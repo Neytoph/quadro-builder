@@ -1,0 +1,930 @@
+{
+  "meta": {
+    "name": "QUADRO Teile-Katalog",
+    "source": "quadroshop.com (Kupplungen + Rohre), Stand Mai 2026",
+    "currency": "EUR",
+    "units": "cm",
+    "note": "Preise/Verfügbarkeit können abweichen. Geometrie für den Editor vereinfacht (Stecksystem als Knoten-/Kanten-Graph)."
+  },
+  "geometry": {
+    "connectorSize": 5.0,
+    "tubeRadius": 2.45,
+    "armRadius": 2.1,
+    "armLength": 5.0,
+    "defaultTube": "T35",
+    "diagonalTube": "T35",
+    "defaultPanel": "panel_40x40",
+    "panelThickness": 1.6,
+    "comment": "Masse echt: Kupplung 50 mm, Rohr-Aussen 49 mm (tubeRadius 2.45), Kupplungs-Arme ~50 mm lang, ~42 mm Durchmesser (armRadius 2.1) -> duenner als das Rohr, greifen IN die Rohre. Knoten-Abstand (Mitte zu Mitte) = Rohrlaenge + connectorSize. 35er-Rohr -> 40 cm Raster (passend zu Platte 40x40); 15er -> 20 cm (Platte 40x20). Schraegen/Rampen/Daecher: das Bau-Werkzeug baut immer 45 Grad mit 35er-Rohr (T35). Beim Import werden nur Schraegen auf 45 Grad gezwungen, die an einer 45-Grad-Winkelkupplung (connector45_2) andocken; Doppelrohr-Verbinder-Rampen und andere Rampenformen behalten ihre Original-Geometrie."
+  },
+  "colors": {
+    "tube": [
+      {
+        "id": "red",
+        "name": "Rot",
+        "name_en": "Red",
+        "hex": "#e53e3e"
+      },
+      {
+        "id": "green",
+        "name": "Grün",
+        "name_en": "Green",
+        "hex": "#38a169"
+      },
+      {
+        "id": "blue",
+        "name": "Blau",
+        "name_en": "Blue",
+        "hex": "#3182ce"
+      },
+      {
+        "id": "yellow",
+        "name": "Gelb",
+        "name_en": "Yellow",
+        "hex": "#ecc94b"
+      },
+      {
+        "id": "petrol",
+        "name": "Petrol",
+        "name_en": "Petrol",
+        "hex": "#2f6f7e",
+        "series": "home"
+      },
+      {
+        "id": "mint",
+        "name": "Mint",
+        "name_en": "Mint",
+        "hex": "#9ed3bf",
+        "series": "home"
+      },
+      {
+        "id": "berry",
+        "name": "Berry",
+        "name_en": "Berry",
+        "hex": "#b5678f",
+        "series": "home"
+      },
+      {
+        "id": "apricot",
+        "name": "Apricot",
+        "name_en": "Apricot",
+        "hex": "#e6a875",
+        "series": "home"
+      }
+    ],
+    "connector": {
+      "id": "black",
+      "name": "Schwarz",
+      "name_en": "Black",
+      "hex": "#2b2b2b"
+    }
+  },
+  "connectors": [
+    {
+      "id": "6way",
+      "code": "CS6",
+      "name": "Raumkupplung 6-armig",
+      "name_en": "Space connector 6-way",
+      "arms": 6,
+      "kind": "space",
+      "price": 2.49,
+      "buildable": true,
+      "note": "Würfel-Knoten, 6 Richtungen",
+      "url": "https://quadroshop.com/products/6way-connector"
+    },
+    {
+      "id": "5way",
+      "code": "CS5",
+      "name": "Raumkupplung 5-armig",
+      "name_en": "Space connector 5-way",
+      "arms": 5,
+      "kind": "space",
+      "price": 2.49,
+      "buildable": true,
+      "note": "",
+      "url": "https://quadroshop.com/products/5way-connector"
+    },
+    {
+      "id": "4way",
+      "code": "CS4",
+      "name": "Raumkupplung 4-armig",
+      "name_en": "Space connector 4-way",
+      "arms": 4,
+      "kind": "space",
+      "price": 2.49,
+      "buildable": true,
+      "note": "räumlich (nicht in einer Ebene)",
+      "url": "https://quadroshop.com/products/4way-connector"
+    },
+    {
+      "id": "3way",
+      "code": "CS3",
+      "name": "Raumkupplung 3-armig",
+      "name_en": "Space connector 3-way",
+      "arms": 3,
+      "kind": "space",
+      "price": 2.49,
+      "buildable": true,
+      "note": "Ecke, räumlich",
+      "url": "https://quadroshop.com/products/3way-connector"
+    },
+    {
+      "id": "cross",
+      "code": "CF4",
+      "name": "Flächenkupplung 4-armig",
+      "name_en": "Surface connector 4-way",
+      "arms": 4,
+      "kind": "planar",
+      "price": 2.49,
+      "buildable": true,
+      "note": "Kreuz in einer Ebene",
+      "url": "https://quadroshop.com/products/cross-connector"
+    },
+    {
+      "id": "t",
+      "code": "CF3",
+      "name": "Flächenkupplung 3-armig",
+      "name_en": "Surface connector 3-way",
+      "arms": 3,
+      "kind": "planar",
+      "price": 2.49,
+      "buildable": true,
+      "note": "T-Stück in einer Ebene",
+      "url": "https://quadroshop.com/products/t-connector"
+    },
+    {
+      "id": "straight",
+      "code": "CF2",
+      "name": "Flächenkupplung 2-armig (180 Grad)",
+      "name_en": "Surface connector 2-way (180°)",
+      "arms": 2,
+      "kind": "planar",
+      "angle": 180,
+      "price": 2.49,
+      "buildable": true,
+      "note": "gerade Verlängerung",
+      "url": "https://quadroshop.com/products/straight-connector"
+    },
+    {
+      "id": "elbow",
+      "code": "CS2",
+      "name": "Flächenkupplung 2-armig (90 Grad)",
+      "name_en": "Surface connector 2-way (90°)",
+      "arms": 2,
+      "kind": "planar",
+      "angle": 90,
+      "price": 2.49,
+      "buildable": true,
+      "note": "Winkel 90 Grad",
+      "url": "https://quadroshop.com/products/elbow-connector"
+    },
+    {
+      "id": "diagonal",
+      "code": "C45",
+      "name": "Winkelkupplung (45 Grad)",
+      "name_en": "Angle connector (45°)",
+      "arms": 1,
+      "kind": "special",
+      "angle": 45,
+      "price": 2.49,
+      "buildable": true,
+      "note": "Aufsteck-Adapter: wird mit der Hülse auf eine vorhandene Kupplung gesteckt und bietet auf der Gegenseite einen einzelnen, um 45 Grad gedrehten Rohrstutzen (für Schraegen/Rampen). Wird daher zusaetzlich zur Basiskupplung gezaehlt.",
+      "url": "https://quadroshop.com/products/diagonal-connector"
+    },
+    {
+      "id": "flexi",
+      "code": "CX4",
+      "name": "Flexikupplung",
+      "name_en": "Flexi connector",
+      "arms": 4,
+      "kind": "special",
+      "price": 8.99,
+      "buildable": false,
+      "note": "frei einstellbar · das ganze Gelenk: zwei Scharniere und ein Bolzen. In der QDF-Datei steht KEINE eigene Zeile dafür, sondern zwei flexi-connector3 (die Scharniere) plus ein bolt2 -- gezählt und bevorratet werden deshalb jene, nicht das Gelenk",
+      "url": "https://quadroshop.com/products/flexi-connector",
+      "stock": false
+    },
+    {
+      "id": "flexi_hinge",
+      "qdf": "flexi-connector3",
+      "code": "CXB",
+      "name": "Flexikupplung Scharnier",
+      "name_en": "Flexi connector hinge",
+      "arms": 2,
+      "kind": "special",
+      "price": 2.49,
+      "buildable": false,
+      "note": "eine Hälfte des Gelenks · je Flexikupplung stehen zwei davon in der Datei · sie sitzt auf dem mittleren Segment des Bolzens, höchstens zwei je Bolzen und immer mindestens 90 Grad auseinander (die Kränze rasten in 45-Grad-Schritten, für weniger als 90 Grad sind die Riemen zu breit)",
+      "url": "https://quadroshop.com/products/flexi-connector-hinge"
+    },
+    {
+      "id": "flexi_bolt",
+      "qdf": "bolt2",
+      "code": "CXA",
+      "name": "Flexikupplung Bolzen",
+      "name_en": "Flexi connector bolt",
+      "arms": 2,
+      "kind": "special",
+      "price": 4.99,
+      "buildable": false,
+      "note": "15 cm lang, drei Segmente zu je 5 cm · er ersetzt am Rohrende die Kupplung: ein Segment steckt im Rohr, auf dem mittleren sitzen die Scharniere, das dritte nimmt ein weiteres Teil auf",
+      "url": "https://quadroshop.com/products/flexi-connector-bolt"
+    },
+    {
+      "id": "hole_t",
+      "code": "CH3",
+      "name": "Lochzapfenkupplung 3-armig",
+      "name_en": "Pin connector 3-way",
+      "arms": 3,
+      "kind": "special",
+      "price": 6.49,
+      "buildable": false,
+      "note": "",
+      "qdf": "hole-connector4",
+      "url": "https://quadroshop.com/products/hole-t-connector"
+    },
+    {
+      "id": "hole_2",
+      "code": "CH2",
+      "name": "Lochzapfenkupplung 2-armig",
+      "name_en": "Pin connector 2-way",
+      "arms": 2,
+      "kind": "special",
+      "price": 6.49,
+      "buildable": false,
+      "note": "zwei gegenüberliegende Arme quer zum Loch · Preis wie die ein- und die dreiarmige, eigener Shop-Eintrag noch offen",
+      "url": "https://quadroshop.com/products/hole-connector"
+    },
+    {
+      "id": "hole_1",
+      "code": "CH1",
+      "name": "Lochzapfenkupplung 1-armig",
+      "name_en": "Pin connector 1-way",
+      "arms": 1,
+      "kind": "special",
+      "price": 6.49,
+      "buildable": false,
+      "note": "",
+      "url": "https://quadroshop.com/products/hole-connector"
+    },
+    {
+      "id": "bearing",
+      "qdf": "bearing-connector4",
+      "code": "CBR",
+      "name": "Lagerkupplung",
+      "name_en": "Bearing connector",
+      "arms": 2,
+      "kind": "special",
+      "price": 6.49,
+      "buildable": false,
+      "note": "klemmt um ein Rohr und trägt eine Kupplung",
+      "url": "https://quadroshop.com/products/bearing-connector"
+    },
+    {
+      "id": "double_tube",
+      "code": "CDT",
+      "name": "Doppelrohrverbinder",
+      "name_en": "Double tube connector",
+      "arms": 2,
+      "kind": "special",
+      "price": 4.49,
+      "buildable": true,
+      "note": "verbindet zwei Rohre längs; ermöglicht Klappen/bewegliche und schräge Elemente",
+      "url": "https://quadroshop.com/products/double-tube-connector"
+    },
+    {
+      "id": "tube_clamp",
+      "code": "CCL",
+      "name": "Rohrklammer",
+      "name_en": "Tube clamp",
+      "arms": 0,
+      "kind": "special",
+      "price": 2.49,
+      "buildable": false,
+      "note": "Klammer",
+      "url": "https://quadroshop.com/products/tube-clamp"
+    }
+  ],
+  "tubes": [
+    {
+      "id": "T10",
+      "code": "T10",
+      "name": "Rohr 10 cm",
+      "name_en": "Tube 10 cm",
+      "length_cm": 10,
+      "shape": "straight",
+      "price": 3.49,
+      "buildable": true,
+      "colored": true,
+      "url": "https://quadroshop.com/products/tube-10cm"
+    },
+    {
+      "id": "T15",
+      "code": "T15",
+      "name": "Rohr 15 cm",
+      "name_en": "Tube 15 cm",
+      "length_cm": 15,
+      "shape": "straight",
+      "price": 1.99,
+      "buildable": true,
+      "colored": true,
+      "url": "https://quadroshop.com/products/tube-15cm"
+    },
+    {
+      "id": "T20",
+      "code": "T20",
+      "name": "Rohr 20 cm",
+      "name_en": "Tube 20 cm",
+      "length_cm": 20,
+      "shape": "straight",
+      "price": 3.99,
+      "buildable": true,
+      "colored": true,
+      "url": "https://quadroshop.com/products/tube-20cm"
+    },
+    {
+      "id": "T25",
+      "code": "T25",
+      "name": "Rohr 25 cm",
+      "name_en": "Tube 25 cm",
+      "length_cm": 25,
+      "shape": "straight",
+      "price": 2.99,
+      "buildable": true,
+      "colored": true,
+      "url": "https://quadroshop.com/products/tube-25cm"
+    },
+    {
+      "id": "T35",
+      "code": "T35",
+      "name": "Rohr 35 cm",
+      "name_en": "Tube 35 cm",
+      "length_cm": 35,
+      "shape": "straight",
+      "price": 2.49,
+      "buildable": true,
+      "colored": true,
+      "url": "https://quadroshop.com/products/tube-35cm"
+    },
+    {
+      "id": "T52",
+      "code": "T52",
+      "name": "Rohr 52 cm",
+      "name_en": "Tube 52 cm",
+      "length_cm": 52,
+      "shape": "straight",
+      "price": 9.99,
+      "buildable": true,
+      "colored": true,
+      "url": "https://quadroshop.com/products/tube-52cm"
+    },
+    {
+      "id": "T75",
+      "code": "T75",
+      "name": "Rohr 75 cm",
+      "name_en": "Tube 75 cm",
+      "length_cm": 75,
+      "shape": "straight",
+      "price": 9.99,
+      "buildable": true,
+      "colored": true,
+      "url": "https://quadroshop.com/products/tube-75cm"
+    },
+    {
+      "id": "TC1",
+      "code": "TC1",
+      "name": "Bogenrohr",
+      "name_en": "Curved tube",
+      "length_cm": null,
+      "shape": "curved",
+      "price": 11.49,
+      "buildable": true,
+      "colored": true,
+      "url": "https://quadroshop.com/products/curved-tube"
+    },
+    {
+      "id": "TS1",
+      "code": "TS1",
+      "name": "Rohr 15 cm 90 Grad (4 Löcher)",
+      "name_en": "Tube 15 cm 90° (4 holes)",
+      "length_cm": 15,
+      "shape": "angled",
+      "angle": 90,
+      "price": 11.49,
+      "buildable": false,
+      "colored": true,
+      "note": "steht nicht in der Toolbar (gelochte Winkelrohre lassen sich nicht sinnvoll ins Raster bauen), zählt aber in der Stückliste vorhandener Modelle",
+      "url": "https://quadroshop.com/products/tube-15cm-90deg-4hole",
+      "stock": false
+    },
+    {
+      "id": "TS2",
+      "code": "TS2",
+      "name": "Rohr 15 cm 135 Grad (3 Löcher)",
+      "name_en": "Tube 15 cm 135° (3 holes)",
+      "length_cm": 15,
+      "shape": "angled",
+      "angle": 135,
+      "price": 11.49,
+      "buildable": false,
+      "colored": true,
+      "note": "steht nicht in der Toolbar (gelochte Winkelrohre lassen sich nicht sinnvoll ins Raster bauen), zählt aber in der Stückliste vorhandener Modelle",
+      "url": "https://quadroshop.com/products/tube-15cm-135deg-3hole",
+      "stock": false
+    },
+    {
+      "id": "TS3",
+      "code": "TS3",
+      "name": "Rohr 15 cm 180 Grad (4 Löcher)",
+      "name_en": "Tube 15 cm 180° (4 holes)",
+      "length_cm": 15,
+      "shape": "angled",
+      "angle": 180,
+      "price": 11.49,
+      "buildable": false,
+      "colored": true,
+      "note": "steht nicht in der Toolbar (gelochte Winkelrohre lassen sich nicht sinnvoll ins Raster bauen), zählt aber in der Stückliste vorhandener Modelle",
+      "url": "https://quadroshop.com/products/tube-15cm-180deg-4hole",
+      "stock": false
+    },
+    {
+      "id": "TS4",
+      "code": "TS4",
+      "name": "Rohr 35 cm 90 Grad (4 Löcher)",
+      "name_en": "Tube 35 cm 90° (4 holes)",
+      "length_cm": 35,
+      "shape": "angled",
+      "angle": 90,
+      "price": 11.49,
+      "buildable": false,
+      "colored": true,
+      "note": "steht nicht in der Toolbar (gelochte Winkelrohre lassen sich nicht sinnvoll ins Raster bauen), zählt aber in der Stückliste vorhandener Modelle",
+      "url": "https://quadroshop.com/products/tube-35cm-90deg-4hole",
+      "stock": false
+    },
+    {
+      "id": "TS5",
+      "code": "TS5",
+      "name": "Rohr 35 cm 135 Grad (3 Löcher)",
+      "name_en": "Tube 35 cm 135° (3 holes)",
+      "length_cm": 35,
+      "shape": "angled",
+      "angle": 135,
+      "price": 11.49,
+      "buildable": false,
+      "colored": true,
+      "note": "steht nicht in der Toolbar (gelochte Winkelrohre lassen sich nicht sinnvoll ins Raster bauen), zählt aber in der Stückliste vorhandener Modelle",
+      "url": "https://quadroshop.com/products/tube-35cm-135deg-3hole",
+      "stock": false
+    },
+    {
+      "id": "TS6",
+      "code": "TS6",
+      "name": "Rohr 35 cm 180 Grad (4 Löcher)",
+      "name_en": "Tube 35 cm 180° (4 holes)",
+      "length_cm": 35,
+      "shape": "angled",
+      "angle": 180,
+      "price": 11.49,
+      "buildable": false,
+      "colored": true,
+      "note": "steht nicht in der Toolbar (gelochte Winkelrohre lassen sich nicht sinnvoll ins Raster bauen), zählt aber in der Stückliste vorhandener Modelle",
+      "url": "https://quadroshop.com/products/tube-35cm-180deg-4hole",
+      "stock": false
+    },
+    {
+      "id": "TS7",
+      "code": "TS7",
+      "name": "Bogenrohr 135 Grad (3 Löcher)",
+      "name_en": "Curved tube 135° (3 holes)",
+      "length_cm": null,
+      "shape": "curved",
+      "angle": 135,
+      "price": 22.99,
+      "buildable": false,
+      "colored": true,
+      "note": "steht nicht in der Toolbar (gelochte Winkelrohre lassen sich nicht sinnvoll ins Raster bauen), zählt aber in der Stückliste vorhandener Modelle",
+      "url": "https://quadroshop.com/products/curved-tube-135deg-3hole",
+      "stock": false
+    }
+  ],
+  "panels": [
+    {
+      "id": "panel_40x40",
+      "code": "PA4",
+      "name": "Platte 40 x 40 cm",
+      "name_en": "Panel 40 x 40 cm",
+      "w": 40,
+      "h": 40,
+      "price": 6.99,
+      "buildable": true,
+      "colored": true,
+      "note": "passt auf ein Feld aus vier 35er-Rohren",
+      "url": "https://quadroshop.com/products/panel-40-40cm"
+    },
+    {
+      "id": "panel_40x20",
+      "code": "PA2",
+      "name": "Platte 40 x 20 cm",
+      "name_en": "Panel 40 x 20 cm",
+      "w": 40,
+      "h": 20,
+      "price": 5.99,
+      "buildable": true,
+      "colored": true,
+      "note": "halbe Platte: 35er x 15er Feld",
+      "url": "https://quadroshop.com/products/panel-40-20cm"
+    },
+    {
+      "id": "panel_80x80",
+      "code": "PA8",
+      "name": "Platte 80 x 80 cm",
+      "name_en": "Panel 80 x 80 cm",
+      "w": 80,
+      "h": 80,
+      "price": 0,
+      "buildable": false,
+      "colored": true,
+      "note": "GIBT ES NICHT – im Shop nicht gelistet und in keiner der 233 Herstellerdateien mit Platten; dort kommen nur 40x40, 40x20 und 30x30 vor. Bleibt im Katalog, damit ältere Entwürfe mit dieser Kennung weiter laden",
+      "url": "https://quadroshop.com/collections/panels"
+    },
+    {
+      "id": "panel_80x20",
+      "code": "PA6",
+      "name": "Platte 80 x 20 cm",
+      "name_en": "Panel 80 x 20 cm",
+      "w": 80,
+      "h": 20,
+      "price": 0,
+      "buildable": false,
+      "colored": true,
+      "note": "GIBT ES NICHT – siehe panel_80x80",
+      "url": "https://quadroshop.com/collections/panels"
+    },
+    {
+      "id": "panel_30x30",
+      "code": "PA3",
+      "name": "Platte 30 x 30 cm",
+      "name_en": "Panel 30 x 30 cm",
+      "w": 30,
+      "h": 30,
+      "price": 5.99,
+      "buildable": true,
+      "colored": true,
+      "note": "30er-Raster (25er-Rohr)",
+      "url": "https://quadroshop.com/products/panel-30-30cm"
+    },
+    {
+      "id": "hole_panel_40x40",
+      "code": "PO4",
+      "name": "Lochplatte 40 x 40 cm",
+      "name_en": "Perforated panel 40 x 40 cm",
+      "w": 40,
+      "h": 40,
+      "holes": 9,
+      "price": 6.99,
+      "buildable": true,
+      "colored": true,
+      "note": "gleiches Feld wie panel_40x40, aber mit 3x3-Lochraster; holes steuert die Darstellung und hält sie beim QDF-Import aus der Größen-Zuordnung heraus",
+      "url": "https://quadroshop.com/products/hole-panel-40-40cm"
+    },
+    {
+      "id": "panel_70x120",
+      "code": "P7C",
+      "name": "Platte 70 x 120 cm",
+      "name_en": "Panel 70 x 120 cm",
+      "w": 70,
+      "h": 120,
+      "price": 0,
+      "buildable": false,
+      "colored": true,
+      "note": "GIBT ES NICHT als Platte – gehört zum Pool-/Bällebad-Set und wird dort als Teil des Beckens gezeichnet; frei setzbar war sie ein Versehen",
+      "url": "https://quadroshop.com/collections/pools"
+    }
+  ],
+  "reinforcements": [
+    {
+      "id": "reinforce80",
+      "code": "RV8",
+      "name": "Holz-Profil 80 cm",
+      "name_en": "Wood profile 80 cm",
+      "length_cm": 80,
+      "material": "Holz",
+      "price": 8.99,
+      "note": "Stab, der in die Rohre geschoben wird und sie versteift; es gibt NUR diese eine Länge (80 cm, Holz) zu kaufen -- die Alu-Profile der Herstellersoftware sind nicht mehr erhältlich. Ein Profil deckt 80 cm Knotenabstand: entweder ein 75er-Rohr oder zwei 35er in einer Linie; nötig bei frei tragenden, von unten ungestuetzten Ebenen",
+      "url": "https://quadroshop.com/products/wood-tube-core"
+    }
+  ],
+  "accessories": [
+    {
+      "id": "wheel_bearing",
+      "code": "CBR",
+      "name": "Radlager",
+      "name_en": "Wheel bearing",
+      "price": 2.49,
+      "qdf": "bearing2",
+      "note": "5 cm langes Rohrstück an einer Kupplung, trägt das Multirad · Preis: quadroshop.com „Multirad Radlager“, Stand 2026-08-16",
+      "url": "https://quadroshop.com/products/multiwheel-bearing"
+    },
+    {
+      "id": "tube_cap",
+      "code": "TCP",
+      "name": "Rohrkappe",
+      "price": 2.49,
+      "note": "runde Kappe, verschließt ein offenes Rohrende · aus Quadro.exe abgegriffen: tube-cap2 ist 24 mm lang und an einem Ende geschlossen, open-connector2 dagegen eine 50 mm lange, beidseitig offene Hülse",
+      "name_en": "Tube cap",
+      "qdf": "tube-cap2",
+      "url": "https://quadroshop.com/products/tube-cap"
+    },
+    {
+      "id": "open_end",
+      "code": "",
+      "name": "Offenes Verbinderende",
+      "name_en": "Open connector end",
+      "price": 0,
+      "qdf": "open-connector2",
+      "note": "50 mm lange, beidseitig offene Hülse auf einem Stutzen der Kupplung · erzwingt diesen Stutzen: ohne Rohr wird dort sonst keiner gezeichnet und keiner gerechnet · im Shop nicht als Einzelteil gelistet, deshalb ohne Preis",
+      "url": "https://quadroshop.com/collections/connectors",
+      "stock": false
+    },
+    {
+      "id": "safety_clamp",
+      "code": "YTC",
+      "name": "Sicherungsklammer (Bodenverankerung)",
+      "price": 11.49,
+      "note": "",
+      "url": "https://quadroshop.com/products/safety-clamp"
+    },
+    {
+      "id": "double_tube",
+      "code": "CDT",
+      "name": "Doppelrohrverbinder",
+      "price": 4.49,
+      "note": "",
+      "url": "https://quadroshop.com/products/double-tube-connector"
+    },
+    {
+      "id": "tube_clamp",
+      "code": "CCL",
+      "name": "Rohrklammer",
+      "price": 2.49,
+      "note": "",
+      "url": "https://quadroshop.com/products/tube-clamp"
+    },
+    {
+      "id": "wheel",
+      "code": "",
+      "name": "Multirad",
+      "name_en": "Multi wheel",
+      "price": 6.99,
+      "qdf": "multi-wheel2",
+      "note": "schmales Speichenrad, sitzt auf einem Radlager · Preis: quadroshop.com „Multirad“, Stand 2026-08-16",
+      "url": "https://quadroshop.com/products/multiwheel"
+    },
+    {
+      "id": "wheel_floating",
+      "code": "",
+      "name": "Schwimmrad",
+      "name_en": "Float wheel",
+      "price": 13.49,
+      "qdf": "floating-wheel2",
+      "note": "knapp 15 cm dick, sitzt auf einem Rohr · Preis: quadroshop.com „Schwimmrad“, Stand 2026-08-16",
+      "url": "https://quadroshop.com/products/offroad-wheel"
+    },
+    {
+      "id": "hub_cap",
+      "code": "",
+      "name": "Radkappe",
+      "name_en": "Wheel cap",
+      "price": 2.99,
+      "qdf": "hub-cap2",
+      "note": "hält das Schwimmrad fest, wie die Radarretierung beim Multirad · Preis: quadroshop.com „Radkappe für Schwimmrad“, Stand 2026-08-16",
+      "url": "https://quadroshop.com/products/offroad-wheel-lock"
+    },
+    {
+      "id": "caster",
+      "code": "",
+      "name": "Laufrolle",
+      "name_en": "Caster",
+      "price": 4.99,
+      "qdf": "casters2",
+      "note": "sitzt auf ihrem Adapter an einer Kupplung · Preis: quadroshop.com „Laufrolle Vollgummi“, Stand 2026-08-16",
+      "url": "https://quadroshop.com/products/caster-v2"
+    },
+    {
+      "id": "steering_lock",
+      "code": "",
+      "name": "Multirad Arretierung",
+      "name_en": "Multi wheel lock",
+      "price": 2.49,
+      "qdf": "steering-lock2",
+      "note": "sitzt am Ende eines Kupplungs-Stutzens und hält das Multirad · Preis: quadroshop.com „Multirad Arretierung“, Stand 2026-08-16",
+      "url": "https://quadroshop.com/products/multiwheel-lock"
+    },
+    {
+      "id": "wheel_adapter",
+      "code": "",
+      "name": "Laufrolle Adapter",
+      "name_en": "Caster adapter",
+      "price": 2.49,
+      "qdf": "adapter2",
+      "note": "sitzt auf einem Kupplungs-Stutzen und nimmt die Laufrolle auf · Preis: quadroshop.com „Laufrolle Adapter“, Stand 2026-08-16",
+      "url": "https://quadroshop.com/products/caster-adapter"
+    },
+    {
+      "id": "textile_round",
+      "code": "",
+      "name": "Rundwand (Textil)",
+      "name_en": "Curved textile wall",
+      "price": 16.99,
+      "qdf": "textil-round2",
+      "note": "Viertelzylinder, Radius 40 cm · Preis: quadroshop.com „Rundtextil“, Stand 2026-08-16",
+      "url": "https://quadroshop.com/products/round-textile"
+    },
+    {
+      "id": "roof_large",
+      "code": "",
+      "name": "Dachtextil",
+      "name_en": "Roof textile",
+      "price": 32.99,
+      "qdf": "roof-large2",
+      "note": "Textil, das über eine bestimmte Dachkonstruktion gestülpt wird (First aus zwei 75ern) · wird geladen, aber nicht frei gesetzt · Preis: quadroshop.com „Dachtextil“, Stand 2026-08-16",
+      "url": "https://quadroshop.com/products/roof-textile"
+    },
+    {
+      "id": "lattice",
+      "code": "",
+      "name": "Netz",
+      "name_en": "Net",
+      "price": 0,
+      "qdf": "lattice2",
+      "note": "Maße stehen im Entwurf · im Shop nur als Ballcage-Netz gelistet (84,99 €) bzw. Baby-Ballcage (74,99 €), nicht als Einzelteil unserer Größe · Preis noch offen",
+      "url": "https://quadroshop.com/collections/textiles"
+    },
+    {
+      "id": "bag",
+      "code": "",
+      "name": "Spielsack",
+      "name_en": "Play bag",
+      "price": 32.99,
+      "qdf": "bag2",
+      "note": "Preis noch offen · Preis: quadroshop.com „Spielsack“, Stand 2026-08-16",
+      "url": "https://quadroshop.com/products/play-bag"
+    },
+    {
+      "id": "slide_integral",
+      "code": "",
+      "name": "Integralrutsche",
+      "name_en": "Integral slide",
+      "price": 169.99,
+      "qdf": "slide-new2",
+      "note": "eigenständige Rutsche ohne Anbauten · Preis: quadroshop.com „Integralrutsche“, Stand 2026-08-16",
+      "url": "https://quadroshop.com/products/integrated-slide"
+    },
+    {
+      "id": "slide_module",
+      "code": "",
+      "name": "Modularrutschen-Körper",
+      "name_en": "Modular slide body",
+      "price": 64.99,
+      "qdf": "slide2",
+      "note": "leicht gewellte Bahn, mehrere hintereinander möglich; am Ende der Kette der Auslauf · Preis: quadroshop.com „Modularrutschen-Körper“, Stand 2026-08-16",
+      "url": "https://quadroshop.com/products/modular-slide-body"
+    },
+    {
+      "id": "slide_curved",
+      "code": "",
+      "name": "Bogenrutschen-Körper",
+      "name_en": "Curved slide body",
+      "price": 99.99,
+      "qdf": "curved-slide2",
+      "note": "gebogene Bahn, Ausgang 90 Grad zur Laufrichtung · Preis: quadroshop.com „Bogenrutschen-Körper“, Stand 2026-08-16",
+      "url": "https://quadroshop.com/products/curved-slide-body"
+    },
+    {
+      "id": "slide_end",
+      "code": "",
+      "name": "Rutschenauslauf",
+      "name_en": "Slide run-out",
+      "price": 49.99,
+      "qdf": "slide-end2",
+      "note": "schließt eine Kette aus Modular- oder Bogenrutschen-Körpern ab · Preis: quadroshop.com „Rutschenauslauf“, Stand 2026-08-16",
+      "url": "https://quadroshop.com/products/slide-runout"
+    },
+    {
+      "id": "textile",
+      "code": "",
+      "name": "Textil",
+      "name_en": "Textile",
+      "price": 0,
+      "qdf": "textil2",
+      "note": "Tuch zwischen zwei parallelen Rohren, gesetzt wie das Netz · im Shop nur im Textilset (59,99 €), nicht einzeln · Preis noch offen",
+      "url": "https://quadroshop.com/collections/textiles"
+    },
+    {
+      "id": "pool_liner_xs",
+      "code": "10017",
+      "name": "Poolfolie XS",
+      "name_en": "Pool liner XS",
+      "price": 89.99,
+      "pool": {
+        "short": 80,
+        "long": 80
+      },
+      "note": "Pool XS, Art. 10017 · Außenmaß 85 x 85 x 25 cm, Innenmaß der Folie 82,5 x 82,5 x 25 cm · Rahmen 80 x 80 cm bei 20 cm Wandhöhe · Preis: quadroshop.com „Poolfolie XS“, Stand 2026-08-18",
+      "url": "https://quadroshop.com/products/pool-liner-xs"
+    },
+    {
+      "id": "pool_liner_s",
+      "code": "10960",
+      "name": "Poolfolie S",
+      "name_en": "Pool liner S",
+      "price": 99.99,
+      "pool": {
+        "short": 80,
+        "long": 120
+      },
+      "note": "Pool S, Art. 10960 · Außenmaß 145 x 85 x 25 cm, Innenmaß der Folie 122,5 x 82,5 x 25 cm · Rahmen 120 x 80 cm bei 20 cm Wandhöhe · Preis: quadroshop.com „Poolfolie S“, Stand 2026-08-18",
+      "url": "https://quadroshop.com/products/pool-liner-s"
+    },
+    {
+      "id": "pool_liner_l",
+      "code": "11670",
+      "name": "Poolfolie L",
+      "name_en": "Pool liner L",
+      "price": 119.99,
+      "pool": {
+        "short": 120,
+        "long": 160
+      },
+      "note": "Pool L, Art. 11670 · Außenmaß 245 x 125 x 45 cm, Innenmaß der Folie 162,5 x 122,5 x 45 cm · Rahmen 160 x 120 cm bei 40 cm Wandhöhe · Preis: quadroshop.com „Poolfolie L“, Stand 2026-08-18",
+      "url": "https://quadroshop.com/products/pool-liner-l"
+    },
+    {
+      "id": "pool_liner_xxl",
+      "code": "11680",
+      "name": "Poolfolie XXL",
+      "name_en": "Pool liner XXL",
+      "price": 149.99,
+      "pool": {
+        "short": 120,
+        "long": 240
+      },
+      "note": "Pool XXL, Art. 11680 · Außenmaß 325 x 125 x 45 cm, Innenmaß der Folie 242,5 x 122,5 x 45 cm · Rahmen 240 x 120 cm bei 40 cm Wandhöhe · Preis: quadroshop.com „Poolfolie XXL“, Stand 2026-08-18",
+      "url": "https://quadroshop.com/products/pool-liner-xxl"
+    }
+  ],
+  "screws": [
+    {
+      "id": "screw_tube",
+      "code": "",
+      "name": "Rohrschraube",
+      "name_en": "Tube screw",
+      "price": 2.99,
+      "pack": 20,
+      "colored": true,
+      "url": "https://quadroshop.com/collections/screws/products/tube-screws-20pcs",
+      "note": "Verbindet ein Rohr mit der Kupplung; je Rohrende eine. Gibt es in den Rohrfarben · Preis und Packgröße: quadroshop.com, Stand 2026-08-18"
+    },
+    {
+      "id": "screw_panel",
+      "code": "",
+      "name": "Plattenschraube",
+      "name_en": "Panel screw",
+      "price": 2.99,
+      "pack": 8,
+      "url": "https://quadroshop.com/collections/screws/products/panel-screw",
+      "note": "Hält eine Platte durch das Rohr hindurch an der Kupplung; vier je Platte. Immer schwarz · Preis und Packgröße: quadroshop.com, Stand 2026-08-18"
+    },
+    {
+      "id": "screw_slide_conical",
+      "code": "",
+      "name": "Konische Rutschenschraube",
+      "name_en": "Conical slide screw",
+      "price": 11.49,
+      "pack": 4,
+      "url": "https://quadroshop.com/collections/screws/products/conical-slide-screw",
+      "note": "Verbindet Rutschenkörper untereinander bzw. mit dem Auslauf; zwei je Verbindung · Preis und Packgröße: quadroshop.com, Stand 2026-08-18"
+    },
+    {
+      "id": "screw_slide_conical_counter",
+      "code": "",
+      "name": "Rutschenschraube Gegenstück",
+      "name_en": "Slide screw counterpiece",
+      "price": 4.49,
+      "pack": 2,
+      "url": "https://quadroshop.com/collections/screws/products/conical-slide-screw-counterpiece",
+      "note": "Gegenstück zu jeder konischen Schraube an einer Rutschen-Verbindung · Preis und Packgröße: quadroshop.com, Stand 2026-08-18"
+    },
+    {
+      "id": "screw_slide",
+      "code": "",
+      "name": "Rutschenschraube",
+      "name_en": "Slide screw",
+      "price": 5.49,
+      "pack": 2,
+      "url": "https://quadroshop.com/collections/screws/products/slide-screw",
+      "note": "Zusätzlich je Rutschen-Verbindung; läuft durch ein Rohr in die Kupplung · Preis und Packgröße: quadroshop.com, Stand 2026-08-18"
+    }
+  ]
+}

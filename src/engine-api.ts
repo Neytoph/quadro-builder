@@ -1,0 +1,14 @@
+// @ts-nocheck
+/** 把 quadro-3D 的 Vanilla 模块接到 TypeScript 壳上。类型在 React 侧自己包一层。 */
+export { loadCatalog, buildableTubes, buildableCurvedTubes, buildablePanels, tubeColors, geometry, panels, accessories, allConnectors, partName, partForFitting, getPartById, colorHex, colorName, slideKindName } from './engine/catalog.js'
+export { BuildModel, POOL_SETS } from './engine/model.js'
+export { SceneManager } from './engine/scene.js'
+export { Builder, RANDOM_COLOR, MOVE_STEPS, DEFAULT_MOVE_STEP } from './engine/builder.js'
+export { computeBuildPlan, BUILD_ORDERS } from './engine/buildplan.js'
+export { computeBOM, compareInventory, connectorsForNode } from './engine/bom.js'
+export { parseQDF } from './engine/qdfimport.js'
+export { buildQDF } from './engine/qdfexport.js'
+export { t, getLang, setLang } from './engine/i18n.js'
+export * as docs from './engine/docs.js'
+export * as storage from './engine/storage.js'
+export { parseDesign, designEntry, designName, checkAgainstInventory, missingCount } from './engine/library.js'

@@ -1,0 +1,84 @@
+@import "tailwindcss";
+
+.app-viewport {
+  height: 100vh;
+  height: 100dvh;
+}
+
+html, body, #root {
+  margin: 0;
+  overflow: hidden;
+  background: #030712;
+  color: #e5e7eb;
+}
+
+#canvas-host,
+#canvas-host canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  outline: none;
+}
+
+.scene-spinner {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+}
+.scene-spinner.visible {
+  display: flex;
+}
+.scene-spinner::after {
+  content: "";
+  width: 28px;
+  height: 28px;
+  border: 3px solid #cbd5e1;
+  border-top-color: #0d9488;
+  border-radius: 50%;
+  animation: scene-spin 0.7s linear infinite;
+}
+@keyframes scene-spin {
+  to { transform: rotate(360deg); }
+}
+
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: #374151 transparent;
+}
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: #374151;
+  border-radius: 999px;
+}
+
+/* 滚动条贴在容器起点一侧（左栏 = 窗口外沿），不挡靠画布的那条边。 */
+.scrollbar-left {
+  direction: rtl;
+}
+.scrollbar-left > .scrollbar-left-content {
+  direction: ltr;
+}
+
+body.resizing-panels,
+body.resizing-panels * {
+  user-select: none !important;
+}
+body.resizing-panels[data-resize-dir="ew"],
+body.resizing-panels[data-resize-dir="ew"] * {
+  cursor: ew-resize !important;
+}
+body.resizing-panels[data-resize-dir="ns"],
+body.resizing-panels[data-resize-dir="ns"] * {
+  cursor: ns-resize !important;
+}
+body.resizing-panels[data-resize-dir="move"],
+body.resizing-panels[data-resize-dir="move"] * {
+  cursor: grabbing !important;
+}
