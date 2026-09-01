@@ -1,0 +1,166 @@
+// 与后端的文档同步。
+//
+// engine/docs.js 早就把同步要用的那一半写好了（rev / dirty / deletedAt、
+// setSyncMode、putRemoteDoc、markDocSynced）。本模块只是它缺的另一半：
+// 真正跟服务器说话的人。engine 里的代码来自 thecodingdad/quadro-3D，
+// 因此这里刻意放在 engine 之外，只通过 engine-api 门面消费公开接口。
+//
+// 不传 baseUrl 就什么都不做——开源本地版的默认状态，行为与从前完全一致。
+
+import { docs } from '../engine-api'
+import type {
+  DocRecord, PullResponse, PushResponse, RemoteDoc, SyncEvent, SyncOptions,
+} from './types'
+
+const CURSOR_KEY = 'quadro.sync.rev'
+
+function readCursor(): number {
+  try { return Number(localStorage.getItem(CURSOR_KEY)) || 0 } catch { return 0 }
+}
+function writeCursor(rev: number): void {
+  try { localStorage.setItem(CURSOR_KEY, String(rev)) } catch { /* 隐私模式下忽略 */ }
+}
+
+/** 402 = 配额用尽。带上服务端给的用量信息，UI 好提示。 */
+export class QuotaError extends Error {
+  feature: string
+  used: number
+  limit: number
+  constructor(feature: string, used: number, limit: number) {
+    super(`quota exceeded: ${feature} ${used}/${limit}`)
+    this.name = 'QuotaError'
+    this.feature = feature
+    this.used = used
+    this.limit = limit
+  }
+}
+
+/** 409 = 服务端有更新的版本。 */
+class ConflictError extends Error {
+  remote: RemoteDoc
+  constructor(remote: RemoteDoc) {
+    super('conflict')
+    this.name = 'ConflictError'
+    this.remote = remote
+  }
+}
+
+export function createSync(opts: SyncOptions = {}) {
+  const { baseUrl, intervalMs = 30_000, fetchImpl = globalThis.fetch, onEvent } = opts
+  const enabled = Boolean(baseUrl)
+  let timer: ReturnType<typeof setInterval> | null = null
+  let running = false
+
+  const emit = (e: SyncEvent) => { try { onEvent?.(e) } catch { /* 回调自己的错不该拖垮同步 */ } }
+
+  async function call<T>(path: string, init?: RequestInit): Promise<T> {
+    const res = await fetchImpl(`${baseUrl}${path}`, {
+      ...init,
+      credentials: 'include',           // 会话 cookie 由网关下发
+      headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) },
+    })
+    if (res.status === 402) {
+      const b = await res.json().catch(() => ({}))
+      throw new QuotaError(b.feature ?? 'designs', b.used ?? 0, b.limit ?? 0)
+    }
+    if (res.status === 409) {
+      const b = await res.json().catch(() => ({}))
+      throw new ConflictError(b.remote as RemoteDoc)
+    }
+    if (!res.ok) throw new Error(`${init?.method ?? 'GET'} ${path} → ${res.status}`)
+    return res.status === 204 ? (undefined as T) : ((await res.json()) as T)
+  }
+
+  /** 冲突不丢数据：本地版本另存一份，再接受服务端版本。 */
+  async function forkConflict(local: DocRecord, remote: RemoteDoc): Promise<void> {
+    const copy = await docs.saveDoc({
+      docId: undefined,                 // 新建：engine 侧会生成 id
+      name: `${local.name}（冲突副本）`,
+      data: local.data,
+    })
+    await docs.putRemoteDoc(remote)
+    emit({ type: 'conflict', id: local.id, copyId: copy.id })
+  }
+
+  /**
+   * 推送本地改动。必须先于 pull——putRemoteDoc 是无条件覆盖，
+   * 先拉会把还没上传的修改冲掉。
+   */
+  async function push(): Promise<void> {
+    const all = (await docs.allRecords()) as DocRecord[]
+    for (const doc of all.filter((d) => d.dirty)) {
+      // 记下这一刻的 updatedAt：上传期间用户可能又改了，
+      // markDocSynced 靠它判断该不该清 dirty。
+      const stamp = doc.updatedAt
+      try {
+        if (doc.deletedAt) {
+          const r = await call<PushResponse>(
+            `/models/${encodeURIComponent(doc.id)}?baseRev=${doc.rev}`, { method: 'DELETE' })
+          await docs.markDocSynced(doc.id, r.rev, stamp)
+        } else {
+          const r = await call<PushResponse>(`/models/${encodeURIComponent(doc.id)}`, {
+            method: 'PUT',
+            body: JSON.stringify({ name: doc.name, data: doc.data, baseRev: doc.rev }),
+          })
+          await docs.markDocSynced(doc.id, r.rev, stamp)
+        }
+        emit({ type: 'pushed', id: doc.id, rev: doc.rev })
+      } catch (err) {
+        if (err instanceof ConflictError) { await forkConflict(doc, err.remote); continue }
+        if (err instanceof QuotaError) {
+          // 配额用尽：保持 dirty，停止本轮推送，别把服务器打满。
+          emit({ type: 'quota', feature: err.feature, used: err.used, limit: err.limit })
+          return
+        }
+        throw err
+      }
+    }
+  }
+
+  /** 拉取服务端变更。跳过仍为 dirty 的记录，它们下一轮由 push 处理。 */
+  async function pull(): Promise<void> {
+    const since = readCursor()
+    const { rev, items } = await call<PullResponse>(`/models?since=${since}`)
+    if (!items.length) { writeCursor(rev); return }
+
+    const local = new Map(
+      ((await docs.allRecords()) as DocRecord[]).map((d) => [d.id, d]))
+    let n = 0
+    for (const item of items) {
+      if (local.get(item.id)?.dirty) continue        // 本地更新，别覆盖
+      await docs.putRemoteDoc(item)
+      n++
+    }
+    writeCursor(rev)
+    emit({ type: 'pulled', count: n, rev })
+  }
+
+  async function syncNow(): Promise<void> {
+    if (!enabled || running) return
+    running = true
+    emit({ type: 'start' })
+    try {
+      await push()
+      await pull()
+      emit({ type: 'idle', rev: readCursor() })
+    } catch (error) {
+      emit({ type: 'error', error })
+    } finally {
+      running = false
+    }
+  }
+
+  function start(): void {
+    if (!enabled || timer) return
+    docs.setSyncMode(true)          // 让删除留下墓碑，否则服务端的删不掉
+    void syncNow()
+    if (intervalMs > 0) timer = setInterval(() => void syncNow(), intervalMs)
+  }
+
+  function stop(): void {
+    if (timer) { clearInterval(timer); timer = null }
+    docs.setSyncMode(false)
+  }
+
+  return { enabled, start, stop, syncNow }
+}
