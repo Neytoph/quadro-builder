@@ -40,8 +40,8 @@ export default function KitAdvisor() {
     <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin">
       <div className="sticky top-0 z-10 bg-gray-950/90 backdrop-blur px-3 py-2 border-b border-gray-800">
         <div className="flex gap-1 bg-gray-800/70 rounded-lg p-0.5">
-          <button onClick={() => setTab('buy')} className={`flex-1 px-2 py-1.5 rounded-md text-xs cursor-pointer ${tab === 'buy' ? 'bg-teal-500 text-gray-950 font-semibold' : 'text-gray-300'}`}>{t('kit.buy')}</button>
-          <button onClick={() => setTab('inv')} className={`flex-1 px-2 py-1.5 rounded-md text-xs cursor-pointer ${tab === 'inv' ? 'bg-teal-500 text-gray-950 font-semibold' : 'text-gray-300'}`}>{t('kit.stock')}</button>
+          <button onClick={() => setTab('buy')} className={`flex-1 px-2 py-1.5 rounded-md text-xs cursor-pointer ${tab === 'buy' ? 'bg-teal-500 text-white font-semibold' : 'text-gray-300'}`}>{t('kit.buy')}</button>
+          <button onClick={() => setTab('inv')} className={`flex-1 px-2 py-1.5 rounded-md text-xs cursor-pointer ${tab === 'inv' ? 'bg-teal-500 text-white font-semibold' : 'text-gray-300'}`}>{t('kit.stock')}</button>
         </div>
       </div>
 
@@ -83,17 +83,17 @@ export default function KitAdvisor() {
             ) : (
               <div className="space-y-1.5">
                 {buildable.slice(0, 12).map((k, idx) => (
-                  <div key={k.name} className={`flex justify-between items-center gap-2 text-sm rounded-lg px-3 py-2 border ${idx === 0 ? 'border-teal-500/60 bg-teal-500/10' : 'border-gray-800 bg-gray-800/40'}`}>
-                    <span className="text-gray-100 min-w-0 truncate">{idx === 0 && <span className="text-teal-400 mr-1">★</span>}{k.disp}</span>
+                  <div key={k.name} className={`flex justify-between items-center gap-2 text-sm rounded-lg px-3 py-2 border ${idx === 0 ? 'border-emerald-500/60 bg-emerald-500/10' : 'border-gray-800 bg-gray-800/40'}`}>
+                    <span className="text-gray-100 min-w-0 truncate">{idx === 0 && <span className="text-emerald-400 mr-1">★</span>}{k.disp}</span>
                     <span className="text-amber-300 font-semibold tabular-nums shrink-0">{k.price != null ? `¥${k.price}` : t('kit.priceUnknown')}</span>
                   </div>
                 ))}
               </div>
             )}
-            {cheapest && <div className="mt-2.5 text-sm text-teal-300">{t('kit.cheapest', { name: cheapest.disp, price: cheapest.price ?? '' })}</div>}
+            {cheapest && <div className="mt-2.5 text-sm text-emerald-300">{t('kit.cheapest', { name: cheapest.disp, price: cheapest.price ?? '' })}</div>}
           </div>
           <div className="flex flex-col gap-1.5">
-            <button onClick={copyList} className="w-full bg-teal-500 hover:bg-teal-400 text-gray-950 font-semibold text-sm rounded-lg py-2.5 cursor-pointer">{t('kit.copy')}</button>
+            <button onClick={copyList} className="w-full bg-teal-500 hover:bg-teal-400 text-white font-semibold text-sm rounded-lg py-2.5 cursor-pointer">{t('kit.copy')}</button>
             <button onClick={() => setPane('bom')} className="w-full bg-gray-800 hover:bg-gray-700 text-sm rounded-lg py-2.5 cursor-pointer">{t('kit.continue')}</button>
           </div>
         </div>
@@ -102,7 +102,7 @@ export default function KitAdvisor() {
           {!hasStock ? (
             <div className="text-sm text-gray-400">{t('kit.noStock')}</div>
           ) : missing.length === 0 ? (
-            <div className="text-sm text-teal-300">{t('kit.stockOk')}</div>
+            <div className="text-sm text-emerald-300">{t('kit.stockOk')}</div>
           ) : (
             <div>
               <div className="text-sm text-amber-300 mb-2">{t('kit.stockShort')}</div>

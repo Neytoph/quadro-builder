@@ -10,6 +10,7 @@ const TUBE_HOTKEY: Record<string, string> = { T15: '1', T25: '2', T35: '3', T10:
 
 const STATUS_KEY: Record<string, string> = {
   select: 'status.select',
+  delete: 'status.delete',
   add: 'status.add',
   panel: 'status.panel',
   slide: 'status.slide',
@@ -22,9 +23,15 @@ const STATUS_KEY: Record<string, string> = {
 
 const PLACE_PREFIX = new Set(['add', 'panel', 'slide', 'fitting', 'clamp', 'c45', 'reinforce'])
 
-const btn = (active: boolean) =>
+const btn = (active: boolean, tone: 'teal' | 'red' = 'teal') =>
   `flex flex-col items-center justify-center gap-0.5 min-w-[3.4rem] h-12 px-2 rounded-xl border text-[11px] cursor-pointer transition-colors ${
-    active ? 'bg-teal-500 text-gray-950 border-teal-400 font-semibold' : 'bg-gray-900/70 text-gray-200 border-gray-700 hover:border-teal-400'
+    active
+      ? (tone === 'red'
+        ? 'bg-red-500 text-white border-red-400 font-semibold'
+        : 'bg-teal-500 text-white border-teal-400 font-semibold')
+      : (tone === 'red'
+        ? 'bg-gray-900/70 text-gray-200 border-gray-700 hover:border-red-400'
+        : 'bg-gray-900/70 text-gray-200 border-gray-700 hover:border-teal-400')
   }`
 
 function Pop({ children }: { children: ReactNode }) {
@@ -101,6 +108,10 @@ export default function TopToolbar() {
       <button className={btn(api.mode === 'select')} onClick={() => { api.setMode('select'); close() }}>
         <Svg16 inner={TOOL_ICON.select} />{t('tool.select')}
       </button>
+      <button className={btn(api.mode === 'delete', 'red')} title={t('tool.deleteHint')}
+        onClick={() => { api.setMode(api.mode === 'delete' ? 'select' : 'delete'); close() }}>
+        <Svg16 inner={TOOL_ICON.delete} />{t('tool.delete')}
+      </button>
 
       <div className="relative">
         <button className={btn(open === 'tubes' || (api.mode === 'add' && !api.placingConnector))} onClick={() => { api.setMode('add'); toggle('tubes') }}>
@@ -114,14 +125,14 @@ export default function TopToolbar() {
               {api.catalog.tubes.map(tube => (
                 <button key={tube.id} onClick={() => { api.setTube(tube.id); close() }}
                   title={TUBE_HOTKEY[tube.id] ? t('hint.tubeKey', { n: tube.length_cm, k: TUBE_HOTKEY[tube.id] }) : undefined}
-                  className={`flex-1 text-xs rounded-lg py-1.5 border ${api.tubeId === tube.id ? 'bg-teal-500 text-gray-950 border-teal-400 font-semibold' : 'bg-gray-800 border-gray-700 text-gray-200 hover:border-teal-400'}`}>
+                  className={`flex-1 text-xs rounded-lg py-1.5 border ${api.tubeId === tube.id ? 'bg-teal-500 text-white border-teal-400 font-semibold' : 'bg-gray-800 border-gray-700 text-gray-200 hover:border-teal-400'}`}>
                   {tube.length_cm}
                 </button>
               ))}
             </div>
             {api.catalog.curved.map(c => (
               <button key={c.id} onClick={() => { api.setTube(c.id); close() }}
-                className={`w-full text-xs rounded-lg py-1.5 border ${api.tubeId === c.id ? 'bg-teal-500 text-gray-950 border-teal-400 font-semibold' : 'border-gray-700 bg-gray-800 text-gray-200 hover:border-teal-400'}`}>
+                className={`w-full text-xs rounded-lg py-1.5 border ${api.tubeId === c.id ? 'bg-teal-500 text-white border-teal-400 font-semibold' : 'border-gray-700 bg-gray-800 text-gray-200 hover:border-teal-400'}`}>
                 {t('hint.curved')}
               </button>
             ))}
@@ -261,8 +272,11 @@ function StatusHint() {
   }
   const key = placingConnector ? 'status.placeConnector' : (STATUS_KEY[mode] || 'status.select')
   const prefix = placingConnector || PLACE_PREFIX.has(mode)
+  const danger = mode === 'delete'
   return (
-    <div data-ui="status-hint" className="pointer-events-none bg-gray-950/85 border border-teal-500/50 text-teal-50 text-xs px-3 py-1.5 rounded-lg backdrop-blur max-w-[min(32rem,42vw)] text-center leading-snug">
+    <div data-ui="status-hint" className={`pointer-events-none bg-gray-950/85 border text-xs px-3 py-1.5 rounded-lg backdrop-blur max-w-[min(32rem,42vw)] text-center leading-snug ${
+      danger ? 'border-red-500/50 text-red-50' : 'border-teal-500/50 text-teal-50'
+    }`}>
       {prefix ? `${t('lib.placing')} · ${t(key)}` : t(key)}
     </div>
   )

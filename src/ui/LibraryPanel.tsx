@@ -128,11 +128,11 @@ export default function LibraryPanel() {
       <div className="px-3 py-2 border-b border-gray-800 shrink-0 space-y-2">
         <div className="flex bg-gray-800/80 rounded-lg p-0.5">
           <button onClick={() => setTab('official')}
-            className={`flex-1 px-2 py-1 rounded-md text-[11px] cursor-pointer ${tab === 'official' ? 'bg-teal-500 text-gray-950 font-semibold' : 'text-gray-300'}`}>
+            className={`flex-1 px-2 py-1 rounded-md text-[11px] cursor-pointer ${tab === 'official' ? 'bg-teal-500 text-white font-semibold' : 'text-gray-300'}`}>
             {t('lib.official')} · {OFFICIAL_MODELS.length}
           </button>
           <button onClick={() => setTab('mine')}
-            className={`flex-1 px-2 py-1 rounded-md text-[11px] cursor-pointer ${tab === 'mine' ? 'bg-teal-500 text-gray-950 font-semibold' : 'text-gray-300'}`}>
+            className={`flex-1 px-2 py-1 rounded-md text-[11px] cursor-pointer ${tab === 'mine' ? 'bg-teal-500 text-white font-semibold' : 'text-gray-300'}`}>
             {t('lib.mine')} · {rows.length}
           </button>
         </div>
@@ -227,7 +227,7 @@ export default function LibraryPanel() {
                       {t('lib.parts', { conn: row.meta?.connectors || 0, tubes: row.meta?.tubes || 0, panels: row.meta?.panels || 0 })}
                     </div>
                     {check && (
-                      <div className={`text-[10px] mt-0.5 ${check.ok ? 'text-teal-400' : 'text-amber-400'}`}>
+                      <div className={`text-[10px] mt-0.5 ${check.ok ? 'text-emerald-400' : 'text-amber-400'}`}>
                         {check.ok ? t('lib.feasible') : t('lib.missing', { n: miss })}
                       </div>
                     )}

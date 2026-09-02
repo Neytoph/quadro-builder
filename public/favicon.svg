@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
-  <rect width="64" height="64" rx="14" fill="#0f1117"/>
+  <rect width="64" height="64" rx="14" fill="#14120F"/>
   <g stroke-linecap="round" fill="none" stroke-width="5">
     <!-- three axes through the center: red / green / blue tubes -->
     <line x1="14.7" y1="22" x2="49.3" y2="42" stroke="#e53e3e"/>
@@ -16,5 +16,5 @@
     <circle cx="32" cy="54" r="3.6" fill="#38a169"/>
   </g>
   <!-- central connector node -->
-  <circle cx="32" cy="32" r="7" fill="#f1f5f9" stroke="#0f1117" stroke-width="1.5"/>
+  <circle cx="32" cy="32" r="7" fill="#FFF1E6" stroke="#14120F" stroke-width="1.5"/>
 </svg>

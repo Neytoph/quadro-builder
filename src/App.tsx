@@ -9,6 +9,7 @@ import ProjectTabs from './ui/ProjectTabs'
 import AssemblyBar from './ui/AssemblyBar'
 import Onboarding from './ui/Onboarding'
 import ErrorBoundary from './ui/ErrorBoundary'
+import ShortcutHint from './ui/ShortcutHint'
 import { canvasInset, PANEL_GAP, PanelLayoutProvider, TOP_MIN, usePanelLayout } from './ui/panelLayout'
 import { UI_ESCAPE_EVENT } from './ui/events'
 import { DockProvider, DOCK_PILLS, useDock } from './ui/dock'
@@ -48,27 +49,12 @@ function AppActions() {
         return (
           <button key={item.id} onClick={() => toggle(item.id)}
             className={on
-              ? `${pill} bg-teal-500 hover:bg-teal-400 border-teal-400 text-gray-950 font-semibold`
+              ? `${pill} bg-teal-500 hover:bg-teal-400 border-teal-400 text-white font-semibold`
               : `${pill} bg-gray-800/90 hover:bg-gray-700 border-gray-700 text-gray-100`}>
             {t(item.labelKey)}
           </button>
         )
       })}
-    </div>
-  )
-}
-
-function CameraHint() {
-  const { t } = useI18n()
-  const { left, vh } = usePanelLayout()
-  const coversBottom = left.top + left.height > vh - 96
-  return (
-    <div
-      data-ui="camera-hint"
-      className="fixed z-20 pointer-events-none text-[11px] text-gray-100 select-none leading-relaxed whitespace-pre-line bg-gray-950/80 backdrop-blur-sm px-3 py-2 rounded-lg border border-white/15 shadow-lg"
-      style={{ left: coversBottom ? canvasInset(left) : PANEL_GAP, bottom: 16, maxWidth: '14rem' }}
-    >
-      {t('hint.camera')}
     </div>
   )
 }
@@ -122,7 +108,7 @@ function AppInner() {
         return
       }
       if (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-        if (api.mode === 'assembly') return
+        if (api.mode === 'assembly' || api.mode === 'delete') return
         e.preventDefault()
         if (api.pasting) {
           if (e.key === 'ArrowUp' || e.key === 'ArrowDown') api.nudgePasteY(e.key === 'ArrowUp' ? 1 : -1)
@@ -153,6 +139,11 @@ function AppInner() {
       }
       const TUBE_BY_KEY: Record<string, string> = { '1': 'T15', '2': 'T25', '3': 'T35', '4': 'T10', '5': 'T20', '6': 'T75' }
       if (TUBE_BY_KEY[e.key]) { api.setTube(TUBE_BY_KEY[e.key]); return }
+      if (e.key === 'd' || e.key === 'D') {
+        e.preventDefault()
+        api.setMode(api.mode === 'delete' ? 'select' : 'delete')
+        return
+      }
       if (e.key === 'b' || e.key === 'B') api.setMode('add')
       else if (e.key === 'p' || e.key === 'P') api.setMode('panel')
       else if (e.key === 's' || e.key === 'S') api.setMode('select')
@@ -172,7 +163,7 @@ function AppInner() {
       <RightDock />
       <AssemblyBar />
       <Toast />
-      <CameraHint />
+      <ShortcutHint />
       <AppActions />
       <Onboarding />
     </div>

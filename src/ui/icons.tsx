@@ -5,6 +5,7 @@ export function Svg16({ inner, size = 18 }: { inner: string; size?: number }) {
 
 export const TOOL_ICON = {
   select: '<path d="M3.5 2 L12.8 8.2 L8.4 9 L10.7 13.6 L8.9 14.5 L6.5 9.9 L3 12.4 Z" fill="currentColor"/>',
+  delete: '<path d="M3.2 3.2 L12.8 12.8 M12.8 3.2 L3.2 12.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
   tube: '<rect x="1.6" y="6.4" width="12.8" height="3.2" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.5"/>',
   panel: '<rect x="3" y="3" width="10" height="10" rx="1.8" fill="none" stroke="currentColor" stroke-width="1.5"/>',
   slide: '<path d="M3 13 C7 13 5 4 13 3" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>',

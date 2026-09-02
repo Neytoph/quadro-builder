@@ -1,5 +1,50 @@
 @import "tailwindcss";
 
+/*
+ * 清禾品牌色（qinghe-logo 品牌规范）：
+ * 橙承载强调与数据，绿承载状态 / 可用性 / 增长。
+ * teal-* 映射主橙，emerald-* 映射禾绿；零件红绿蓝黄是产品色，不改。
+ * P1 #EA580C  P2 #FF8A2B  禾绿 #1FA85A  深禾绿 #13763E
+ * 墨 #1F2430  暖底 #FFF1E6  描边 #FFD3B0
+ */
+@theme {
+  --color-teal-50: #fff8f2;
+  --color-teal-100: #fff1e6;
+  --color-teal-200: #ffd3b0;
+  --color-teal-300: #ffb070;
+  --color-teal-400: #ff8a2b;
+  --color-teal-500: #ea580c;
+  --color-teal-600: #c2410c;
+  --color-teal-700: #9a3412;
+  --color-teal-800: #7c2d12;
+  --color-teal-900: #431407;
+  --color-teal-950: #2a0e06;
+
+  --color-emerald-50: #e9f7ef;
+  --color-emerald-100: #d4f0e0;
+  --color-emerald-200: #b9e4cb;
+  --color-emerald-300: #7fd9a4;
+  --color-emerald-400: #3dbe72;
+  --color-emerald-500: #1fa85a;
+  --color-emerald-600: #13763e;
+  --color-emerald-700: #0f5c31;
+  --color-emerald-800: #0c4a28;
+  --color-emerald-900: #10251a;
+  --color-emerald-950: #0a1811;
+
+  --color-gray-50: #f7f4ef;
+  --color-gray-100: #f2ede5;
+  --color-gray-200: #e3ddd3;
+  --color-gray-300: #cfc7ba;
+  --color-gray-400: #a79e91;
+  --color-gray-500: #7a7267;
+  --color-gray-600: #5a5348;
+  --color-gray-700: #3d382f;
+  --color-gray-800: #232019;
+  --color-gray-900: #1c1915;
+  --color-gray-950: #14120f;
+}
+
 .app-viewport {
   height: 100vh;
   height: 100dvh;
@@ -8,8 +53,8 @@
 html, body, #root {
   margin: 0;
   overflow: hidden;
-  background: #030712;
-  color: #e5e7eb;
+  background: #14120f;
+  color: #f2ede5;
 }
 
 #canvas-host,
@@ -36,8 +81,8 @@ html, body, #root {
   content: "";
   width: 28px;
   height: 28px;
-  border: 3px solid #cbd5e1;
-  border-top-color: #0d9488;
+  border: 3px solid #ffd3b0;
+  border-top-color: #ea580c;
   border-radius: 50%;
   animation: scene-spin 0.7s linear infinite;
 }
@@ -47,15 +92,22 @@ html, body, #root {
 
 .scrollbar-thin {
   scrollbar-width: thin;
-  scrollbar-color: #374151 transparent;
+  scrollbar-color: #3d382f transparent;
 }
 .scrollbar-thin::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 .scrollbar-thin::-webkit-scrollbar-thumb {
-  background: #374151;
+  background: #3d382f;
   border-radius: 999px;
+}
+
+.select-box {
+  position: absolute;
+  pointer-events: none;
+  border: 1px solid color-mix(in srgb, var(--color-teal-400) 75%, transparent);
+  background: color-mix(in srgb, var(--color-teal-500) 16%, transparent);
 }
 
 /* 滚动条贴在容器起点一侧（左栏 = 窗口外沿），不挡靠画布的那条边。 */

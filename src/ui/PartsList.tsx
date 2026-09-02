@@ -70,7 +70,7 @@ export function BomPane() {
         {api.feasible == null
           ? <div className="text-gray-500">{t('side.noInventory')}</div>
           : (
-            <div className={api.feasible ? 'text-teal-300' : 'text-amber-300'}>
+            <div className={api.feasible ? 'text-emerald-300' : 'text-amber-300'}>
               {api.feasible ? t('side.feasible') : t('side.missing')}
             </div>
           )}

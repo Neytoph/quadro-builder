@@ -69,7 +69,7 @@ export default function Onboarding() {
           )}
           <button
             onClick={() => { if (last) close(); else setI(i + 1) }}
-            className="px-4 py-2 rounded-lg text-sm font-semibold bg-teal-500 hover:bg-teal-400 text-gray-950 cursor-pointer"
+            className="px-4 py-2 rounded-lg text-sm font-semibold bg-teal-500 hover:bg-teal-400 text-white cursor-pointer"
           >
             {last ? t('onboard.done') : t('onboard.next')}
           </button>

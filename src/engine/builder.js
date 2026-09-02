@@ -41,9 +41,8 @@ const SELECT_BLOCK_MS = 500;
 // Jedes Teil wuerfelt beim Setzen (bzw. beim Umfaerben einer Auswahl) seine
 // eigene Farbe -- sonst waere es nur eine weitere feste Farbe.
 export const RANDOM_COLOR = "random";
-// Schwarz ist eine Platten-Farbe: es gibt keine schwarzen Rohre. Dieselbe
-// Trennung wie bei den Farbschaltern der Toolbar.
-const PANEL_RANDOM_EXTRA = ["black"];
+// 随机色只走经典四色。黑是厂家面板色，会出现在导入文件里，但不进随机池，
+// 免得工具栏没有黑色色块时突然铺出一块黑面板。
 
 // 普通通型的臂位掩码（与 scene.js / connectors.json 同一套 bit）。
 const CONN_TYPE_MASK = {
@@ -85,8 +84,8 @@ export class Builder {
     this.inputType = "mouse";
     this.onInputTypeChange = () => {};
 
-    // "select" (Cursor: vorhandenes auswaehlen) | "add" | "panel" | "slide" |
-    // "clamp" | "fitting" | "reinforce" | "assembly"
+    // "select" (Cursor: vorhandenes auswaehlen) | "delete" (Klick loescht)
+    // | "add" | "panel" | "slide" | "clamp" | "fitting" | "reinforce" | "assembly"
     this.mode = "select";
     this.tubeId = geometry().defaultTube;
     this.panelId = defaultPanel();
@@ -217,6 +216,7 @@ export class Builder {
     // Labels beim Moduswechsel grundsaetzlich ausschalten;
     // der Aufbaumodus schaltet sie in enterAssembly() selbst wieder ein.
     if (mode === "assembly") this.enterAssembly(); // Aufbau zeigt wieder eigene Labels
+    this.scene.setCursor("default");
     this.refresh();
   }
   setTube(tubeId) { this.tubeId = tubeId; this.placeConnectorId = null; }
@@ -291,14 +291,12 @@ export class Builder {
   /**
    * Farbe fuer ein NEU gesetztes Teil. Normalerweise die Toolbar-Farbe; bei
    * "Zufall" wuerfelt jedes Teil einzeln. Rohre nehmen an dem Knoten die
-   * seltenste der klassischen Vier (wie designer)，Platten duerfen auch schwarz.
+   * seltenste der klassischen Vier (wie designer).
    */
   colorFor(kind, nodeId) {
     if (this.color !== RANDOM_COLOR) return this.color;
     if (kind === "tube") return this._leastUsedClassic(nodeId);
-    const pool = CLASSIC_COLOR_IDS.slice();
-    if (kind === "panel") pool.push(...PANEL_RANDOM_EXTRA);
-    return pool[Math.floor(Math.random() * pool.length)];
+    return CLASSIC_COLOR_IDS[Math.floor(Math.random() * CLASSIC_COLOR_IDS.length)];
   }
 
   /** Seltenste der klassischen Vier an diesem Knoten; bei Gleichstand zufaellig. */
@@ -2500,8 +2498,9 @@ export class Builder {
       return p && (!kinds || kinds.includes(p.data.kind)) ? p : null;
     };
     let obj = null;
-    if (this.mode === "select") {
-      // Cursor-Modus: alles Platzierte ist waehlbar, Rutschen eingeschlossen.
+    if (this.mode === "select" || this.mode === "delete") {
+      // Cursor- und Loesch-Modus: alles Platzierte ist treffbar, Rutschen
+      // eingeschlossen. Im Loesch-Modus wird der Klick zum Loeschen.
       obj = this.scene.pickForDelete(x, y)?.object || null;
     } else if (this.mode === "add") {
       if (this.placeConnectorId) {
@@ -2606,6 +2605,9 @@ export class Builder {
       obj = this.scene.pickForDelete(x, y)?.object || null;
     }
     this.scene.setHover(obj);
+    // Loesch-Modus: Fadenkreuz auf einem Teil, sonst Standard -- setHover hat
+    // sonst die Zeigefinger-Hand gesetzt.
+    if (this.mode === "delete") this.scene.setCursor(obj ? "crosshair" : "default");
     // Auf einem ausgewaehlten Teil laesst sich ziehen -- das zeigt der Cursor.
     if (this.mode === "select" && this.selection.size) {
       const p = this.scene.pickForDelete(x, y);
@@ -2693,6 +2695,7 @@ export class Builder {
       this.refresh();
     }
     if (this.mode === "select") this._clickSelect(e);
+    else if (this.mode === "delete") this._clickDelete(e);
     else if (this.mode === "add") this._clickAdd(e);
     else if (this.mode === "panel") this._clickPanel(e);
     else if (this.mode === "slide") this._clickSlide(e);
@@ -3479,6 +3482,33 @@ export class Builder {
   // Laesst sich an dieser Kupplung ueberhaupt weiterbauen?
   _isBuildable(nodeId) {
     return this.model.nodes.has(nodeId);
+  }
+
+  /**
+   * Loesch-Modus: Klick auf ein Teil nimmt genau dieses heraus. Verstaerkungs-
+   * profil und Scharnier gelten wie in der Auswahl -- ein Profil ist der ganze
+   * Lauf, nicht nur das eine Rohr. Klick ins Leere tut nichts.
+   */
+  _clickDelete(e) {
+    const pick = this.scene.pickForDelete(e.clientX, e.clientY);
+    if (!pick) return;
+    this._fillSelectionFromPick(pick);
+    this.deleteSelection();
+  }
+
+  /** Setzt die Auswahl auf genau das getroffene Teil (ohne refresh). */
+  _fillSelectionFromPick(pick) {
+    this.selection.clear();
+    const { kind, id } = pick.data;
+    if (kind === "node" && pick.data.hinge != null) {
+      this.selection.set(hingeKey(id, pick.data.hinge), "hinge");
+      this._profilAuswahl = null;
+      return;
+    }
+    const ids = Array.isArray(pick.data.tubes) && pick.data.tubes.length
+      ? pick.data.tubes : [id];
+    this._profilAuswahl = Array.isArray(pick.data.tubes) ? new Set(ids) : null;
+    for (const x of ids) this.selection.set(x, kind);
   }
 
   // Cursor-Modus: bereits platzierte Teile auswaehlen. Einfacher Klick waehlt

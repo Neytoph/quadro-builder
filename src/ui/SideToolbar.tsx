@@ -84,7 +84,7 @@ export default function SideToolbar() {
       <div className="mt-1 flex gap-1">
         {LANGS.map(item => (
           <button key={item.id} onClick={() => setLang(item.id)}
-            className={`flex-1 text-xs rounded-lg py-1 border cursor-pointer ${lang === item.id ? 'bg-teal-500 text-gray-950 border-teal-400' : 'border-gray-700 bg-gray-800'}`}>
+            className={`flex-1 text-xs rounded-lg py-1 border cursor-pointer ${lang === item.id ? 'bg-teal-500 text-white border-teal-400' : 'border-gray-700 bg-gray-800'}`}>
             {item.label}
           </button>
         ))}
@@ -121,7 +121,7 @@ export default function SideToolbar() {
         <div className="text-[10px] uppercase tracking-wider text-gray-400 mb-1.5">{t('section.view')}</div>
         <div className="flex flex-col gap-1.5">
           <button onClick={api.toggleGrass} aria-pressed={api.grassOn}
-            className={`text-xs rounded-lg border px-2 py-1.5 text-left cursor-pointer ${api.grassOn ? 'bg-teal-500 text-gray-950 border-teal-400 font-semibold' : 'border-gray-700 bg-gray-800 hover:border-teal-400'}`}>
+            className={`text-xs rounded-lg border px-2 py-1.5 text-left cursor-pointer ${api.grassOn ? 'bg-emerald-500 text-white border-emerald-400 font-semibold' : 'border-gray-700 bg-gray-800 hover:border-teal-400'}`}>
             {t('btn.grass')}
           </button>
           <button onClick={api.frame} className="text-xs rounded-lg border border-gray-700 bg-gray-800 hover:border-teal-400 px-2 py-1.5 text-left cursor-pointer">{t('btn.frame')}</button>

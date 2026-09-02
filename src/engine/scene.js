@@ -161,8 +161,8 @@ const POOL_INSET = 2.5;
 
 // Farbschema der normalen Ansicht (die Szene bringt ihren eigenen Himmel mit).
 // Die Werte sind die Gegenstuecke zu --bg/--line in style.css.
-const BG_LIGHT = 0xe8e8ec;
-const BG_DARK = 0x171b21;
+const BG_LIGHT = 0xfff4eb;                  // 暖底
+const BG_DARK = 0x14120f;                   // 品牌深色地面
 // Bodenraster: Kantenlaenge und Zellweite. 1040 cm sind 52 Zellen je Achse --
 // das urspruengliche 800er Raster plus sechs Zellen auf jeder Seite, damit auch
 // breitere Aufbauten noch darauf stehen. Es bleibt deutlich innerhalb der
@@ -183,15 +183,15 @@ const GRASS_TILE = 25;                        // cm je Graskachel (Halmgroesse)
 const TREE_RING = [GRID_SIZE / 2 + 120, GROUND_AREA / 2 - 120];
 const BUSH_RING = [GRID_SIZE / 2 + 60, GROUND_AREA / 2 - 100];
 
-const GRID_LIGHT = [0xb8c0cc, 0xd6dce4];   // Hauptlinien, Nebenlinien
-const GRID_DARK = [0x3a4351, 0x2a313b];
+const GRID_LIGHT = [0xcfc7ba, 0xe3ddd3];   // Hauptlinien, Nebenlinien
+const GRID_DARK = [0x3d382f, 0x2e2a23];
 
 // Ansichtswuerfel: Kanten hell/dunkel (die Flaechen stecken in der Textur).
-const CUBE_EDGE_LIGHT = 0x8a94a3;
-const CUBE_EDGE_DARK = 0x5a6675;
+const CUBE_EDGE_LIGHT = 0xcfc7ba;
+const CUBE_EDGE_DARK = 0x5a5348;
 
-const HIGHLIGHT_COLOR = 0x9b30ff;
-const HIGHLIGHT_EMISSIVE = 0x3a0066;
+const HIGHLIGHT_COLOR = 0xea580c;
+const HIGHLIGHT_EMISSIVE = 0x612f00;
 // Platten-Modus: das angeklickte Tragrohr (amber) und die Gegenrohre (gruen).
 const FOCUS_COLOR = 0xf59e0b;
 const FOCUS_EMISSIVE = 0x7c4a00;
@@ -367,7 +367,7 @@ export class SceneManager {
     this.controls.target.set(...this._defaultCam.target);
 
     // Licht: warmes Sonnenlicht + Himmelslicht + weiche Schatten
-    this._hemiLight = new THREE.HemisphereLight(0xffffff, 0x8090a0, 1.0); // Normal-Modus-Startwert
+    this._hemiLight = new THREE.HemisphereLight(0xffffff, 0x908070, 1.0); // Normal-Modus-Startwert
     this.scene.add(this._hemiLight);
     this._dirLight = new THREE.DirectionalLight(0xffffff, 1.1);  // setScene() stellt Farbe/Staerke
     this._dirLight.position.set(200, 320, 150);
@@ -1808,8 +1808,8 @@ export class SceneManager {
     return this._materials[key];
   }
 
-  // Hervorhebungs-Variante eines beliebigen Bauteil-Materials: durchgehend lila.
-  // Geklont statt neu gebaut, damit Eigenschaften wie DoubleSide oder
+  // Hervorhebungs-Variante eines beliebigen Bauteil-Materials: durchgehend orange
+  // (清禾主橙 P1). Geklont statt neu gebaut, damit Eigenschaften wie DoubleSide oder
   // Transparenz (Platten, Netze) erhalten bleiben. Pro Basis-Material einmal
   // gecacht -- _disposeGroup gibt nur Geometrien frei.
   _selectedMaterial(base) {
@@ -2451,7 +2451,7 @@ export class SceneManager {
     const key = selected ? "conn:sel" : "conn:base";
     if (!this._materials[key]) {
       this._materials[key] = new THREE.MeshStandardMaterial({
-        color: new THREE.Color(selected ? 0xff8c1a : connectorColor().hex),
+        color: new THREE.Color(selected ? 0xea580c : connectorColor().hex),
         roughness: 0.6, metalness: 0.1,
         emissive: new THREE.Color(selected ? 0x612f00 : 0x000000),
       });
@@ -2473,7 +2473,7 @@ export class SceneManager {
     const key = "faded" + (twoSided ? "_2" : "") + (this._dark ? "_d" : "") + ":ghost";
     if (!this._materials[key]) {
       this._materials[key] = new THREE.MeshStandardMaterial({
-        color: new THREE.Color(this._dark ? 0x8a94a2 : 0xc5ccd4),
+        color: new THREE.Color(this._dark ? 0xa79e91 : 0xcfc7ba),
         roughness: 0.85, metalness: 0.02,
         side: twoSided ? THREE.DoubleSide : THREE.FrontSide,
         transparent: true, opacity: 0.28,
@@ -2734,7 +2734,7 @@ export class SceneManager {
       const isPlace = kind === "place";
       const isDiag = kind === "diag";
       this._materials[key] = new THREE.MeshBasicMaterial({
-        color: isOrigin ? 0x1a8cff : isPlace ? 0x14b8a6 : isDiag ? 0x8b3df5 : 0x18a558,
+        color: isOrigin ? 0x1a8cff : isPlace ? 0xea580c : isDiag ? 0x8b3df5 : 0x18a558,
         transparent: true, opacity: isOrigin ? 0.45 : isPlace ? 0.7 : 0.85,
       });
     }
@@ -2884,7 +2884,7 @@ export class SceneManager {
   // Material gebuendelt und als ein InstancedMesh gezeichnet.
   //
   // Gebuendelt wird nach dem FERTIGEN Material, nicht ueber instanceColor: die
-  // Varianten (grau im Kollisions-Modus, rot, orange, blass, lila) unter-
+  // Varianten (grau im Kollisions-Modus, rot, orange, blass) unter-
   // scheiden sich nicht nur in der Farbe, sondern auch in Rauheit, Emissive und
   // Transparenz -- das laesst sich nicht je Instanz setzen. Da es nur eine
   // Handvoll Rohrlaengen und Farben gibt, bleiben es trotzdem wenige Buendel.
@@ -5133,7 +5133,7 @@ export class SceneManager {
     if (this._hemiLight) {
       this._hemiLight.intensity = v ? 1.1 : 1.0;
       this._hemiLight.color.set(v ? 0xcde7ff : 0xffffff);
-      this._hemiLight.groundColor.set(v ? 0x7a9060 : 0x8090a0);
+      this._hemiLight.groundColor.set(v ? 0x7a9060 : 0x908070);
     }
     this._applyBackground();
     this._applyGrid();
@@ -5421,9 +5421,9 @@ export class SceneManager {
     const cv = document.createElement("canvas");
     cv.width = cv.height = S;
     const g = cv.getContext("2d");
-    g.fillStyle = this._dark ? "#2c3542" : "#f2f4f8";
+    g.fillStyle = this._dark ? "#232019" : "#fff4eb";
     g.fillRect(0, 0, S, S);
-    g.fillStyle = this._dark ? "#e6eaf0" : "#1f2733";
+    g.fillStyle = this._dark ? "#f2ede5" : "#1f2430";
     g.font = "700 23px system-ui, sans-serif";
     g.textAlign = "center";
     g.textBaseline = "middle";

@@ -1,0 +1,198 @@
+import { useCallback, useState } from 'react'
+import { useEngine } from '../store/EngineContext'
+import { useI18n } from '../i18n'
+import { canvasInset, PANEL_GAP, usePanelLayout } from './panelLayout'
+
+const STORAGE_KEY = 'quadro.ui.shortcuts.open'
+
+type Row = { chord: string; action: string }
+
+function readOpen(): boolean {
+  try {
+    const v = localStorage.getItem(STORAGE_KEY)
+    if (v === '0') return false
+    if (v === '1') return true
+  } catch { /* ignore */ }
+  return true
+}
+
+function persistOpen(open: boolean) {
+  try { localStorage.setItem(STORAGE_KEY, open ? '1' : '0') } catch { /* ignore */ }
+}
+
+function rowsFor(
+  t: (key: string, vars?: Record<string, string | number>) => string,
+  mode: string,
+  pasting: boolean,
+  placingConnector: boolean,
+): Row[] {
+  if (pasting) {
+    return [
+      { chord: '↑ ↓', action: t('keys.lift') },
+      { chord: t('keys.click'), action: t('keys.drop') },
+      { chord: 'Esc', action: t('keys.escCancel') },
+    ]
+  }
+  if (placingConnector) {
+    return [
+      { chord: 'Esc', action: t('keys.escSelect') },
+      { chord: 'D', action: t('keys.deleteMode') },
+      { chord: t('keys.chord.undo'), action: t('keys.undo') },
+    ]
+  }
+  switch (mode) {
+    case 'delete':
+      return [
+        { chord: t('keys.click'), action: t('keys.clickDelete') },
+        { chord: 'Esc / D / S', action: t('keys.escSelect') },
+        { chord: t('keys.chord.undo'), action: t('keys.undo') },
+      ]
+    case 'add':
+      return [
+        { chord: '1 – 6', action: t('keys.tubeLen') },
+        { chord: '↑ ↓ ← →', action: t('keys.buildDir') },
+        { chord: 'Esc', action: t('keys.escSelect') },
+        { chord: 'D', action: t('keys.deleteMode') },
+      ]
+    case 'panel':
+      return [
+        { chord: t('keys.chord.panelTurn'), action: t('keys.panelTurn') },
+        { chord: 'Esc', action: t('keys.escSelect') },
+        { chord: 'D', action: t('keys.deleteMode') },
+      ]
+    case 'slide':
+    case 'fitting':
+    case 'clamp':
+    case 'c45':
+    case 'reinforce':
+      return [
+        { chord: 'Esc', action: t('keys.escSelect') },
+        { chord: 'D', action: t('keys.deleteMode') },
+        { chord: t('keys.chord.undo'), action: t('keys.undo') },
+      ]
+    case 'assembly':
+      return [
+        { chord: '[ ]', action: t('keys.step') },
+        { chord: 'A / Esc', action: t('keys.escSelect') },
+        { chord: 'D', action: t('keys.deleteMode') },
+      ]
+    default:
+      return [
+        { chord: t('keys.chord.addSelect'), action: t('keys.addSelect') },
+        { chord: t('keys.chord.block'), action: t('keys.block') },
+        { chord: t('keys.chord.selectAll'), action: t('keys.selectAll') },
+        { chord: t('keys.chord.copyPaste'), action: t('keys.copyPaste') },
+        { chord: t('keys.chord.delete'), action: t('keys.deleteSel') },
+        { chord: 'Q / E', action: t('keys.rotate') },
+        { chord: 'D', action: t('keys.deleteMode') },
+      ]
+  }
+}
+
+const MODE_TITLE: Record<string, string> = {
+  select: 'tool.select',
+  delete: 'tool.delete',
+  add: 'tool.tubes',
+  panel: 'tool.panels',
+  slide: 'tool.slides',
+  fitting: 'tool.connections',
+  clamp: 'tool.connections',
+  c45: 'tool.connections',
+  reinforce: 'tool.reinforce',
+  assembly: 'assembly.toggle',
+}
+
+function Kbd({ text }: { text: string }) {
+  const parts = text.split(' / ').filter(Boolean)
+  return (
+    <span className="inline-flex items-center gap-0.5 shrink-0">
+      {parts.map((part, i) => (
+        <span key={`${part}-${i}`} className="inline-flex items-center">
+          {i > 0 && <span className="mx-0.5 text-gray-500 text-[9px]">/</span>}
+          <span className="inline-flex items-center justify-center min-w-[1.2rem] h-[1.15rem] px-1 rounded-[4px] border border-white/12 bg-white/8 text-[10px] leading-none text-gray-100 font-medium tabular-nums whitespace-nowrap">
+            {part}
+          </span>
+        </span>
+      ))}
+    </span>
+  )
+}
+
+export default function ShortcutHint() {
+  const api = useEngine()
+  const { t } = useI18n()
+  const { left, vh } = usePanelLayout()
+  const [open, setOpen] = useState(readOpen)
+
+  const toggle = useCallback(() => {
+    setOpen(cur => {
+      const next = !cur
+      persistOpen(next)
+      return next
+    })
+  }, [])
+
+  const mode = api.pasting ? 'paste' : api.mode
+  const titleKey = api.pasting
+    ? 'lib.placing'
+    : (MODE_TITLE[api.placingConnector ? 'fitting' : api.mode] || 'tool.select')
+  const rows = rowsFor(t, api.mode, api.pasting, !!api.placingConnector)
+  const cameraLines = t('hint.camera').split('\n').filter(Boolean)
+  const coversBottom = left.top + left.height > vh - (open ? 280 : 96)
+
+  return (
+    <div
+      data-ui="shortcut-hint"
+      data-open={open ? '1' : '0'}
+      data-mode={mode}
+      className="fixed z-30 select-none"
+      style={{ left: coversBottom ? canvasInset(left) : PANEL_GAP, bottom: 16, maxWidth: open ? '16.5rem' : '9.5rem' }}
+    >
+      <div className={`overflow-hidden rounded-xl border shadow-lg backdrop-blur-sm transition-colors ${
+        api.mode === 'delete' && !api.pasting
+          ? 'bg-gray-950/82 border-red-500/25'
+          : 'bg-gray-950/82 border-teal-500/25'
+      }`}>
+        <button
+          type="button"
+          onClick={toggle}
+          aria-expanded={open}
+          title={open ? t('keys.hide') : t('keys.show')}
+          className="flex items-center gap-1.5 w-full text-left px-2.5 py-1.5 cursor-pointer hover:bg-white/5"
+        >
+          <span className="text-gray-400" aria-hidden>
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+              <rect x="1.5" y="4" width="13" height="8.5" rx="1.6" stroke="currentColor" strokeWidth="1.3"/>
+              <path d="M4 8.2h2.2M7.4 8.2h4.6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+            </svg>
+          </span>
+          <span className="flex-1 min-w-0 text-[11px] text-gray-100 truncate">
+            {t('keys.title')}
+            <span className="text-gray-400"> · {t(titleKey)}</span>
+          </span>
+          <span className={`text-[10px] text-gray-500 transition-transform ${open ? 'rotate-180' : ''}`} aria-hidden>▾</span>
+        </button>
+        <div className={`grid transition-[grid-template-rows] duration-200 ease-out ${open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
+          <div className="overflow-hidden" aria-hidden={!open} inert={!open}>
+            <div className="px-2.5 pb-2.5 pt-0.5">
+              <div className="flex flex-col gap-1">
+                {rows.map(row => (
+                  <div key={row.chord + row.action} className="flex items-start gap-2">
+                    <Kbd text={row.chord} />
+                    <span className="text-[11px] text-gray-300 leading-snug pt-px">{row.action}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-2 pt-2 border-t border-white/8">
+                <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">{t('keys.camera')}</div>
+                <div className="text-[11px] text-gray-400 leading-relaxed whitespace-pre-line">
+                  {cameraLines.join('\n')}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
