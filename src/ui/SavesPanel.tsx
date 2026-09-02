@@ -27,7 +27,7 @@ export default function SavesPanel() {
             <button onClick={() => {
               const name = window.prompt(t('saves.namePrompt'), d.name)
               if (name) void api.renameDoc(d.id, name).then(() => api.listDocs().then(setDocs))
-            }} className="text-xs text-gray-400 hover:text-white cursor-pointer">{t('saves.rename')}</button>
+            }} className="text-xs text-gray-400 hover:text-teal-600 cursor-pointer">{t('saves.rename')}</button>
             <button onClick={() => {
               if (window.confirm(t('confirm.delete'))) void api.removeDoc(d.id).then(() => api.listDocs().then(setDocs))
             }} className="text-xs text-red-400 hover:text-red-200 cursor-pointer">{t('saves.delete')}</button>

@@ -23,52 +23,52 @@
         "id": "red",
         "name": "Rot",
         "name_en": "Red",
-        "hex": "#e53e3e"
+        "hex": "#F23B3B"
       },
       {
         "id": "green",
         "name": "Grün",
         "name_en": "Green",
-        "hex": "#38a169"
+        "hex": "#2FCB5A"
       },
       {
         "id": "blue",
         "name": "Blau",
         "name_en": "Blue",
-        "hex": "#3182ce"
+        "hex": "#2B8FF0"
       },
       {
         "id": "yellow",
         "name": "Gelb",
         "name_en": "Yellow",
-        "hex": "#ecc94b"
+        "hex": "#FFD21A"
       },
       {
         "id": "petrol",
         "name": "Petrol",
         "name_en": "Petrol",
-        "hex": "#2f6f7e",
+        "hex": "#3A8494",
         "series": "home"
       },
       {
         "id": "mint",
         "name": "Mint",
         "name_en": "Mint",
-        "hex": "#9ed3bf",
+        "hex": "#7ECBB0",
         "series": "home"
       },
       {
         "id": "berry",
         "name": "Berry",
         "name_en": "Berry",
-        "hex": "#b5678f",
+        "hex": "#C46B90",
         "series": "home"
       },
       {
         "id": "apricot",
         "name": "Apricot",
         "name_en": "Apricot",
-        "hex": "#e6a875",
+        "hex": "#E8AE7A",
         "series": "home"
       }
     ],

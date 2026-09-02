@@ -4,21 +4,21 @@ export const CLASSIC_COLOR_IDS = ["red", "green", "blue", "yellow"];
 export const HOME_COLOR_IDS = ["petrol", "mint", "berry"];
 
 export const COLOR_HEX = {
-  red: "#e53e3e",
-  green: "#38a169",
-  blue: "#3182ce",
-  yellow: "#ecc94b",
-  petrol: "#2f6f7e",
-  mint: "#9ed3bf",
-  berry: "#b5678f",
-  apricot: "#e6a875",
+  red: "#F23B3B",
+  green: "#2FCB5A",
+  blue: "#2B8FF0",
+  yellow: "#FFD21A",
+  petrol: "#3A8494",
+  mint: "#7ECBB0",
+  berry: "#C46B90",
+  apricot: "#E8AE7A",
 };
 
 export const PALETTES = [
-  { key: "classic", colors: ["#e53e3e", "#ecc94b", "#38a169", "#3182ce"] },
-  { key: "home-blue", colors: ["#e9e4d6", "#a9c5dc", "#6e93b4", "#2e3a4c", "#8b95a0"] },
-  { key: "home-green", colors: ["#e9e4d6", "#a7be9a", "#6e8f6a", "#364a3c", "#8b95a0"] },
-  { key: "home-pink", colors: ["#e9e4d6", "#d9afc0", "#a96d86", "#4a3542", "#8b95a0"] },
+  { key: "classic", colors: ["#F23B3B", "#FFD21A", "#2FCB5A", "#2B8FF0"] },
+  { key: "home-blue", colors: ["#e9e4d6", "#9FC8E0", "#5A8FB0", "#2e3a4c", "#8b95a0"] },
+  { key: "home-green", colors: ["#e9e4d6", "#9BC4A0", "#629A6E", "#364a3c", "#8b95a0"] },
+  { key: "home-pink", colors: ["#e9e4d6", "#D8A8BC", "#B06888", "#4a3542", "#8b95a0"] },
 ];
 
 const HOME_TO_OFFICIAL = {

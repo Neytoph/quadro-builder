@@ -4,7 +4,6 @@ import { LIBRARY_OPEN_EVENT } from './LibraryPanel'
 
 export type DockPane = 'file' | 'library' | 'saves' | 'advisor' | 'bom' | 'inventory'
 
-const OVERLAY = new Set<DockPane>(['file', 'library', 'saves', 'advisor'])
 export const LIB_DOCK_MIN = 360
 
 export const DOCK_PILLS: { id: DockPane; labelKey: string }[] = [
@@ -26,7 +25,7 @@ type Ctx = {
 const DockCtx = createContext<Ctx | null>(null)
 
 export function DockProvider({ children }: { children: ReactNode }) {
-  const [pane, setPane] = useState<DockPane | null>('bom')
+  const [pane, setPane] = useState<DockPane | null>(null)
   const { right, patchRight } = usePanelLayout()
 
   useEffect(() => {
@@ -44,11 +43,7 @@ export function DockProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const handleEsc = useCallback(() => {
-    setPane(cur => {
-      if (!cur) return cur
-      if (OVERLAY.has(cur)) return 'bom'
-      return null
-    })
+    setPane(null)
   }, [])
 
   const value = useMemo(() => ({ pane, setPane, toggle, handleEsc }), [pane, toggle, handleEsc])

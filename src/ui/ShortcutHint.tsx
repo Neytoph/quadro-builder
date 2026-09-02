@@ -109,7 +109,7 @@ function Kbd({ text }: { text: string }) {
       {parts.map((part, i) => (
         <span key={`${part}-${i}`} className="inline-flex items-center">
           {i > 0 && <span className="mx-0.5 text-gray-500 text-[9px]">/</span>}
-          <span className="inline-flex items-center justify-center min-w-[1.2rem] h-[1.15rem] px-1 rounded-[4px] border border-white/12 bg-white/8 text-[10px] leading-none text-gray-100 font-medium tabular-nums whitespace-nowrap">
+          <span className="inline-flex items-center justify-center min-w-[1.2rem] h-[1.15rem] px-1 rounded-[4px] border border-gray-700 bg-gray-800 text-[10px] leading-none text-gray-100 font-medium tabular-nums whitespace-nowrap">
             {part}
           </span>
         </span>
@@ -158,7 +158,7 @@ export default function ShortcutHint() {
           onClick={toggle}
           aria-expanded={open}
           title={open ? t('keys.hide') : t('keys.show')}
-          className="flex items-center gap-1.5 w-full text-left px-2.5 py-1.5 cursor-pointer hover:bg-white/5"
+          className="flex items-center gap-1.5 w-full text-left px-2.5 py-1.5 cursor-pointer hover:bg-gray-800"
         >
           <span className="text-gray-400" aria-hidden>
             <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
@@ -183,7 +183,7 @@ export default function ShortcutHint() {
                   </div>
                 ))}
               </div>
-              <div className="mt-2 pt-2 border-t border-white/8">
+              <div className="mt-2 pt-2 border-t border-gray-700">
                 <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">{t('keys.camera')}</div>
                 <div className="text-[11px] text-gray-400 leading-relaxed whitespace-pre-line">
                   {cameraLines.join('\n')}

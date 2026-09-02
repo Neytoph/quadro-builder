@@ -17,7 +17,7 @@ function Swatch({ hex, selected, title, onClick }: {
 }) {
   return (
     <button title={title} onClick={onClick}
-      className={`w-7 h-7 rounded-md border-2 cursor-pointer transition-transform ${selected ? 'border-white scale-110' : 'border-gray-700'}`}
+      className={`w-7 h-7 rounded-md border-2 cursor-pointer transition-transform ${selected ? 'border-teal-600 scale-110' : 'border-gray-700'}`}
       style={{ background: hex }} />
   )
 }
@@ -44,8 +44,8 @@ export default function SideToolbar() {
             title={nameOf(id)} onClick={() => api.setColor(id)} />
         ))}
         <button title={t('hint.random')} onClick={() => api.setColor(RANDOM_COLOR)}
-          className={`w-7 h-7 rounded-md border-2 cursor-pointer ${api.color === RANDOM_COLOR ? 'border-white scale-110' : 'border-gray-700'}`}
-          style={{ background: 'conic-gradient(#e53e3e, #ecc94b, #38a169, #3182ce, #e53e3e)' }} />
+          className={`w-7 h-7 rounded-md border-2 cursor-pointer ${api.color === RANDOM_COLOR ? 'border-teal-600 scale-110' : 'border-gray-700'}`}
+          style={{ background: 'conic-gradient(#F23B3B, #FFD21A, #2FCB5A, #2B8FF0, #F23B3B)' }} />
       </div>
 
       <div className="text-[10px] text-gray-500 mb-1">{t('section.home')}</div>
@@ -62,7 +62,7 @@ export default function SideToolbar() {
           {PALETTES.map(pal => (
             <button key={pal.key} title={t('hint.recolorFamily')}
               onClick={() => api.recolorAll(pal.colors)}
-              className="flex items-center justify-center gap-1 text-[11px] rounded-md py-1.5 border border-gray-700 hover:border-white bg-gray-800 text-gray-200 cursor-pointer">
+              className="flex items-center justify-center gap-1 text-[11px] rounded-md py-1.5 border border-gray-700 hover:border-teal-400 bg-gray-800 text-gray-200 cursor-pointer">
               <span className="w-3.5 h-3.5 rounded-full border border-black/20 shrink-0"
                 style={{ background: `linear-gradient(90deg, ${pal.colors.join(',')})` }} />
               {t(`palette.${pal.key}`)}
@@ -75,7 +75,7 @@ export default function SideToolbar() {
             <button key={id} title={`${t('hint.recolorSame')} · ${nameOf(id)}`}
               aria-label={`${t('hint.recolorSame')} · ${nameOf(id)}`}
               onClick={() => api.recolorAll([HEX[id]])}
-              className="w-6 h-6 rounded border border-gray-700 hover:border-white cursor-pointer"
+              className="w-6 h-6 rounded border border-gray-700 hover:border-teal-400 cursor-pointer"
               style={{ background: HEX[id] }} />
           ))}
         </div>

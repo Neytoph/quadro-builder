@@ -46,13 +46,13 @@ export default function Onboarding() {
 
   return (
     <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/45 p-4" onClick={close}>
-      <div className="w-full max-w-md bg-gray-900 text-white rounded-2xl border border-gray-700 shadow-2xl p-5"
+      <div className="w-full max-w-md bg-gray-900 text-gray-100 rounded-2xl border border-gray-700 shadow-2xl p-5"
         onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-3">
           <div className="text-[11px] uppercase tracking-wider text-teal-400">
             {t('onboard.kicker')} · {i + 1}/{STEPS.length}
           </div>
-          <button onClick={close} className="text-gray-400 hover:text-white text-sm cursor-pointer">{t('onboard.skip')}</button>
+          <button onClick={close} className="text-gray-400 hover:text-teal-600 text-sm cursor-pointer">{t('onboard.skip')}</button>
         </div>
         <div className="text-base font-semibold mb-2">{t(step.title)}</div>
         <p className="text-sm text-gray-300 leading-relaxed mb-5">{t(step.body)}</p>

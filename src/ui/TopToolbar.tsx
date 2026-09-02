@@ -265,7 +265,7 @@ function StatusHint() {
   const { t } = useI18n()
   if (pasting) {
     return (
-      <div data-ui="status-hint" className="pointer-events-none bg-gray-950/85 border border-teal-500/50 text-teal-50 text-xs px-3 py-1.5 rounded-lg backdrop-blur max-w-[min(36rem,48vw)] text-center leading-snug">
+      <div data-ui="status-hint" className="pointer-events-none bg-gray-950/85 border border-teal-500/50 text-teal-800 text-xs px-3 py-1.5 rounded-lg backdrop-blur max-w-[min(36rem,48vw)] text-center leading-snug">
         {t('lib.placing')} · {t('status.paste', { h: pasteHeightCm ?? 0 })}
       </div>
     )
@@ -275,7 +275,7 @@ function StatusHint() {
   const danger = mode === 'delete'
   return (
     <div data-ui="status-hint" className={`pointer-events-none bg-gray-950/85 border text-xs px-3 py-1.5 rounded-lg backdrop-blur max-w-[min(32rem,42vw)] text-center leading-snug ${
-      danger ? 'border-red-500/50 text-red-50' : 'border-teal-500/50 text-teal-50'
+      danger ? 'border-red-500/50 text-red-700' : 'border-teal-500/50 text-teal-800'
     }`}>
       {prefix ? `${t('lib.placing')} · ${t(key)}` : t(key)}
     </div>

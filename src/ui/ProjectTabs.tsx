@@ -20,7 +20,7 @@ export default function ProjectTabs() {
     >
       {api.tabs.map(tab => (
         <div key={tab.tabId}
-          className={`flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs shrink-0 ${tab.tabId === api.activeTabId ? 'bg-gray-800 border-teal-500 text-teal-100' : 'bg-transparent border-transparent text-gray-400 hover:text-gray-200 hover:bg-gray-900'}`}>
+          className={`flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs shrink-0 ${tab.tabId === api.activeTabId ? 'bg-gray-800 border-teal-500 text-teal-700' : 'bg-transparent border-transparent text-gray-400 hover:text-gray-200 hover:bg-gray-900'}`}>
           {editing === tab.tabId ? (
             <input autoFocus defaultValue={tab.name} className="bg-transparent w-24 outline-none"
               onBlur={e => { api.renameTab(tab.tabId, e.target.value); setEditing(null) }}
@@ -31,7 +31,7 @@ export default function ProjectTabs() {
               {tab.name}{tab.dirty ? ' •' : ''}
             </button>
           )}
-          <button onClick={() => close(tab.tabId, tab.dirty)} className="text-gray-500 hover:text-white cursor-pointer"
+          <button onClick={() => close(tab.tabId, tab.dirty)} className="text-gray-500 hover:text-teal-600 cursor-pointer"
             title={t('saves.delete')}>×</button>
         </div>
       ))}

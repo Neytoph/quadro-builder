@@ -161,8 +161,8 @@ const POOL_INSET = 2.5;
 
 // Farbschema der normalen Ansicht (die Szene bringt ihren eigenen Himmel mit).
 // Die Werte sind die Gegenstuecke zu --bg/--line in style.css.
-const BG_LIGHT = 0xfff4eb;                  // 暖底
-const BG_DARK = 0x14120f;                   // 品牌深色地面
+const BG_LIGHT = 0xedd8c4;                  // 无草地：桦木工作台，比暖纸深一档，避免一片白
+const BG_DARK = 0x221e19;                   // 与菜单同色阶，避免浅橙画布对黑边
 // Bodenraster: Kantenlaenge und Zellweite. 1040 cm sind 52 Zellen je Achse --
 // das urspruengliche 800er Raster plus sechs Zellen auf jeder Seite, damit auch
 // breitere Aufbauten noch darauf stehen. Es bleibt deutlich innerhalb der
@@ -179,15 +179,14 @@ const GRID_CELL = 20;
 // Bild kommt. Baeume und Buesche stehen im Ring dahinter -- ausserhalb des
 // Rasters, damit sie nicht in ein grosses Modell hineinragen.
 const GROUND_AREA = 2600;                     // Kantenlaenge der Wiese, cm
-const GRASS_TILE = 25;                        // cm je Graskachel (Halmgroesse)
 const TREE_RING = [GRID_SIZE / 2 + 120, GROUND_AREA / 2 - 120];
 const BUSH_RING = [GRID_SIZE / 2 + 60, GROUND_AREA / 2 - 100];
 
-const GRID_LIGHT = [0xcfc7ba, 0xe3ddd3];   // Hauptlinien, Nebenlinien
+const GRID_LIGHT = [0xb88850, 0xd0b08a];   // 主线 / 次线：暖棕，显色底上要压得住
 const GRID_DARK = [0x3d382f, 0x2e2a23];
 
 // Ansichtswuerfel: Kanten hell/dunkel (die Flaechen stecken in der Textur).
-const CUBE_EDGE_LIGHT = 0xcfc7ba;
+const CUBE_EDGE_LIGHT = 0xb88850;
 const CUBE_EDGE_DARK = 0x5a5348;
 
 const HIGHLIGHT_COLOR = 0xea580c;
@@ -367,7 +366,7 @@ export class SceneManager {
     this.controls.target.set(...this._defaultCam.target);
 
     // Licht: warmes Sonnenlicht + Himmelslicht + weiche Schatten
-    this._hemiLight = new THREE.HemisphereLight(0xffffff, 0x908070, 1.0); // Normal-Modus-Startwert
+    this._hemiLight = new THREE.HemisphereLight(0xffffff, 0xa89880, 1.15); // Normal-Modus-Startwert
     this.scene.add(this._hemiLight);
     this._dirLight = new THREE.DirectionalLight(0xffffff, 1.1);  // setScene() stellt Farbe/Staerke
     this._dirLight.position.set(200, 320, 150);
@@ -1800,7 +1799,7 @@ export class SceneManager {
     const key = `fit${hex}${transparent ? "t" : ""}`;
     if (!this._materials[key]) {
       this._materials[key] = new THREE.MeshStandardMaterial({
-        color: new THREE.Color(hex), roughness: 0.55, metalness: 0.05,
+        color: new THREE.Color(hex), roughness: 0.42, metalness: 0.04,
         side: THREE.DoubleSide,
         transparent, opacity: transparent ? 0.55 : 1,
       });
@@ -1927,10 +1926,10 @@ export class SceneManager {
   // den Modelldateien bereits gerichtet, siehe tmp/extracted/README.md.)
   _slideMatFor(kind, isCurrent, colorId) {
     const COL = {
-      "slide2": 0xd23b3b, "slide-new2": 0xd23b3b,  // gerade Rutsche = rot
-      "curved-slide2": 0x37a23f,                    // Bogenrutsche = gruen
-      "slide-end2": 0xf0c020,                       // Auslauf = gelb
-      "roof2": 0x37a23f,                            // Dach-Tuch = gruen, durchsichtig
+      "slide2": 0xf23b3b, "slide-new2": 0xf23b3b,  // gerade Rutsche = rot
+      "curved-slide2": 0x2fcb5a,                    // Bogenrutsche = gruen
+      "slide-end2": 0xffd21a,                       // Auslauf = gelb
+      "roof2": 0x2fcb5a,                            // Dach-Tuch = gruen, durchsichtig
     };
     // Das Dach ist deckend wie jedes andere Teil. Es war einmal durchscheinend
     // gedacht ("Tuch"), war damit aber das einzige halbdurchsichtige Stueck im
@@ -1943,7 +1942,7 @@ export class SceneManager {
     const key = "slidem_" + kind + (colorId || "") + (isCurrent ? "_c" : "");
     if (!this._materials[key]) {
       this._materials[key] = new THREE.MeshStandardMaterial({
-        color: new THREE.Color(hex), roughness: transp ? 0.9 : 0.6, metalness: 0.05,
+        color: new THREE.Color(hex), roughness: transp ? 0.9 : 0.42, metalness: 0.04,
         side: THREE.DoubleSide,
         transparent: transp, opacity: transp ? 0.5 : 1,
         emissive: new THREE.Color(isCurrent ? 0x3a2400 : 0x000000),
@@ -2365,8 +2364,8 @@ export class SceneManager {
     if (!this._materials[key]) {
       this._materials[key] = new THREE.MeshStandardMaterial({
         color: new THREE.Color(colorHex(colorId)),
-        roughness: 0.55,
-        metalness: 0.05,
+        roughness: 0.42,
+        metalness: 0.04,
       });
     }
     return this._materials[key];
@@ -2383,7 +2382,7 @@ export class SceneManager {
     if (!this._materials[key]) {
       this._materials[key] = new THREE.MeshStandardMaterial({
         color: new THREE.Color(colorHex(colorId)),
-        roughness: transparent ? 0.95 : 0.7, metalness: transparent ? 0.0 : 0.05,
+        roughness: transparent ? 0.95 : 0.48, metalness: transparent ? 0.0 : 0.04,
         side: THREE.DoubleSide,
         transparent: !!transparent, opacity: transparent ? 0.5 : 1,
         emissive: new THREE.Color(isCurrent ? 0x3a2400 : 0x000000),
@@ -4765,40 +4764,7 @@ export class SceneManager {
     }
   }
 
-  // --- Prozedurales Gras (Instanced + Wind-Shader, keine Asset-Datei) --------
-  // Ein konisch zulaufendes Grashalm-Mesh wird via InstancedMesh tausendfach
-  // gestreut; ein Vertex-Shader biegt jeden Halm windabhaengig (Hoehe², Zeit,
-  // Position, Zufallsphase). Darunter eine gruene Bodenflaeche. Alles statisch
-  // in der Szene (NICHT in buildGroup, wird also nicht pro Render neu gebaut).
-  // Prozedurale Gras-Textur: Canvas mit zufälligen Halm-Strichen aus der
-  // Vogelperspektive → kein 3D-Geometry-Aufwand, kein Asset.
-  _makeGrassTexture() {
-    const S = 256;
-    const cv = document.createElement("canvas");
-    cv.width = cv.height = S;
-    const ctx = cv.getContext("2d");
-    ctx.fillStyle = "#3d6620";
-    ctx.fillRect(0, 0, S, S);
-    const tones = ["#4d8228", "#3d6620", "#5c9430", "#466e24", "#52882e", "#3a5e1c"];
-    for (let i = 0; i < 4000; i++) {
-      const x = Math.random() * S, y = Math.random() * S;
-      const len = 2 + Math.random() * 7;
-      const a = Math.random() * Math.PI;
-      ctx.strokeStyle = tones[Math.floor(Math.random() * tones.length)];
-      ctx.lineWidth = 0.7 + Math.random() * 1.1;
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      ctx.lineTo(x + Math.cos(a) * len, y + Math.sin(a) * len);
-      ctx.stroke();
-    }
-    const tex = new THREE.CanvasTexture(cv);
-    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-    tex.repeat.set(GROUND_AREA / GRASS_TILE, GROUND_AREA / GRASS_TILE);   // Halme bleiben gleich gross
-    return tex;
-  }
-
-  // Grasfläche als texturierter Boden (keine 3D-Halme). Empfängt Schatten der
-  // Bauteile; Cull-Maske ist inaktiv wenn _grassMesh null ist.
+  // 纯色草地，无草纹。阴影仍落在地面上。
   _buildGrass(opts = {}) {
     const area = opts.area || GROUND_AREA;
     const env = new THREE.Group();
@@ -4806,7 +4772,7 @@ export class SceneManager {
 
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(area, area),
-      new THREE.MeshLambertMaterial({ map: this._makeGrassTexture() })
+      new THREE.MeshLambertMaterial({ color: 0x58b83a })
     );
     ground.rotation.x = -Math.PI / 2;
     ground.position.y = -GROUND_DROP - 0.4;
@@ -4950,9 +4916,9 @@ export class SceneManager {
   // Geometrien und Materialien werden einmalig geteilt; per-Baum nur Transform.
   _buildTrees() {
     const trunkMat  = new THREE.MeshLambertMaterial({ color: 0x6b5a3e }); // graubraun (Obstbaumrinde)
-    const crownMatA = new THREE.MeshLambertMaterial({ color: 0x4a8022 }); // frisches Grün
-    const crownMatB = new THREE.MeshLambertMaterial({ color: 0x5a9428 });
-    const crownMatC = new THREE.MeshLambertMaterial({ color: 0x3d7018 });
+    const crownMatA = new THREE.MeshLambertMaterial({ color: 0x5cb83a });
+    const crownMatB = new THREE.MeshLambertMaterial({ color: 0x6dcc44 });
+    const crownMatC = new THREE.MeshLambertMaterial({ color: 0x4aa32e });
     // Obstbäume (Apfel/Birne/Pflaume): 250–350 cm hoch, kurzer dicker Stamm,
     // breite runde Krone — typisch für Hausgarten.
     const trunkGeo  = new THREE.CylinderGeometry(8, 13, 100, 7);
@@ -5009,7 +4975,7 @@ export class SceneManager {
 
   _buildBushes() {
     const bushGeo = new THREE.SphereGeometry(30, 8, 6);
-    const bushMat = new THREE.MeshLambertMaterial({ color: 0x2d5a27 });
+    const bushMat = new THREE.MeshLambertMaterial({ color: 0x3d8a32 });
 
     const group = new THREE.Group();
     this._bushNodes = [];
@@ -5124,16 +5090,16 @@ export class SceneManager {
     if (this._dirLight) {
       this._dirLight.visible    = true;
       this._dirLight.castShadow = v;
-      this._dirLight.intensity  = v ? 1.9 : 1.1;   // Szene: helle Sonne, Normal: nur Modellierung
+      this._dirLight.intensity  = v ? 1.85 : 1.25;   // Szene: 日照略收，草地不被晒白
       this._dirLight.color.set(v ? 0xfff8e7 : 0xffffff);  // Normal neutral -> Teilefarben bleiben echt
     }
     // Hemisphärenlicht: im Builder-Modus neutral weiß, im Szene-Modus warm.
     // Normal ist es schwächer als früher (1,4) -- das Sonnenlicht bringt jetzt
     // den fehlenden Teil der Helligkeit mit.
     if (this._hemiLight) {
-      this._hemiLight.intensity = v ? 1.1 : 1.0;
-      this._hemiLight.color.set(v ? 0xcde7ff : 0xffffff);
-      this._hemiLight.groundColor.set(v ? 0x7a9060 : 0x908070);
+      this._hemiLight.intensity = v ? 1.25 : 1.15;
+      this._hemiLight.color.set(v ? 0xd6eeff : 0xffffff);
+      this._hemiLight.groundColor.set(v ? 0x4a7a38 : 0xc4a078);
     }
     this._applyBackground();
     this._applyGrid();
@@ -5421,7 +5387,7 @@ export class SceneManager {
     const cv = document.createElement("canvas");
     cv.width = cv.height = S;
     const g = cv.getContext("2d");
-    g.fillStyle = this._dark ? "#232019" : "#fff4eb";
+    g.fillStyle = this._dark ? "#232019" : "#edd8c4";
     g.fillRect(0, 0, S, S);
     g.fillStyle = this._dark ? "#f2ede5" : "#1f2430";
     g.font = "700 23px system-ui, sans-serif";

@@ -7,6 +7,17 @@ export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
+    {
+      name: 'qinghe-demo-index',
+      configureServer(server) {
+        server.middlewares.use((req, _res, next) => {
+          if (req.url === '/qinghe-demo' || req.url === '/qinghe-demo/') {
+            req.url = '/qinghe-demo/index.html'
+          }
+          next()
+        })
+      },
+    },
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg'],
@@ -14,8 +25,8 @@ export default defineConfig({
         name: 'Quadro Builder',
         short_name: 'Quadro',
         description: 'QUADRO 攀爬架 3D 设计器',
-        theme_color: '#14120F',
-        background_color: '#14120F',
+        theme_color: '#FFF4EB',
+        background_color: '#FFF4EB',
         display: 'standalone',
         start_url: '/',
         lang: 'zh-CN',

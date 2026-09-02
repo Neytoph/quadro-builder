@@ -32,17 +32,17 @@
   --color-emerald-900: #10251a;
   --color-emerald-950: #0a1811;
 
-  --color-gray-50: #f7f4ef;
-  --color-gray-100: #f2ede5;
-  --color-gray-200: #e3ddd3;
-  --color-gray-300: #cfc7ba;
-  --color-gray-400: #a79e91;
-  --color-gray-500: #7a7267;
-  --color-gray-600: #5a5348;
-  --color-gray-700: #3d382f;
-  --color-gray-800: #232019;
-  --color-gray-900: #1c1915;
-  --color-gray-950: #14120f;
+  --color-gray-50: #1f2430;
+  --color-gray-100: #1f2430;
+  --color-gray-200: #2a3140;
+  --color-gray-300: #5a6270;
+  --color-gray-400: #6b7380;
+  --color-gray-500: #8a8278;
+  --color-gray-600: #c4b8a8;
+  --color-gray-700: #ffd3b0;
+  --color-gray-800: #fff1e6;
+  --color-gray-900: #fff8f2;
+  --color-gray-950: #ffffff;
 }
 
 .app-viewport {
@@ -53,8 +53,8 @@
 html, body, #root {
   margin: 0;
   overflow: hidden;
-  background: #14120f;
-  color: #f2ede5;
+  background: #edd8c4;
+  color: #1f2430;
 }
 
 #canvas-host,
@@ -92,14 +92,14 @@ html, body, #root {
 
 .scrollbar-thin {
   scrollbar-width: thin;
-  scrollbar-color: #3d382f transparent;
+  scrollbar-color: #ffd3b0 transparent;
 }
 .scrollbar-thin::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 .scrollbar-thin::-webkit-scrollbar-thumb {
-  background: #3d382f;
+  background: #ffd3b0;
   border-radius: 999px;
 }
 
