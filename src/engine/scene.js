@@ -382,6 +382,15 @@ export class SceneManager {
     this._dirLight.shadow.bias          = -0.0005;
     this._dirLight.shadow.radius        =   3;
     this.scene.add(this._dirLight);
+    // Fuell- und Randlicht: weiches Volumen statt einer Plastik-Hotspot.
+    this._fillLight = new THREE.DirectionalLight(0xfff4ea, 0.5);
+    this._fillLight.position.set(-220, 90, -140);
+    this._fillLight.castShadow = false;
+    this.scene.add(this._fillLight);
+    this._rimLight = new THREE.DirectionalLight(0xf4f7ff, 0.28);
+    this._rimLight.position.set(-60, 40, 240);
+    this._rimLight.castShadow = false;
+    this.scene.add(this._rimLight);
     // Schattenaufloesung richtet sich nach der Qualitaetsstufe.
     this._applyShadowQuality();
 
@@ -2364,8 +2373,8 @@ export class SceneManager {
     if (!this._materials[key]) {
       this._materials[key] = new THREE.MeshStandardMaterial({
         color: new THREE.Color(colorHex(colorId)),
-        roughness: 0.42,
-        metalness: 0.04,
+        roughness: 0.5,
+        metalness: 0,
       });
     }
     return this._materials[key];
@@ -2822,7 +2831,7 @@ export class SceneManager {
     const key = "tubehl:" + colorId;
     if (!this._materials[key]) {
       this._materials[key] = new THREE.MeshStandardMaterial({
-        color: new THREE.Color(colorHex(colorId)), roughness: 0.4, metalness: 0.05,
+        color: new THREE.Color(colorHex(colorId)), roughness: 0.5, metalness: 0,
         emissive: new THREE.Color(0x3a2400),
         transparent: true, opacity: 0.75, depthWrite: false,
       });
@@ -5090,9 +5099,11 @@ export class SceneManager {
     if (this._dirLight) {
       this._dirLight.visible    = true;
       this._dirLight.castShadow = v;
-      this._dirLight.intensity  = v ? 1.85 : 1.25;   // Szene: 日照略收，草地不被晒白
-      this._dirLight.color.set(v ? 0xfff8e7 : 0xffffff);  // Normal neutral -> Teilefarben bleiben echt
+      this._dirLight.intensity  = v ? 1.7 : 1.05;
+      this._dirLight.color.set(v ? 0xfff8e7 : 0xffffff);
     }
+    if (this._fillLight) this._fillLight.intensity = v ? 0.22 : 0.5;
+    if (this._rimLight) this._rimLight.intensity = v ? 0.14 : 0.28;
     // Hemisphärenlicht: im Builder-Modus neutral weiß, im Szene-Modus warm.
     // Normal ist es schwächer als früher (1,4) -- das Sonnenlicht bringt jetzt
     // den fehlenden Teil der Helligkeit mit.
