@@ -473,7 +473,11 @@ export function EngineProvider({ children }: { children: ReactNode }) {
         })
         const scene = new SceneManager(host)
         scene.setTheme(false)
-        try { scene.setScene(localStorage.getItem('quadro.scene.v1') === '1') } catch { /* ignore */ }
+        // 默认开草地。没存过偏好（null）算开，只有显式关过（'0'）才关——
+        // 原来写的是 === '1'，等于新用户第一次打开是一片空白网格。
+        // localStorage 读不到（隐私模式）也按开处理。
+        try { scene.setScene(localStorage.getItem('quadro.scene.v1') !== '0') }
+        catch { scene.setScene(true) }
         const savedTune = loadTune()
         applyFrameHex(savedTune.frame)
         scene.applyColorTune(savedTune)
