@@ -1,18 +1,19 @@
 import { useEffect } from 'react'
-import { LanguageProvider, useI18n } from './i18n'
+import { LanguageProvider } from './i18n'
 import { EngineProvider, useEngine } from './store/EngineContext'
 import CanvasHost from './ui/CanvasHost'
 import TopToolbar from './ui/TopToolbar'
-import SideToolbar from './ui/SideToolbar'
+import LeftStack from './ui/LeftStack'
 import RightDock from './ui/RightDock'
 import ProjectTabs from './ui/ProjectTabs'
 import AssemblyBar from './ui/AssemblyBar'
 import Onboarding from './ui/Onboarding'
 import ErrorBoundary from './ui/ErrorBoundary'
-import ShortcutHint from './ui/ShortcutHint'
-import { canvasInset, PANEL_GAP, PanelLayoutProvider, TOP_MIN, usePanelLayout } from './ui/panelLayout'
+import SceneToggle from './ui/SceneToggle'
+// 调色台代码保留在 src/ui/ColorTune.tsx，面板先不挂上。
+import { PanelLayoutProvider } from './ui/panelLayout'
 import { UI_ESCAPE_EVENT } from './ui/events'
-import { DockProvider, DOCK_PILLS, useDock } from './ui/dock'
+import { DockProvider, useDock } from './ui/dock'
 
 function Toast() {
   const { toast, dismissToast } = useEngine()
@@ -26,35 +27,6 @@ function Toast() {
   return (
     <div className={`fixed top-[9.5rem] left-1/2 -translate-x-1/2 ${tone} text-white text-sm px-4 py-2 rounded-lg shadow-lg z-40`}>
       {toast.message}
-    </div>
-  )
-}
-
-const pill = 'text-xs rounded-full border px-3 py-1.5 shadow-lg cursor-pointer backdrop-blur whitespace-nowrap text-center'
-
-function AppActions() {
-  const { t } = useI18n()
-  const { pane, toggle } = useDock()
-  const { left, vw } = usePanelLayout()
-  const leftPos = left.top > TOP_MIN + 40 ? PANEL_GAP : canvasInset(left)
-  const toolbarLeft = vw / 2 - 340
-  const beside = leftPos + 108 < toolbarLeft
-  return (
-    <div
-      className="fixed z-40 flex flex-col items-stretch gap-1.5"
-      style={{ left: leftPos, top: beside ? TOP_MIN : TOP_MIN + 64 }}
-    >
-      {DOCK_PILLS.map(item => {
-        const on = pane === item.id
-        return (
-          <button key={item.id} onClick={() => toggle(item.id)}
-            className={on
-              ? `${pill} bg-teal-500 hover:bg-teal-400 border-teal-400 text-white font-semibold`
-              : `${pill} bg-gray-800/90 hover:bg-gray-700 border-gray-700 text-gray-100`}>
-            {t(item.labelKey)}
-          </button>
-        )
-      })}
     </div>
   )
 }
@@ -157,14 +129,13 @@ function AppInner() {
   return (
     <div className="app-viewport w-screen flex bg-gray-950 overflow-hidden">
       <CanvasHost />
+      <SceneToggle />
       <ProjectTabs />
       <TopToolbar />
-      <SideToolbar />
+      <LeftStack />
       <RightDock />
       <AssemblyBar />
       <Toast />
-      <ShortcutHint />
-      <AppActions />
       <Onboarding />
     </div>
   )

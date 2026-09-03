@@ -7,7 +7,7 @@ export const COLOR_HEX = {
   red: "#F23B3B",
   green: "#2FCB5A",
   blue: "#2B8FF0",
-  yellow: "#FFD21A",
+  yellow: "#FFD942",
   petrol: "#3A8494",
   mint: "#7ECBB0",
   berry: "#C46B90",
@@ -15,7 +15,7 @@ export const COLOR_HEX = {
 };
 
 export const PALETTES = [
-  { key: "classic", colors: ["#F23B3B", "#FFD21A", "#2FCB5A", "#2B8FF0"] },
+  { key: "classic", colors: ["#F23B3B", "#FFD942", "#2FCB5A", "#2B8FF0"] },
   { key: "home-blue", colors: ["#e9e4d6", "#9FC8E0", "#5A8FB0", "#2e3a4c", "#8b95a0"] },
   { key: "home-green", colors: ["#e9e4d6", "#9BC4A0", "#629A6E", "#364a3c", "#8b95a0"] },
   { key: "home-pink", colors: ["#e9e4d6", "#D8A8BC", "#B06888", "#4a3542", "#8b95a0"] },

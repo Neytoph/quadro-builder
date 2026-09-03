@@ -651,6 +651,16 @@ export class BuildModel {
     return out;
   }
 
+  /** 删掉这个接头时会一起走的真管子（不含 C45 臂 / 双管连杆）。 */
+  incidentTubeIds(nodeId) {
+    const out = [];
+    for (const t of this.tubes.values()) {
+      if (t.arm || t.link) continue;
+      if (t.a === nodeId || t.b === nodeId) out.push(t.id);
+    }
+    return out;
+  }
+
   // --- Rohre --------------------------------------------------------------
   tubeBetween(aId, bId) {
     for (const t of this.tubes.values()) {

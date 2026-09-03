@@ -1362,12 +1362,8 @@ export class Builder {
           { clampOpening: true, center: o.pos, dir: o.dir, bearingNode: o.nodeId }, "dir");
       }
     }
-    // Ohne gewaehlte Kupplung zeigen ALLE ihre Ankerpunkte -- so sieht man auf
-    // einen Blick, wo sich weiterbauen laesst. Ein Klick auf eine Kupplung
-    // waehlt sie, danach sind nur noch ihre Punkte zu sehen.
-    const nodes = (this.selectedNodeId
-      ? [this.model.nodes.get(this.selectedNodeId)].filter(Boolean)
-      : [...this.model.nodes.values()])
+    // 加管始终给出所有合法锚点（短桩，悬停再展开）。加完一根后不锁在新端点。
+    const nodes = [...this.model.nodes.values()]
       // Kupplungen ohne Rohr aus einer QDF-Datei werden nicht gezeichnet --
       // dann bieten sie auch keine Ankerpunkte an. Ebenso ein Rohrende unter
       // einer Rad- oder Rohrkappe: dort steckt die Kappe ANSTELLE der Kupplung,
@@ -1581,6 +1577,11 @@ export class Builder {
     // setzt _buildHandles ueber `bearingOpenings()`.
     const lagerArm = node.bearingOn && node.stub
       ? [-node.stub[0], -node.stub[1], -node.stub[2]] : null;
+    const tube = getTube(this.tubeId);
+    const previewSpan = isCurvedTube(this.tubeId)
+      ? 0
+      : spacingFor(tube ? tube.length_cm : 35);
+    const previewColor = this.color === RANDOM_COLOR ? null : this.color;
     for (const d of dirs) {
       if (occupied.has(d.name)) continue;
       if (lagerArm && (lagerArm[0] * d.vec[0] + lagerArm[1] * d.vec[1] + lagerArm[2] * d.vec[2]) > 0.9) continue;
@@ -1594,7 +1595,12 @@ export class Builder {
       // schwebende Kugel auf `gap`. Die Richtung bleibt die des freien Arms.
       this.scene.addHandle(
         [node.x, node.y, node.z],
-        { nodeId: node.id, dir: d.vec, dirName: d.name, slope: isSlope || !!c45Dir },
+        {
+          nodeId: node.id, dir: d.vec, dirName: d.name, slope: isSlope || !!c45Dir,
+          arrowCompact: true,
+          previewSpan,
+          previewColor,
+        },
         ((useDiag || c45Dir) && !isCardDir) ? "diag" : "dir"
       );
     }
@@ -2436,7 +2442,12 @@ export class Builder {
     if (!(e.buttons & 1)) {
       const cell = this.scene.pickViewCube(e.clientX, e.clientY);
       this.scene.setViewCubeHover(cell);
-      if (cell) { this.scene.setHover(null); this.scene.setCursor("pointer"); return; }
+      if (cell) {
+        this.scene.setHover(null);
+        this.scene.setHoverPart(null);
+        this.scene.setCursor("pointer");
+        return;
+      }
     }
     // Kopie am Zeiger: sie folgt ihm -- aber nur mit LOSER Taste. Wer zieht,
     // will die Ansicht drehen (abgesetzt wird ohnehin nur bei einem echten
@@ -2486,6 +2497,7 @@ export class Builder {
         this._boxing = true;
         this.scene.showSelectBox(this._down.x, this._down.y, e.clientX, e.clientY);
         this.scene.setHover(null);
+        this.scene.setHoverPart(null);
         return;
       }
     }
@@ -2498,6 +2510,7 @@ export class Builder {
       return p && (!kinds || kinds.includes(p.data.kind)) ? p : null;
     };
     let obj = null;
+    let arrowFocus;
     if (this.mode === "select" || this.mode === "delete") {
       // Cursor- und Loesch-Modus: alles Platzierte ist treffbar, Rutschen
       // eingeschlossen. Im Loesch-Modus wird der Klick zum Loeschen.
@@ -2519,8 +2532,15 @@ export class Builder {
         const p = this.scene.pickBuild(x, y);
         const bow = p && p.data.kind === "tube" && this.model.tubes.get(p.data.id)?.bow ? p : null;
         if (bow && (!h || p.distance < h.distance)) obj = bow.object;
-        else if (h) obj = h.object;
-        else obj = p && p.data.kind === "node" && this._isBuildable(p.data.id) ? p.object : null;
+        else if (h) {
+          obj = h.object;
+          arrowFocus = h.data && h.data.nodeId != null ? h.data.nodeId : null;
+        } else if (p && p.data.kind === "node" && this._isBuildable(p.data.id)) {
+          obj = p.object;
+          arrowFocus = p.data.id;
+        } else {
+          arrowFocus = null;
+        }
       }
     } else if (this.mode === "panel") {
       // Hand nur, wo die gewaehlte Platte auch hinkann: auf einem Tragrohr mit
@@ -2604,15 +2624,18 @@ export class Builder {
       // Nur ansehen -- aber die Hand zeigt, dass sich ein Teil nachschlagen laesst.
       obj = this.scene.pickForDelete(x, y)?.object || null;
     }
-    this.scene.setHover(obj);
-    // Loesch-Modus: Fadenkreuz auf einem Teil, sonst Standard -- setHover hat
-    // sonst die Zeigefinger-Hand gesetzt.
-    if (this.mode === "delete") this.scene.setCursor(obj ? "crosshair" : "default");
-    // Auf einem ausgewaehlten Teil laesst sich ziehen -- das zeigt der Cursor.
-    if (this.mode === "select" && this.selection.size) {
-      const p = this.scene.pickForDelete(x, y);
-      if (p && this._isMoveHandle(p.data.id)) this.scene.setCursor("move");
+    if (this.mode === "select" || this.mode === "delete") {
+      const raw = this.scene.pickForDelete(x, y);
+      const p = this.mode === "delete" ? this._resolveDeletePick(raw, x, y) : raw;
+      this.scene.setHover(null);
+      this.scene.setHoverPart(p, this.mode, x, y, this._deleteHoverExtras(p));
+      if (this.mode === "select" && this.selection.size && p && this._isMoveHandle(p.data.id)) {
+        this.scene.setCursor("move");
+      }
+      return;
     }
+    this.scene.setHoverPart(null);
+    this.scene.setHover(obj, this.mode === "add" && !this.placeConnectorId ? arrowFocus : undefined);
   }
 
   _onUp(e) {
@@ -3414,7 +3437,6 @@ export class Builder {
       this.recordHistory(() => { res = this.model.rotateBow(bow.id); });
       if (res && res.ground) this.onNotice(t("notice_ground"), "warn");
       else if (res && res.duplicate) this.onNotice(t("notice_bow_blocked"));
-      else if (res && res.node) this.selectedNodeId = res.node.id;
       this.refresh();
       return;
     }
@@ -3456,26 +3478,21 @@ export class Builder {
       }
       if (res && res.ground) this.onNotice(t("notice_ground"), "warn");
       else if (res && res.collision) this.onNotice(t("notice_collision"), "warn");
-      else if (res && res.node) {
-        this.selectedNodeId = res.node.id;
-        if (res.tube) this._notePlaced(res.tube.id, "tube");
+      else if (res && res.tube) {
+        this._notePlaced(res.tube.id, "tube");
+        this.selectedNodeId = null;
       }
+      // 鼠标加管不锁到新端点：所有合法接头继续可加。键盘步进仍用 selectedNodeId。
       this.refresh();
       return;
     }
-    // 2. bestehende Kupplung als Anbaupunkt waehlen. Umfaerben gibt es hier
-    // bewusst nicht mehr -- das passiert nur im Cursor-Modus.
+    // 点接头只作为键盘步进的锚，不收起其它位置的锚点。
     const pick = front;
     if (pick && pick.data.kind === "node" && this._isBuildable(pick.data.id)) {
-      this.selectedNodeId = pick.data.id;
+      this.selectedNodeId = pick.data.id === this.selectedNodeId ? null : pick.data.id;
       this.refresh();
       return;
     }
-    // Alles, was KEINE Kupplung ist -- der leere Raum genauso wie ein Rohr oder
-    // eine Platte --, hebt die Wahl wieder auf: danach bietet wieder jede
-    // Kupplung ihre Ankerpunkte an (wie beim Anbauen von Teilen, siehe
-    // _pickFittingNode). Ohne das kam man nur ueber eine zweite Kupplung
-    // wieder heraus.
     if (this.selectedNodeId) { this.selectedNodeId = null; this.refresh(); }
   }
 
@@ -3490,10 +3507,79 @@ export class Builder {
    * Lauf, nicht nur das eine Rohr. Klick ins Leere tut nichts.
    */
   _clickDelete(e) {
-    const pick = this.scene.pickForDelete(e.clientX, e.clientY);
+    const pick = this._resolveDeletePick(this.scene.pickForDelete(e.clientX, e.clientY), e.clientX, e.clientY);
     if (!pick) return;
     this._fillSelectionFromPick(pick);
     this.deleteSelection();
+  }
+
+  /**
+   * 删接头会带走相连的管子。接头常被管子或面板挡住，射线先打在它们上——
+   * 落在接头范围内时仍按接头算，预览和点击才一致。
+   */
+  _resolveDeletePick(pick, clientX, clientY) {
+    if (!pick) return pick;
+    if (pick.data.kind === "node") return pick;
+    const cs = geometry().connectorSize;
+    if ((pick.data.kind === "panel" || pick.data.kind === "textile") && clientX != null) {
+      const corners = this._surfaceCornerNodes(pick.data.id);
+      const near = this.scene.closestOnRay(corners, clientX, clientY, cs * 0.75);
+      if (near) return { ...pick, data: { kind: "node", id: near.id } };
+    }
+    if (!pick.point) return pick;
+    const pt = pick.point;
+    const ball = this._nodeNearPoint(pt, cs * 1.2);
+    if (ball) return { ...pick, data: { kind: "node", id: ball.id } };
+    if (pick.data.kind !== "tube") return pick;
+    const t = this.model.tubes.get(pick.data.id);
+    if (!t || t.arm || t.link) return pick;
+    const a = this.model.nodes.get(t.a);
+    const b = this.model.nodes.get(t.b);
+    if (!a || !b) return pick;
+    const span = Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z) || 1;
+    const along = ((pt.x - a.x) * (b.x - a.x) + (pt.y - a.y) * (b.y - a.y) + (pt.z - a.z) * (b.z - a.z)) / span;
+    const zone = cs * 1.55;
+    let n = null;
+    if (along <= zone && !a.c45body) n = a;
+    else if (along >= span - zone && !b.c45body) n = b;
+    return n ? { ...pick, data: { kind: "node", id: n.id } } : pick;
+  }
+
+  _surfaceCornerNodes(partId) {
+    const part = this.model.panels.get(partId) || this.model.textiles.get(partId);
+    if (!part) return [];
+    const ids = new Set();
+    if (part.nodes) for (const id of part.nodes) ids.add(id);
+    for (const tid of [part.a, part.b]) {
+      const t = this.model.tubes.get(tid);
+      if (t) { ids.add(t.a); ids.add(t.b); }
+    }
+    const out = [];
+    for (const id of ids) {
+      const n = this.model.nodes.get(id);
+      if (n && !n.c45body && !n.unused) out.push(n);
+    }
+    return out;
+  }
+
+  _nodeNearPoint(pt, reach) {
+    let best = null, bestD = reach;
+    for (const n of this.model.nodes.values()) {
+      if (n.c45body || n.unused) continue;
+      const d = Math.hypot(pt.x - n.x, pt.y - n.y, pt.z - n.z);
+      if (d < bestD) { bestD = d; best = n; }
+    }
+    return best;
+  }
+
+  /** 删除模式下：指到接头时，把会一起删掉的管子也标出来。 */
+  _deleteHoverExtras(pick) {
+    if (this.mode !== "delete" || !pick || pick.data.kind !== "node") return null;
+    if (pick.data.hinge != null) return null;
+    const n = this.model.nodes.get(pick.data.id);
+    if (!n || n.c45body) return null;
+    const ids = this.model.incidentTubeIds(pick.data.id);
+    return ids.length ? ids : null;
   }
 
   /** Setzt die Auswahl auf genau das getroffene Teil (ohne refresh). */

@@ -1,10 +1,13 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 
 const KEY_V1 = 'quadro.ui.widths.v1'
-const KEY = 'quadro.ui.layout.v2'
+const KEY_V2 = 'quadro.ui.layout.v2'
+const KEY = 'quadro.ui.layout.v3'
 export const PANEL_GAP = 12
-export const TAB_BAR_H = 32
+export const TAB_BAR_H = 44
+export const NARROW_MAX = 767
 export const TOP_MIN = TAB_BAR_H + PANEL_GAP
+export const TOOLBAR_H = 56
 
 export const LEFT_DEFAULT = 192
 export const RIGHT_DEFAULT = 264
@@ -14,9 +17,18 @@ const RIGHT_MIN = 196
 const RIGHT_MAX = 448
 export const HEIGHT_MIN = 180
 
-/** 视角方块边长 / 外边距，与 scene.js 的 CUBE_PX / CUBE_MARGIN 一致。 */
-export const VIEW_CUBE_PX = 104
-export const VIEW_CUBE_MARGIN = 14
+/** 草地 / 框住：固定小方块，贴在左栏右侧画布角。 */
+export const CORNER_TILE = 40
+export const VIEW_CUBE_PX = 80
+export const VIEW_CUBE_MARGIN = 22
+export const SCENE_TOGGLE_PX = CORNER_TILE
+export const SCENE_CLUSTER_GAP = 8
+export const SCENE_CLUSTER_W = CORNER_TILE * 2 + SCENE_CLUSTER_GAP
+export const CORNER_BOTTOM = 16
+export const CORNER_BOTTOM_NARROW = 72
+/** 左栏拖动手柄 h-3.5 + 栏内 gap-2，窄屏没有手柄。 */
+export const LEFT_MOVE_HANDLE_H = 14
+export const LEFT_STACK_GAP = 8
 
 export type PanelBox = { width: number; top: number; height: number }
 type Side = 'left' | 'right'
@@ -27,8 +39,14 @@ type Ctx = {
   right: PanelBox
   vw: number
   vh: number
+  leftColor: boolean
+  leftKeys: boolean
   patchLeft: (p: Partial<PanelBox>) => void
   patchRight: (p: Partial<PanelBox>) => void
+  setLeftColor: (on: boolean) => void
+  setLeftKeys: (on: boolean) => void
+  toggleLeftColor: () => void
+  toggleLeftKeys: () => void
 }
 
 const PanelCtx = createContext<Ctx | null>(null)
@@ -65,13 +83,32 @@ function readBox(raw: unknown, side: Side, vh: number, fallbackW: number): Panel
   }, side, vh)
 }
 
-function load(vh: number): { left: PanelBox; right: PanelBox } {
+type StoredLayout = { left?: unknown; right?: unknown; leftColor?: boolean; leftKeys?: boolean }
+
+function flagsOf(raw: StoredLayout | null) {
+  return {
+    leftColor: raw?.leftColor !== false,
+    leftKeys: raw?.leftKeys !== false,
+  }
+}
+
+function load(vh: number): { left: PanelBox; right: PanelBox; leftColor: boolean; leftKeys: boolean } {
+  const empty = () => {
+    const h = defaultHeight(vh)
+    return {
+      left: { width: LEFT_DEFAULT, top: TOP_MIN, height: h },
+      right: { width: RIGHT_DEFAULT, top: TOP_MIN, height: h },
+      leftColor: true,
+      leftKeys: true,
+    }
+  }
   try {
-    const raw = JSON.parse(localStorage.getItem(KEY) || '') as { left?: unknown; right?: unknown }
+    const raw = JSON.parse(localStorage.getItem(KEY) || localStorage.getItem(KEY_V2) || '') as StoredLayout
     if (raw && (raw.left || raw.right)) {
       return {
         left: readBox(raw.left, 'left', vh, LEFT_DEFAULT),
         right: readBox(raw.right, 'right', vh, RIGHT_DEFAULT),
+        ...flagsOf(raw),
       }
     }
   } catch { /* fall through */ }
@@ -81,13 +118,11 @@ function load(vh: number): { left: PanelBox; right: PanelBox } {
     return {
       left: clampBox({ width: Number(v1.left) || LEFT_DEFAULT, top: TOP_MIN, height: h }, 'left', vh),
       right: clampBox({ width: Number(v1.right) || RIGHT_DEFAULT, top: TOP_MIN, height: h }, 'right', vh),
+      leftColor: true,
+      leftKeys: true,
     }
   } catch {
-    const h = defaultHeight(vh)
-    return {
-      left: { width: LEFT_DEFAULT, top: TOP_MIN, height: h },
-      right: { width: RIGHT_DEFAULT, top: TOP_MIN, height: h },
-    }
+    return empty()
   }
 }
 
@@ -105,13 +140,43 @@ export function canvasInset(box: PanelBox) {
   return PANEL_GAP + box.width + PANEL_GAP
 }
 
-/** 视角方块相对画布的额外上/右边距，避开顶栏和右栏。 */
-export function viewCubePad(right: PanelBox, open = true) {
-  const top = Math.max(0, TOP_MIN - VIEW_CUBE_MARGIN)
-  const cubeTop = VIEW_CUBE_MARGIN + top
-  const cubeBottom = cubeTop + VIEW_CUBE_PX
-  const overlaps = open && right.top < cubeBottom + PANEL_GAP && right.top + right.height > cubeTop - PANEL_GAP
-  return { top, right: overlaps ? PANEL_GAP + right.width : 0 }
+export function leftColumnWidth(box: PanelBox, vw: number) {
+  return vw <= NARROW_MAX ? Math.min(box.width, vw - PANEL_GAP * 2) : box.width
+}
+
+/** 草地 / 框住贴左栏右侧顶上；视角方块在画布右下，避开右侧抽屉。 */
+export function canvasCorner(left: PanelBox, vw: number, extras: { right?: PanelBox; dockOpen?: boolean } = {}) {
+  const narrow = vw <= NARROW_MAX
+  const tile = SCENE_TOGGLE_PX
+  const clusterW = tile * 2 + SCENE_CLUSTER_GAP
+  const bottom = narrow ? CORNER_BOTTOM_NARROW : CORNER_BOTTOM
+  const sceneLeft = Math.min(
+    canvasInset(left),
+    Math.max(PANEL_GAP, vw - clusterW - PANEL_GAP),
+  )
+  const stackTop = narrow ? TOP_MIN + TOOLBAR_H + PANEL_GAP : left.top
+  const sceneTop = stackTop + (narrow ? 0 : LEFT_MOVE_HANDLE_H + LEFT_STACK_GAP)
+  const cubeSize = VIEW_CUBE_PX
+  const rightInset = !narrow && extras.dockOpen && extras.right
+    ? extras.right.width + PANEL_GAP * 2
+    : PANEL_GAP
+  return {
+    beside: true,
+    tile,
+    cubeSize,
+    clusterW,
+    stackH: tile,
+    sceneLeft,
+    sceneTop,
+    frameLeft: sceneLeft,
+    toggleLeft: sceneLeft,
+    toggleBottom: bottom,
+    frameBottom: bottom,
+    sceneBottom: bottom,
+    cubePadRight: Math.max(0, rightInset - VIEW_CUBE_MARGIN),
+    cubePadBottom: Math.max(0, bottom - VIEW_CUBE_MARGIN),
+    clusterBottom: bottom,
+  }
 }
 
 export function PanelLayoutProvider({ children }: { children: ReactNode }) {
@@ -127,6 +192,7 @@ export function PanelLayoutProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     setLayout(cur => {
       const next = {
+        ...cur,
         left: clampBox(cur.left, 'left', vh),
         right: clampBox(cur.right, 'right', vh),
       }
@@ -149,10 +215,35 @@ export function PanelLayoutProvider({ children }: { children: ReactNode }) {
   const patchRight = useCallback((p: Partial<PanelBox>) => {
     setLayout(cur => ({ ...cur, right: clampBox({ ...cur.right, ...p }, 'right', window.innerHeight) }))
   }, [])
+  const setLeftColor = useCallback((on: boolean) => {
+    setLayout(cur => (cur.leftColor === on ? cur : { ...cur, leftColor: on }))
+  }, [])
+  const setLeftKeys = useCallback((on: boolean) => {
+    setLayout(cur => (cur.leftKeys === on ? cur : { ...cur, leftKeys: on }))
+  }, [])
+  const toggleLeftColor = useCallback(() => {
+    setLayout(cur => ({ ...cur, leftColor: !cur.leftColor }))
+  }, [])
+  const toggleLeftKeys = useCallback(() => {
+    setLayout(cur => ({ ...cur, leftKeys: !cur.leftKeys }))
+  }, [])
 
   const value = useMemo(
-    () => ({ left: layout.left, right: layout.right, vw, vh, patchLeft, patchRight }),
-    [layout, vw, vh, patchLeft, patchRight],
+    () => ({
+      left: layout.left,
+      right: layout.right,
+      vw,
+      vh,
+      leftColor: layout.leftColor,
+      leftKeys: layout.leftKeys,
+      patchLeft,
+      patchRight,
+      setLeftColor,
+      setLeftKeys,
+      toggleLeftColor,
+      toggleLeftKeys,
+    }),
+    [layout, vw, vh, patchLeft, patchRight, setLeftColor, setLeftKeys, toggleLeftColor, toggleLeftKeys],
   )
   return <PanelCtx.Provider value={value}>{children}</PanelCtx.Provider>
 }
@@ -163,16 +254,57 @@ export function usePanelLayout() {
   return ctx
 }
 
+/** 左栏卡片标题：整行可点，箭头收起 / 展开。 */
+export function FoldHeader({
+  open,
+  onToggle,
+  label,
+  title,
+  children,
+}: {
+  open: boolean
+  onToggle: () => void
+  label: ReactNode
+  title: string
+  children?: ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={open}
+      title={title}
+      className={`flex items-center gap-1.5 w-full px-2.5 py-1.5 shrink-0 text-left cursor-pointer hover:bg-white/[0.04] transition-colors ${
+        open ? 'border-b border-gray-800' : ''
+      }`}
+    >
+      <svg
+        width="12"
+        height="12"
+        viewBox="0 0 16 16"
+        className={`shrink-0 text-gray-400 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
+        aria-hidden
+      >
+        <path d="M6 3.5 L11 8 L6 12.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+      <span className="flex-1 min-w-0 text-[10px] uppercase tracking-wider text-gray-400 truncate">{label}</span>
+      {children}
+    </button>
+  )
+}
+
 function setResizeCursor(dir: Dir | null) {
   document.body.classList.toggle('resizing-panels', !!dir)
   if (dir) document.body.dataset.resizeDir = dir
   else delete document.body.dataset.resizeDir
 }
 
-export function PanelHandles({ side, moveLabel, sizeLabel }: {
+export function PanelHandles({ side, moveLabel, sizeLabel, hug, showMove = true }: {
   side: Side
   moveLabel: string
   sizeLabel: string
+  hug?: boolean
+  showMove?: boolean
 }) {
   const { left, right, vh, patchLeft, patchRight } = usePanelLayout()
   const box = side === 'left' ? left : right
@@ -274,7 +406,7 @@ export function PanelHandles({ side, moveLabel, sizeLabel }: {
 
   return (
     <>
-      <div
+      {showMove && <div
         role="slider"
         aria-label={moveLabel}
         aria-valuemin={TOP_MIN}
@@ -308,9 +440,9 @@ export function PanelHandles({ side, moveLabel, sizeLabel }: {
         data-panel-chrome=""
       >
         <span className="w-10 h-1 rounded-full bg-gray-600 group-hover:bg-teal-400 group-focus-visible:bg-teal-400" />
-      </div>
-      {edge('n', 'top-0 left-2 right-2 h-1 cursor-ns-resize')}
-      {edge('s', 'bottom-0 left-2 right-2 h-1.5 cursor-ns-resize')}
+      </div>}
+      {!hug && edge('n', 'top-0 left-2 right-2 h-1 cursor-ns-resize')}
+      {!hug && edge('s', 'bottom-0 left-2 right-2 h-1.5 cursor-ns-resize')}
       {edge('ew', side === 'left' ? 'top-0 bottom-0 right-0 w-2 cursor-ew-resize' : 'top-0 bottom-0 left-0 w-2 cursor-ew-resize')}
     </>
   )

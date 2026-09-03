@@ -10,6 +10,7 @@ import pyramidQdf from '../data/A0128.qdf?raw'
 import { clearSharePayload, decodeShare, peekSharePayload, shareUrl } from '../share'
 import { isUntitledName, labelOf as nameLabel } from '../names'
 import { fetchOfficialQdf, officialLibId, OFFICIAL_BY_ID, parseOfficialId } from '../data/official'
+import { applyFrameHex, loadTune } from '../engine/colorTune.js'
 
 // 引擎来自 Vanilla JS，这里不跟它的推断类型较劲。
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -165,7 +166,7 @@ interface EngineApi {
   setRoom: (p: Partial<RoomSettings>) => void
   roomOverflow: { w: number; d: number; h: number }
   loadPreset: (key: string) => void
-  setViewCubePad: (top: number, right: number) => void
+  setViewCubePad: (right: number, bottom: number, size?: number) => void
   exportPng: () => void
   shareCurrent: () => Promise<void>
   catalog: {
@@ -176,6 +177,7 @@ interface EngineApi {
     connectors: Array<{ id: string; kind: string; qdf?: string; name?: string }>
     accessories: Array<{ id: string; qdf?: string; name?: string }>
   }
+  applyColorTune: (tune: { scene: Record<string, unknown>; frame: Record<string, string>; grade?: Record<string, number> }) => void
 }
 
 const Ctx = createContext<EngineApi | null>(null)
@@ -471,6 +473,10 @@ export function EngineProvider({ children }: { children: ReactNode }) {
         })
         const scene = new SceneManager(host)
         scene.setTheme(false)
+        try { scene.setScene(localStorage.getItem('quadro.scene.v1') === '1') } catch { /* ignore */ }
+        const savedTune = loadTune()
+        applyFrameHex(savedTune.frame)
+        scene.applyColorTune(savedTune)
         setEngineLang(lang)
         scene.setViewCubeLabels(cubeLabels())
         const model = new BuildModel()
@@ -1076,9 +1082,17 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     return () => { dead = true }
   }, [ready, applyModelJson, newTab, notify, t])
 
-  const setViewCubePad = useCallback((top: number, rightPad: number) => {
-    eng.current?.scene?.setViewCubePad?.(top, rightPad)
+  const setViewCubePad = useCallback((right: number, bottom: number, size?: number) => {
+    eng.current?.scene?.setViewCubePad?.(right, bottom, size)
   }, [])
+
+  const applyColorTune = useCallback((tune: { scene: Record<string, unknown>; frame: Record<string, string>; grade?: Record<string, number> }) => {
+    applyFrameHex(tune.frame)
+    const e = eng.current
+    e?.scene?.applyColorTune?.(tune)
+    e?.builder?.refresh?.()
+    bump()
+  }, [bump])
 
   const value: EngineApi = {
     ready, error, hostRef, tick,
@@ -1126,7 +1140,12 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     nudgePasteY: (steps) => { builder?.nudgePasteY?.(steps); bump() },
     setViewCubePad,
     frame: () => { scene?.resetCamera?.(model); bump() },
-    toggleGrass: () => { scene?.setScene?.(!scene._sceneOn); bump() },
+    toggleGrass: () => {
+      const next = !scene?._sceneOn
+      scene?.setScene?.(next)
+      try { localStorage.setItem('quadro.scene.v1', next ? '1' : '0') } catch { /* ignore */ }
+      bump()
+    },
     grassOn: !!scene?._sceneOn,
     highlight, setInv, newTab, closeTab, activateTab, renameTab, saveCurrent, openDoc,
     listDocs: async () => (await docs.listDocs()).map((d: AnyRec) => ({ id: String(d.id), name: String(d.name), updatedAt: Number(d.updatedAt || 0) })),
@@ -1137,6 +1156,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     stepAssembly: (delta) => { builder?.setAssemblyStep?.((builder.assemblyStep || 0) + delta); bump() },
     engineLang: (l) => setEngineLang(l),
     catalog,
+    applyColorTune,
   }
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>

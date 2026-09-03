@@ -3,6 +3,7 @@ import { useEngine } from '../store/EngineContext'
 import { useI18n } from '../i18n'
 import { storage, designEntry, checkAgainstInventory, missingCount } from '../engine-api'
 import { OFFICIAL_MODELS, officialThumbPath } from '../data/official'
+import { MODULES, PRESETS } from '../data/presets'
 
 export const LIBRARY_OPEN_EVENT = 'quadro:library-open'
 
@@ -24,7 +25,7 @@ type LibEntry = {
   meta?: LibMeta
 }
 
-type Tab = 'official' | 'mine'
+type Tab = 'official' | 'start' | 'mine'
 
 function isQdf(file: File) {
   return file.name.toLowerCase().endsWith('.qdf')
@@ -128,11 +129,15 @@ export default function LibraryPanel() {
       <div className="px-3 py-2 border-b border-gray-800 shrink-0 space-y-2">
         <div className="flex bg-gray-800/80 rounded-lg p-0.5">
           <button onClick={() => setTab('official')}
-            className={`flex-1 px-2 py-1 rounded-md text-[11px] cursor-pointer ${tab === 'official' ? 'bg-teal-500 text-white font-semibold' : 'text-gray-300'}`}>
+            className={`flex-1 px-2 py-1.5 md:py-1 rounded-md text-xs md:text-[11px] cursor-pointer ${tab === 'official' ? 'bg-teal-500 text-white font-semibold' : 'text-gray-300'}`}>
             {t('lib.official')} · {OFFICIAL_MODELS.length}
           </button>
+          <button onClick={() => setTab('start')}
+            className={`flex-1 px-2 py-1.5 md:py-1 rounded-md text-xs md:text-[11px] cursor-pointer ${tab === 'start' ? 'bg-teal-500 text-white font-semibold' : 'text-gray-300'}`}>
+            {t('section.presets')}
+          </button>
           <button onClick={() => setTab('mine')}
-            className={`flex-1 px-2 py-1 rounded-md text-[11px] cursor-pointer ${tab === 'mine' ? 'bg-teal-500 text-white font-semibold' : 'text-gray-300'}`}>
+            className={`flex-1 px-2 py-1.5 md:py-1 rounded-md text-xs md:text-[11px] cursor-pointer ${tab === 'mine' ? 'bg-teal-500 text-white font-semibold' : 'text-gray-300'}`}>
             {t('lib.mine')} · {rows.length}
           </button>
         </div>
@@ -169,6 +174,35 @@ export default function LibraryPanel() {
       </div>
 
       <div className="flex-1 overflow-y-auto scrollbar-thin p-2 min-h-0">
+        {tab === 'start' && (
+          <div className="space-y-3 px-0.5 pb-2">
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-gray-400 mb-1.5">{t('section.modules')}</div>
+              <p className="text-[11px] text-gray-500 mb-2 leading-snug">{t('hint.modules')}</p>
+              <div className="grid grid-cols-2 gap-1.5">
+                {MODULES.map(p => (
+                  <button key={p.key} onClick={() => api.placeModule(p.key)} title={p.hint}
+                    className="text-sm md:text-xs rounded-lg border border-gray-700 bg-gray-800 hover:border-teal-400 px-2 py-2.5 md:py-1.5 text-left cursor-pointer">
+                    {t(p.labelKey)} <span className="text-gray-500">{p.hint}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-gray-400 mb-1.5">{t('section.presets')}</div>
+              <div className="grid grid-cols-2 gap-1.5">
+                {PRESETS.map(p => (
+                  <button key={p.key}
+                    onClick={() => p.mode === 'replace' ? api.loadPreset(p.key) : api.placeModule(p.key)}
+                    title={p.mode === 'replace' ? t('hint.presetReplace') : p.hint}
+                    className="text-sm md:text-xs rounded-lg border border-gray-700 bg-gray-800 hover:border-teal-400 px-2 py-2.5 md:py-1.5 text-left cursor-pointer">
+                    {t(p.labelKey)} <span className="text-gray-500">{p.hint}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
         {tab === 'official' && (
           officialVisible.length === 0
             ? <div className="text-xs text-gray-500 px-2 py-6 text-center">{t('lib.noMatch')}</div>

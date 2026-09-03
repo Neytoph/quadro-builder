@@ -1,10 +1,10 @@
 // Aufbauplan: zerlegt das Modell Lage fuer Lage in nachvollziehbare Bauschritte.
 // Bewusst ohne Three.js/DOM, damit es testbar und Backend-tauglich bleibt.
 //
-// Logik: Man baut von unten nach oben. Pro Hoehen-Ebene entsteht zuerst der
-// waagerechte Rahmen (Kupplungen + Rohre + Platten), danach die senkrechten
-// Stuetzen zur naechsten Ebene. Die Kupplungstypen werden aus dem FERTIGEN
-// Modell abgeleitet (man greift beim Bau die endgueltige Kupplung).
+// Logik: Man baut von unten nach oben. Zuerst das Geruest -- pro Ebene der
+// waagerechte Rahmen (Kupplungen + Rohre), dann die Stuetzen zur naechsten
+// Ebene. Platten und Stoffe kommen erst am Schluss, wenn das Rohrgeruest steht.
+// Die Kupplungstypen werden aus dem FERTIGEN Modell abgeleitet.
 
 import { inferConnectorType, connectorsForNode } from "./bom.js";
 import { getTube, getConnector, getPanel, colorName, partName, reinforcementPart } from "./catalog.js";
@@ -317,6 +317,9 @@ export function computeBuildPlan(model, order = "y+") {
   // erreichen. Beim letzten Schritt bleibt es bei der eigenen Ebene.
   const reachedAfter = (i) => round1(progressAt(i + 1));
 
+  const structure = [];
+  const cladding = [];
+
   for (let i = 0; i < levels.length; i++) {
     const nodes = nodesByLevel[i];
     const horiz = horizByLevel[i];
@@ -325,21 +328,21 @@ export function computeBuildPlan(model, order = "y+") {
     const sls = slidesByLevel[i];
     const fts = fittingsByLevel[i];
 
-    // Rahmen-Schritt (nur, wenn er etwas Neues bringt)
-    if (nodes.length || horiz.length || pans.length || txs.length || sls.length || fts.length) {
+    // Geruest: Kupplungen + waagerechte Rohre. Platten kommen spaeter.
+    if (nodes.length || horiz.length || sls.length || fts.length) {
       const conn = countConnectors(model, nodes);
       const title = t("buildplan_level", i + 1, reachedAfter(i));
-      steps.push({
+      structure.push({
         kind: "frame", title, level: i, y: levels[i],
         connectors: conn.rows, openEnds: conn.openEnds,
-        tubes: countTubes(horiz), panels: countPanels(pans),
+        tubes: countTubes(horiz), panels: [],
         reinforcements: countReinforcements(model, horiz),
         nodeIds: nodes.map((n) => n.id),
         // Die Huelsen kommen mit ihrer Kupplung ins Bild, tauchen aber in
         // keiner Liste auf (siehe armsByLevel).
         tubeIds: [...horiz, ...armsByLevel[i]].map((t) => t.id),
-        panelIds: pans.map((p) => p.id),
-        textileIds: txs.map((tx) => tx.id),
+        panelIds: [],
+        textileIds: [],
         slideIds: sls.map((sl) => sl.id),
         fittingIds: fts.map((f) => f.id),
       });
@@ -348,7 +351,7 @@ export function computeBuildPlan(model, order = "y+") {
     // Stuetzen-Schritt zur naechsten Ebene
     const risers = risersByLevel[i];
     if (risers.length) {
-      steps.push({
+      structure.push({
         kind: "risers",
         // Die Stuetzen fuehren zur naechsten Ebene -- der Titel nennt sie,
         // damit die Schritte in Baurichtung durchzaehlen.
@@ -365,7 +368,24 @@ export function computeBuildPlan(model, order = "y+") {
         fittingIds: [],
       });
     }
+
+    if (pans.length || txs.length) {
+      cladding.push({
+        kind: "panels",
+        title: t("buildplan_level", i + 1, reachedAfter(i)),
+        level: i, y: levels[i],
+        connectors: [], openEnds: 0,
+        tubes: [], panels: countPanels(pans),
+        reinforcements: [],
+        nodeIds: [],
+        tubeIds: [],
+        panelIds: pans.map((p) => p.id),
+        textileIds: txs.map((tx) => tx.id),
+        slideIds: [],
+        fittingIds: [],
+      });
+    }
   }
 
-  return { levels, steps };
+  return { levels, steps: [...structure, ...cladding] };
 }

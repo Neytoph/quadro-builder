@@ -3,16 +3,45 @@ export function Svg16({ inner, size = 18 }: { inner: string; size?: number }) {
   return <svg viewBox="0 0 16 16" width={size} height={size} fill="none" dangerouslySetInnerHTML={{ __html: inner }} />
 }
 
+/** 直管：横条长度跟厘米成比例（quadro-3D 那套）。 */
+export function tubeBarIcon(cm: number): string {
+  const n = Number(cm)
+  const minC = 10, maxC = 75
+  const minW = 3.2, maxW = 14
+  const t = Number.isFinite(n) ? Math.max(0, Math.min(1, (n - minC) / (maxC - minC))) : 0.4
+  const w = minW + t * (maxW - minW)
+  const h = 2.5
+  const x = (16 - w) / 2
+  const y = (16 - h) / 2
+  return `<rect x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${w.toFixed(2)}" height="${h}" rx="${(h / 2).toFixed(2)}" fill="currentColor"/>`
+}
+
+export const CURVED_TUBE_ICON =
+  '<path d="M3.2 12.8 A7.2 7.2 0 0 1 12.8 3.2" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>'
+
+export function tubeIcon(id?: string | null, lengthCm?: number | null): string {
+  const key = String(id || '')
+  if (key.startsWith('TC') || key === 'curved') return CURVED_TUBE_ICON
+  const fromId = key.match(/^T(\d+)/)
+  const cm = lengthCm ?? (fromId ? Number(fromId[1]) : null)
+  if (cm) return tubeBarIcon(cm)
+  return tubeBarIcon(35)
+}
+
 export const TOOL_ICON = {
   select: '<path d="M3.5 2 L12.8 8.2 L8.4 9 L10.7 13.6 L8.9 14.5 L6.5 9.9 L3 12.4 Z" fill="currentColor"/>',
   delete: '<path d="M3.2 3.2 L12.8 12.8 M12.8 3.2 L3.2 12.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
-  tube: '<rect x="1.6" y="6.4" width="12.8" height="3.2" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.5"/>',
+  tube: tubeBarIcon(35),
   panel: '<rect x="3" y="3" width="10" height="10" rx="1.8" fill="none" stroke="currentColor" stroke-width="1.5"/>',
+  holePanel: '<rect x="3" y="3" width="10" height="10" rx="1.8" fill="none" stroke="currentColor" stroke-width="1.5"/>'
+    + [5.1, 8, 10.9].map(y => [5.1, 8, 10.9].map(x => `<circle cx="${x}" cy="${y}" r="0.95" fill="currentColor"/>`).join('')).join(''),
   slide: '<path d="M3 13 C7 13 5 4 13 3" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>',
   wheel: '<circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="1.5" fill="currentColor"/><path d="M8 2.4 L8 13.6 M2.4 8 L13.6 8 M4 4 L12 12 M12 4 L4 12" stroke="currentColor" stroke-width="0.9"/>',
   textile: '<path d="M2.5 4 L13.5 4 L13.5 12 L2.5 12 Z" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M2.5 6.5 C5 5.4 6.5 7.6 8 6.5 C9.5 5.4 11 7.6 13.5 6.5" fill="none" stroke="currentColor" stroke-width="1"/><path d="M2.5 9.5 C5 8.4 6.5 10.6 8 9.5 C9.5 8.4 11 10.6 13.5 9.5" fill="none" stroke="currentColor" stroke-width="1"/>',
   pool: '<path d="M2.5 4 L2.5 12.5 L13.5 12.5 L13.5 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M3.5 8.5 C5.2 7.4 6.6 9.6 8.2 8.5 C9.8 7.4 11.2 9.6 12.8 8.5" fill="none" stroke="currentColor" stroke-width="1"/>',
   reinforce: '<rect x="1.6" y="4.8" width="12.8" height="6.4" rx="2.4" fill="none" stroke="currentColor" stroke-width="1.3"/><line x1="4" y1="8" x2="12" y2="8" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/>',
+  undo: '<polyline points="5.4 3.4 2.2 6.5 5.4 9.6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M2.2 6.5h6.4a4.1 4.1 0 0 1 0 8.2H6.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>',
+  redo: '<polyline points="10.6 3.4 13.8 6.5 10.6 9.6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M13.8 6.5H7.4a4.1 4.1 0 0 0 0 8.2H9.6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>',
 } as const
 
 const connBody = '<rect x="5.6" y="5.6" width="4.8" height="4.8" rx="1.1" fill="currentColor"/>'
@@ -82,6 +111,7 @@ const BY_ID: Record<string, string> = {
   slide_integral: TOOL_ICON.slide,
   slide_module: TOOL_ICON.slide,
   slide_curved: TOOL_ICON.slide,
+  hole_panel_40x40: TOOL_ICON.holePanel,
   slide_end: TOOL_ICON.slide,
   'slide-new2': TOOL_ICON.slide,
   slide2: TOOL_ICON.slide,
@@ -114,8 +144,10 @@ const BY_KIND: Record<string, string> = {
 export function partIcon(id?: string | null, kind?: string | null): string {
   const key = String(id || '')
   if (key && BY_ID[key]) return BY_ID[key]
-  if (key.startsWith('T') || key.startsWith('TC')) return TOOL_ICON.tube
-  if (key.startsWith('panel') || key.startsWith('hole_panel')) return TOOL_ICON.panel
+  if (key.startsWith('TC')) return CURVED_TUBE_ICON
+  if (key.startsWith('T')) return tubeIcon(key)
+  if (key.startsWith('hole_panel')) return TOOL_ICON.holePanel
+  if (key.startsWith('panel')) return TOOL_ICON.panel
   if (key.startsWith('pool_liner')) return TOOL_ICON.pool
   if (key.startsWith('screw')) return SCREW_ICON
   if (key.startsWith('reinforce')) return TOOL_ICON.reinforce

@@ -1,19 +1,19 @@
 import { useEffect } from 'react'
 import { useEngine } from '../store/EngineContext'
 import { parseOfficialId } from '../data/official'
-import { usePanelLayout, viewCubePad } from './panelLayout'
 import { useDock } from './dock'
+import { canvasCorner, usePanelLayout } from './panelLayout'
 
 export default function CanvasHost() {
   const { hostRef, ready, error, openLibraryId, setViewCubePad } = useEngine()
-  const { right } = usePanelLayout()
+  const { left, right, vw } = usePanelLayout()
   const { pane } = useDock()
 
   useEffect(() => {
     if (!ready) return
-    const pad = viewCubePad(right, !!pane)
-    setViewCubePad(pad.top, pad.right)
-  }, [ready, right, pane, setViewCubePad])
+    const pad = canvasCorner(left, vw, { right, dockOpen: !!pane })
+    setViewCubePad(pad.cubePadRight, pad.cubePadBottom, pad.cubeSize)
+  }, [ready, left, right, vw, pane, setViewCubePad])
   const onDragOver = (e: React.DragEvent) => {
     if (![...e.dataTransfer.types].includes('text/plain')) return
     e.preventDefault()

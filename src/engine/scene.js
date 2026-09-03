@@ -11,23 +11,25 @@ import { reinforcementProfiles } from "./qdfexport.js";
 import { loadConnectorMeshes, loadSlideMeshes, loadTubeMeshes, loadFittingMeshes,
   loadSurfaceMeshes } from "./meshes.js";
 import { CONNECTOR_ARM_BITS } from "./qdfimport.js";
+import { shadeHex, hexRgba, DEFAULT_TUNE, DEFAULT_GRADE, gradeHex, displayHex } from "./colorTune.js";
 
 const UP = new THREE.Vector3(0, 1, 0);
 // So viel darf ein Bauteil vor einem Ankerpunkt liegen, ohne ihn zu verdecken
 // (Rohrhalbmesser + halbe Kupplung).
 const HANDLE_CLEAR = 6;
-// Richtungspfeile (cm). Alte gruenen Kugeln hatten Radius 2.4 -- Schaft und
-// unsichtbarer Trefferkoerper muessen mindestens so dick sein, sonst klickt
-// man daneben. Designer-Massstab 0.5/1.2 waere hier zu duenn.
+// 加管箭头：平时短芽，指到接头才展开。隐形碰撞体保持够点。
 const ARROW = {
-  shaftR: 1.55,
-  shaftLen: 7,
-  coneR: 3.15,
-  coneLen: 4.2,
-  offset: 3.2,
-  hitR: 2.9,
-  geoVer: 2,
+  shaftR: 0.52,
+  shaftLen: 5.1,
+  coneR: 1.28,
+  coneLen: 2.05,
+  offset: 3.35,
+  stubR: 0.7,
+  stubLen: 2.35,
+  hitR: 2.45,
+  geoVer: 3,
 };
+const ARROW_TEAL = 0x2dd4bf;
 // Das große Dach liegt auf dem First-Rohr, nicht auf dessen Achse.
 const ROOF_LIFT = 5;
 const ROOF_THICK = 2.5;   // Materialstärke der beiden Dachschrägen
@@ -160,9 +162,9 @@ const POOL_INSET = 2.5;
 
 
 // Farbschema der normalen Ansicht (die Szene bringt ihren eigenen Himmel mit).
-// Die Werte sind die Gegenstuecke zu --bg/--line in style.css.
-const BG_LIGHT = 0xedd8c4;                  // 无草地：桦木工作台，比暖纸深一档，避免一片白
-const BG_DARK = 0x221e19;                   // 与菜单同色阶，避免浅橙画布对黑边
+// 空白画布：桦木工作台。风景开时背景要退后，把彩管留给主体。
+const BG_LIGHT = 0xedd8c4;
+const BG_DARK = 0x221e19;
 // Bodenraster: Kantenlaenge und Zellweite. 1040 cm sind 52 Zellen je Achse --
 // das urspruengliche 800er Raster plus sechs Zellen auf jeder Seite, damit auch
 // breitere Aufbauten noch darauf stehen. Es bleibt deutlich innerhalb der
@@ -179,15 +181,25 @@ const GRID_CELL = 20;
 // Bild kommt. Baeume und Buesche stehen im Ring dahinter -- ausserhalb des
 // Rasters, damit sie nicht in ein grosses Modell hineinragen.
 const GROUND_AREA = 2600;                     // Kantenlaenge der Wiese, cm
+const GRASS_TILE = 80;                        // 大块平铺，颗粒在，纹路不抢眼
 const TREE_RING = [GRID_SIZE / 2 + 120, GROUND_AREA / 2 - 120];
 const BUSH_RING = [GRID_SIZE / 2 + 60, GROUND_AREA / 2 - 100];
 
 const GRID_LIGHT = [0xb88850, 0xd0b08a];   // 主线 / 次线：暖棕，显色底上要压得住
 const GRID_DARK = [0x3d382f, 0x2e2a23];
 
+// 风景退后：草地/树冠灰绿；天空走晴天蓝，避免阴天灰。
+const SCENE_SKY_HORIZON = 0xeaf5fd;
+const SCENE_SKY_ZENITH = 0xa7d9fb;
+const SCENE_TRUNK = 0x6b5a3e;
+const SCENE_CROWN_A = 0x649655;
+const SCENE_CROWN_B = 0x709b62;
+const SCENE_CROWN_C = 0x56804a;
+const SCENE_BUSH = 0x4a7544;
+
 // Ansichtswuerfel: Kanten hell/dunkel (die Flaechen stecken in der Textur).
-const CUBE_EDGE_LIGHT = 0xb88850;
-const CUBE_EDGE_DARK = 0x5a5348;
+const CUBE_EDGE_LIGHT = 0x6e7884;
+const CUBE_EDGE_DARK = 0x3d4450;
 
 const HIGHLIGHT_COLOR = 0xea580c;
 const HIGHLIGHT_EMISSIVE = 0x612f00;
@@ -222,10 +234,13 @@ const MIN_ZOOM_OUT_DISTANCE = 600;   // cm
 const POLE_GAP = 0.002;                          // rad
 const MAX_PITCH = Math.PI / 2 - POLE_GAP;
 
-// Ansichtswuerfel oben rechts im Viewport (Fusion-Vorbild).
-const CUBE_PX = 104;        // Kantenlaenge des Ausschnitts in CSS-Pixeln
-const CUBE_MARGIN = 14;
+// Ansichtswuerfel 右下角（避开右侧抽屉）。
+const CUBE_PX = 80;
+const CUBE_MARGIN = 22;
 const CUBE_SNAP_MS = 320;   // Dauer des Kameraschwenks beim Klick
+// Ortho-Ausschnitt. 45°-Orbit: Silhouette bis |ux|+|uy|+|uz| ≈ 1,63;
+// darunter schneidet der Scissor die untere Spitze ab.
+const CUBE_FRUSTUM = 1.85;
 
 // Wie weit darf eine Rohrrichtung von einer Würfelachse abweichen, damit noch
 // ein Kupplungsmodell dazu passt? cos(20°) ≈ 0,94. Alles Schiefere (Rampen,
@@ -345,6 +360,8 @@ export class SceneManager {
     // (siehe _applyBackground/_applyGrid). Beim Bau steht beides auf "aus".
     this._dark = false;
     this._sceneOn = false;
+    this._tune = { ...DEFAULT_TUNE.scene };
+    this._grade = { ...DEFAULT_GRADE };
     this.scene.background = new THREE.Color(BG_LIGHT);
 
     // Beide Kameras stehen bereit; umgeschaltet wird ueber setProjection().
@@ -366,7 +383,7 @@ export class SceneManager {
     this.controls.target.set(...this._defaultCam.target);
 
     // Licht: warmes Sonnenlicht + Himmelslicht + weiche Schatten
-    this._hemiLight = new THREE.HemisphereLight(0xffffff, 0xa89880, 1.15); // Normal-Modus-Startwert
+    this._hemiLight = new THREE.HemisphereLight(0xffffff, 0xa89880, 1.15);
     this.scene.add(this._hemiLight);
     this._dirLight = new THREE.DirectionalLight(0xffffff, 1.1);  // setScene() stellt Farbe/Staerke
     this._dirLight.position.set(200, 320, 150);
@@ -403,17 +420,21 @@ export class SceneManager {
     this._buildGrass();
     this._buildSky();
     this._buildTrees();
+    this.setScene(false);
 
     // Gruppen
     this.buildGroup = new THREE.Group();
     this.handleGroup = new THREE.Group();
     this.labelGroup = new THREE.Group();
+    this._hoverPartGroup = new THREE.Group();
+    this._hoverPartGroup.name = "hover-part";
     this._roomGroup = new THREE.Group();
     this._roomGroup.name = "roomOverlay";
     this._roomSig = "";
     this.scene.add(this.buildGroup);
     this.scene.add(this.handleGroup);
     this.scene.add(this.labelGroup);
+    this.scene.add(this._hoverPartGroup);
     this.scene.add(this._roomGroup);
 
     // Pick-Listen
@@ -430,10 +451,18 @@ export class SceneManager {
 
     // Wiederverwendbare Ressourcen
     this._raycaster = new THREE.Raycaster();
-    this._cubeInset = 0;      // Abstand des Ansichtswuerfels von oben (Leiste darueber)
-    this._cubePadRight = 0;   // Abstand von rechts (Seitenleiste)
+    this._cubePadRight = 0;   // 右下角：相对右边的额外让位
+    this._cubePadBottom = 0;  // 右下角：相对底边的额外让位
+    this._cubePx = CUBE_PX;
     this._mouse = new THREE.Vector2();
     this._hover = null;
+    this._arrowFocus = null;
+    this._tubePreview = null;
+    this._hoverPartId = null;
+    this._hoverPartExtra = null;
+    this._hoverPartExtraKey = "";
+    this._hoverPartMode = null;
+    this._hoverMat = new THREE.Matrix4();
     this._panning = false;
 
     this._connGeo = null;     // lazy (braucht Katalog-Geometrie)
@@ -741,7 +770,25 @@ export class SceneManager {
 
   /** Mauszeiger-Form setzen (Builder signalisiert damit "verschiebbar"). */
   setCursor(css) {
-    this.container.style.cursor = css || "default";
+    this.container.classList.toggle("qb-cursor-delete", css === "delete-x");
+    this.container.style.cursor = css === "delete-x" ? "none" : (css || "default");
+    if (css !== "delete-x") this._setDeleteX(false);
+  }
+
+  _setDeleteX(on, clientX, clientY) {
+    if (!this._deleteXEl) {
+      const el = document.createElement("div");
+      el.className = "qb-delete-x";
+      el.setAttribute("aria-hidden", "true");
+      document.body.appendChild(el);
+      this._deleteXEl = el;
+    }
+    const el = this._deleteXEl;
+    el.classList.toggle("on", !!on);
+    if (on && clientX != null) {
+      el.style.left = `${clientX}px`;
+      el.style.top = `${clientY}px`;
+    }
   }
 
   // Abgerundeter Wuerfel (Superellipsoid): eine Kugel wird per p-Norm zum
@@ -1402,7 +1449,7 @@ export class SceneManager {
     const fest = fixedFittingColor(f.kind);
     const hex = fest === "black" ? connectorColor().hex
       : fest ? colorHex(fest)
-      : f.color ? colorHex(f.color) : 0x2b2b2b;
+      : f.color ? colorHex(f.color) : "#2B2B2B";
     let geo = null, mat = null;
     const cs = geometry().connectorSize;
 
@@ -1805,13 +1852,18 @@ export class SceneManager {
   }
 
   _fittingMaterial(hex, transparent) {
-    const key = `fit${hex}${transparent ? "t" : ""}`;
+    const raw = this._asHex(hex);
+    const key = `fit${raw}${transparent ? "t" : ""}`;
     if (!this._materials[key]) {
-      this._materials[key] = new THREE.MeshStandardMaterial({
-        color: new THREE.Color(hex), roughness: 0.42, metalness: 0.04,
+      const m = new THREE.MeshStandardMaterial({
+        color: new THREE.Color(this._lookHex(raw)), roughness: 0.42, metalness: 0.04,
         side: THREE.DoubleSide,
         transparent, opacity: transparent ? 0.55 : 1,
       });
+      m.userData.tuneHex = raw;
+      this._materials[key] = m;
+    } else {
+      this._materials[key].color.set(this._lookHex(this._materials[key].userData.tuneHex || raw));
     }
     return this._materials[key];
   }
@@ -1822,6 +1874,24 @@ export class SceneManager {
   // gecacht -- _disposeGroup gibt nur Geometrien frei.
   _selectedMaterial(base) {
     return this._tintMaterial(base, "sel:", HIGHLIGHT_COLOR, HIGHLIGHT_EMISSIVE);
+  }
+
+  _hoverMaterial(base) {
+    const two = !!(base && base.side === THREE.DoubleSide);
+    const key = two ? "hov:2" : "hov:1";
+    if (!this._materials[key]) {
+      this._materials[key] = new THREE.MeshBasicMaterial({
+        color: HIGHLIGHT_COLOR,
+        transparent: true,
+        opacity: 0.92,
+        depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -2,
+        side: two ? THREE.DoubleSide : THREE.FrontSide,
+      });
+    }
+    return this._materials[key];
   }
 
   _focusMaterial(base) {
@@ -1947,15 +2017,23 @@ export class SceneManager {
     const transp = false;
     // Im Editor gesetzte Rutschen tragen die gewaehlte Baufarbe; importierte
     // ohne Farbangabe behalten die feste Farbe ihrer Art.
-    const hex = colorId ? colorHex(colorId) : (COL[kind] || 0x9aa3ad);
+    const raw = colorId ? colorHex(colorId) : this._asHex(COL[kind] || 0x9aa3ad);
     const key = "slidem_" + kind + (colorId || "") + (isCurrent ? "_c" : "");
     if (!this._materials[key]) {
-      this._materials[key] = new THREE.MeshStandardMaterial({
-        color: new THREE.Color(hex), roughness: transp ? 0.9 : 0.42, metalness: 0.04,
+      const m = new THREE.MeshStandardMaterial({
+        color: new THREE.Color(colorId ? this._look(colorId) : this._lookHex(raw)),
+        roughness: transp ? 0.9 : 0.42, metalness: 0.04,
         side: THREE.DoubleSide,
         transparent: transp, opacity: transp ? 0.5 : 1,
         emissive: new THREE.Color(isCurrent ? 0x3a2400 : 0x000000),
       });
+      if (colorId) m.userData.tuneColorId = colorId;
+      else m.userData.tuneHex = raw;
+      this._materials[key] = m;
+    } else {
+      const m = this._materials[key];
+      if (m.userData.tuneColorId) m.color.set(this._look(m.userData.tuneColorId));
+      else if (m.userData.tuneHex) m.color.set(this._lookHex(m.userData.tuneHex));
     }
     return this._materials[key];
   }
@@ -2371,11 +2449,15 @@ export class SceneManager {
   _tubeMaterial(colorId) {
     const key = "tube:" + colorId;
     if (!this._materials[key]) {
-      this._materials[key] = new THREE.MeshStandardMaterial({
-        color: new THREE.Color(colorHex(colorId)),
+      const m = new THREE.MeshStandardMaterial({
+        color: new THREE.Color(this._look(colorId)),
         roughness: 0.5,
         metalness: 0,
       });
+      m.userData.tuneColorId = colorId;
+      this._materials[key] = m;
+    } else {
+      this._materials[key].color.set(this._look(colorId));
     }
     return this._materials[key];
   }
@@ -2389,13 +2471,17 @@ export class SceneManager {
   _panelMaterial(colorId, isCurrent, transparent) {
     const key = "panel:" + colorId + (isCurrent ? ":c" : "") + (transparent ? ":t" : "");
     if (!this._materials[key]) {
-      this._materials[key] = new THREE.MeshStandardMaterial({
-        color: new THREE.Color(colorHex(colorId)),
+      const m = new THREE.MeshStandardMaterial({
+        color: new THREE.Color(this._look(colorId)),
         roughness: transparent ? 0.95 : 0.48, metalness: transparent ? 0.0 : 0.04,
         side: THREE.DoubleSide,
         transparent: !!transparent, opacity: transparent ? 0.5 : 1,
         emissive: new THREE.Color(isCurrent ? 0x3a2400 : 0x000000),
       });
+      m.userData.tuneColorId = colorId;
+      this._materials[key] = m;
+    } else {
+      this._materials[key].color.set(this._look(colorId));
     }
     return this._materials[key];
   }
@@ -2749,13 +2835,21 @@ export class SceneManager {
     return this._materials[key];
   }
 
-  // Richtungspfeil: eine Farbe, ein Material -- Hover skaliert die Gruppe,
-  // aendert das Material nicht, sonst leuchteten alle Pfeile derselben Achse.
-  _arrowMaterial(hex) {
-    const key = "arrow:" + hex;
+  // 箭头材质按语气分开，避免改透明度时整排一起亮。
+  _arrowMaterial(tone) {
+    const key = "arrow:" + tone;
     if (!this._materials[key]) {
-      this._materials[key] = new THREE.MeshBasicMaterial({
-        color: hex, transparent: true, opacity: 0.95,
+      const focus = tone === "focus";
+      const hot = tone === "hot" || focus;
+      this._materials[key] = new THREE.MeshStandardMaterial({
+        color: focus ? 0x5eead4 : ARROW_TEAL,
+        emissive: hot ? 0x115e59 : 0x042f2e,
+        emissiveIntensity: focus ? 0.42 : hot ? 0.2 : 0.06,
+        roughness: 0.4,
+        metalness: 0.08,
+        transparent: true,
+        opacity: focus ? 0.94 : hot ? 0.76 : 0.38,
+        depthWrite: false,
       });
     }
     return this._materials[key];
@@ -2766,15 +2860,23 @@ export class SceneManager {
     this._arrowGeoVer = ARROW.geoVer;
     this._arrowShaft = new THREE.CylinderGeometry(ARROW.shaftR, ARROW.shaftR, ARROW.shaftLen, 10);
     this._arrowCone = new THREE.ConeGeometry(ARROW.coneR, ARROW.coneLen, 10);
-    this._arrowHit = new THREE.CylinderGeometry(ARROW.hitR, ARROW.hitR, ARROW.shaftLen + ARROW.coneLen, 8);
+    this._arrowStub = new THREE.CylinderGeometry(ARROW.stubR * 0.72, ARROW.stubR, ARROW.stubLen, 10);
+    const stubHit = ARROW.offset + ARROW.stubLen + 1.5;
+    const fullHit = ARROW.offset + ARROW.shaftLen + ARROW.coneLen;
+    this._arrowHitStub = new THREE.CylinderGeometry(ARROW.hitR, ARROW.hitR, stubHit, 8);
+    this._arrowHit = new THREE.CylinderGeometry(ARROW.hitR, ARROW.hitR, fullHit, 8);
     this._keepGeos.add(this._arrowShaft);
     this._keepGeos.add(this._arrowCone);
+    this._keepGeos.add(this._arrowStub);
     this._keepGeos.add(this._arrowHit);
+    this._keepGeos.add(this._arrowHitStub);
   }
 
   _arrowShaftGeo() { this._ensureArrowGeos(); return this._arrowShaft; }
   _arrowConeGeo() { this._ensureArrowGeos(); return this._arrowCone; }
+  _arrowStubGeo() { this._ensureArrowGeos(); return this._arrowStub; }
   _arrowHitGeo() { this._ensureArrowGeos(); return this._arrowHit; }
+  _arrowHitStubGeo() { this._ensureArrowGeos(); return this._arrowHitStub; }
 
   _arrowHitMaterial() {
     if (!this._materials["arrowHit"]) {
@@ -2793,9 +2895,9 @@ export class SceneManager {
     return this._panelDot;
   }
 
-  /** 接管箭头一律绿色，不按轴向分色。 */
+  /** 接管箭头用工具栏青绿，不按轴向分色。 */
   _arrowColor() {
-    return 0x22c55e;
+    return ARROW_TEAL;
   }
 
   // Kandidaten-Feld fuer eine Platte (addPanelHandle): ein festes Material.
@@ -2830,11 +2932,15 @@ export class SceneManager {
   _tubeHighlight(colorId) {
     const key = "tubehl:" + colorId;
     if (!this._materials[key]) {
-      this._materials[key] = new THREE.MeshStandardMaterial({
-        color: new THREE.Color(colorHex(colorId)), roughness: 0.5, metalness: 0,
+      const m = new THREE.MeshStandardMaterial({
+        color: new THREE.Color(this._look(colorId)), roughness: 0.5, metalness: 0,
         emissive: new THREE.Color(0x3a2400),
         transparent: true, opacity: 0.75, depthWrite: false,
       });
+      m.userData.tuneColorId = colorId;
+      this._materials[key] = m;
+    } else {
+      this._materials[key].color.set(this._look(colorId));
     }
     return this._materials[key];
   }
@@ -3763,6 +3869,7 @@ export class SceneManager {
 
     // Der Szenegraph ist neu -> Schattenkarte einmal nachziehen.
     this._shadowsDirty();
+    if (this._hoverPartId != null) this._rebuildHoverOverlay(this._hoverPartId, this._hoverPartExtra);
   }
 
   /**
@@ -4128,6 +4235,8 @@ export class SceneManager {
 
   clearHandles() {
     this._needsRender = true;
+    this._arrowFocus = null;
+    this._clearTubePreview();
     this._disposeGroup(this.handleGroup);
     this.handleMeshes = [];
   }
@@ -4163,35 +4272,132 @@ export class SceneManager {
 
   /**
    * Pfeil vom Ursprung entlang `dir`. Lokales +Y = Richtung.
-   * Schaft beginnt knapp ausserhalb der Kupplung. Ein unsichtbarer Zylinder
-   * um den ganzen Pfeil macht ihn klickbar, ohne die Form weiter aufzublasen.
+   * 加管默认短芽；指到该接头才展开完整箭头。隐形碰撞体保持好点。
    */
   _addArrowHandle(origin, dirArr, userData, kind) {
     const dir = new THREE.Vector3(dirArr[0], dirArr[1], dirArr[2]);
     if (dir.lengthSq() < 1e-8) dir.set(0, 1, 0);
     else dir.normalize();
     const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
-    const mat = this._arrowMaterial(this._arrowColor());
+    const compact = !!userData.arrowCompact;
+    const mat = this._arrowMaterial(compact ? "rest" : "hot");
     const group = new THREE.Group();
     group.position.set(origin[0], origin[1], origin[2]);
     group.quaternion.copy(quat);
-    group.userData = Object.assign({ kind: "handle", arrowRoot: true }, userData);
+    group.userData = Object.assign({
+      kind: "handle",
+      arrowRoot: true,
+      arrowStub: compact,
+    }, userData);
 
+    const stub = new THREE.Mesh(this._arrowStubGeo(), mat);
+    stub.position.y = ARROW.offset + ARROW.stubLen / 2;
     const shaft = new THREE.Mesh(this._arrowShaftGeo(), mat);
     shaft.position.y = ARROW.offset + ARROW.shaftLen / 2;
     const cone = new THREE.Mesh(this._arrowConeGeo(), mat);
     cone.position.y = ARROW.offset + ARROW.shaftLen + ARROW.coneLen / 2;
-    const hit = new THREE.Mesh(this._arrowHitGeo(), this._arrowHitMaterial());
-    hit.position.y = ARROW.offset + (ARROW.shaftLen + ARROW.coneLen) / 2;
+    const hitStub = new THREE.Mesh(this._arrowHitStubGeo(), this._arrowHitMaterial());
+    hitStub.position.y = (ARROW.offset + ARROW.stubLen + 1.5) / 2;
+    const hitFull = new THREE.Mesh(this._arrowHitGeo(), this._arrowHitMaterial());
+    hitFull.position.y = (ARROW.offset + ARROW.shaftLen + ARROW.coneLen) / 2;
     const childData = Object.assign({ kind: "handle", arrowRoot: group }, userData);
-    shaft.userData = cone.userData = hit.userData = childData;
-    shaft.renderOrder = cone.renderOrder = 999;
+    stub.userData = shaft.userData = cone.userData = hitStub.userData = hitFull.userData = childData;
+    stub.renderOrder = shaft.renderOrder = cone.renderOrder = 999;
+    group.userData.stubMesh = stub;
+    group.userData.shaftMesh = shaft;
+    group.userData.coneMesh = cone;
+    group.userData.hitStub = hitStub;
+    group.userData.hitFull = hitFull;
+    group.add(stub);
     group.add(shaft);
     group.add(cone);
-    group.add(hit);
+    group.add(hitStub);
+    group.add(hitFull);
+    this._applyArrowPose(group, !compact, compact ? "rest" : "hot");
     this.handleGroup.add(group);
-    this.handleMeshes.push(hit, shaft, cone);
+    this.handleMeshes.push(hitStub, hitFull, stub, shaft, cone);
     return group;
+  }
+
+  _paintArrow(group, tone) {
+    const mat = this._arrowMaterial(tone);
+    if (group.userData.stubMesh) group.userData.stubMesh.material = mat;
+    if (group.userData.shaftMesh) group.userData.shaftMesh.material = mat;
+    if (group.userData.coneMesh) group.userData.coneMesh.material = mat;
+  }
+
+  _applyArrowPose(group, expanded, tone) {
+    const stub = group.userData.stubMesh;
+    const shaft = group.userData.shaftMesh;
+    const cone = group.userData.coneMesh;
+    const hitStub = group.userData.hitStub;
+    const hitFull = group.userData.hitFull;
+    if (stub) stub.visible = !expanded;
+    if (shaft) shaft.visible = expanded;
+    if (cone) cone.visible = expanded;
+    if (hitStub) hitStub.visible = !expanded;
+    if (hitFull) hitFull.visible = expanded;
+    if (tone) this._paintArrow(group, tone);
+  }
+
+  _arrowFocusId(obj) {
+    if (!obj || !obj.userData) return null;
+    if (obj.userData.nodeId != null) return obj.userData.nodeId;
+    if (obj.userData.kind === "node" && obj.userData.id != null) return obj.userData.id;
+    return null;
+  }
+
+  _setArrowFocus(nodeId) {
+    if (this._arrowFocus === nodeId) return;
+    this._arrowFocus = nodeId;
+    for (const child of this.handleGroup.children) {
+      if (!child.userData || child.userData.arrowRoot !== true) continue;
+      if (!child.userData.arrowCompact) continue;
+      const on = nodeId != null && child.userData.nodeId === nodeId;
+      this._applyArrowPose(child, on, on ? "hot" : "rest");
+    }
+    this._needsRender = true;
+  }
+
+  _setTubePreview(group) {
+    const span = Number(group && group.userData && group.userData.previewSpan);
+    const dirArr = group && group.userData && group.userData.dir;
+    if (!(span > 0) || !dirArr) {
+      this._clearTubePreview();
+      return;
+    }
+    const cs = geometry().connectorSize;
+    const r = geometry().tubeRadius;
+    const drawLen = Math.max(6, span - cs);
+    const dir = new THREE.Vector3(dirArr[0], dirArr[1], dirArr[2]);
+    if (dir.lengthSq() < 1e-8) { this._clearTubePreview(); return; }
+    dir.normalize();
+    const colorId = group.userData.previewColor;
+    const hex = colorId ? this._look(colorId) : ARROW_TEAL;
+    if (!this._tubePreview) {
+      const geo = new THREE.CylinderGeometry(r, r, 1, 14);
+      const mat = new THREE.MeshStandardMaterial({
+        transparent: true, opacity: 0.28, roughness: 0.48, metalness: 0.04,
+        depthWrite: false,
+      });
+      this._tubePreview = new THREE.Mesh(geo, mat);
+      this._tubePreview.renderOrder = 998;
+      this._keepGeos.add(geo);
+      this.scene.add(this._tubePreview);
+    }
+    this._tubePreview.material.color.set(hex);
+    this._tubePreview.scale.set(1, drawLen, 1);
+    const mid = new THREE.Vector3().copy(group.position).addScaledVector(dir, cs / 2 + drawLen / 2);
+    this._tubePreview.position.copy(mid);
+    this._tubePreview.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+    this._tubePreview.visible = true;
+    this._needsRender = true;
+  }
+
+  _clearTubePreview() {
+    if (!this._tubePreview || !this._tubePreview.visible) return;
+    this._tubePreview.visible = false;
+    this._needsRender = true;
   }
 
   /**
@@ -4262,6 +4468,24 @@ export class SceneManager {
       const ray = this._raycaster.ray;
       ray.origin.addScaledVector(ray.direction, this.camera.near);
     }
+  }
+
+  /**
+   * Welcher der Punkte liegt der Zeiger-Geraden am naechsten?
+   * Fehlt, wenn keiner naeher als maxDist (cm) liegt.
+   */
+  closestOnRay(points, clientX, clientY, maxDist) {
+    this._setMouse(clientX, clientY);
+    const ray = this._raycaster.ray;
+    const v = new THREE.Vector3();
+    let best = null, bestD = maxDist;
+    for (const p of points) {
+      v.set(p.x, p.y, p.z);
+      if (this._clipPlane && this._clipPlane.distanceToPoint(v) < 0) continue;
+      const d = ray.distanceToPoint(v);
+      if (d < bestD) { bestD = d; best = p; }
+    }
+    return best;
   }
 
   raycastObjects(clientX, clientY, objects) {
@@ -4546,7 +4770,7 @@ export class SceneManager {
       this._clipList = this._clipPlane ? [this._clipPlane] : [];
     }
     for (const key of Object.keys(this._materials)) this._clipMaterial(this._materials[key]);
-    for (const group of [this.buildGroup, this.handleGroup, this.labelGroup]) {
+    for (const group of [this.buildGroup, this.handleGroup, this.labelGroup, this._hoverPartGroup]) {
       group.traverse((o) => { if (o.material) this._clipMaterial(o.material); });
     }
   }
@@ -4612,7 +4836,7 @@ export class SceneManager {
   pickTube(clientX, clientY) {
     const hit = this.raycastObjects(clientX, clientY, this.pickTubes);
     const data = this._hitData(hit);
-    return data ? { object: hit.object, data, point: hit.point, distance: hit.distance } : null;
+    return data ? { object: hit.object, data, point: hit.point, distance: hit.distance, instanceId: hit.instanceId } : null;
   }
 
   pickBuild(clientX, clientY) {
@@ -4622,7 +4846,7 @@ export class SceneManager {
        ...this.pickTextiles, ...this.pickFittings]
     );
     const data = this._hitData(hit);
-    return data ? { object: hit.object, data, point: hit.point, distance: hit.distance } : null;
+    return data ? { object: hit.object, data, point: hit.point, distance: hit.distance, instanceId: hit.instanceId } : null;
   }
 
   // Wie pickBuild, aber inkl. Rutschen/Dächer (nur fuers Loeschen relevant; im
@@ -4634,7 +4858,7 @@ export class SceneManager {
        ...this.pickTextiles, ...this.pickSlides, ...this.pickFittings, ...this.pickReinforce]
     );
     const data = this._hitData(hit);
-    return data ? { object: hit.object, data, point: hit.point, distance: hit.distance } : null;
+    return data ? { object: hit.object, data, point: hit.point, distance: hit.distance, instanceId: hit.instanceId } : null;
   }
 
   // --- Auswahl-Rechteck (Cursor-Modus) ------------------------------------
@@ -4734,26 +4958,114 @@ export class SceneManager {
     return object;
   }
 
-  setHover(object) {
+  setHover(object, focusNodeId) {
     const root = this._handleVisual(object);
-    if (this._hover === root) return;
+    const focus = focusNodeId !== undefined ? focusNodeId : this._arrowFocusId(root);
+    if (this._hover === root && this._arrowFocus === focus) return;
     this._needsRender = true;
     if (this._hover && this._hover.userData && this._hover.userData.kind === "handle") {
       if (this._hover.userData.panelCell && !this._hover.userData.panelDot) {
         this._hover.material = this._panelHandleMaterial(false);
       } else {
         this._hover.scale.setScalar(1);
+        if (this._hover.userData.arrowRoot) {
+          const on = focus != null && this._hover.userData.nodeId === focus;
+          this._paintArrow(this._hover, on || !this._hover.userData.arrowCompact ? "hot" : "rest");
+        }
       }
     }
+    this._setArrowFocus(focus);
     this._hover = root;
     if (root && root.userData && root.userData.kind === "handle") {
       if (root.userData.panelCell && !root.userData.panelDot) {
         root.material = this._panelHandleMaterial(true);
+        this._clearTubePreview();
       } else {
-        root.scale.setScalar(root.userData.arrowRoot || root.userData.panelDot ? 1.4 : 1.6);
+        const isArrow = !!root.userData.arrowRoot;
+        root.scale.setScalar(isArrow ? 1.12 : root.userData.panelDot ? 1.4 : 1.6);
+        if (isArrow) {
+          this._paintArrow(root, "focus");
+          this._setTubePreview(root);
+        } else {
+          this._clearTubePreview();
+        }
       }
+    } else {
+      this._clearTubePreview();
     }
-    this.container.style.cursor = root ? "pointer" : "default";
+    if (!this._hoverPartId) this.container.style.cursor = root ? "pointer" : "default";
+  }
+
+  /**
+   * Auswahl / Loeschen: das Teil unter dem Zeiger orange hervorheben.
+   * pick = pickForDelete()-Treffer oder null. mode "delete" setzt das X.
+   */
+  setHoverPart(pick, mode, clientX, clientY, extraIds) {
+    const id = pick && pick.data && pick.data.id != null ? pick.data.id : null;
+    const extra = extraIds && extraIds.length ? extraIds : null;
+    const extraKey = extra ? extra.join(",") : "";
+    if (id !== this._hoverPartId || extraKey !== this._hoverPartExtraKey) {
+      this._hoverPartId = id;
+      this._hoverPartExtra = extra;
+      this._hoverPartExtraKey = extraKey;
+      this._rebuildHoverOverlay(id, extra);
+      this._needsRender = true;
+    }
+    this._hoverPartMode = mode || null;
+    if (mode === "delete" && id != null) {
+      this.setCursor("delete-x");
+      this._setDeleteX(true, clientX, clientY);
+    } else {
+      this._setDeleteX(false);
+      if (id != null) this.setCursor("pointer");
+      else this.setCursor("default");
+    }
+  }
+
+  _clearHoverOverlay() {
+    const g = this._hoverPartGroup;
+    if (!g) return;
+    while (g.children.length) g.remove(g.children[0]);
+    if (this._hoverPartId != null) this._needsRender = true;
+    this._hoverPartId = null;
+    this._hoverPartExtra = null;
+    this._hoverPartExtraKey = "";
+    this._hoverPartMode = null;
+    this.container.classList.remove("qb-cursor-delete");
+    this._setDeleteX(false);
+  }
+
+  _rebuildHoverOverlay(id, extraIds) {
+    const g = this._hoverPartGroup;
+    if (!g) return;
+    while (g.children.length) g.remove(g.children[0]);
+    if (id == null) return;
+    const ids = new Set([id, ...(extraIds || [])]);
+    const tmp = this._hoverMat;
+    const add = (geo, mat, world) => {
+      if (!geo || !mat) return;
+      const m = new THREE.Mesh(geo, this._hoverMaterial(mat));
+      m.matrix.copy(world);
+      m.matrixAutoUpdate = false;
+      m.raycast = () => {};
+      m.castShadow = false;
+      m.receiveShadow = false;
+      m.renderOrder = 8;
+      g.add(m);
+    };
+    this.buildGroup.traverse((o) => {
+      if (o.isInstancedMesh) {
+        const list = (o.userData && o.userData.instances) || [];
+        for (let i = 0; i < list.length; i++) {
+          if (!list[i] || !ids.has(list[i].id)) continue;
+          o.getMatrixAt(i, tmp);
+          add(o.geometry, o.material, tmp.clone().premultiply(o.matrixWorld));
+        }
+        return;
+      }
+      if (o.isMesh && o.userData && ids.has(o.userData.id)) add(o.geometry, o.material, o.matrixWorld);
+    });
+    this._applyClip();
   }
 
   _disposeGroup(group) {
@@ -4773,7 +5085,44 @@ export class SceneManager {
     }
   }
 
-  // 纯色草地，无草纹。阴影仍落在地面上。
+  _makeGrassTexture(baseHex) {
+    const S = 256;
+    const cv = document.createElement("canvas");
+    cv.width = cv.height = S;
+    const ctx = cv.getContext("2d");
+    const base = baseHex || this._tune?.grass || "#7A9B6C";
+    ctx.fillStyle = base;
+    ctx.fillRect(0, 0, S, S);
+    let seed = 42;
+    const rng = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 0x100000000; };
+    const patches = [shadeHex(base, -14), shadeHex(base, 10), shadeHex(base, -22), shadeHex(base, 6)];
+    ctx.globalAlpha = 0.26;
+    for (let i = 0; i < 32; i++) {
+      const x = rng() * S, y = rng() * S, r = 28 + rng() * 56;
+      const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+      g.addColorStop(0, patches[i % patches.length]);
+      g.addColorStop(1, hexRgba(shadeHex(base, -18), 0));
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 0.1;
+    for (let i = 0; i < 380; i++) {
+      const x = rng() * S, y = rng() * S;
+      ctx.fillStyle = i % 2 ? shadeHex(base, 14) : shadeHex(base, -16);
+      ctx.fillRect(x, y, 1.4, 1.4);
+    }
+    ctx.globalAlpha = 1;
+    const tex = new THREE.CanvasTexture(cv);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(GROUND_AREA / GRASS_TILE, GROUND_AREA / GRASS_TILE);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 4;
+    return tex;
+  }
+
+  // 草地：灰绿底 + 淡颗粒。阴影仍落在地面上。
   _buildGrass(opts = {}) {
     const area = opts.area || GROUND_AREA;
     const env = new THREE.Group();
@@ -4781,7 +5130,7 @@ export class SceneManager {
 
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(area, area),
-      new THREE.MeshLambertMaterial({ color: 0x58b83a })
+      new THREE.MeshLambertMaterial({ map: this._makeGrassTexture() })
     );
     ground.rotation.x = -Math.PI / 2;
     ground.position.y = -GROUND_DROP - 0.4;
@@ -4789,6 +5138,7 @@ export class SceneManager {
     env.add(ground);
 
     this.scene.add(env);
+    this._grassGround = ground;
     this._grassEnv  = env;
     this._grassMesh = null;   // keine Halm-Instanzen → _updateGrassMask ist no-op
     this._grassXZ   = null;
@@ -4904,8 +5254,8 @@ export class SceneManager {
           gl_FragColor = vec4(mix(uHorizon, uZenith, t * t), 1.0);
         }`,
       uniforms: {
-        uHorizon: { value: new THREE.Color(0xc9dff2) },
-        uZenith:  { value: new THREE.Color(0x3a7bbb) },
+        uHorizon: { value: new THREE.Color(SCENE_SKY_HORIZON) },
+        uZenith:  { value: new THREE.Color(SCENE_SKY_ZENITH) },
       },
       side: THREE.BackSide,
       depthWrite: false,
@@ -4913,6 +5263,7 @@ export class SceneManager {
     });
     this._skyMesh = new THREE.Mesh(new THREE.SphereGeometry(4800, 16, 10), mat);
     this._skyMesh.renderOrder = -1;
+    this._skyMat = mat;
     this.scene.add(this._skyMesh);
     // Hintergrundfarbe passend zum Himmel (Szene) bzw. zum Farbschema setzen --
     // sonst blitzt bis zum ersten setScene() die falsche Farbe auf.
@@ -4924,12 +5275,10 @@ export class SceneManager {
   // hinein; seit das Raster gewachsen ist, richten sie sich nach dessen Kante.
   // Geometrien und Materialien werden einmalig geteilt; per-Baum nur Transform.
   _buildTrees() {
-    const trunkMat  = new THREE.MeshLambertMaterial({ color: 0x6b5a3e }); // graubraun (Obstbaumrinde)
-    const crownMatA = new THREE.MeshLambertMaterial({ color: 0x5cb83a });
-    const crownMatB = new THREE.MeshLambertMaterial({ color: 0x6dcc44 });
-    const crownMatC = new THREE.MeshLambertMaterial({ color: 0x4aa32e });
-    // Obstbäume (Apfel/Birne/Pflaume): 250–350 cm hoch, kurzer dicker Stamm,
-    // breite runde Krone — typisch für Hausgarten.
+    const trunkMat  = new THREE.MeshLambertMaterial({ color: SCENE_TRUNK });
+    const crownMatA = new THREE.MeshLambertMaterial({ color: SCENE_CROWN_A });
+    const crownMatB = new THREE.MeshLambertMaterial({ color: SCENE_CROWN_B });
+    const crownMatC = new THREE.MeshLambertMaterial({ color: SCENE_CROWN_C });
     const trunkGeo  = new THREE.CylinderGeometry(8, 13, 100, 7);
     const crownGeoA = new THREE.SphereGeometry(120, 8, 6);
     const crownGeoB = new THREE.SphereGeometry(100, 7, 5);
@@ -4945,15 +5294,15 @@ export class SceneManager {
     // Die Zahl richtet sich nach dem Ring: er ist groesser als die frueheren
     // 620-780 cm, bei 60 Stueck stuenden sie vereinzelt in der Landschaft.
     const rand = GROUND_AREA / 2 - 10;
-    for (let i = 0; i < 110; i++) {
+    for (let i = 0; i < 72; i++) {
       const r = TREE_RING[0] + rng() * (TREE_RING[1] - TREE_RING[0]);
       const θ = rng() * Math.PI * 2;
       const tx = Math.cos(θ) * r, tz = Math.sin(θ) * r;
-      if (Math.abs(tx) > rand || Math.abs(tz) > rand) continue; // außerhalb der Fläche
+      if (Math.abs(tx) > rand || Math.abs(tz) > rand) continue;
 
-      const sc = 0.65 + rng() * 0.75;       // Skalierung 0.65–1.4
-      const ox2 = (rng() - 0.5) * 60, oz2 = (rng() - 0.5) * 60;
-      const ox3 = (rng() - 0.5) * 50, oz3 = (rng() - 0.5) * 50;
+      const sc = 0.65 + rng() * 0.7;
+      const ox2 = (rng() - 0.5) * 56, oz2 = (rng() - 0.5) * 56;
+      const ox3 = (rng() - 0.5) * 46, oz3 = (rng() - 0.5) * 46;
 
       const tg = new THREE.Group();
       tg.position.set(tx, 0, tz);
@@ -4961,10 +5310,10 @@ export class SceneManager {
       tg.rotation.y = rng() * Math.PI * 2;
 
       const trunk = new THREE.Mesh(trunkGeo, trunkMat);
-      trunk.position.y = 50; trunk.castShadow = true; tg.add(trunk);  // kurzer Stamm (100/2)
+      trunk.position.y = 50; trunk.castShadow = true; tg.add(trunk);
 
       const c1 = new THREE.Mesh(crownGeoA, crownMatA);
-      c1.position.set(0, 175, 0); c1.castShadow = true; tg.add(c1);  // breite Hauptkrone
+      c1.position.set(0, 175, 0); c1.castShadow = true; tg.add(c1);
 
       const c2 = new THREE.Mesh(crownGeoB, crownMatB);
       c2.position.set(ox2, 210, oz2); c2.castShadow = true; tg.add(c2);
@@ -4978,13 +5327,17 @@ export class SceneManager {
 
     this.scene.add(group);
     this._treeGroup = group;
+    this._trunkMat = trunkMat;
+    this._crownMatA = crownMatA;
+    this._crownMatB = crownMatB;
+    this._crownMatC = crownMatC;
 
     this._buildBushes();
   }
 
   _buildBushes() {
     const bushGeo = new THREE.SphereGeometry(30, 8, 6);
-    const bushMat = new THREE.MeshLambertMaterial({ color: 0x3d8a32 });
+    const bushMat = new THREE.MeshLambertMaterial({ color: SCENE_BUSH });
 
     const group = new THREE.Group();
     this._bushNodes = [];
@@ -4992,14 +5345,13 @@ export class SceneManager {
     let seed = 138;
     const rng = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 0x100000000; };
 
-    for (let i = 0; i < 60; i++) {
+    for (let i = 0; i < 40; i++) {
       const r = BUSH_RING[0] + rng() * (BUSH_RING[1] - BUSH_RING[0]);
       const θ = rng() * Math.PI * 2;
       const tx = Math.cos(θ) * r, tz = Math.sin(θ) * r;
       if (Math.abs(tx) > GROUND_AREA / 2 - 10 || Math.abs(tz) > GROUND_AREA / 2 - 10) continue;
 
       const sc = 0.5 + rng() * 0.5;
-      const ox = (rng() - 0.5) * 40, oz = (rng() - 0.5) * 40;
 
       const tg = new THREE.Group();
       tg.position.set(tx, 0, tz);
@@ -5007,7 +5359,7 @@ export class SceneManager {
       tg.rotation.y = rng() * Math.PI * 2;
 
       const bush = new THREE.Mesh(bushGeo, bushMat);
-      bush.position.y = 15; // Höhe ca. 30cm
+      bush.position.y = 15;
       bush.castShadow = true;
       tg.add(bush);
 
@@ -5017,6 +5369,7 @@ export class SceneManager {
 
     this.scene.add(group);
     this._bushGroup = group;
+    this._bushMat = bushMat;
   }
 
   // Bäume ausblenden, die zu nah an einem Modellknoten stehen.
@@ -5099,18 +5452,15 @@ export class SceneManager {
     if (this._dirLight) {
       this._dirLight.visible    = true;
       this._dirLight.castShadow = v;
-      this._dirLight.intensity  = v ? 1.7 : 1.05;
+      this._dirLight.intensity  = v ? (this._tune?.dirIntensity ?? 1.42) : 1.05;
       this._dirLight.color.set(v ? 0xfff8e7 : 0xffffff);
     }
-    if (this._fillLight) this._fillLight.intensity = v ? 0.22 : 0.5;
-    if (this._rimLight) this._rimLight.intensity = v ? 0.14 : 0.28;
-    // Hemisphärenlicht: im Builder-Modus neutral weiß, im Szene-Modus warm.
-    // Normal ist es schwächer als früher (1,4) -- das Sonnenlicht bringt jetzt
-    // den fehlenden Teil der Helligkeit mit.
+    if (this._fillLight) this._fillLight.intensity = v ? 0.28 : 0.5;
+    if (this._rimLight) this._rimLight.intensity = v ? 0.18 : 0.28;
     if (this._hemiLight) {
-      this._hemiLight.intensity = v ? 1.25 : 1.15;
-      this._hemiLight.color.set(v ? 0xd6eeff : 0xffffff);
-      this._hemiLight.groundColor.set(v ? 0x4a7a38 : 0xc4a078);
+      this._hemiLight.intensity = v ? (this._tune?.hemiIntensity ?? 1.22) : 1.15;
+      this._hemiLight.color.set(v ? 0xdef2ff : 0xffffff);
+      this._hemiLight.groundColor.set(v ? this._lookHex(this._tune?.hemiGround || "#6A8258") : 0xc4a078);
     }
     this._applyBackground();
     this._applyGrid();
@@ -5144,8 +5494,91 @@ export class SceneManager {
   /** Hintergrund: Szene an -> Horizont-Blau, sonst nach Farbschema. */
   _applyBackground() {
     if (!this.scene.background) return;
+    const horizon = this._lookHex(this._tune?.skyHorizon || SCENE_SKY_HORIZON);
+    const blank = this._lookHex(this._tune?.blank || BG_LIGHT);
     this.scene.background.set(
-      this._sceneOn ? 0xc9dff2 : (this._dark ? BG_DARK : BG_LIGHT));
+      this._sceneOn ? horizon : (this._dark ? BG_DARK : blank));
+    this._needsRender = true;
+  }
+
+  _look(colorId) {
+    return displayHex(colorId, this._grade);
+  }
+
+  _lookHex(hex) {
+    return gradeHex(this._asHex(hex), this._grade);
+  }
+
+  _asHex(c) {
+    if (typeof c === "number") {
+      return "#" + (c >>> 0).toString(16).padStart(6, "0").toUpperCase();
+    }
+    return String(c || "#888888");
+  }
+
+  /** 调试调色：风景 + 已缓存的管/板材质立刻跟上。 */
+  applyColorTune(tune) {
+    if (!tune) return;
+    if (tune.grade) this._grade = { ...DEFAULT_GRADE, ...tune.grade };
+    if (tune.scene) this._tune = { ...this._tune, ...tune.scene };
+    this._paintSceneTune();
+    this._applyFrameTune();
+  }
+
+  _paintSceneTune() {
+    const s = this._tune || {};
+    const look = (hex) => this._lookHex(hex);
+    if (this._skyMat?.uniforms) {
+      if (s.skyHorizon) this._skyMat.uniforms.uHorizon.value.set(look(s.skyHorizon));
+      if (s.skyZenith) this._skyMat.uniforms.uZenith.value.set(look(s.skyZenith));
+    }
+    if (this._grassGround && s.grass) {
+      const grassLook = look(s.grass);
+      if (grassLook !== this._grassLook) {
+        const old = this._grassGround.material.map;
+        this._grassGround.material.map = this._makeGrassTexture(grassLook);
+        this._grassGround.material.needsUpdate = true;
+        if (old) old.dispose();
+        this._grassLook = grassLook;
+      }
+    }
+    if (s.trunk && this._trunkMat) this._trunkMat.color.set(look(s.trunk));
+    if (s.crownA && this._crownMatA) this._crownMatA.color.set(look(s.crownA));
+    if (s.crownB && this._crownMatB) this._crownMatB.color.set(look(s.crownB));
+    if (s.crownC && this._crownMatC) this._crownMatC.color.set(look(s.crownC));
+    if (s.bush && this._bushMat) this._bushMat.color.set(look(s.bush));
+    if (this._sceneOn) {
+      if (this._dirLight && s.dirIntensity != null) this._dirLight.intensity = s.dirIntensity;
+      if (this._hemiLight) {
+        if (s.hemiIntensity != null) this._hemiLight.intensity = s.hemiIntensity;
+        if (s.hemiGround) this._hemiLight.groundColor.set(look(s.hemiGround));
+      }
+    }
+    this._applyBackground();
+    this._needsRender = true;
+  }
+
+  _applyFrameTune() {
+    const mats = this._materials || {};
+    for (const [key, mat] of Object.entries(mats)) {
+      if (!mat?.color) continue;
+      if (mat.userData?.tuneColorId) {
+        mat.color.set(this._look(mat.userData.tuneColorId));
+        mat.needsUpdate = true;
+        continue;
+      }
+      if (mat.userData?.tuneHex) {
+        mat.color.set(this._lookHex(mat.userData.tuneHex));
+        mat.needsUpdate = true;
+        continue;
+      }
+      const kind = key.split(":")[0];
+      if (kind !== "tube" && kind !== "panel" && kind !== "tubehl") continue;
+      const colorId = key.split(":")[1];
+      if (!colorId) continue;
+      mat.color.set(this._look(colorId));
+      mat.needsUpdate = true;
+    }
     this._needsRender = true;
   }
 
@@ -5327,11 +5760,12 @@ export class SceneManager {
     this._cubeScene = new THREE.Scene();
     // Orthografisch, damit der Wuerfel unabhaengig von der Hauptprojektion
     // immer gleich aussieht. Der Ausschnitt fasst auch die Ecken der Diagonale.
-    this._cubeCam = new THREE.OrthographicCamera(-1.75, 1.75, 1.75, -1.75, 0.1, 40);
+    this._cubeCam = new THREE.OrthographicCamera(
+      -CUBE_FRUSTUM, CUBE_FRUSTUM, CUBE_FRUSTUM, -CUBE_FRUSTUM, 0.1, 40);
     // Hell ausgeleuchtet: der Wuerfel ist ein Bedienelement, kein Bauteil --
     // er soll vor jedem Hintergrund gleich gut lesbar sein.
-    this._cubeScene.add(new THREE.AmbientLight(0xffffff, 2.0));
-    const light = new THREE.DirectionalLight(0xffffff, 1.1);
+    this._cubeScene.add(new THREE.AmbientLight(0xffffff, 1.55));
+    const light = new THREE.DirectionalLight(0xffffff, 0.85);
     light.position.set(4, 6, 5);
     this._cubeScene.add(light);
 
@@ -5341,8 +5775,7 @@ export class SceneManager {
     this._cubeBody = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), this._cubeFaceMats);
     this._cubeScene.add(this._cubeBody);
 
-    // Kanten nachziehen, sonst verschwimmt der Wuerfel vor dem Hintergrund.
-    this._cubeEdgeMat = new THREE.LineBasicMaterial({ color: CUBE_EDGE_LIGHT });
+    this._cubeEdgeMat = new THREE.LineBasicMaterial({ color: CUBE_EDGE_LIGHT, transparent: true, opacity: 0.55 });
     this._cubeScene.add(new THREE.LineSegments(
       new THREE.EdgesGeometry(this._cubeBody.geometry), this._cubeEdgeMat));
 
@@ -5398,10 +5831,10 @@ export class SceneManager {
     const cv = document.createElement("canvas");
     cv.width = cv.height = S;
     const g = cv.getContext("2d");
-    g.fillStyle = this._dark ? "#232019" : "#edd8c4";
+    g.fillStyle = this._dark ? "#2a3038" : "#eef1f5";
     g.fillRect(0, 0, S, S);
-    g.fillStyle = this._dark ? "#f2ede5" : "#1f2430";
-    g.font = "700 23px system-ui, sans-serif";
+    g.fillStyle = this._dark ? "#e8edf3" : "#3a4350";
+    g.font = "700 26px system-ui, sans-serif";
     g.textAlign = "center";
     g.textBaseline = "middle";
     g.fillText(String(text).toUpperCase(), S / 2, S / 2);
@@ -5415,34 +5848,33 @@ export class SceneManager {
   }
 
   /**
-   * Wie weit der Ansichtswuerfel von oben / rechts abruecken soll.
-   * Oben: Titelleiste; rechts: Teileliste, sonst liegt er darunter.
+   * 视角方块停在画布右下角。right / bottom 是相对右边和底边再让出的 CSS 像素
+   * （右侧抽屉、拼装条等）。
    */
-  setViewCubePad(top, right) {
-    const t = Math.max(0, top || 0);
+  setViewCubePad(right, bottom, size) {
     const r = Math.max(0, right || 0);
-    if (t === this._cubeInset && r === this._cubePadRight) return;
-    this._cubeInset = t;
+    const b = Math.max(0, bottom || 0);
+    const s = Math.max(32, Math.round(size || CUBE_PX));
+    if (r === this._cubePadRight && b === this._cubePadBottom && s === this._cubePx) return;
     this._cubePadRight = r;
+    this._cubePadBottom = b;
+    this._cubePx = s;
     this._needsRender = true;
   }
 
-  /**
-   * Wie weit der Ansichtswuerfel von oben abruecken soll. Gebraucht, wenn eine
-   * Leiste ueber dem Bild liegt (Schnittebene auf schmalen Schirmen) -- sonst
-   * verschwindet er dahinter.
-   */
   setViewCubeInset(px) {
-    this.setViewCubePad(px, this._cubePadRight);
+    this.setViewCubePad(this._cubePadRight, px);
   }
 
   /** Ausschnitt des Wuerfels in CSS-Pixeln, gemessen von der linken oberen Ecke. */
   _cubeRect() {
     const w = this.container.clientWidth, h = this.container.clientHeight;
-    if (w < CUBE_PX * 2 || h < CUBE_PX * 2) return null;   // zu wenig Platz
-    const x = Math.max(CUBE_MARGIN, w - CUBE_PX - CUBE_MARGIN - (this._cubePadRight || 0));
-    const y = CUBE_MARGIN + (this._cubeInset || 0);
-    return { x, y, size: CUBE_PX, w, h };
+    const size = this._cubePx || CUBE_PX;
+    if (w < size + CUBE_MARGIN * 2 || h < size + CUBE_MARGIN * 2) return null;
+    const x = w - size - CUBE_MARGIN - (this._cubePadRight || 0);
+    const y = h - size - CUBE_MARGIN - (this._cubePadBottom || 0);
+    if (x < 0 || y < 0 || x + size > w || y + size > h) return null;
+    return { x, y, size, w, h };
   }
 
   _renderViewCube() {
@@ -5450,6 +5882,10 @@ export class SceneManager {
     const r = this._cubeRect();
     if (!r) return;
     // Wuerfel genauso ausrichten wie die Hauptkamera und von aussen anschauen.
+    this._cubeCam.left = -CUBE_FRUSTUM;
+    this._cubeCam.right = CUBE_FRUSTUM;
+    this._cubeCam.top = CUBE_FRUSTUM;
+    this._cubeCam.bottom = -CUBE_FRUSTUM;
     this._cubeCam.quaternion.copy(this.camera.quaternion);
     this._cubeCam.position.set(0, 0, 1).applyQuaternion(this.camera.quaternion).multiplyScalar(12);
     this._cubeCam.updateProjectionMatrix();

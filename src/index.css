@@ -134,3 +134,33 @@ body.resizing-panels[data-resize-dir="move"],
 body.resizing-panels[data-resize-dir="move"] * {
   cursor: grabbing !important;
 }
+
+/* 删除模式：藏起系统光标，改用跟手的红 X */
+.qb-cursor-delete,
+.qb-cursor-delete canvas {
+  cursor: none !important;
+}
+.qb-delete-x {
+  position: fixed;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+  pointer-events: none;
+  z-index: 80;
+  display: none;
+}
+.qb-delete-x.on { display: block; }
+.qb-delete-x::before,
+.qb-delete-x::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 18px;
+  height: 2.5px;
+  border-radius: 2px;
+  background: #e11d48;
+  box-shadow: 0 0 0 1.5px #fff;
+}
+.qb-delete-x::before { transform: translate(-50%, -50%) rotate(45deg); }
+.qb-delete-x::after { transform: translate(-50%, -50%) rotate(-45deg); }

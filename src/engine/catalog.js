@@ -174,9 +174,10 @@ function colorDef(colorId) {
 
 export function colorHex(colorId) {
   if (isHexColor(colorId)) return colorId;
+  // 调色台改的是 COLOR_HEX；目录里的 hex 可能还是出厂值。
+  if (COLOR_HEX[colorId]) return COLOR_HEX[colorId];
   const c = colorDef(colorId);
   if (c) return c.hex;
-  if (COLOR_HEX[colorId]) return COLOR_HEX[colorId];
   return "#888888";
 }
 
