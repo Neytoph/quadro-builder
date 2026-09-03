@@ -8,6 +8,8 @@ export const TAB_BAR_H = 44
 export const NARROW_MAX = 767
 export const TOP_MIN = TAB_BAR_H + PANEL_GAP
 export const TOOLBAR_H = 56
+/** 工具条真实高度：内边距 + h-12 按钮 + 描边。和左侧 40px 方块对中位线时用这个。 */
+export const TOOLBAR_CHROME_H = 58
 
 export const LEFT_DEFAULT = 192
 export const RIGHT_DEFAULT = 264
@@ -17,13 +19,14 @@ const RIGHT_MIN = 196
 const RIGHT_MAX = 448
 export const HEIGHT_MIN = 180
 
-/** 草地 / 框住：固定小方块，贴在左栏右侧画布角。 */
+/** 草地 / 框住 / 导出：固定小方块，贴在左栏右侧画布角。 */
 export const CORNER_TILE = 40
 export const VIEW_CUBE_PX = 80
 export const VIEW_CUBE_MARGIN = 22
 export const SCENE_TOGGLE_PX = CORNER_TILE
 export const SCENE_CLUSTER_GAP = 8
-export const SCENE_CLUSTER_W = CORNER_TILE * 2 + SCENE_CLUSTER_GAP
+export const SCENE_CLUSTER_TILES = 3
+export const SCENE_CLUSTER_W = CORNER_TILE * SCENE_CLUSTER_TILES + SCENE_CLUSTER_GAP * (SCENE_CLUSTER_TILES - 1)
 export const CORNER_BOTTOM = 16
 export const CORNER_BOTTOM_NARROW = 72
 /** 左栏拖动手柄 h-3.5 + 栏内 gap-2，窄屏没有手柄。 */
@@ -39,10 +42,12 @@ type Ctx = {
   right: PanelBox
   vw: number
   vh: number
+  toolbarW: number
   leftColor: boolean
   leftKeys: boolean
   patchLeft: (p: Partial<PanelBox>) => void
   patchRight: (p: Partial<PanelBox>) => void
+  setToolbarW: (w: number) => void
   setLeftColor: (on: boolean) => void
   setLeftKeys: (on: boolean) => void
   toggleLeftColor: () => void
@@ -144,24 +149,59 @@ export function leftColumnWidth(box: PanelBox, vw: number) {
   return vw <= NARROW_MAX ? Math.min(box.width, vw - PANEL_GAP * 2) : box.width
 }
 
-/** 草地 / 框住贴左栏右侧顶上；视角方块在画布右下，避开右侧抽屉。 */
-export function canvasCorner(left: PanelBox, vw: number, extras: { right?: PanelBox; dockOpen?: boolean } = {}) {
+/** 居中工具条会碰到左栏时，左栏立刻改到工具栏下面。 */
+export function leftStackDrop(left: PanelBox, vw: number, toolbarW: number) {
+  if (vw <= NARROW_MAX) return true
+  const colRight = PANEL_GAP + leftColumnWidth(left, vw)
+  const width = Math.max(1, toolbarW)
+  const barLeft = (vw - width) / 2
+  const barRight = barLeft + width
+  const pad = 4
+  return barLeft < colRight + pad && barRight > PANEL_GAP - pad
+}
+
+/** 桌面：工具条垂直中线对齐「颜色」旁那一行；窄屏贴在标签栏下。不跟三个按钮的下落位置走。 */
+export function toolbarTop(left: PanelBox, vw: number) {
+  if (vw <= NARROW_MAX) return TOP_MIN
+  const sceneTop = left.top + LEFT_MOVE_HANDLE_H + LEFT_STACK_GAP
+  return Math.round(sceneTop + SCENE_TOGGLE_PX / 2 - TOOLBAR_CHROME_H / 2)
+}
+
+/** 居中工具条会碰到三个按钮或左栏时，按钮改到工具栏下面，工具条保持原宽。 */
+export function sceneButtonsDrop(left: PanelBox, vw: number, toolbarW: number) {
+  if (leftStackDrop(left, vw, toolbarW)) return true
+  const clusterW = SCENE_TOGGLE_PX * SCENE_CLUSTER_TILES + SCENE_CLUSTER_GAP * (SCENE_CLUSTER_TILES - 1)
+  const sceneLeft = Math.min(
+    canvasInset(left),
+    Math.max(PANEL_GAP, vw - clusterW - PANEL_GAP),
+  )
+  const width = Math.max(1, toolbarW)
+  const barLeft = (vw - width) / 2
+  const barRight = barLeft + width
+  const pad = 4
+  return barLeft < sceneLeft + clusterW + pad && barRight > sceneLeft - pad
+}
+
+/** 草地 / 框住 / 导出贴左栏右侧顶上；视角方块在画布右下，避开右侧抽屉。 */
+export function canvasCorner(left: PanelBox, vw: number, extras: { right?: PanelBox; dockOpen?: boolean; toolbarW?: number } = {}) {
   const narrow = vw <= NARROW_MAX
   const tile = SCENE_TOGGLE_PX
-  const clusterW = tile * 2 + SCENE_CLUSTER_GAP
+  const clusterW = tile * SCENE_CLUSTER_TILES + SCENE_CLUSTER_GAP * (SCENE_CLUSTER_TILES - 1)
   const bottom = narrow ? CORNER_BOTTOM_NARROW : CORNER_BOTTOM
   const sceneLeft = Math.min(
     canvasInset(left),
     Math.max(PANEL_GAP, vw - clusterW - PANEL_GAP),
   )
-  const stackTop = narrow ? TOP_MIN + TOOLBAR_H + PANEL_GAP : left.top
-  const sceneTop = stackTop + (narrow ? 0 : LEFT_MOVE_HANDLE_H + LEFT_STACK_GAP)
+  const drop = sceneButtonsDrop(left, vw, extras.toolbarW ?? 720)
+  const barTop = toolbarTop(left, vw)
+  const besideTop = left.top + LEFT_MOVE_HANDLE_H + LEFT_STACK_GAP
+  const sceneTop = drop ? barTop + TOOLBAR_CHROME_H + PANEL_GAP : besideTop
   const cubeSize = VIEW_CUBE_PX
   const rightInset = !narrow && extras.dockOpen && extras.right
     ? extras.right.width + PANEL_GAP * 2
     : PANEL_GAP
   return {
-    beside: true,
+    beside: !drop,
     tile,
     cubeSize,
     clusterW,
@@ -182,6 +222,7 @@ export function canvasCorner(left: PanelBox, vw: number, extras: { right?: Panel
 export function PanelLayoutProvider({ children }: { children: ReactNode }) {
   const [{ vw, vh }, setVp] = useState(viewport)
   const [layout, setLayout] = useState(() => load(viewport().vh))
+  const [toolbarW, setToolbarWState] = useState(720)
 
   useEffect(() => {
     const on = () => setVp(viewport())
@@ -227,6 +268,10 @@ export function PanelLayoutProvider({ children }: { children: ReactNode }) {
   const toggleLeftKeys = useCallback(() => {
     setLayout(cur => ({ ...cur, leftKeys: !cur.leftKeys }))
   }, [])
+  const setToolbarW = useCallback((w: number) => {
+    const n = Math.round(w)
+    setToolbarWState(cur => (cur === n ? cur : n))
+  }, [])
 
   const value = useMemo(
     () => ({
@@ -234,16 +279,18 @@ export function PanelLayoutProvider({ children }: { children: ReactNode }) {
       right: layout.right,
       vw,
       vh,
+      toolbarW,
       leftColor: layout.leftColor,
       leftKeys: layout.leftKeys,
       patchLeft,
       patchRight,
+      setToolbarW,
       setLeftColor,
       setLeftKeys,
       toggleLeftColor,
       toggleLeftKeys,
     }),
-    [layout, vw, vh, patchLeft, patchRight, setLeftColor, setLeftKeys, toggleLeftColor, toggleLeftKeys],
+    [layout, vw, vh, toolbarW, patchLeft, patchRight, setToolbarW, setLeftColor, setLeftKeys, toggleLeftColor, toggleLeftKeys],
   )
   return <PanelCtx.Provider value={value}>{children}</PanelCtx.Provider>
 }

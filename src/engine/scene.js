@@ -502,30 +502,120 @@ export class SceneManager {
    * festen Werte.
    */
   resetCamera(model = null) {
-    this._needsRender = true;
     const start = new THREE.Vector3(...this._defaultCam.pos);
     const heim = new THREE.Vector3(...this._defaultCam.target);
     const dir = start.clone().sub(heim).normalize();
+    this._frameAlong(model, dir);
+  }
 
-    const b = model && model.bounds ? model.bounds(geometry().connectorSize / 2) : null;
+  /**
+   * 绕竖直轴转 yaw 弧度后框住模型。说明书正/反视图用：0 是默认 3/4，π 是背面。
+   * silent 时不写进会话相机。
+   */
+  frameFromYaw(model, yaw = 0, opts = {}) {
+    const start = new THREE.Vector3(...this._defaultCam.pos);
+    const heim = new THREE.Vector3(...this._defaultCam.target);
+    const dir = start.clone().sub(heim);
+    if (yaw) dir.applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+    dir.normalize();
+    if (opts.elevate) {
+      dir.y += opts.elevate;
+      dir.normalize();
+    }
+    this._frameAlong(model, dir, opts);
+  }
+
+  /**
+   * 世界坐标投到当前相机画面，返回 0–1 的 uv（原点在左上）以及 NDC z。
+   * 在相机背后或明显出画的点返回 null。aspect 若给定会临时改透视比，投完还原。
+   */
+  projectWorld(points, aspect = null) {
+    const cam = this.camera;
+    const prevAspect = cam.aspect;
+    if (aspect && Math.abs(aspect - cam.aspect) > 1e-4) {
+      cam.aspect = aspect;
+      cam.updateProjectionMatrix();
+    }
+    cam.updateMatrixWorld();
+    const dir = new THREE.Vector3();
+    cam.getWorldDirection(dir);
+    const origin = cam.position;
+    const v = new THREE.Vector3();
+    const to = new THREE.Vector3();
+    const out = [];
+    for (const p of points) {
+      v.set(p[0], p[1], p[2]);
+      to.copy(v).sub(origin);
+      if (to.dot(dir) <= 0.4) {
+        out.push(null);
+        continue;
+      }
+      v.project(cam);
+      if (v.z < -1 || v.z > 1 || Math.abs(v.x) > 1.12 || Math.abs(v.y) > 1.12) {
+        out.push(null);
+        continue;
+      }
+      out.push({
+        u: v.x * 0.5 + 0.5,
+        v: -v.y * 0.5 + 0.5,
+        z: v.z,
+      });
+    }
+    if (aspect && Math.abs(prevAspect - cam.aspect) > 1e-4) {
+      cam.aspect = prevAspect;
+      cam.updateProjectionMatrix();
+    }
+    return out;
+  }
+
+  getCameraPose() {
+    const t = this.controls ? this.controls.target : new THREE.Vector3(...this._defaultCam.target);
+    return {
+      pos: this.camera.position.toArray(),
+      target: t.toArray(),
+      zoom: this.camera.zoom,
+      projection: this._projection,
+    };
+  }
+
+  setCameraPose(pose) {
+    if (!pose) return;
+    this._camAnim = null;
+    this._needsRender = true;
+    if (pose.projection && pose.projection !== this._projection) this.setProjection(pose.projection);
+    this.camera.position.fromArray(pose.pos);
+    this.camera.zoom = pose.zoom || 1;
+    this.camera.lookAt(pose.target[0], pose.target[1], pose.target[2]);
+    this.camera.updateProjectionMatrix();
+    if (this.controls) {
+      this.controls.target.fromArray(pose.target);
+      this.controls.update();
+    }
+    this._updateOrthoFrustum();
+  }
+
+  _frameAlong(model, dir, opts = {}) {
+    this._camAnim = null;
+    this._needsRender = true;
+    const heim = new THREE.Vector3(...this._defaultCam.target);
+    const pad = geometry().connectorSize / 2;
+    const b = opts.bounds || (model && model.bounds ? model.bounds(pad) : null);
     const leer = !b || (!b.size[0] && !b.size[1] && !b.size[2]);
     let target, dist;
     if (leer) {
       target = heim;
-      dist = start.distanceTo(heim);
+      dist = new THREE.Vector3(...this._defaultCam.pos).distanceTo(heim);
     } else {
       target = new THREE.Vector3(
         (b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2, (b.min[2] + b.max[2]) / 2);
-      const w = this.container.clientWidth || 1, h = this.container.clientHeight || 1;
+      const w = this._viewSize?.w || this.container.clientWidth || 1;
+      const h = this._viewSize?.h || this.container.clientHeight || 1;
+      const aspect = opts.aspect || (w / h);
       const fovV = (this._perspCam.fov * Math.PI) / 180;
-      const fovH = 2 * Math.atan(Math.tan(fovV / 2) * (w / h));
-      // Gerechnet wird mit den acht ECKEN, nicht mit einer Kugel um die Kiste:
-      // ein flaches Modell fuellt das Bild sonst nur zur Haelfte. Je Ecke sagt
-      // ihr Abstand zur Bildmitte (quer) und ihre Tiefe (laengs), wie weit die
-      // Kamera zurueck muss, damit sie gerade noch im Bild liegt.
+      const fovH = 2 * Math.atan(Math.tan(fovV / 2) * aspect);
       const blick = dir.clone().negate();
       let quer = new THREE.Vector3().crossVectors(blick, new THREE.Vector3(0, 1, 0));
-      if (quer.lengthSq() < 1e-6) quer = new THREE.Vector3(1, 0, 0);   // Blick senkrecht
+      if (quer.lengthSq() < 1e-6) quer = new THREE.Vector3(1, 0, 0);
       quer.normalize();
       const hoch = new THREE.Vector3().crossVectors(quer, blick).normalize();
       const tanH = Math.tan(fovH / 2), tanV = Math.tan(fovV / 2);
@@ -541,24 +631,27 @@ export class SceneManager {
           }
         }
       }
-      dist = FIT_MARGIN * noetig;
-      // Die Grenze fuers Herauszoomen darf das Einpassen nicht zurueckziehen.
-      this._maxDistance = Math.max(this._maxDistance || 0, dist);
+      dist = (opts.margin || FIT_MARGIN) * noetig;
+      if (!opts.silent) this._maxDistance = Math.max(this._maxDistance || 0, dist);
+      if (opts.lookDown) target.y -= (b.max[1] - b.min[1]) * opts.lookDown;
     }
 
-    this.camera.position.copy(target).addScaledVector(dir, dist);
-    this.camera.lookAt(target);
-    this.camera.zoom = 1;
-    this.camera.updateProjectionMatrix();
-    if (this.controls) {
-      this.controls.target.copy(target);
-      this.controls.update();
+    const prev = this.onCameraChange;
+    if (opts.silent) this.onCameraChange = () => {};
+    try {
+      this.camera.position.copy(target).addScaledVector(dir, dist);
+      this.camera.lookAt(target);
+      this.camera.zoom = 1;
+      this.camera.updateProjectionMatrix();
+      if (this.controls) {
+        this.controls.target.copy(target);
+        this.controls.update();
+      }
+      this._updateOrthoFrustum();
+      this.onCameraChange();
+    } finally {
+      this.onCameraChange = prev;
     }
-    // Der orthografische Ausschnitt kommt aus Abstand und Oeffnungswinkel --
-    // damit passt auch dort das ganze Modell ins Bild.
-    this._updateOrthoFrustum();
-    // Auch das Einpassen ist ein Kamerastand, der einen Reload ueberleben soll.
-    this.onCameraChange();
   }
 
   /** Aktive Projektion: "perspective" | "orthographic". */
@@ -605,7 +698,8 @@ export class SceneManager {
   // Oeffnungswinkel der perspektivischen ableiten -- so deckt sie beim
   // Umschalten denselben Bereich ab.
   _updateOrthoFrustum() {
-    const w = this.container.clientWidth, h = this.container.clientHeight;
+    const w = this._viewSize?.w || this.container.clientWidth;
+    const h = this._viewSize?.h || this.container.clientHeight;
     if (!w || !h) return;
     const target = this.controls ? this.controls.target : new THREE.Vector3(...this._defaultCam.target);
     const dist = this.camera.position.distanceTo(target) || 1;
@@ -2947,7 +3041,7 @@ export class SceneManager {
 
   // Textmarke (Sprite mit Canvas-Textur) ueber einer Kupplung.
   _makeLabelSprite(text, current, category) {
-    const dpr = 2;
+    const dpr = this._labelDpr || 2;
     const pad = 10 * dpr, fs = 30 * dpr;
     const canvas = document.createElement("canvas");
     const ctx = canvas.getContext("2d");
@@ -5720,16 +5814,47 @@ export class SceneManager {
    * Gerendert wird eigens fuer diesen Aufruf und der Puffer SOFORT ausgelesen:
    * `preserveDrawingBuffer` ist aus, nach dem naechsten Bild waere er leer.
    */
-  snapshot() {
-    const versteckt = [this._grid, this.handleGroup, this.labelGroup]
-      .filter(Boolean).map((o) => [o, o.visible]);
+  snapshot(opts = {}) {
+    const hideGrid = opts.hideGrid !== false;
+    const hideLabels = opts.hideLabels !== false;
+    const hideRoom = opts.hideRoom === true;
+    const mime = opts.mime || "image/png";
+    const quality = opts.quality;
+    const snapW = opts.width | 0;
+    const snapH = opts.height | 0;
+    const resized = snapW > 0 && snapH > 0;
+    const prevPR = this.renderer.getPixelRatio();
+    if (resized) {
+      this._viewSize = { w: snapW, h: snapH };
+      this._perspCam.aspect = snapW / snapH;
+      this._perspCam.updateProjectionMatrix();
+      this.renderer.setPixelRatio(opts.pixelRatio || Math.max(2, prevPR));
+      this.renderer.setSize(snapW, snapH, false);
+      this._updateOrthoFrustum();
+    }
+    const versteckt = [
+      hideGrid ? this._grid : null,
+      this.handleGroup,
+      hideLabels ? this.labelGroup : null,
+      this._hoverPartGroup,
+      hideRoom ? this._roomGroup : null,
+    ].filter(Boolean).map((o) => [o, o.visible]);
     for (const [o] of versteckt) o.visible = false;
     let url = null;
     try {
       this.renderer.render(this.scene, this.camera);
-      url = this.renderer.domElement.toDataURL("image/png");
+      url = mime === "image/jpeg"
+        ? this.renderer.domElement.toDataURL(mime, quality ?? 0.82)
+        : this.renderer.domElement.toDataURL(mime);
     } finally {
       for (const [o, sichtbar] of versteckt) o.visible = sichtbar;
+      if (resized) {
+        this._viewSize = null;
+        this.renderer.setPixelRatio(prevPR);
+        this._lastW = 0;
+        this._lastH = 0;
+        this.onResize();
+      }
       this._needsRender = true;      // das naechste Bild zeigt wieder alles
     }
     return url;

@@ -10,6 +10,7 @@
 // 真正的错误。探测用的就是同一个拉取接口，不额外依赖任何平台专有的
 // "我是谁"接口——任何实现了这套同步契约的后端，未登录时都会给 401/403。
 
+import { track } from '../analytics/track'
 import { createSync, QuotaError } from './index'
 import type { SyncEvent } from './types'
 
@@ -41,8 +42,11 @@ export function startSyncIfConfigured(
     onEvent: (e) => {
       // 配额用尽要让用户看见，别静默失败
       if (e.type === 'quota') {
+        // 撞配额是最该看见的一类事件：它直接对应"有人想用但被拦住了"
+        track('builder.sync.quota', { feature: e.feature, limit: e.limit })
         console.warn(`[sync] 配额已满：${e.feature} ${e.used}/${e.limit}`)
       } else if (e.type === 'error') {
+        track('builder.sync.error')
         console.warn('[sync] 同步出错', e.error)
       }
       onEvent?.(e)
@@ -52,6 +56,7 @@ export function startSyncIfConfigured(
   const begin = () => {
     if (started) return
     started = true
+    track('builder.sync.start')
     sync.start()
     // 关页面前推一把，别把最后的改动留在本地
     window.addEventListener('pagehide', () => { void sync.syncNow() })
@@ -62,6 +67,9 @@ export function startSyncIfConfigured(
   void (async () => {
     const ok = await authenticated(baseUrl)
     if (ok) { begin(); return }
+    // 没登录也记一笔：进了 builder 却没登录的人有多少，
+    // 直接说明入口那道闸门有没有漏。
+    if (ok === false) track('builder.sync.anon')
 
     const recheck = async () => {
       if (started || document.visibilityState !== 'visible') return

@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { bumpCount, track } from '../analytics/track'
 import {
   BuildModel, Builder, SceneManager, loadCatalog, computeBOM, compareInventory, connectorsForNode,
   parseQDF, parseDesign, designEntry, buildQDF, buildableTubes, buildableCurvedTubes, buildablePanels, tubeColors, allConnectors, accessories,
@@ -11,6 +12,7 @@ import { clearSharePayload, decodeShare, peekSharePayload, shareUrl } from '../s
 import { isUntitledName, labelOf as nameLabel } from '../names'
 import { fetchOfficialQdf, officialLibId, OFFICIAL_BY_ID, parseOfficialId } from '../data/official'
 import { applyFrameHex, loadTune } from '../engine/colorTune.js'
+import { exportAssemblyPdf as runAssemblyPdf } from '../engine/assemblyManual.js'
 
 // 引擎来自 Vanilla JS，这里不跟它的推断类型较劲。
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -168,6 +170,11 @@ interface EngineApi {
   loadPreset: (key: string) => void
   setViewCubePad: (right: number, bottom: number, size?: number) => void
   exportPng: () => void
+  exportAssemblyPdf: () => Promise<void>
+  confirmExportManual: () => Promise<void>
+  cancelExportManual: () => void
+  exportManualConfirm: boolean
+  exportingManual: { page: number; total: number } | null
   shareCurrent: () => Promise<void>
   catalog: {
     tubes: Array<{ id: string; length_cm: number; name?: string }>
@@ -367,6 +374,9 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const [inventory, setInventory] = useState<Inventory>(loadInv)
   const [room, setRoomState] = useState<RoomSettings>(loadRoom)
   const [side, setSide] = useState<SidePanel>('bom')
+  const [exportingManual, setExportingManual] = useState<{ page: number; total: number } | null>(null)
+  const [exportManualConfirm, setExportManualConfirm] = useState(false)
+  const exportingManualRef = useRef(false)
   const [catalog, setCatalog] = useState<EngineApi['catalog']>({
     tubes: [], curved: [], panels: [], colors: [], connectors: [], accessories: [],
   })
@@ -716,6 +726,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const newTab = useCallback(() => {
+    track('builder.design.new')
     snapshotActive()
     const e2 = eng.current
     if (!e2) return
@@ -783,6 +794,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     tab.dirty = false
     tab.model = data
     syncTabs()
+    track('builder.design.save', { parts: modelPartCount(data), named: !!name })
     notify(t('toast.saved', { name: saved.name }))
   }, [notify, syncTabs, t])
 
@@ -901,10 +913,14 @@ export function EngineProvider({ children }: { children: ReactNode }) {
         tab.name = file.name.replace(/\.(qdf|json)$/i, '') || tab.name
       }
       syncTabs()
+      track('builder.design.import', { kind: looksJson ? 'json' : 'qdf', ok: true })
       notify(t('toast.imported', { name: file.name }))
       bump()
     } catch (err) {
       switching.current = false
+      // 导入失败的比例说明格式支持得够不够。只记格式，不记文件名——
+      // 文件名是用户起的，属于自由文本。
+      track('builder.design.import', { kind: 'unknown', ok: false })
       notify(t('toast.importFailed', { err: err instanceof Error ? err.message : String(err) }), 'err')
     }
   }, [bump, notify, syncTabs, t])
@@ -913,6 +929,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const e2 = eng.current
     if (!e2) return
     const out = buildQDF(e2.model, { camera: e2.scene.cameraForQdf?.() }) as { text?: string } | string
+    track('builder.export.qdf')
     download(`${activeName()}.qdf`, typeof out === 'string' ? out : (out.text || ''), 'text/plain')
     notify(t(qdfWillMapColors(e2.model) ? 'toast.exportedQdfMapped' : 'toast.exported'))
   }, [notify, t])
@@ -920,6 +937,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const exportJson = useCallback(() => {
     const e2 = eng.current
     if (!e2) return
+    track('builder.export.json')
     download(`${activeName()}.json`, JSON.stringify(e2.model.toJSON(), null, 2), 'application/json')
     notify(t('toast.exported'))
   }, [notify, t])
@@ -966,6 +984,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const frag = data ? jsonToFragment(data) : null
     if (!frag) { notify(t('toast.presetFailed'), 'err'); return }
     clipboard.current = frag
+    track('builder.model.module', { key })
     builder?.startPaste?.(frag)
     notify(t('toast.moduleHint'))
     bump()
@@ -981,6 +1000,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   }, [builder, bump])
 
   const exportInventory = useCallback(() => {
+    track('builder.inventory.export')
     download('quadro-inventory.json', JSON.stringify({ format: 'quadro.inventory.v1', inventory }, null, 2), 'application/json')
     notify(t('toast.invExported'))
   }, [inventory, notify, t])
@@ -1040,6 +1060,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       notify(t('toast.presetFailed'), 'err')
       return
     }
+    track('builder.model.preset', { key })
     notify(t('toast.preset', { name: t(`preset.${key}`) }))
   }, [applyModelJson, notify, t])
 
@@ -1055,6 +1076,89 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     notify(t('toast.pngSaved'))
   }, [notify, t])
 
+  const cancelExportManual = useCallback(() => setExportManualConfirm(false), [])
+
+  const exportAssemblyPdf = useCallback(async () => {
+    const e2 = eng.current
+    if (!e2 || exportingManualRef.current) return
+    if (modelPartCount(e2.model.toJSON()) === 0) {
+      notify(t('toast.manualEmpty'), 'warn')
+      return
+    }
+    track('builder.export.manual.ask', { parts: modelPartCount(e2.model.toJSON()) })
+    setExportManualConfirm(true)
+  }, [notify, t])
+
+  const confirmExportManual = useCallback(async () => {
+    const e2 = eng.current
+    if (!e2 || exportingManualRef.current) return
+    if (modelPartCount(e2.model.toJSON()) === 0) {
+      setExportManualConfirm(false)
+      notify(t('toast.manualEmpty'), 'warn')
+      return
+    }
+    setExportManualConfirm(false)
+    track('builder.export.manual.go')
+    exportingManualRef.current = true
+    switching.current = true
+    setExportingManual({ page: 0, total: 1 })
+    const locale = lang === 'zh' ? 'zh-CN' : lang === 'de' ? 'de-DE' : 'en-US'
+    const b = e2.model.bounds?.(2.5) as { size: number[] } | null
+    const sizeLine = b
+      ? t('manual.size', { w: Math.round(b.size[0]), d: Math.round(b.size[2]), h: Math.round(b.size[1]) })
+      : ''
+    let bomNow: BomView | null = null
+    try { bomNow = asBom(computeBOM(e2.model) as AnyRec) } catch { bomNow = null }
+    const fileBase = (activeName() || 'design').replace(/[\\/:*?"<>|]+/g, '_').trim() || 'design'
+    try {
+      await runAssemblyPdf({
+        scene: e2.scene,
+        builder: e2.builder,
+        model: e2.model,
+        name: activeName(),
+        bom: bomNow,
+        filename: `${fileBase}-${t('manual.fileSuffix')}.pdf`,
+        onProgress: (p: { page: number; total: number }) => setExportingManual(p),
+        copy: {
+          product: t('app.title'),
+          coverTitle: t('manual.coverTitle'),
+          date: new Date().toLocaleDateString(locale, { year: 'numeric', month: 'long', day: 'numeric' }),
+          stepsLine: t('manual.stepsLine'),
+          sizeLine,
+          hint: t('manual.hint'),
+          front: t('manual.front'),
+          back: t('manual.back'),
+          bomTitle: t('manual.bomTitle'),
+          thisStep: t('manual.thisStep'),
+          none: t('manual.none'),
+          kindFrame: t('manual.kindFrame'),
+          kindRisers: t('manual.kindRisers'),
+          kindPanels: t('manual.kindPanels'),
+          stepHeading: t('manual.stepHeading'),
+          gTubes: t('bom.tubes'),
+          gConnectors: t('bom.connectors'),
+          gPanels: t('bom.panels'),
+          gTextiles: t('bom.textiles'),
+          gSlides: t('bom.slides'),
+          gWheels: t('bom.wheels'),
+          gFittings: t('bom.fittings'),
+          gReinforcements: t('bom.reinforcements'),
+          gScrews: t('bom.screws'),
+        },
+      })
+      notify(t('toast.manualSaved'))
+    } catch (err) {
+      if ((err as { code?: string })?.code === 'empty') notify(t('toast.manualEmpty'), 'warn')
+      else notify(t('toast.manualFailed'), 'err')
+    } finally {
+      exportingManualRef.current = false
+      switching.current = false
+      snapshotActive()
+      setExportingManual(null)
+      bump()
+    }
+  }, [bump, lang, notify, snapshotActive, t])
+
   const shareCurrent = useCallback(async () => {
     const e2 = eng.current
     if (!e2) return
@@ -1062,6 +1166,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       const url = await shareUrl(e2.model.toJSON())
       if (!url) { notify(t('toast.shareTooBig'), 'warn'); return }
       await navigator.clipboard.writeText(url)
+      track('builder.design.share')
       notify(t('toast.shareCopied'))
     } catch {
       notify(t('toast.shareFailed'), 'err')
@@ -1114,7 +1219,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     toast,
     tabs, activeTabId, bom, inventory,
     invRows: cmp.rows, feasible: cmp.feasible, sizeCm, room, setRoom, roomOverflow,
-    loadPreset, placeModule, exportPng, shareCurrent,
+    loadPreset, placeModule, exportPng, exportAssemblyPdf, confirmExportManual, cancelExportManual, exportManualConfirm, exportingManual, shareCurrent,
     assembly: {
       step: builder?.assemblyStep ?? 0,
       max: Math.max(0, (builder?.buildPlan?.steps?.length ?? 1) - 1),
@@ -1130,22 +1235,23 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     dismissToast: () => setToast(null),
     placingConnector: (builder?.placeConnectorId as string) || null,
     bump, setMode, setColor, setTube, setPanel, setSlide, setFitting, setClamp, startPool, startC45, startReinforce, placeConnector,
-    buildStep: (dir) => { builder?.buildStep?.(dir); bump() },
-    moveSelection: (dir) => { builder?.moveSelectionBy?.(dir); bump() },
+    buildStep: (dir) => { bumpCount('builder.edit.step'); builder?.buildStep?.(dir); bump() },
+    moveSelection: (dir) => { bumpCount('builder.edit.move'); builder?.moveSelectionBy?.(dir); bump() },
     cameraAxes: () => ({
       axes: scene?.getHorizontalAxes?.() || { forward: [0, 0, -1], right: [1, 0, 0] },
       frontal: !!scene?.isFrontalView?.(),
     }),
-    undo: () => { builder?.undo(); bump() },
-    redo: () => { builder?.redo(); bump() },
-    rotate: (dir) => { builder?.rotateSelectionBy?.(dir); bump() },
-    deleteSel: () => { builder?.deleteSelection(); bump() },
+    undo: () => { bumpCount('builder.edit.undo'); builder?.undo(); bump() },
+    redo: () => { bumpCount('builder.edit.redo'); builder?.redo(); bump() },
+    rotate: (dir) => { bumpCount('builder.edit.rotate'); builder?.rotateSelectionBy?.(dir); bump() },
+    deleteSel: () => { bumpCount('builder.edit.delete'); builder?.deleteSelection(); bump() },
     copy, paste, cancelPaste, selectAll, selectConnected,
     nudgePasteY: (steps) => { builder?.nudgePasteY?.(steps); bump() },
     setViewCubePad,
     frame: () => { scene?.resetCamera?.(model); bump() },
     toggleGrass: () => {
       const next = !scene?._sceneOn
+      track('builder.scene.grass', { on: next })
       scene?.setScene?.(next)
       try { localStorage.setItem('quadro.scene.v1', next ? '1' : '0') } catch { /* ignore */ }
       bump()

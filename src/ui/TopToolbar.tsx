@@ -5,7 +5,7 @@ import { useI18n } from '../i18n'
 import { CONN_KIND_ORDER, connKindLabel, labelOf } from '../names'
 import { ACC_CAT_ICON, CONN_CAT_ICON, Svg16, TOOL_ICON, partIcon, tubeIcon } from './icons'
 import { UI_ESCAPE_EVENT } from './events'
-import { NARROW_MAX, TOP_MIN, usePanelLayout } from './panelLayout'
+import { NARROW_MAX, toolbarTop, usePanelLayout } from './panelLayout'
 
 const TUBE_HOTKEY: Record<string, string> = { T15: '1', T25: '2', T35: '3', T10: '4', T20: '5', T75: '6' }
 
@@ -20,6 +20,11 @@ const btn = (active: boolean, tone: 'teal' | 'red' = 'teal') =>
         : 'bg-gray-900/70 text-gray-200 border-gray-700 hover:border-teal-400')
   }`
 
+const dropItem = (on: boolean) =>
+  `flex items-center gap-2 w-full text-xs rounded-lg px-2 py-1.5 text-left cursor-pointer ${
+    on ? 'bg-teal-500 text-white font-semibold' : 'text-gray-50 hover:bg-gray-700'
+  }`
+
 function Pop({ anchor, children }: { anchor: HTMLElement | null; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState({ top: 0, left: 0 })
@@ -28,7 +33,7 @@ function Pop({ anchor, children }: { anchor: HTMLElement | null; children: React
     if (!anchor || !el) return
     const place = () => {
       const r = anchor.getBoundingClientRect()
-      const w = el.offsetWidth || 208
+      const w = el.offsetWidth || 256
       const left = Math.min(Math.max(8, r.left), window.innerWidth - w - 8)
       setPos({ top: r.bottom + 6, left })
     }
@@ -44,7 +49,7 @@ function Pop({ anchor, children }: { anchor: HTMLElement | null; children: React
   return createPortal(
     <div
       ref={ref}
-      className="fixed z-[60] pointer-events-auto bg-gray-800 border border-gray-600 rounded-xl shadow-2xl p-2 min-w-[13rem]"
+      className="fixed z-[60] pointer-events-auto bg-gray-800 border border-gray-600 rounded-xl shadow-2xl p-2 min-w-[16rem] w-max max-w-[22rem]"
       style={pos}
     >
       {children}
@@ -106,11 +111,22 @@ function jointActive(id: string, api: ReturnType<typeof useEngine>) {
 export default function TopToolbar() {
   const api = useEngine()
   const { t } = useI18n()
-  const { vw } = usePanelLayout()
+  const { vw, left, setToolbarW } = usePanelLayout()
   const narrow = vw <= NARROW_MAX
+  const barRef = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState<string | null>(null)
   const toggle = (k: string) => setOpen(o => (o === k ? null : k))
   const close = () => setOpen(null)
+
+  useLayoutEffect(() => {
+    const el = barRef.current
+    if (!el) return
+    const update = () => setToolbarW(el.scrollWidth)
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [setToolbarW])
 
   useEffect(() => {
     const onEsc = () => close()
@@ -136,9 +152,9 @@ export default function TopToolbar() {
   return (
     <div
       className={`fixed z-50 flex flex-col items-stretch gap-1.5 pointer-events-none ${narrow ? 'left-2 right-2' : 'left-1/2 -translate-x-1/2 items-center'}`}
-      style={{ top: TOP_MIN }}
+      style={{ top: toolbarTop(left, vw) }}
     >
-      <div className="flex items-stretch gap-1 bg-gray-950/90 backdrop-blur border border-gray-800 rounded-2xl p-1 shadow-xl pointer-events-auto max-w-full overflow-x-auto scrollbar-thin">
+      <div ref={barRef} className="flex items-stretch gap-1 bg-gray-950/90 backdrop-blur border border-gray-800 rounded-2xl p-1 shadow-xl pointer-events-auto max-w-[calc(100vw-1rem)] overflow-x-auto scrollbar-thin">
       <button disabled={!api.canUndo} onClick={api.undo} title={t('hint.undo')}
         className="flex items-center justify-center min-w-[2.5rem] h-12 px-2 rounded-xl text-gray-200 hover:bg-gray-800 disabled:opacity-30 cursor-pointer disabled:cursor-default">
         <Svg16 inner={TOOL_ICON.undo} />
@@ -166,16 +182,16 @@ export default function TopToolbar() {
             {api.catalog.tubes.map(tube => (
               <button key={tube.id} onClick={() => { api.setTube(tube.id); close() }}
                 title={TUBE_HOTKEY[tube.id] ? t('hint.tubeKey', { n: tube.length_cm, k: TUBE_HOTKEY[tube.id] }) : undefined}
-                className={`flex items-center gap-2 w-full text-xs rounded-lg px-2 py-1.5 text-left ${api.tubeId === tube.id ? 'bg-teal-500 text-white font-semibold' : 'text-gray-100 hover:bg-gray-700'}`}>
+                className={dropItem(api.tubeId === tube.id)}>
                 <Svg16 inner={tubeIcon(tube.id, tube.length_cm)} size={18} />
-                <span className="truncate">{t('hint.tubeName', { n: tube.length_cm })}</span>
+                <span className="whitespace-nowrap">{t('hint.tubeName', { n: tube.length_cm })}</span>
               </button>
             ))}
             {api.catalog.curved.map(c => (
               <button key={c.id} onClick={() => { api.setTube(c.id); close() }}
-                className={`flex items-center gap-2 w-full text-xs rounded-lg px-2 py-1.5 text-left ${api.tubeId === c.id ? 'bg-teal-500 text-white font-semibold' : 'text-gray-100 hover:bg-gray-700'}`}>
+                className={dropItem(api.tubeId === c.id)}>
                 <Svg16 inner={tubeIcon(c.id)} size={18} />
-                <span className="truncate">{t('hint.curved')}</span>
+                <span className="whitespace-nowrap">{t('hint.curved')}</span>
               </button>
             ))}
           </>
@@ -190,15 +206,15 @@ export default function TopToolbar() {
         active={open === 'panels' || api.mode === 'panel'}
         onClick={() => { api.setMode('panel'); toggle('panels') }}
         menu={(
-          <div className="grid grid-cols-2 gap-1">
+          <>
             {api.catalog.panels.map(p => (
               <button key={p.id} onClick={() => { api.setPanel(p.id); close() }}
-                className={`flex items-center gap-1.5 text-xs rounded-lg border px-2 py-1.5 text-left ${api.panelId === p.id ? 'bg-teal-600 border-teal-400 text-white' : 'border-gray-600 bg-gray-700 text-gray-50 hover:bg-teal-600 hover:border-teal-400'}`}>
-                <Svg16 inner={partIcon(p.id, 'panels')} size={16} />
-                <span className="truncate">{p.w && p.h ? `${p.w}×${p.h}` : labelOf(p.id, p.name)}</span>
+                className={dropItem(api.panelId === p.id)}>
+                <Svg16 inner={partIcon(p.id, 'panels')} size={18} />
+                <span className="whitespace-nowrap">{p.w && p.h ? `${p.w}×${p.h}` : labelOf(p.id, p.name)}</span>
               </button>
             ))}
-          </div>
+          </>
         )}
       >
         <Svg16 inner={TOOL_ICON.panel} />
@@ -210,29 +226,28 @@ export default function TopToolbar() {
         active={open === 'conn' || api.mode === 'c45' || api.mode === 'clamp' || !!api.placingConnector || (api.mode === 'fitting' && JOINT_FITTING.has(api.fittingKind))}
         onClick={() => toggle('conn')}
         menu={(
-          <div className="max-h-[70vh] overflow-y-auto pr-0.5 scrollbar-thin">
+          <div className="max-h-[80vh] overflow-y-auto pr-0.5 scrollbar-thin">
             {CONN_KIND_ORDER.map(kind => {
               const items = api.catalog.connectors.filter(c => c.kind === kind)
               if (!items.length) return null
               return (
-                <div key={kind} className="mb-2 last:mb-0">
-                  <div className="text-[10px] uppercase tracking-wider text-gray-300 mb-1">{connKindLabel(kind)}</div>
-                  <div className="grid grid-cols-1 gap-1">
-                    {items.map(c => (
-                      <button key={c.id} onClick={() => { pickJoint(c.id, api); close() }}
-                        className={`flex items-center gap-2 text-sm rounded-lg border px-2 py-1.5 text-left ${jointActive(c.id, api) ? 'bg-teal-600 border-teal-400 text-white' : 'border-gray-600 bg-gray-700 text-gray-50 hover:bg-teal-600 hover:border-teal-400'}`}>
-                        <Svg16 inner={CONN_CAT_ICON[c.id] ?? CONN_CAT_ICON['6way']} size={20} />
-                        <span className="flex-1">{labelOf(c.id, c.name)}</span>
-                      </button>
-                    ))}
-                  </div>
+                <div key={kind} className="mb-1.5 last:mb-0">
+                  <div className="text-[10px] uppercase tracking-wider text-gray-400 px-2 py-1">{connKindLabel(kind)}</div>
+                  {items.map(c => (
+                    <button key={c.id} onClick={() => { pickJoint(c.id, api); close() }}
+                      className={dropItem(jointActive(c.id, api))}>
+                      <Svg16 inner={CONN_CAT_ICON[c.id] ?? CONN_CAT_ICON['6way']} size={18} />
+                      <span className="whitespace-nowrap">{labelOf(c.id, c.name)}</span>
+                    </button>
+                  ))}
                 </div>
               )
             })}
           </div>
         )}
       >
-        <Svg16 inner={CONN_CAT_ICON['6way']} />{t('tool.connections')}
+        <Svg16 inner={CONN_CAT_ICON['6way']} />
+        <span className="leading-none">{t('tool.connections')}</span>
       </ToolDrop>
 
       <div className="w-px bg-gray-700 mx-0.5 self-stretch" />
@@ -243,12 +258,14 @@ export default function TopToolbar() {
         onClick={() => toggle('wheels')}
         menu={wheels.map(a => (
           <button key={a.id} onClick={() => { if (a.qdf) api.setFitting(a.qdf); close() }}
-            className="flex w-full items-center gap-2 text-sm rounded-lg border border-gray-600 bg-gray-700 text-gray-50 hover:bg-teal-600 hover:border-teal-400 px-2 py-1.5 text-left mb-1 last:mb-0">
-            <Svg16 inner={(a.qdf && ACC_CAT_ICON[a.qdf]) || TOOL_ICON.wheel} size={20} />{labelOf(a.id, a.name)}
+            className={dropItem(!!a.qdf && api.fittingKind === a.qdf && api.mode === 'fitting')}>
+            <Svg16 inner={(a.qdf && ACC_CAT_ICON[a.qdf]) || TOOL_ICON.wheel} size={18} />
+            <span className="whitespace-nowrap">{labelOf(a.id, a.name)}</span>
           </button>
         ))}
       >
-        <Svg16 inner={TOOL_ICON.wheel} />{t('tool.wheels')}
+        <Svg16 inner={TOOL_ICON.wheel} />
+        <span className="leading-none">{t('tool.wheels')}</span>
       </ToolDrop>
       <ToolDrop
         open={open === 'textiles'}
@@ -256,12 +273,14 @@ export default function TopToolbar() {
         onClick={() => toggle('textiles')}
         menu={textiles.map(a => (
           <button key={a.id} onClick={() => { if (a.qdf) api.setFitting(a.qdf); close() }}
-            className="flex w-full items-center gap-2 text-sm rounded-lg border border-gray-600 bg-gray-700 text-gray-50 hover:bg-teal-600 hover:border-teal-400 px-2 py-1.5 text-left mb-1 last:mb-0">
-            <Svg16 inner={(a.qdf && ACC_CAT_ICON[a.qdf]) || TOOL_ICON.textile} size={20} />{labelOf(a.id, a.name)}
+            className={dropItem(!!a.qdf && api.fittingKind === a.qdf && api.mode === 'fitting')}>
+            <Svg16 inner={(a.qdf && ACC_CAT_ICON[a.qdf]) || TOOL_ICON.textile} size={18} />
+            <span className="whitespace-nowrap">{labelOf(a.id, a.name)}</span>
           </button>
         ))}
       >
-        <Svg16 inner={TOOL_ICON.textile} />{t('tool.textiles')}
+        <Svg16 inner={TOOL_ICON.textile} />
+        <span className="leading-none">{t('tool.textiles')}</span>
       </ToolDrop>
       <ToolDrop
         open={open === 'pools'}
@@ -269,29 +288,33 @@ export default function TopToolbar() {
         onClick={() => toggle('pools')}
         menu={pools.map(a => (
           <button key={a.id} onClick={() => { api.startPool(a.id); close() }}
-            className="flex w-full items-center gap-2 text-sm rounded-lg border border-gray-600 bg-gray-700 text-gray-50 hover:bg-teal-600 hover:border-teal-400 px-2 py-1.5 text-left mb-1 last:mb-0">
-            <Svg16 inner={TOOL_ICON.pool} size={20} />{labelOf(a.id, a.name)}
+            className={dropItem(false)}>
+            <Svg16 inner={TOOL_ICON.pool} size={18} />
+            <span className="whitespace-nowrap">{labelOf(a.id, a.name)}</span>
           </button>
         ))}
       >
-        <Svg16 inner={TOOL_ICON.pool} />{t('tool.pools')}
+        <Svg16 inner={TOOL_ICON.pool} />
+        <span className="leading-none">{t('tool.pools')}</span>
       </ToolDrop>
       <ToolDrop
         open={open === 'slides'}
         active={open === 'slides' || api.mode === 'slide'}
         onClick={() => toggle('slides')}
         menu={(
-          <div className="grid grid-cols-1 gap-1">
+          <>
             {slides.map(s => (
               <button key={s.id} onClick={() => { api.setSlide(s.id); close() }}
-                className={`flex items-center gap-2 text-sm rounded-lg border px-2 py-1.5 text-left ${api.slideKind === s.id && api.mode === 'slide' ? 'bg-teal-600 border-teal-400 text-white' : 'border-gray-600 bg-gray-700 text-gray-50 hover:bg-teal-600 hover:border-teal-400'}`}>
-                <Svg16 inner={TOOL_ICON.slide} size={16} />{labelOf(s.part)}
+                className={dropItem(api.slideKind === s.id && api.mode === 'slide')}>
+                <Svg16 inner={TOOL_ICON.slide} size={18} />
+                <span className="whitespace-nowrap">{labelOf(s.part)}</span>
               </button>
             ))}
-          </div>
+          </>
         )}
       >
-        <Svg16 inner={TOOL_ICON.slide} />{t('tool.slides')}
+        <Svg16 inner={TOOL_ICON.slide} />
+        <span className="leading-none">{t('tool.slides')}</span>
       </ToolDrop>
 
       <div className="w-px bg-gray-700 mx-0.5 self-stretch" />

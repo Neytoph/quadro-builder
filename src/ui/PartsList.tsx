@@ -1,6 +1,7 @@
 import { useRef } from 'react'
 import { useEngine, type BomRow } from '../store/EngineContext'
 import { useI18n } from '../i18n'
+import { formatCatalogPrice } from '../money'
 import { colorLabel, labelOf } from '../names'
 import { colorHex } from '../engine-api'
 import { Svg16, partIcon } from './icons'
@@ -49,7 +50,7 @@ function Section({ title, rows, onPick }: { title: string; rows: BomRow[]; onPic
 
 export function BomPane() {
   const api = useEngine()
-  const { t } = useI18n()
+  const { t, lang } = useI18n()
   const bom = api.bom
 
   return (
@@ -74,9 +75,9 @@ export function BomPane() {
               {api.feasible ? t('side.feasible') : t('side.missing')}
             </div>
           )}
-        {bom && <div className="text-gray-400">{t('side.price')} €{bom.totals.price.toFixed(2)}</div>}
+        {bom && <div className="text-gray-400">{t('side.price')} {formatCatalogPrice(bom.totals.price, lang)}</div>}
       </div>
-      <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin p-3">
+      <div className="p-3">
         {!bom || bom.totals.tubes + bom.totals.connectors + bom.totals.panels + bom.totals.other === 0
           ? <div className="text-xs text-gray-500">{t('side.empty')}</div>
           : (
@@ -103,7 +104,7 @@ export function InventoryPane() {
   const invRef = useRef<HTMLInputElement>(null)
 
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin p-3 space-y-1">
+    <div className="p-3 space-y-1">
       <div className="flex gap-1.5 pb-2">
         <button onClick={api.exportInventory}
           className="flex-1 text-[11px] rounded-lg border border-gray-700 bg-gray-800 hover:border-teal-400 px-2 py-1.5 cursor-pointer">{t('btn.invExport')}</button>

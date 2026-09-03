@@ -1,5 +1,8 @@
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useEngine } from '../store/EngineContext'
 import { useI18n } from '../i18n'
+import { UI_ESCAPE_EVENT } from './events'
 
 const ORDER_I18N: Record<string, string> = {
   'y+': 'assembly.orderYp',
@@ -9,9 +12,92 @@ const ORDER_I18N: Record<string, string> = {
   'z-': 'assembly.orderZm',
 }
 
+const dropItem = (on: boolean) =>
+  `flex items-center w-full text-sm rounded-lg px-3 py-2 text-left cursor-pointer whitespace-nowrap ${
+    on ? 'bg-teal-500 text-white font-semibold' : 'text-gray-50 hover:bg-gray-700'
+  }`
+
+function OrderMenu({
+  anchor,
+  value,
+  orders,
+  onPick,
+  onClose,
+}: {
+  anchor: HTMLElement | null
+  value: string
+  orders: string[]
+  onPick: (id: string) => void
+  onClose: () => void
+}) {
+  const { t } = useI18n()
+  const ref = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState({ top: 0, left: 0 })
+
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!anchor || !el) return
+    const place = () => {
+      const r = anchor.getBoundingClientRect()
+      const w = el.offsetWidth || 176
+      const left = Math.min(Math.max(8, r.left), window.innerWidth - w - 8)
+      const h = el.offsetHeight || 200
+      const top = r.bottom + 6 + h > window.innerHeight - 8
+        ? Math.max(8, r.top - h - 6)
+        : r.bottom + 6
+      setPos({ top, left })
+    }
+    place()
+    const ro = new ResizeObserver(place)
+    ro.observe(el)
+    window.addEventListener('resize', place)
+    return () => {
+      ro.disconnect()
+      window.removeEventListener('resize', place)
+    }
+  }, [anchor])
+
+  useEffect(() => {
+    const onDown = (e: PointerEvent) => {
+      const node = e.target as Node
+      if (ref.current?.contains(node) || anchor?.contains(node)) return
+      onClose()
+    }
+    const onEsc = () => onClose()
+    window.addEventListener('pointerdown', onDown, true)
+    window.addEventListener(UI_ESCAPE_EVENT, onEsc)
+    return () => {
+      window.removeEventListener('pointerdown', onDown, true)
+      window.removeEventListener(UI_ESCAPE_EVENT, onEsc)
+    }
+  }, [anchor, onClose])
+
+  return createPortal(
+    <div
+      ref={ref}
+      className="fixed z-[60] min-w-[12rem] w-max max-w-[18rem] bg-gray-900 border border-gray-700 rounded-xl shadow-2xl p-1.5"
+      style={pos}
+    >
+      {orders.map(order => (
+        <button
+          key={order}
+          type="button"
+          onClick={() => { onPick(order); onClose() }}
+          className={dropItem(order === value)}
+        >
+          {t(ORDER_I18N[order] || order)}
+        </button>
+      ))}
+    </div>,
+    document.body,
+  )
+}
+
 export default function AssemblyBar() {
   const api = useEngine()
   const { t } = useI18n()
+  const orderBtn = useRef<HTMLButtonElement>(null)
+  const [orderOpen, setOrderOpen] = useState(false)
   const totals = api.bom?.totals
   const hasParts = !!totals && (totals.tubes + totals.connectors + totals.panels + totals.other) > 0
   if (!hasParts && !api.assembly.active) return null
@@ -20,7 +106,7 @@ export default function AssemblyBar() {
     return (
       <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40">
         <button onClick={() => api.setAssembly(true)}
-          className="bg-gray-900/90 backdrop-blur border border-gray-700 hover:border-teal-400 text-gray-200 text-sm rounded-full shadow-lg px-4 py-2 cursor-pointer">
+          className="bg-gray-900/90 backdrop-blur border border-gray-700 hover:border-teal-400 text-gray-50 text-sm rounded-full shadow-lg px-4 py-2 cursor-pointer">
           {t('assembly.toggle')}
         </button>
       </div>
@@ -31,21 +117,35 @@ export default function AssemblyBar() {
   return (
     <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1 bg-gray-900/95 backdrop-blur border border-teal-500/50 rounded-full p-1 shadow-lg">
       <button disabled={api.assembly.step <= 0} onClick={() => api.stepAssembly(-1)}
-        className="w-8 h-8 rounded-full text-gray-200 hover:bg-gray-700 disabled:opacity-30 cursor-pointer" title={`${t('assembly.prev')} [`}>◀</button>
-      <div className="px-2 text-sm text-teal-200 tabular-nums">{t('assembly.step', { k: api.assembly.step + 1, n })}</div>
+        className="w-8 h-8 rounded-full text-gray-50 hover:bg-gray-700 disabled:opacity-30 cursor-pointer" title={`${t('assembly.prev')} [`}>◀</button>
+      <div className="px-2.5 text-sm font-semibold text-teal-700 tabular-nums whitespace-nowrap">{t('assembly.step', { k: api.assembly.step + 1, n })}</div>
       <button disabled={api.assembly.step >= api.assembly.max} onClick={() => api.stepAssembly(1)}
-        className="w-8 h-8 rounded-full text-gray-200 hover:bg-gray-700 disabled:opacity-30 cursor-pointer" title={`${t('assembly.next')} ]`}>▶</button>
+        className="w-8 h-8 rounded-full text-gray-50 hover:bg-gray-700 disabled:opacity-30 cursor-pointer" title={`${t('assembly.next')} ]`}>▶</button>
       <div className="w-px h-5 bg-gray-700 mx-0.5" />
-      <label className="sr-only" htmlFor="asm-order">{t('assembly.order')}</label>
-      <select id="asm-order" value={api.assembly.order}
-        onChange={e => api.setAssemblyOrder(e.target.value)}
-        className="h-8 max-w-[7.5rem] rounded-full bg-gray-800 text-gray-200 text-[11px] px-2 border-0 cursor-pointer">
-        {api.assemblyOrders.map(order => (
-          <option key={order} value={order}>{t(ORDER_I18N[order] || order)}</option>
-        ))}
-      </select>
+      <button
+        ref={orderBtn}
+        type="button"
+        id="asm-order"
+        aria-haspopup="listbox"
+        aria-expanded={orderOpen}
+        title={t('assembly.order')}
+        onClick={() => setOrderOpen(o => !o)}
+        className="h-8 px-3 rounded-full text-sm text-gray-50 hover:bg-gray-700 cursor-pointer whitespace-nowrap"
+      >
+        {t(ORDER_I18N[api.assembly.order] || api.assembly.order)}
+        <span className="ml-1 opacity-60">▾</span>
+      </button>
+      {orderOpen && (
+        <OrderMenu
+          anchor={orderBtn.current}
+          value={api.assembly.order}
+          orders={api.assemblyOrders}
+          onPick={api.setAssemblyOrder}
+          onClose={() => setOrderOpen(false)}
+        />
+      )}
       <button onClick={() => api.setAssembly(false)}
-        className="px-3 h-8 rounded-full text-xs text-gray-300 hover:bg-gray-700 cursor-pointer" title={t('assembly.allHint')}>{t('assembly.all')}</button>
+        className="px-3 h-8 rounded-full text-sm text-gray-50 hover:bg-gray-700 cursor-pointer" title={t('assembly.allHint')}>{t('assembly.all')}</button>
     </div>
   )
 }

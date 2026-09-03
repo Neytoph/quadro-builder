@@ -1,7 +1,7 @@
 import { getLang } from './engine/i18n.js'
 import type { Lang } from './i18n'
 
-/** 目录显示名。德/英优先用 parts.json，缺项再用这一层。 */
+/** 零件显示名。三种语言都走这里，缺了才会退回 parts.json 的德/英名。 */
 export const PART_ZH: Record<string, string> = {
   '6way': '6通·空间',
   '5way': '5通',
@@ -51,8 +51,27 @@ export const PART_ZH: Record<string, string> = {
   T52: '管 52 cm',
   T75: '管 75 cm',
   TC1: '弯管',
+  TS1: '管 15 cm 90°（4孔）',
+  TS2: '管 15 cm 135°（3孔）',
+  TS3: '管 15 cm 180°（4孔）',
+  TS4: '管 35 cm 90°（4孔）',
+  TS5: '管 35 cm 135°（3孔）',
+  TS6: '管 35 cm 180°（4孔）',
+  TS7: '弯管 135°（3孔）',
+  panel_40x40: '板 40×40 cm',
+  panel_40x20: '板 40×20 cm',
+  panel_80x80: '板 80×80 cm',
+  panel_80x20: '板 80×20 cm',
+  panel_30x30: '板 30×30 cm',
+  hole_panel_40x40: '洞洞板 40×40 cm',
+  panel_70x120: '板 70×120 cm',
+  reinforce80: '木芯 80 cm',
+  safety_clamp: '地锚夹',
   screw_tube: '管螺丝',
   screw_panel: '板螺丝',
+  screw_slide: '滑梯螺丝',
+  screw_slide_conical: '滑梯锥头螺丝',
+  screw_slide_conical_counter: '滑梯螺丝对件',
 }
 
 export const PART_EN: Record<string, string> = {
@@ -104,8 +123,27 @@ export const PART_EN: Record<string, string> = {
   T52: 'Tube 52 cm',
   T75: 'Tube 75 cm',
   TC1: 'Curved tube',
+  TS1: 'Tube 15 cm 90° (4 holes)',
+  TS2: 'Tube 15 cm 135° (3 holes)',
+  TS3: 'Tube 15 cm 180° (4 holes)',
+  TS4: 'Tube 35 cm 90° (4 holes)',
+  TS5: 'Tube 35 cm 135° (3 holes)',
+  TS6: 'Tube 35 cm 180° (4 holes)',
+  TS7: 'Curved tube 135° (3 holes)',
+  panel_40x40: 'Panel 40×40 cm',
+  panel_40x20: 'Panel 40×20 cm',
+  panel_80x80: 'Panel 80×80 cm',
+  panel_80x20: 'Panel 80×20 cm',
+  panel_30x30: 'Panel 30×30 cm',
+  hole_panel_40x40: 'Hole panel 40×40 cm',
+  panel_70x120: 'Panel 70×120 cm',
+  reinforce80: 'Wood core 80 cm',
+  safety_clamp: 'Ground clamp',
   screw_tube: 'Tube screw',
   screw_panel: 'Panel screw',
+  screw_slide: 'Slide screw',
+  screw_slide_conical: 'Conical slide screw',
+  screw_slide_conical_counter: 'Slide screw counterpart',
 }
 
 export const PART_DE: Record<string, string> = {
@@ -157,8 +195,27 @@ export const PART_DE: Record<string, string> = {
   T52: 'Rohr 52 cm',
   T75: 'Rohr 75 cm',
   TC1: 'Bogenrohr',
+  TS1: 'Rohr 15 cm 90° (4 Löcher)',
+  TS2: 'Rohr 15 cm 135° (3 Löcher)',
+  TS3: 'Rohr 15 cm 180° (4 Löcher)',
+  TS4: 'Rohr 35 cm 90° (4 Löcher)',
+  TS5: 'Rohr 35 cm 135° (3 Löcher)',
+  TS6: 'Rohr 35 cm 180° (4 Löcher)',
+  TS7: 'Bogenrohr 135° (3 Löcher)',
+  panel_40x40: 'Platte 40×40 cm',
+  panel_40x20: 'Platte 40×20 cm',
+  panel_80x80: 'Platte 80×80 cm',
+  panel_80x20: 'Platte 80×20 cm',
+  panel_30x30: 'Platte 30×30 cm',
+  hole_panel_40x40: 'Lochplatte 40×40 cm',
+  panel_70x120: 'Platte 70×120 cm',
+  reinforce80: 'Holzprofil 80 cm',
+  safety_clamp: 'Bodenanker',
   screw_tube: 'Rohrschraube',
   screw_panel: 'Plattenschraube',
+  screw_slide: 'Rutschenschraube',
+  screw_slide_conical: 'Konische Rutschenschraube',
+  screw_slide_conical_counter: 'Rutschenschraube Gegenstück',
 }
 
 export const CONN_KIND_ZH: Record<string, string> = {
@@ -188,6 +245,7 @@ export const COLOR_ZH: Record<string, string> = {
   mint: '薄荷绿',
   berry: '莓粉',
   apricot: '杏黄',
+  black: '黑',
 }
 
 export const COLOR_EN: Record<string, string> = {
@@ -199,6 +257,7 @@ export const COLOR_EN: Record<string, string> = {
   mint: 'Mint',
   berry: 'Berry',
   apricot: 'Apricot',
+  black: 'Black',
 }
 
 export const COLOR_DE: Record<string, string> = {
@@ -210,6 +269,7 @@ export const COLOR_DE: Record<string, string> = {
   mint: 'Mint',
   berry: 'Berry',
   apricot: 'Apricot',
+  black: 'Schwarz',
 }
 
 /** 官方 50 维配件名（quadro_bom），顾问对照表用。 */

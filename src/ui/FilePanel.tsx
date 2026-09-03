@@ -3,7 +3,7 @@ import { useEngine } from '../store/EngineContext'
 import { LANGS, useI18n } from '../i18n'
 import { ONBOARDING_EVENT } from './Onboarding'
 
-const btn = 'text-sm md:text-xs rounded-lg border border-gray-700 bg-gray-800 hover:border-teal-400 px-3 py-2.5 md:py-2 text-left cursor-pointer'
+const btn = 'text-sm rounded-lg border border-gray-700 bg-gray-800 hover:border-teal-400 px-3 py-2.5 text-left cursor-pointer leading-snug'
 
 export default function FilePanel() {
   const api = useEngine()
@@ -11,7 +11,7 @@ export default function FilePanel() {
   const fileRef = useRef<HTMLInputElement>(null)
 
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin p-3">
+    <div className="p-3">
       <div className="flex flex-col gap-1.5">
         <button onClick={() => api.newTab()} className={btn}>{t('btn.new')}</button>
         <button onClick={() => void api.saveCurrent()} className={btn}>{t('btn.save')}</button>
@@ -19,6 +19,11 @@ export default function FilePanel() {
         <button onClick={api.exportQdf} className={btn}>{t('btn.exportQdf')}</button>
         <button onClick={api.exportJson} className={btn}>{t('btn.exportJson')}</button>
         <button onClick={api.exportPng} className={btn}>{t('btn.exportPng')}</button>
+        <button
+          onClick={() => void api.exportAssemblyPdf()}
+          disabled={!!api.exportingManual}
+          className={`${btn} disabled:opacity-40 disabled:cursor-not-allowed`}
+        >{t('btn.exportManual')}</button>
         <button onClick={() => void api.shareCurrent()} className={btn}>{t('btn.share')}</button>
         <button onClick={() => window.dispatchEvent(new Event(ONBOARDING_EVENT))} className={btn}>{t('onboard.replay')}</button>
         <input ref={fileRef} type="file" accept=".qdf,.json,application/json" hidden
@@ -27,11 +32,11 @@ export default function FilePanel() {
 
       <div className="mt-4 pt-3 border-t border-gray-800">
         <div className="text-[10px] uppercase tracking-wider text-gray-400 mb-1.5">{t('section.room')}</div>
-        <label className="flex items-center gap-2 text-sm md:text-xs text-gray-300 cursor-pointer mb-1.5 min-h-8">
+        <label className="flex items-center gap-2 text-sm text-gray-50 cursor-pointer mb-1.5 min-h-9">
           <input type="checkbox" checked={api.room.visible} onChange={e => api.setRoom({ visible: e.target.checked })} className="accent-sky-500" />
           {t('room.show')}
         </label>
-        <label className="flex items-center gap-2 text-sm md:text-xs text-gray-300 cursor-pointer mb-2 min-h-8">
+        <label className="flex items-center gap-2 text-sm text-gray-50 cursor-pointer mb-2 min-h-9">
           <input type="checkbox" checked={api.room.showExtents} onChange={e => api.setRoom({ showExtents: e.target.checked })} className="accent-sky-500" />
           {t('room.extents')}
         </label>
@@ -46,7 +51,7 @@ export default function FilePanel() {
         <div className="flex gap-1">
           {LANGS.map(item => (
             <button key={item.id} onClick={() => setLang(item.id)}
-              className={`flex-1 text-sm md:text-xs rounded-lg py-2.5 md:py-1.5 border cursor-pointer ${lang === item.id ? 'bg-teal-500 text-white border-teal-400' : 'border-gray-700 bg-gray-800'}`}>
+              className={`flex-1 text-sm rounded-lg py-2.5 border cursor-pointer ${lang === item.id ? 'bg-teal-500 text-white border-teal-400' : 'border-gray-700 bg-gray-800'}`}>
               {item.label}
             </button>
           ))}
@@ -70,7 +75,7 @@ function CmField({ label, value, onCommit }: { label: string; value: number; onC
         onChange={e => setTxt(e.target.value)}
         onBlur={() => onCommit(Number(txt))}
         onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
-        className="w-full min-w-0 bg-gray-800 border border-gray-700 rounded px-1 py-2 md:py-1 text-sm md:text-xs tabular-nums outline-none focus:border-teal-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+        className="w-full min-w-0 bg-gray-800 border border-gray-700 rounded px-1 py-2 text-sm tabular-nums outline-none focus:border-teal-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
       />
     </label>
   )

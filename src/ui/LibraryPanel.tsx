@@ -125,8 +125,8 @@ export default function LibraryPanel() {
   }
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col">
-      <div className="px-3 py-2 border-b border-gray-800 shrink-0 space-y-2">
+    <div className="flex flex-col">
+      <div className="px-3 py-2 border-b border-gray-800 shrink-0 space-y-2 sticky top-0 z-10 bg-gray-950/92 backdrop-blur">
         <div className="flex bg-gray-800/80 rounded-lg p-0.5">
           <button onClick={() => setTab('official')}
             className={`flex-1 px-2 py-1.5 md:py-1 rounded-md text-xs md:text-[11px] cursor-pointer ${tab === 'official' ? 'bg-teal-500 text-white font-semibold' : 'text-gray-300'}`}>
@@ -173,7 +173,7 @@ export default function LibraryPanel() {
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto scrollbar-thin p-2 min-h-0">
+      <div className="p-2">
         {tab === 'start' && (
           <div className="space-y-3 px-0.5 pb-2">
             <div>

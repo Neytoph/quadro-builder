@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { LanguageProvider } from './i18n'
+import { LanguageProvider, useI18n } from './i18n'
 import { EngineProvider, useEngine } from './store/EngineContext'
 import CanvasHost from './ui/CanvasHost'
 import TopToolbar from './ui/TopToolbar'
@@ -31,6 +31,67 @@ function Toast() {
   )
 }
 
+function ManualConfirm() {
+  const { exportManualConfirm, cancelExportManual, confirmExportManual } = useEngine()
+  const { t } = useI18n()
+
+  useEffect(() => {
+    if (!exportManualConfirm) return
+    const onEsc = () => cancelExportManual()
+    window.addEventListener(UI_ESCAPE_EVENT, onEsc)
+    return () => window.removeEventListener(UI_ESCAPE_EVENT, onEsc)
+  }, [exportManualConfirm, cancelExportManual])
+
+  if (!exportManualConfirm) return null
+  return (
+    <div
+      className="fixed inset-0 z-[75] flex items-center justify-center bg-black/45 p-4"
+      onClick={cancelExportManual}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="manual-confirm-title"
+        className="w-full max-w-sm bg-gray-900 text-gray-100 rounded-2xl border border-gray-700 shadow-2xl p-5"
+        onClick={e => e.stopPropagation()}
+      >
+        <div id="manual-confirm-title" className="text-base font-semibold">{t('confirm.exportManualTitle')}</div>
+        <p className="text-sm text-gray-300 leading-relaxed mt-2 mb-5">{t('confirm.exportManual')}</p>
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={cancelExportManual}
+            className="px-3 py-2 rounded-lg text-sm text-gray-300 hover:bg-gray-800 cursor-pointer"
+          >
+            {t('confirm.cancel')}
+          </button>
+          <button
+            type="button"
+            autoFocus
+            onClick={() => void confirmExportManual()}
+            className="px-4 py-2 rounded-lg text-sm font-semibold bg-teal-500 hover:bg-teal-400 text-white cursor-pointer"
+          >
+            {t('confirm.okExport')}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ManualProgress() {
+  const { exportingManual } = useEngine()
+  const { t } = useI18n()
+  if (!exportingManual) return null
+  return (
+    <div className="fixed inset-0 z-[80] bg-black/45 flex items-center justify-center">
+      <div className="bg-gray-900 border border-gray-700 rounded-xl px-6 py-4 text-gray-100 text-sm shadow-xl tabular-nums">
+        {t('manual.progress', { k: exportingManual.page, n: exportingManual.total })}
+      </div>
+    </div>
+  )
+}
+
 function AppInner() {
   const api = useEngine()
   const { handleEsc } = useDock()
@@ -39,6 +100,10 @@ function AppInner() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault()
+        if (api.exportManualConfirm) {
+          api.cancelExportManual()
+          return
+        }
         const focused = document.activeElement as HTMLElement | null
         if (focused && focused !== document.body && typeof focused.blur === 'function') focused.blur()
         window.dispatchEvent(new Event(UI_ESCAPE_EVENT))
@@ -136,6 +201,8 @@ function AppInner() {
       <RightDock />
       <AssemblyBar />
       <Toast />
+      <ManualConfirm />
+      <ManualProgress />
       <Onboarding />
     </div>
   )

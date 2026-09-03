@@ -14,7 +14,7 @@ export default function SavesPanel() {
   }, [api])
 
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin p-3">
+    <div className="p-3">
       {!docs.length && <div className="text-xs text-gray-500 px-2 py-6 text-center">{t('saves.empty')}</div>}
       {docs.map(d => (
         <div key={d.id} className="flex flex-col gap-1.5 rounded-xl border border-gray-800 px-3 py-2 mb-2">

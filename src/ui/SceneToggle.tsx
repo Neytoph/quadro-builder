@@ -3,22 +3,26 @@ import { useEngine } from '../store/EngineContext'
 import { useI18n } from '../i18n'
 import { canvasCorner, SCENE_CLUSTER_GAP, usePanelLayout } from './panelLayout'
 
-const tileChrome = (on: boolean, h: number): CSSProperties => ({
+const TILE_EDGE = '2px solid rgba(255,255,255,0.88)'
+
+const tileChrome = (_on: boolean, h: number): CSSProperties => ({
   height: h,
+  width: h,
+  boxSizing: 'border-box',
   boxShadow: '0 2px 8px rgba(0,0,0,0.28)',
-  outline: on ? '2px solid rgba(255,255,255,0.62)' : '2px solid rgba(0,0,0,0.14)',
-  outlineOffset: 1,
+  border: TILE_EDGE,
 })
 
 const tileBtn = 'overflow-hidden rounded-[11px] p-0 border-0 cursor-pointer transition-[filter,opacity,box-shadow,transform] duration-200 hover:scale-[1.03] active:scale-95 flex items-center justify-center'
 
-/** 草地、框住：左栏右侧、与左栏顶对齐。 */
+/** 草地、框住、导出说明书：左栏右侧、与左栏顶对齐。 */
 export default function SceneToggle() {
   const api = useEngine()
   const { t } = useI18n()
-  const { left, vw } = usePanelLayout()
-  const pos = canvasCorner(left, vw)
+  const { left, vw, toolbarW } = usePanelLayout()
+  const pos = canvasCorner(left, vw, { toolbarW })
   const { tile, clusterW } = pos
+  const exporting = !!api.exportingManual
 
   return (
     <div
@@ -30,7 +34,7 @@ export default function SceneToggle() {
         onClick={api.toggleGrass}
         aria-pressed={api.grassOn}
         title={t('btn.grassTitle')}
-        className={`pointer-events-auto ${tileBtn} flex-1 min-w-0 ${api.grassOn ? 'opacity-100' : 'opacity-45 grayscale'}`}
+        className={`pointer-events-auto ${tileBtn} ${api.grassOn ? 'opacity-100' : 'opacity-45 grayscale'}`}
         style={tileChrome(api.grassOn, tile)}
       >
         <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" width={tile} height={tile} aria-hidden="true">
@@ -49,7 +53,7 @@ export default function SceneToggle() {
         type="button"
         onClick={api.frame}
         title={t('btn.frameTitle')}
-        className={`pointer-events-auto ${tileBtn} flex-1 min-w-0`}
+        className={`pointer-events-auto ${tileBtn}`}
         style={tileChrome(false, tile)}
       >
         <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" width={tile} height={tile} aria-hidden="true">
@@ -59,6 +63,28 @@ export default function SceneToggle() {
           <rect x="20" y="24" width="3.2" height="4.2" rx="0.7" fill="#F23B3B" />
           <rect x="23.4" y="21" width="3.2" height="7.2" rx="0.7" fill="#2FCB5A" />
           <rect x="26.8" y="19" width="3.2" height="9.2" rx="0.7" fill="#2B8FF0" />
+        </svg>
+      </button>
+
+      <button
+        type="button"
+        onClick={() => void api.exportAssemblyPdf()}
+        disabled={exporting}
+        aria-busy={exporting}
+        aria-label={t('btn.exportManual')}
+        title={t('btn.exportManual')}
+        className={`pointer-events-auto ${tileBtn} disabled:opacity-45 disabled:cursor-not-allowed disabled:hover:scale-100`}
+        style={tileChrome(false, tile)}
+      >
+        <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" width={tile} height={tile} aria-hidden="true">
+          <rect x="0" y="0" width="48" height="48" fill="#F3EADC" />
+          <rect x="11" y="8" width="26" height="32" rx="3.2" fill="#fff" />
+          <path d="M14.2 8 H33.8 A3.2 3.2 0 0 1 37 11.2 V16 H11 V11.2 A3.2 3.2 0 0 1 14.2 8 Z" fill="#EA580C" />
+          <rect x="11" y="8" width="26" height="32" rx="3.2" fill="none" stroke="#3A8494" strokeWidth="1.7" />
+          <rect x="15" y="19" width="8.2" height="7.2" rx="1.2" fill="#D7E8EE" />
+          <rect x="24.8" y="19" width="8.2" height="7.2" rx="1.2" fill="#D7E8EE" />
+          <circle cx="17.2" cy="33.2" r="3.1" fill="#fff" stroke="#5C6570" strokeWidth="1.05" />
+          <path d="M22.4 31.7 h10.4 M22.4 35.3 h7.4" stroke="#C4B8A8" strokeWidth="1.5" strokeLinecap="round" />
         </svg>
       </button>
     </div>

@@ -109,6 +109,7 @@ export class Builder {
     this.buildPlan = { levels: [], steps: [] };
     this.assemblyStep = 0;
     this.assemblyOrder = "y+";   // Aufbaurichtung, siehe buildplan.BUILD_ORDERS
+    this.manualLabels = false;   // 说明书导出：显示当前步所有接头/管标注
 
     this._undoStack = [];
     this._redoStack = [];
@@ -1279,14 +1280,14 @@ export class Builder {
     const soloId = (this.mode === "select" || this.mode === "assembly")
       ? (profil != null ? profil : (this.selection.size === 1 ? [...this.selection.keys()][0] : null))
       : null;
-    const withLabels = soloId != null;
+    const withLabels = this.manualLabels || soloId != null;
     const labelFor = withLabels ? (node) => connectorLabelInfo(this.model, node) : null;
     const slideNameFor = withLabels ? (sl) => slideKindLabel(sl.kind) : null;
     // Ein Scharnier haengt am Bolzen-Knoten und hat keine eigene Stelle im
     // Bild -- seine Beschriftung sitzt deshalb am Knoten.
     const scharnier = soloId != null ? splitHingeKey(soloId) : null;
     const labelAn = scharnier ? scharnier.nodeId : soloId;
-    const labelIds = labelAn != null ? new Set([labelAn]) : null;
+    const labelIds = this.manualLabels ? null : (labelAn != null ? new Set([labelAn]) : null);
     const soloLabel = soloId != null
       ? { id: labelAn, text: profil != null
         ? (reinforcementPart() ? partName(reinforcementPart()) : null)

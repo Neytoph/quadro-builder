@@ -4032,6 +4032,52 @@ export class BuildModel {
     };
   }
 
+  // 只包住给定零件（拼装说明书按「当前已出现」框镜头，避免早期步骤缩在画面中间）。
+  boundsOf(ids, pad = 0) {
+    if (!ids) return this.bounds(pad);
+    const want = ids instanceof Set ? ids : new Set(ids);
+    if (!want.size) return this.bounds(pad);
+    let lo = null, hi = null;
+    const push = (x, y, z) => {
+      if (!lo) { lo = [x, y, z]; hi = [x, y, z]; return; }
+      lo = [Math.min(lo[0], x), Math.min(lo[1], y), Math.min(lo[2], z)];
+      hi = [Math.max(hi[0], x), Math.max(hi[1], y), Math.max(hi[2], z)];
+    };
+    const pushNode = (n) => { if (n) push(n.x, n.y, n.z); };
+    for (const n of this.nodes.values()) {
+      if (want.has(n.id)) pushNode(n);
+    }
+    for (const t of this.tubes.values()) {
+      if (!want.has(t.id)) continue;
+      pushNode(this.nodes.get(t.a));
+      pushNode(this.nodes.get(t.b));
+    }
+    for (const p of this.panels.values()) {
+      if (!want.has(p.id)) continue;
+      const cor = this.panelCorners(p);
+      if (cor) for (const c of cor) push(c[0], c[1], c[2]);
+    }
+    for (const p of (this.textiles ? this.textiles.values() : [])) {
+      if (!want.has(p.id)) continue;
+      const cor = this.panelCorners(p);
+      if (cor) for (const c of cor) push(c[0], c[1], c[2]);
+    }
+    for (const f of (this.fittings ? this.fittings.values() : [])) {
+      if (want.has(f.id)) push(f.x, f.y, f.z);
+    }
+    for (const s of (this.slides ? this.slides.values() : [])) {
+      if (!want.has(s.id)) continue;
+      push(s.x, s.y, s.z);
+      if (s.hook && s.hook.length === 3) push(s.hook[0], s.hook[1], s.hook[2]);
+    }
+    if (!lo) return this.bounds(pad);
+    return {
+      min: [lo[0] - pad, lo[1] - pad, lo[2] - pad],
+      max: [hi[0] + pad, hi[1] + pad, hi[2] + pad],
+      size: [hi[0] - lo[0] + 2 * pad, hi[1] - lo[1] + 2 * pad, hi[2] - lo[2] + 2 * pad],
+    };
+  }
+
   // Naechster vorhandener Knoten innerhalb tol um p, ohne die ausgeschlossenen ids.
   _nodeNear(p, tol, exclude = []) {
     let best = null, bestD = tol;

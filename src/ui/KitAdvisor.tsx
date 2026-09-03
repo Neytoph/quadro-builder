@@ -4,10 +4,11 @@ import { useI18n } from '../i18n'
 import { kitsCovering, shortages, usedRows, vecFromBom, vecFromInventory } from '../data/kitAdvice'
 import { labelOf, skuLabel } from '../names'
 import { useDock } from './dock'
+import { formatKitPrice } from '../money'
 
 export default function KitAdvisor() {
   const api = useEngine()
-  const { t } = useI18n()
+  const { t, lang } = useI18n()
   const { setPane } = useDock()
   const [tab, setTab] = useState<'buy' | 'inv'>('buy')
   const mapped = useMemo(() => vecFromBom(api.bom), [api.bom])
@@ -29,7 +30,7 @@ export default function KitAdvisor() {
     lines.push('', t('kit.covers') + ':')
     if (!buildable.length) lines.push('  ' + t('kit.none'))
     else buildable.slice(0, 10).forEach((k, i) => {
-      const price = k.price != null ? `  ¥${k.price}` : ''
+      const price = k.price != null ? `  ${formatKitPrice(k.price, lang)}` : ''
       lines.push(`  ${i === 0 ? '★ ' : '  '}${k.disp}${price}`)
     })
     void navigator.clipboard?.writeText(lines.join('\n'))
@@ -37,7 +38,7 @@ export default function KitAdvisor() {
   }
 
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin">
+    <div>
       <div className="sticky top-0 z-10 bg-gray-950/90 backdrop-blur px-3 py-2 border-b border-gray-800">
         <div className="flex gap-1 bg-gray-800/70 rounded-lg p-0.5">
           <button onClick={() => setTab('buy')} className={`flex-1 px-2 py-1.5 rounded-md text-xs cursor-pointer ${tab === 'buy' ? 'bg-teal-500 text-white font-semibold' : 'text-gray-300'}`}>{t('kit.buy')}</button>
@@ -85,12 +86,12 @@ export default function KitAdvisor() {
                 {buildable.slice(0, 12).map((k, idx) => (
                   <div key={k.name} className={`flex justify-between items-center gap-2 text-sm rounded-lg px-3 py-2 border ${idx === 0 ? 'border-emerald-500/60 bg-emerald-500/10' : 'border-gray-800 bg-gray-800/40'}`}>
                     <span className="text-gray-100 min-w-0 truncate">{idx === 0 && <span className="text-emerald-400 mr-1">★</span>}{k.disp}</span>
-                    <span className="text-amber-300 font-semibold tabular-nums shrink-0">{k.price != null ? `¥${k.price}` : t('kit.priceUnknown')}</span>
+                    <span className="text-teal-700 font-semibold tabular-nums shrink-0">{k.price != null ? formatKitPrice(k.price, lang) : t('kit.priceUnknown')}</span>
                   </div>
                 ))}
               </div>
             )}
-            {cheapest && <div className="mt-2.5 text-sm text-emerald-300">{t('kit.cheapest', { name: cheapest.disp, price: cheapest.price ?? '' })}</div>}
+            {cheapest && <div className="mt-2.5 text-sm text-emerald-700">{t('kit.cheapest', { name: cheapest.disp, price: formatKitPrice(cheapest.price ?? 0, lang) })}</div>}
           </div>
           <div className="flex flex-col gap-1.5">
             <button onClick={copyList} className="w-full bg-teal-500 hover:bg-teal-400 text-white font-semibold text-sm rounded-lg py-2.5 cursor-pointer">{t('kit.copy')}</button>

@@ -1147,6 +1147,7 @@ const zh = {
   asm_order_zp: '从后往前',
   asm_order_zm: '从前往后',
   flash_pool_ready: '泳池跟指针走，点击放下，Esc 取消。',
+  buildplan_level: (level, cm) => `第 ${level} 层 · ${cm} cm`,
 };
 
 const LANG_KEY = 'quadro.lang';

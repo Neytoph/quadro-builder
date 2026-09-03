@@ -3,7 +3,7 @@
 
 import { t, getLang } from "./i18n.js";
 import { COLOR_HEX, isHexColor } from "./colors.js";
-import { COLOR_ZH, PART_ZH } from "../names";
+import { COLOR_ZH, COLOR_EN, COLOR_DE, PART_ZH, PART_EN, PART_DE } from "../names";
 
 let _data = null;
 
@@ -187,8 +187,8 @@ export function colorName(colorId) {
   if (!c) return colorId;
   const lang = getLang();
   if (lang === "zh") return COLOR_ZH[c.id] || c.name_en || c.name;
-  if (lang === "en") return c.name_en || c.name;
-  return c.name || c.name_en;
+  if (lang === "en") return COLOR_EN[c.id] || c.name_en || c.name;
+  return COLOR_DE[c.id] || c.name || c.name_en;
 }
 
 /** Gibt den Namen eines Teils in der aktuellen Sprache zurück. */
@@ -196,8 +196,8 @@ export function partName(part) {
   if (!part) return "";
   const lang = getLang();
   if (lang === "zh") return PART_ZH[part.id] || part.name_en || part.name || "";
-  if (lang === "en") return part.name_en || part.name || "";
-  return part.name || part.name_en || "";
+  if (lang === "en") return PART_EN[part.id] || part.name_en || part.name || "";
+  return PART_DE[part.id] || part.name || part.name_en || "";
 }
 
 // Knoten-Abstand (Mitte zu Mitte) fuer eine gegebene Rohrlaenge.
