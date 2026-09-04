@@ -115,37 +115,10 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,woff2,json}'],
         maximumFileSizeToCacheInBytes: 12 * 1024 * 1024,
-        navigateFallbackDenylist: [/^\/mdb-/],
       },
     }),
   ],
   server: {
     host: '0.0.0.0',
-    proxy: {
-      '/mdb-files': {
-        target: 'https://mdb.quadroworld.com',
-        changeOrigin: true,
-        rewrite: (path: string) => path.replace(/^\/mdb-files/, '/files'),
-      },
-      '/mdb-images': {
-        target: 'https://mdb.quadroworld.com',
-        changeOrigin: true,
-        rewrite: (path: string) => path.replace(/^\/mdb-images/, '/images'),
-      },
-    },
-  },
-  preview: {
-    proxy: {
-      '/mdb-files': {
-        target: 'https://mdb.quadroworld.com',
-        changeOrigin: true,
-        rewrite: (path: string) => path.replace(/^\/mdb-files/, '/files'),
-      },
-      '/mdb-images': {
-        target: 'https://mdb.quadroworld.com',
-        changeOrigin: true,
-        rewrite: (path: string) => path.replace(/^\/mdb-images/, '/images'),
-      },
-    },
   },
 })

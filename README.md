@@ -6,9 +6,7 @@
 
 QUADRO 是原厂商标。这是非官方社区工具，和 QUADRO GmbH 没有关系。
 
-<p align="center">
-  <img src="docs/shots/qh-can.jpg" alt="攀爬架 Builder：三维网格搭建、官方造型库、料表对库存、逐层装配" width="920">
-</p>
+![攀爬架 Builder：三维网格搭建、官方造型库、料表对库存、逐层装配](docs/shots/qh-can.jpg)
 
 零件按官方网格走，料表能对库存，`.qdf` 与原厂软件互相打开。浏览器打开就能用。
 
@@ -20,9 +18,7 @@ QUADRO 是原厂商标。这是非官方社区工具，和 QUADRO GmbH 没有关
 
 这里打开就能改。网格上能接的位置会亮起来，点一下就接上。
 
-<p align="center">
-  <img src="docs/shots/qh-pain-01.jpg" alt="痛：改个尺寸先装软件。解：浏览器里点亮的位置就能接" width="920">
-</p>
+![痛：改个尺寸先装软件。解：浏览器里点亮的位置就能接](docs/shots/qh-pain-01.jpg)
 
 ### 搭完，别人也能照着装
 
@@ -30,9 +26,7 @@ QUADRO 是原厂商标。这是非官方社区工具，和 QUADRO GmbH 没有关
 
 按真实装配顺序一层一层翻，每步用到哪几个零件都列在旁边。
 
-<p align="center">
-  <img src="docs/shots/qh-pain-02.jpg" alt="痛：不知从哪一步下手。解：按真实顺序出说明书" width="920">
-</p>
+![痛：不知从哪一步下手。解：按真实顺序出说明书](docs/shots/qh-pain-02.jpg)
 
 ### 缺件别等到装一半
 
@@ -40,32 +34,24 @@ QUADRO 是原厂商标。这是非官方社区工具，和 QUADRO GmbH 没有关
 
 搭完自动生成料表：需要多少、现有多少、还差多少逐行列出。缺的先补齐再动手。
 
-<p align="center">
-  <img src="docs/shots/qh-pain-03.jpg" alt="痛：库存全凭印象。解：料表对库存，差多少一目了然" width="920">
-</p>
+![痛：库存全凭印象。解：料表对库存，差多少一目了然](docs/shots/qh-pain-03.jpg)
 
 ## 怎么用
 
 第一次打开有引导，会高亮界面上的真实按钮。「文件 → 再看一遍引导」可以随时回来。
 
-<p align="center">
-  <img src="docs/shots/qh-how.jpg" alt="从开搭到带走：起手、搭建、对库存、预览、带走" width="920">
-</p>
+![从开搭到带走：起手、搭建、对库存、预览、带走](docs/shots/qh-how.jpg)
 
-1. **起手**  
-   右栏「模型库」打开官方造型或起步示例；也可以顶栏选「管」，空场景点一下长出第一根。
-
-2. **搭建**  
-   顶栏选零件，点场景里高亮的位置装上。左栏改颜色。接错了撤销，或按 D 进删除模式点掉。
-
-3. **对库存**  
-   「零件清单」看用了什么；「我的库存」填手里的数量。「选购建议」会列出还缺哪些件、该买哪套。
-
-4. **预览**  
-   底部「逐层拼装」（或按 A）按真实顺序翻步。`[` `]` 切换步骤。
-
-5. **带走**  
-   ⌘S 存进「我的设计」。给别人搭：导出拼装说明书 PDF。给别人改：复制分享链接，或导出 `.qdf`。
+1. **起手**
+  右栏「模型库」打开官方造型或起步示例；也可以顶栏选「管」，空场景点一下长出第一根。
+2. **搭建**
+  顶栏选零件，点场景里高亮的位置装上。左栏改颜色。接错了撤销，或按 D 进删除模式点掉。
+3. **对库存**
+  「零件清单」看用了什么；「我的库存」填手里的数量。「选购建议」会列出还缺哪些件、该买哪套。
+4. **预览**
+  底部「逐层拼装」（或按 A）按真实顺序翻步。`[` `]` 切换步骤。
+5. **带走**
+  ⌘S（Windows：Ctrl+S）存进「我的设计」。给别人搭：导出拼装说明书 PDF。给别人改：复制分享链接，或导出 `.qdf`。
 
 Esc 退出当前模式。标签栏可以同时开多个设计，关掉未保存的标签前会问一次。
 
@@ -73,7 +59,7 @@ Esc 退出当前模式。标签栏可以同时开多个设计，关掉未保存�
 
 **搭建** — 管、连接件、面板、轮、布件、泳池、滑梯、加固，按官方网格吸附。经典四色和 Home 柔和色，可按家族换色或全部改成同色。支持选择、框选、整块选择、复制粘贴（可升降楼层）、旋转、删除。多标签同时开几个设计。
 
-**模型库** — 约 495 个官方造型，卡片是空背景 3D 图；第一次打开某条会从官网下 QDF，之后缓存在本机。起步造型（立方框、塔、桌、隧道、金字塔等）可挂到指针上再放下。本地 `.qdf` 可单文件或整夹导入。
+**模型库** — 约 495 个官方造型，卡片是空背景 3D 图；QDF 在仓库 `public/qdf/`，点开即用。起步造型（立方框、塔、桌、隧道、金字塔等）可挂到指针上再放下。本地 `.qdf` 可单文件或整夹导入。
 
 **料表和选购** — 「零件清单」按类列出，点一行会在场景里标出对应零件。「我的库存」按可买配件目录填写数量（管 / 接头 / 板 / 滑梯 / 轮 / 布 / 泳池衬 / 管帽 / 加固 / 螺丝），可搜索、按全部 / 已有 / 缺件筛选，也可导入导出 JSON。店里不单卖的件默认不出现，当前造型用到的仍会列出来。「选购建议」对照官方件看缺什么、哪套能盖住；中文界面套装价按人民币显示。
 
@@ -81,19 +67,21 @@ Esc 退出当前模式。标签栏可以同时开多个设计，关掉未保存�
 
 **导出** — 拼装说明书 PDF（封面成品图、每步正反两张、本步零件、总料表）；`.qdf`（和原厂软件互开；Home 色导出会落到官方红绿蓝黄）；JSON、PNG。分享链接把设计写进网址，对方打开即见，不用账号。「我的设计」存在本机浏览器。
 
-界面中 / EN / DE。可安装成 PWA；已经缓存过的页面离线也能打开，官方模型第一次仍要联网下载 QDF。
+界面中 / EN / DE。可安装成 PWA；已经缓存过的页面离线也能打开。
 
 ## 界面
 
-| 位置 | 做什么 |
-| --- | --- |
-| 顶栏 | 选择、删除、管、面板、连接件、轮、布件、泳池、滑梯、加固 |
-| 左栏 | 颜色、一键换色 |
-| 左上三个按钮 | 草地、框住模型、导出说明书 |
-| 画布上方 | 设计标签 |
-| 右栏 | 文件、我的设计、模型库、选购建议、零件清单、我的库存 |
-| 底栏 | 逐层拼装 |
-| 左下角 | 当前模式能用的快捷键，点标题可收起 |
+
+| 位置     | 做什么                          |
+| ------ | ---------------------------- |
+| 顶栏     | 选择、删除、管、面板、连接件、轮、布件、泳池、滑梯、加固 |
+| 左栏     | 颜色、一键换色                      |
+| 左上三个按钮 | 草地、框住模型、导出说明书                |
+| 画布上方   | 设计标签                         |
+| 右栏     | 文件、我的设计、模型库、选购建议、零件清单、我的库存   |
+| 底栏     | 逐层拼装                         |
+| 左下角    | 当前模式能用的快捷键，点标题可收起            |
+
 
 窗口变窄时，左栏和三个按钮会落到工具栏下面，避免叠在一起。
 
@@ -112,41 +100,144 @@ Esc 退出当前模式。标签栏可以同时开多个设计，关掉未保存�
 
 快捷键按系统显示：Mac 用 ⌘，Windows 用 Ctrl。
 
-| 操作 | 键 |
-| --- | --- |
+
+| 操作      | 键                                 |
+| ------- | --------------------------------- |
 | 撤销 / 重做 | ⌘Z / ⇧⌘Z（Windows：Ctrl+Z / Ctrl+Y） |
-| 保存 | ⌘S |
-| 全选 | ⌘A |
-| 复制 / 粘贴 | ⌘C / ⌘V。粘贴后 ↑↓ 升降，点击放下，Esc 取消 |
-| 选择整块 | 双击，或 L，或左栏「选择整块 L」。Shift/⌘ 加点选 |
-| 旋转选中 | Q 逆时针 / E 顺时针 |
-| 删除模式 | D。点零件逐个删除，Esc 或再按 D 退出 |
-| 删除选中 | Delete / Backspace |
-| 框住模型 | F |
-| 逐层拼装 | A，`[` `]` 翻步 |
-| 退出当前模式 | Esc |
+| 保存      | ⌘S                                |
+| 全选      | ⌘A                                |
+| 复制 / 粘贴 | ⌘C / ⌘V。粘贴后 ↑↓ 升降，点击放下，Esc 取消     |
+| 选择整块    | 双击，或 L，或左栏「选择整块 L」。Shift/⌘ 加点选    |
+| 旋转选中    | Q 逆时针 / E 顺时针                     |
+| 删除模式    | D。点零件逐个删除，Esc 或再按 D 退出            |
+| 删除选中    | Delete / Backspace                |
+| 框住模型    | F                                 |
+| 逐层拼装    | A，`[` `]` 翻步                      |
+| 退出当前模式  | Esc                               |
+
 
 相机：拖动旋转；Mac 用 ⌥ 拖或 ⇧+双指横移、双指缩放；Windows 用 Alt 拖或 Shift+滚轮横移、滚轮缩放。
 
-## 本地运行
+## 本机部署
 
-需要 Node 22+ 和 [pnpm](https://pnpm.io/)。本机若用 Homebrew 的 `node@24`：
+需要 Node 22+、[pnpm](https://pnpm.io/) 和 Git。开发用 `pnpm dev`，上线先 `pnpm build` 打出 `dist/`，再预览或丢给静态站点。
+
+官方造型的 `.qdf`（约 495 个）和缩略图都在仓库里，`pnpm dev` / `pnpm preview` / 静态托管都走本地文件，不用代理官网。clone 会带上这些资源，大约几十 MB。
+
+Linux 与 macOS 同一套命令，跳过 Homebrew 那几行即可。
+
+### macOS
+
+1. 安装 Node。可用 [官网安装包](https://nodejs.org/)，或 Homebrew：
 
 ```bash
-export PATH="/opt/homebrew/opt/node@24/bin:$PATH"
+brew install node@24
+echo 'export PATH="/opt/homebrew/opt/node@24/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+node -v    # 应是 v22 或更新
+```
+
+Intel Mac 把 `/opt/homebrew` 换成 `/usr/local`。
+
+2. 启用 pnpm：
+
+```bash
+corepack enable
+pnpm -v
+```
+
+3. 拉代码并启动开发服：
+
+```bash
+git clone https://github.com/Neytoph/quadro-builder.git
+cd quadro-builder
 pnpm install
 pnpm dev
 ```
 
 浏览器打开终端里打印的地址，一般是 `http://localhost:5173/`。端口被占用时 Vite 会顺延。
 
+4. 打生产包，本机预览：
+
 ```bash
-pnpm exec tsc -b --noEmit   # 类型检查
+pnpm exec tsc -b --noEmit   # 可选，类型检查
 pnpm build                  # 产出 dist/
-pnpm preview                # 预览生产包
+pnpm preview                # 一般是 http://localhost:4173/
 ```
 
-打开官方模型时，开发服务器会把 `/mdb-files` 代理到 `https://mdb.quadroworld.com`。缩略图在本仓库 `public/thumbs/`，不走官网。
+### Windows
+
+用 **PowerShell**。不要复制 macOS 的 `export PATH=...`，那是 Unix 语法。
+
+1. 安装 Node 和 Git。关掉当前窗口，再开一个新的 PowerShell，让 PATH 生效：
+
+```powershell
+winget install OpenJS.NodeJS.LTS
+winget install Git.Git
+```
+
+也可以从 [nodejs.org](https://nodejs.org/) 下载安装包，勾选 Add to PATH。装完检查：
+
+```powershell
+node -v    # 应是 v22 或更新
+git --version
+```
+
+2. 启用 pnpm：
+
+```powershell
+corepack enable
+pnpm -v
+```
+
+若提示没有 corepack，改用 `npm install -g pnpm`。
+
+3. 拉代码并启动开发服。仓库尽量放在较短路径，例如 `C:\src\`，避免 Windows 路径过长：
+
+```powershell
+git clone https://github.com/Neytoph/quadro-builder.git
+cd quadro-builder
+pnpm install
+pnpm dev
+```
+
+浏览器打开 `http://localhost:5173/`。
+
+4. 打生产包，本机预览：
+
+```powershell
+pnpm exec tsc -b --noEmit
+pnpm build
+pnpm preview
+```
+
+一般是 `http://localhost:4173/`。
+
+### 放到网上
+
+把 `dist/` 交给 Nginx、Caddy、Cloudflare Pages 等静态托管即可。官方造型在 `dist/qdf/`，缩略图在 `dist/thumbs/`，不用再配反向代理。
+
+注意：
+
+- 挂在**域名根路径**。子路径要先改 Vite 的 `base` 再构建。
+- 未知路径回到 `index.html`（单页应用）。`pnpm preview` 已经这样做；裸的 `python -m http.server` 不会。
+
+Nginx 示例：
+
+```nginx
+server {
+  listen 80;
+  server_name example.com;
+  root /var/www/quadro-builder/dist;
+  index index.html;
+
+  location / {
+    try_files $uri $uri/ /index.html;
+  }
+}
+```
+
+开源本地版不必配置 `VITE_SYNC_BASE`、`VITE_ANALYTICS_URL`，默认同步和埋点都是关掉的。
 
 ## 目录
 
@@ -157,6 +248,7 @@ src/store/      引擎和 React 之间的桥
 src/data/       起步造型、官方模型列表、套装建议、库存目录
 src/sync/       可选的云端同步（本地默认关闭）
 public/data/    零件目录，以及从原厂程序抽出的网格
+public/qdf/     官方造型的 .qdf（约 495 个）
 public/thumbs/  官方和起步造型的空背景缩略图
 docs/shots/     README 用的产品图
 ```
@@ -166,3 +258,4 @@ docs/shots/     README 用的产品图
 ## 许可
 
 MIT。见 [LICENSE](LICENSE)。
+
