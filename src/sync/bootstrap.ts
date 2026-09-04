@@ -31,8 +31,22 @@ async function authenticated(baseUrl: string): Promise<boolean | null> {
   }
 }
 
+/** 一次会话里只让 onUnauthenticated 触发一次，防止没有闸门的部署反复重载。 */
+const GATE_KEY = 'quadro.sync.gate-recheck'
+
 export function startSyncIfConfigured(
   onEvent?: (e: SyncEvent) => void,
+  /**
+   * 后端明确说"你没登录"时调一次（网络不通不算，那是说不准）。
+   *
+   * 为什么需要它：应用壳可能是 Service Worker 从预缓存里给的，导航请求
+   * 压根没走网络，入口那道闸门（服务端重定向）也就没机会生效——登录过一次
+   * 之后，退了登录照样能把工具打开。SW 是缓存不是授权层，所以由应用自己
+   * 在启动时确认一次会话。
+   *
+   * 具体怎么处置留给调用方：这一层不该认识 /login 这种平台专有的地址。
+   */
+  onUnauthenticated?: () => void,
 ): ReturnType<typeof createSync> | null {
   const baseUrl = import.meta.env.VITE_SYNC_BASE
   if (!baseUrl || started) return null
@@ -66,10 +80,27 @@ export function startSyncIfConfigured(
   // 登录后切回来，那时候不该还要求他刷新页面。
   void (async () => {
     const ok = await authenticated(baseUrl)
-    if (ok) { begin(); return }
+    if (ok) {
+      try { sessionStorage.removeItem(GATE_KEY) } catch { /* 隐私模式 */ }
+      begin()
+      return
+    }
     // 没登录也记一笔：进了 builder 却没登录的人有多少，
     // 直接说明入口那道闸门有没有漏。
-    if (ok === false) track('builder.sync.anon')
+    if (ok === false) {
+      track('builder.sync.anon')
+      let first = true
+      try {
+        first = !sessionStorage.getItem(GATE_KEY)
+        if (first) sessionStorage.setItem(GATE_KEY, '1')
+      } catch { /* 隐私模式：存不了就当第一次，最多多走一次 */ }
+      // 只处置一次。没有入口闸门的部署（自建、开源本地版接了同步）
+      // 重载之后仍然是未登录，再触发就成了死循环。
+      if (first && onUnauthenticated) {
+        onUnauthenticated()
+        return
+      }
+    }
 
     const recheck = async () => {
       if (started || document.visibilityState !== 'visible') return
