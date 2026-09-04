@@ -21,6 +21,10 @@ export const PRESETS: PresetDef[] = [
   { key: 'pyramid', labelKey: 'preset.pyramid', hint: 'A0128', mode: 'replace' },
 ]
 
+export function presetThumbPath(key: string) {
+  return `/thumbs/presets/${key}.jpg?v=2`
+}
+
 const SPAN = 40
 const COLORS = ['red', 'green', 'blue', 'yellow'] as const
 

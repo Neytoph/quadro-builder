@@ -13,6 +13,7 @@ import { isUntitledName, labelOf as nameLabel } from '../names'
 import { fetchOfficialQdf, officialLibId, OFFICIAL_BY_ID, parseOfficialId } from '../data/official'
 import { applyFrameHex, loadTune } from '../engine/colorTune.js'
 import { exportAssemblyPdf as runAssemblyPdf } from '../engine/assemblyManual.js'
+import { takeModelThumb, waitSceneReady } from '../engine/thumbShot.js'
 
 // 引擎来自 Vanilla JS，这里不跟它的推断类型较劲。
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -185,6 +186,9 @@ interface EngineApi {
     accessories: Array<{ id: string; qdf?: string; name?: string }>
   }
   applyColorTune: (tune: { scene: Record<string, unknown>; frame: Record<string, string>; grade?: Record<string, number> }) => void
+  startThumbBatch: () => void
+  endThumbBatch: () => void
+  captureThumb: (job: { kind: 'official' | 'preset'; id: string }) => Promise<string | null>
 }
 
 const Ctx = createContext<EngineApi | null>(null)
@@ -358,6 +362,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const { t, lang } = useI18n()
   const hostRef = useRef<HTMLDivElement | null>(null)
   const eng = useRef<{ scene: E; model: E; builder: E } | null>(null)
+  const thumbBatch = useRef<{ json: unknown; camera: unknown; sceneOn: boolean; mode: string } | null>(null)
   const tabsRef = useRef<Array<TabInfo & { model: unknown; view: AnyRec }>>([])
   const activeRef = useRef<string | null>(null)
   const switching = useRef(false)
@@ -1203,6 +1208,80 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     bump()
   }, [bump])
 
+  const startThumbBatch = useCallback(() => {
+    const e = eng.current
+    if (!e || thumbBatch.current) return
+    switching.current = true
+    thumbBatch.current = {
+      json: e.model.toJSON(),
+      camera: e.scene.cameraState(),
+      sceneOn: !!e.scene._sceneOn,
+      mode: String(e.builder.mode || 'select'),
+    }
+    e.builder.cancelPaste?.()
+    e.builder.setMode('select')
+    e.builder.modelReplaced()
+    e.scene.setScene(false)
+  }, [])
+
+  const endThumbBatch = useCallback(() => {
+    const e = eng.current
+    const prev = thumbBatch.current
+    thumbBatch.current = null
+    if (e && prev) {
+      e.builder.modelReplaced()
+      e.model.loadJSON(prev.json || { format: 2, nodes: [], tubes: [] })
+      e.builder.setMode(prev.mode || 'select')
+      e.scene.setScene(prev.sceneOn)
+      if (prev.camera) e.scene.restoreCameraState(prev.camera)
+      e.builder.refresh()
+    }
+    switching.current = false
+    bump()
+  }, [bump])
+
+  const captureThumb = useCallback(async (job: { kind: 'official' | 'preset'; id: string }) => {
+    const e = eng.current
+    if (!e) return null
+    let data: unknown = null
+    try {
+      if (job.kind === 'official') {
+        const text = await fetchOfficialQdf(job.id)
+        data = parseDesign(text)
+      } else if (job.id === 'pyramid') {
+        data = parseQDF(pyramidQdf, {
+          tubes: buildableTubes(),
+          panels: panels(),
+          connectorSize: geometry().connectorSize,
+          mergeEps: 2,
+        })
+      } else {
+        data = geometricPreset(job.id)
+      }
+    } catch {
+      return null
+    }
+    if (!data) return null
+    const batched = !!thumbBatch.current
+    if (!batched) startThumbBatch()
+    try {
+      e.builder.modelReplaced()
+      const res = e.model.loadJSON(data)
+      if (res && res.ok === false) return null
+      if (!e.model.nodes?.size) return null
+      e.builder.refresh()
+      const meshesOk = await waitSceneReady(e.scene)
+      if (!meshesOk) return null
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+      const url = await takeModelThumb(e.scene, e.model)
+      return typeof url === 'string' && url.startsWith('data:image') ? url : null
+    } catch {
+      return null
+    } finally {
+      if (!batched) endThumbBatch()
+    }
+  }, [endThumbBatch, startThumbBatch])
+
   const value: EngineApi = {
     ready, error, hostRef, tick,
     mode: (builder?.mode as string) || 'select',
@@ -1267,6 +1346,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     engineLang: (l) => setEngineLang(l),
     catalog,
     applyColorTune,
+    startThumbBatch, endThumbBatch, captureThumb,
   }
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>

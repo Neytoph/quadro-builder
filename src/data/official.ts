@@ -20,7 +20,7 @@ export function officialQdfPath(id: string) {
 }
 
 export function officialThumbPath(id: string) {
-  return `/mdb-images/designs/${id.toUpperCase()}/01.jpg`
+  return `/thumbs/official/${id.toUpperCase()}.jpg?v=2`
 }
 
 export async function fetchOfficialQdf(id: string) {

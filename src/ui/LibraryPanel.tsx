@@ -3,7 +3,7 @@ import { useEngine } from '../store/EngineContext'
 import { useI18n } from '../i18n'
 import { storage, designEntry, checkAgainstInventory, missingCount } from '../engine-api'
 import { OFFICIAL_MODELS, officialThumbPath } from '../data/official'
-import { MODULES, PRESETS } from '../data/presets'
+import { MODULES, PRESETS, presetThumbPath, type PresetDef } from '../data/presets'
 
 export const LIBRARY_OPEN_EVENT = 'quadro:library-open'
 
@@ -33,6 +33,31 @@ function isQdf(file: File) {
 
 function yieldUi() {
   return new Promise<void>(resolve => { requestAnimationFrame(() => resolve()) })
+}
+
+function hideBrokenImg(e: React.SyntheticEvent<HTMLImageElement>) {
+  e.currentTarget.style.display = 'none'
+}
+
+function StartCard({ p, label, onClick }: { p: PresetDef; label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={`${label} · ${p.hint}`}
+      className="text-left rounded-xl border border-gray-800 bg-gray-900/80 hover:border-teal-400 cursor-pointer overflow-hidden"
+    >
+      <div className="aspect-[4/3] bg-[#edd8c4] overflow-hidden">
+        <img src={presetThumbPath(p.key)} alt="" loading="lazy" draggable={false}
+          className="w-full h-full object-contain"
+          onError={hideBrokenImg} />
+      </div>
+      <div className="px-1.5 py-1.5">
+        <div className="text-[11px] text-gray-100 leading-snug">{label}</div>
+        <div className="text-[10px] text-gray-500 mt-0.5">{p.hint}</div>
+      </div>
+    </button>
+  )
 }
 
 export default function LibraryPanel() {
@@ -179,25 +204,22 @@ export default function LibraryPanel() {
             <div>
               <div className="text-[10px] uppercase tracking-wider text-gray-400 mb-1.5">{t('section.modules')}</div>
               <p className="text-[11px] text-gray-500 mb-2 leading-snug">{t('hint.modules')}</p>
-              <div className="grid grid-cols-2 gap-1.5">
+              <div className="grid grid-cols-2 gap-2">
                 {MODULES.map(p => (
-                  <button key={p.key} onClick={() => api.placeModule(p.key)} title={p.hint}
-                    className="text-sm md:text-xs rounded-lg border border-gray-700 bg-gray-800 hover:border-teal-400 px-2 py-2.5 md:py-1.5 text-left cursor-pointer">
-                    {t(p.labelKey)} <span className="text-gray-500">{p.hint}</span>
-                  </button>
+                  <StartCard key={p.key} p={p} label={t(p.labelKey)} onClick={() => api.placeModule(p.key)} />
                 ))}
               </div>
             </div>
             <div>
               <div className="text-[10px] uppercase tracking-wider text-gray-400 mb-1.5">{t('section.presets')}</div>
-              <div className="grid grid-cols-2 gap-1.5">
+              <div className="grid grid-cols-2 gap-2">
                 {PRESETS.map(p => (
-                  <button key={p.key}
+                  <StartCard
+                    key={p.key}
+                    p={p}
+                    label={t(p.labelKey)}
                     onClick={() => p.mode === 'replace' ? api.loadPreset(p.key) : api.placeModule(p.key)}
-                    title={p.mode === 'replace' ? t('hint.presetReplace') : p.hint}
-                    className="text-sm md:text-xs rounded-lg border border-gray-700 bg-gray-800 hover:border-teal-400 px-2 py-2.5 md:py-1.5 text-left cursor-pointer">
-                    {t(p.labelKey)} <span className="text-gray-500">{p.hint}</span>
-                  </button>
+                  />
                 ))}
               </div>
             </div>
@@ -219,10 +241,10 @@ export default function LibraryPanel() {
                       title={`${m.id} · ${m.name}\n${t('lib.drag')}`}
                       className={`text-left rounded-xl border border-gray-800 bg-gray-900/80 hover:border-teal-400 cursor-grab active:cursor-grabbing overflow-hidden ${busyCard ? 'opacity-60' : ''}`}
                     >
-                      <div className="aspect-[4/3] bg-gray-800 overflow-hidden">
+                      <div className="aspect-[4/3] bg-[#edd8c4] overflow-hidden">
                         <img src={officialThumbPath(m.id)} alt="" loading="lazy" draggable={false}
-                          className="w-full h-full object-cover"
-                          onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
+                          className="w-full h-full object-contain"
+                          onError={hideBrokenImg} />
                       </div>
                       <div className="px-1.5 py-1.5">
                         <div className="text-[10px] text-teal-300 font-mono">{m.id}</div>

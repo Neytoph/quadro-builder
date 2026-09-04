@@ -8,6 +8,7 @@ import RightDock from './ui/RightDock'
 import ProjectTabs from './ui/ProjectTabs'
 import AssemblyBar from './ui/AssemblyBar'
 import Onboarding from './ui/Onboarding'
+import ThumbCapture from './ui/ThumbCapture'
 import ErrorBoundary from './ui/ErrorBoundary'
 import SceneToggle from './ui/SceneToggle'
 // 调色台代码保留在 src/ui/ColorTune.tsx，面板先不挂上。
@@ -204,6 +205,7 @@ function AppInner() {
       <ManualConfirm />
       <ManualProgress />
       <Onboarding />
+      <ThumbCapture />
     </div>
   )
 }
