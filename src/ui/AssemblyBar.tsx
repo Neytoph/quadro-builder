@@ -104,7 +104,7 @@ export default function AssemblyBar() {
 
   if (!api.assembly.active) {
     return (
-      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40">
+      <div data-tour="assembly" className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40">
         <button onClick={() => api.setAssembly(true)}
           className="bg-gray-900/90 backdrop-blur border border-gray-700 hover:border-teal-400 text-gray-50 text-sm rounded-full shadow-lg px-4 py-2 cursor-pointer">
           {t('assembly.toggle')}
@@ -115,7 +115,7 @@ export default function AssemblyBar() {
   const n = api.assembly.max + 1
 
   return (
-    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1 bg-gray-900/95 backdrop-blur border border-teal-500/50 rounded-full p-1 shadow-lg">
+    <div data-tour="assembly" className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1 bg-gray-900/95 backdrop-blur border border-teal-500/50 rounded-full p-1 shadow-lg">
       <button disabled={api.assembly.step <= 0} onClick={() => api.stepAssembly(-1)}
         className="w-8 h-8 rounded-full text-gray-50 hover:bg-gray-700 disabled:opacity-30 cursor-pointer" title={`${t('assembly.prev')} [`}>◀</button>
       <div className="px-2.5 text-sm font-semibold text-teal-700 tabular-nums whitespace-nowrap">{t('assembly.step', { k: api.assembly.step + 1, n })}</div>

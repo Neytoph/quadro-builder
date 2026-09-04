@@ -46,6 +46,8 @@ export interface BomRow {
   subtotal?: number
   id?: string
   kind: string
+  w?: number
+  h?: number
 }
 
 export interface BomView {
@@ -193,8 +195,20 @@ interface EngineApi {
 
 const Ctx = createContext<EngineApi | null>(null)
 
-const TEXTIL = new Set(['textil2', 'lattice2', 'textil-round2', 'bag2', 'roof-large2'])
-const WHEEL = new Set(['multi-wheel2', 'floating-wheel2', 'hub-cap2', 'casters2', 'adapter2', 'bearing2', 'steering-lock2'])
+const TEXTIL = new Set([
+  'textil2', 'lattice2', 'textil-round2', 'bag2', 'roof-large2',
+  'textile', 'lattice', 'textile_round', 'bag', 'roof_large',
+])
+const WHEEL = new Set([
+  'multi-wheel2', 'floating-wheel2', 'hub-cap2', 'casters2', 'adapter2', 'bearing2', 'steering-lock2',
+  'wheel', 'wheel_floating', 'hub_cap', 'caster', 'wheel_adapter', 'wheel_bearing', 'steering_lock',
+])
+
+function cleanBomText(v: unknown): string {
+  if (v == null) return ''
+  const s = String(v).trim()
+  return !s || s === 'undefined' || s === 'null' ? '' : s
+}
 
 function emptyInv(): Inventory {
   return { tubes: {}, connectors: {}, panels: {}, reinforcements: {}, fittings: {}, screws: {} }
@@ -294,49 +308,58 @@ function download(name: string, text: string, type: string) {
 
 function asBom(raw: AnyRec): BomView {
   const tubes = ((raw.tubes as AnyRec[]) || []).map(r => ({
-    key: String(r.key ?? `${r.tubeId}|${r.color}`), name: String(r.name), count: Number(r.count),
+    key: String(r.key ?? `${r.tubeId}|${r.color}`), name: cleanBomText(r.name), count: Number(r.count),
     color: (r.color as string) || null, colorName: (r.colorName as string) || null, subtotal: Number(r.subtotal || 0),
-    id: String(r.tubeId), kind: 'tubes',
+    id: cleanBomText(r.tubeId), kind: 'tubes',
   }))
   const connectors = ((raw.connectors as AnyRec[]) || []).map(r => ({
-    key: `connectors:${r.type}`, name: String(r.name), count: Number(r.count),
-    subtotal: Number(r.subtotal || 0), id: String(r.type), kind: 'connectors',
+    key: `connectors:${r.type}`, name: cleanBomText(r.name), count: Number(r.count),
+    subtotal: Number(r.subtotal || 0), id: cleanBomText(r.type), kind: 'connectors',
   }))
   const panels = ((raw.panels as AnyRec[]) || []).map(r => ({
-    key: String(r.key ?? `${r.panelId}|${r.color}`), name: String(r.name), count: Number(r.count),
+    key: String(r.key ?? `${r.panelId}|${r.color}`), name: cleanBomText(r.name), count: Number(r.count),
     color: (r.color as string) || null, colorName: (r.colorName as string) || null, subtotal: Number(r.subtotal || 0),
-    id: String(r.panelId), kind: 'panels',
+    id: cleanBomText(r.panelId), kind: 'panels',
   }))
   const textiles: BomRow[] = []
   const wheels: BomRow[] = []
   const fittings: BomRow[] = []
   for (const r of ((raw.fittings as AnyRec[]) || [])) {
+    const id = cleanBomText(r.id) || cleanBomText(r.kind)
     const row: BomRow = {
-      key: `fittings:${r.id}`, name: String(r.name), count: Number(r.count),
-      subtotal: Number(r.subtotal || 0), id: String(r.id), kind: 'fittings',
+      key: `fittings:${id || r.key}`, name: cleanBomText(r.name), count: Number(r.count),
+      subtotal: Number(r.subtotal || 0), id, kind: 'fittings',
     }
-    const qdf = String(r.qdf || r.kind || '')
-    if (TEXTIL.has(qdf) || TEXTIL.has(String(r.id))) textiles.push({ ...row, kind: 'textiles' })
-    else if (WHEEL.has(qdf) || WHEEL.has(String(r.id))) wheels.push({ ...row, kind: 'wheels' })
+    const qdf = cleanBomText(r.qdf) || cleanBomText(r.kind)
+    if (TEXTIL.has(qdf) || TEXTIL.has(id)) textiles.push({ ...row, kind: 'textiles' })
+    else if (WHEEL.has(qdf) || WHEEL.has(id)) wheels.push({ ...row, kind: 'wheels' })
     else fittings.push(row)
   }
   for (const r of ((raw.textiles as AnyRec[]) || [])) {
+    const w = Number(r.w) || undefined
+    const h = Number(r.h) || undefined
     textiles.push({
-      key: String(r.key ?? r.id), name: String(r.name), count: Number(r.count),
-      color: (r.color as string) || null, subtotal: Number(r.subtotal || 0), id: String(r.id), kind: 'textiles',
+      key: String(r.key ?? r.id ?? `${w}x${h}|${r.color || ''}`),
+      name: cleanBomText(r.name),
+      count: Number(r.count),
+      color: (r.color as string) || null,
+      subtotal: Number(r.subtotal || 0),
+      id: cleanBomText(r.id) || 'textile',
+      kind: 'textiles',
+      w, h,
     })
   }
   const slides = ((raw.slides as AnyRec[]) || []).map(r => ({
-    key: `slides:${r.id || r.kind}`, name: String(r.name), count: Number(r.count),
-    subtotal: Number(r.subtotal || 0), id: String(r.kind || r.id), kind: 'slides',
+    key: `slides:${r.id || r.kind}`, name: cleanBomText(r.name), count: Number(r.count),
+    subtotal: Number(r.subtotal || 0), id: cleanBomText(r.id) || cleanBomText(r.kind), kind: 'slides',
   }))
   const reinforcements = ((raw.reinforcements as AnyRec[]) || []).map(r => ({
-    key: `reinforcements:${r.id}`, name: String(r.name), count: Number(r.count),
-    subtotal: Number(r.subtotal || 0), id: String(r.id), kind: 'reinforcements',
+    key: `reinforcements:${r.id}`, name: cleanBomText(r.name), count: Number(r.count),
+    subtotal: Number(r.subtotal || 0), id: cleanBomText(r.id), kind: 'reinforcements',
   }))
   const screws = ((raw.screws as AnyRec[]) || []).map(r => ({
-    key: `screws:${r.id}|${r.color || ''}`, name: String(r.name), count: Number(r.count),
-    color: (r.color as string) || null, subtotal: Number(r.subtotal || 0), id: String(r.id), kind: 'screws',
+    key: `screws:${r.id}|${r.color || ''}`, name: cleanBomText(r.name), count: Number(r.count),
+    color: (r.color as string) || null, subtotal: Number(r.subtotal || 0), id: cleanBomText(r.id), kind: 'screws',
   }))
   const sum = (rows: BomRow[]) => rows.reduce((s, r) => s + r.count, 0)
   const totals = (raw.totals as AnyRec) || {}

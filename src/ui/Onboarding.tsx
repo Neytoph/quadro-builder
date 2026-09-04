@@ -1,17 +1,33 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useI18n } from '../i18n'
 import { UI_ESCAPE_EVENT } from './events'
+import { useDock, type DockPane } from './dock'
+import { usePanelLayout } from './panelLayout'
 
-const KEY = 'quadro.builder.onboarded.v1'
+const KEY = 'quadro.builder.onboarded.v2'
 export const ONBOARDING_EVENT = 'quadro:onboarding'
 
-const STEPS = [
-  { title: 'onboard.s1title', body: 'onboard.s1body' },
-  { title: 'onboard.s2title', body: 'onboard.s2body' },
-  { title: 'onboard.s3title', body: 'onboard.s3body' },
-  { title: 'onboard.s4title', body: 'onboard.s4body' },
-  { title: 'onboard.s5title', body: 'onboard.s5body' },
-] as const
+const PAD = 8
+const CARD_W = 340
+
+type Prefer = 'left' | 'right' | 'bottom' | 'top'
+
+const STEPS: Array<{
+  title: string
+  body: string
+  hint?: string
+  tour: string
+  pane: DockPane | null
+  color?: boolean
+  prefer: Prefer
+}> = [
+  { title: 'onboard.s1title', body: 'onboard.s1body', hint: 'onboard.s1hint', tour: 'dock-panel', pane: 'library', prefer: 'left' },
+  { title: 'onboard.s2title', body: 'onboard.s2body', hint: 'onboard.s2hint', tour: 'tool-tubes', pane: null, prefer: 'bottom' },
+  { title: 'onboard.s3title', body: 'onboard.s3body', tour: 'left-color', pane: null, color: true, prefer: 'right' },
+  { title: 'onboard.s4title', body: 'onboard.s4body', tour: 'dock-panel', pane: 'bom', prefer: 'left' },
+  { title: 'onboard.s5title', body: 'onboard.s5body', tour: 'scene-buttons', pane: null, prefer: 'bottom' },
+  { title: 'onboard.s6title', body: 'onboard.s6body', hint: 'onboard.s6hint', tour: 'dock-panel', pane: 'file', prefer: 'left' },
+]
 
 function shouldOpen(): boolean {
   try { return localStorage.getItem(KEY) !== '1' } catch { return true }
@@ -21,10 +37,66 @@ function markDone() {
   try { localStorage.setItem(KEY, '1') } catch { /* ignore */ }
 }
 
+function clamp(n: number, min: number, max: number) {
+  return Math.min(Math.max(min, n), max)
+}
+
+function placeCard(hole: DOMRect | null, prefer: Prefer, cardH: number) {
+  const margin = 12
+  const vw = window.innerWidth
+  const vh = window.innerHeight
+  const w = Math.min(CARD_W, vw - margin * 2)
+  const h = cardH
+  if (!hole) return { top: Math.max(margin, (vh - h) / 2), left: Math.max(margin, (vw - w) / 2) }
+  const midY = hole.top + hole.height / 2 - h / 2
+  const midX = hole.left + hole.width / 2 - w / 2
+  const right = hole.right + PAD + margin
+  const left = hole.left - w - margin
+  const below = hole.bottom + PAD + margin
+  const above = hole.top - h - margin
+  const order: Prefer[] = prefer === 'left'
+    ? ['left', 'right', 'bottom', 'top']
+    : prefer === 'right'
+      ? ['right', 'left', 'bottom', 'top']
+      : prefer === 'top'
+        ? ['top', 'bottom', 'right', 'left']
+        : ['bottom', 'top', 'right', 'left']
+  for (const side of order) {
+    if (side === 'right' && right + w <= vw - margin) return { top: clamp(midY, margin, vh - h - margin), left: right }
+    if (side === 'left' && left >= margin) return { top: clamp(midY, margin, vh - h - margin), left: left }
+    if (side === 'bottom' && below + h <= vh - margin) return { top: below, left: clamp(midX, margin, vw - w - margin) }
+    if (side === 'top' && above >= margin) return { top: above, left: clamp(midX, margin, vw - w - margin) }
+  }
+  return { top: clamp(below, margin, vh - h - margin), left: clamp(midX, margin, vw - w - margin) }
+}
+
+function readTourRect(id: string): DOMRect | null {
+  const el = document.querySelector(`[data-tour="${id}"]`)
+  if (!el) return null
+  const r = el.getBoundingClientRect()
+  if (r.width < 2 || r.height < 2) return null
+  return r
+}
+
 export default function Onboarding() {
   const { t } = useI18n()
+  const { setPane } = useDock()
+  const { setLeftColor } = usePanelLayout()
   const [open, setOpen] = useState(shouldOpen)
   const [i, setI] = useState(0)
+  const [hole, setHole] = useState<DOMRect | null>(null)
+  const cardRef = useRef<HTMLDivElement>(null)
+  const [cardH, setCardH] = useState(220)
+
+  const step = STEPS[i]
+  const last = i >= STEPS.length - 1
+
+  const finish = () => {
+    markDone()
+    setOpen(false)
+    setI(0)
+    setPane(null)
+  }
 
   useEffect(() => {
     const replay = () => { setI(0); setOpen(true) }
@@ -34,41 +106,106 @@ export default function Onboarding() {
 
   useEffect(() => {
     if (!open) return
-    const onEsc = () => { markDone(); setOpen(false); setI(0) }
+    const onEsc = () => finish()
     window.addEventListener(UI_ESCAPE_EVENT, onEsc)
     return () => window.removeEventListener(UI_ESCAPE_EVENT, onEsc)
   }, [open])
 
-  if (!open) return null
-  const last = i >= STEPS.length - 1
-  const step = STEPS[i]
-  const close = () => { markDone(); setOpen(false); setI(0) }
+  useEffect(() => {
+    if (!open || !step) return
+    setPane(step.pane)
+    if (step.color) setLeftColor(true)
+  }, [open, i, step, setPane, setLeftColor])
+
+  useLayoutEffect(() => {
+    if (!open || !step) return
+    let dead = false
+    const measure = () => {
+      if (dead) return
+      setHole(readTourRect(step.tour))
+      const ch = cardRef.current?.offsetHeight
+      if (ch && ch > 40) setCardH(ch)
+    }
+    measure()
+    const a = window.requestAnimationFrame(measure)
+    const t1 = window.setTimeout(measure, 80)
+    const t2 = window.setTimeout(measure, 220)
+    window.addEventListener('resize', measure)
+    window.addEventListener('scroll', measure, true)
+    return () => {
+      dead = true
+      window.cancelAnimationFrame(a)
+      window.clearTimeout(t1)
+      window.clearTimeout(t2)
+      window.removeEventListener('resize', measure)
+      window.removeEventListener('scroll', measure, true)
+    }
+  }, [open, i, step])
+
+  if (!open || !step) return null
+
+  const spot = hole
+    ? {
+      top: hole.top - PAD,
+      left: hole.left - PAD,
+      width: hole.width + PAD * 2,
+      height: hole.height + PAD * 2,
+    }
+    : null
+  const card = placeCard(hole, step.prefer, cardH)
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/45 p-4" onClick={close}>
-      <div className="w-full max-w-md bg-gray-900 text-gray-100 rounded-2xl border border-gray-700 shadow-2xl p-5"
-        onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-3">
-          <div className="text-[11px] uppercase tracking-wider text-teal-400">
+    <div className="fixed inset-0 z-[80] pointer-events-none" role="dialog" aria-modal="true" aria-labelledby="onboard-title">
+      {spot ? (
+        <>
+          <div className="absolute bg-black/50 pointer-events-auto" style={{ top: 0, left: 0, right: 0, height: Math.max(0, spot.top) }} />
+          <div className="absolute bg-black/50 pointer-events-auto" style={{ top: spot.top + spot.height, left: 0, right: 0, bottom: 0 }} />
+          <div className="absolute bg-black/50 pointer-events-auto" style={{ top: spot.top, left: 0, width: Math.max(0, spot.left), height: spot.height }} />
+          <div className="absolute bg-black/50 pointer-events-auto" style={{ top: spot.top, left: spot.left + spot.width, right: 0, height: spot.height }} />
+          <div
+            className="absolute rounded-2xl pointer-events-none shadow-[0_0_0_2px_#2dd4bf,0_0_0_6px_rgba(45,212,191,0.28)]"
+            style={spot}
+          />
+        </>
+      ) : (
+        <div className="absolute inset-0 bg-black/50 pointer-events-auto" />
+      )}
+
+      <div
+        ref={cardRef}
+        className="absolute w-[min(21.25rem,calc(100vw-1.5rem))] bg-gray-900 text-gray-100 rounded-2xl border border-gray-700 shadow-2xl p-4 pointer-events-auto"
+        style={{ top: card.top, left: card.left }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-[11px] tracking-wide text-teal-400">
             {t('onboard.kicker')} · {i + 1}/{STEPS.length}
           </div>
-          <button onClick={close} className="text-gray-400 hover:text-teal-600 text-sm cursor-pointer">{t('onboard.skip')}</button>
+          <button type="button" onClick={finish} className="text-gray-400 hover:text-teal-300 text-sm cursor-pointer">
+            {t('onboard.skip')}
+          </button>
         </div>
-        <div className="text-base font-semibold mb-2">{t(step.title)}</div>
-        <p className="text-sm text-gray-300 leading-relaxed mb-5">{t(step.body)}</p>
-        <div className="flex items-center gap-2">
-          <div className="flex-1 flex gap-1">
+        <div id="onboard-title" className="text-base font-semibold mb-1.5">{t(step.title)}</div>
+        <p className="text-sm text-gray-300 leading-relaxed">{t(step.body)}</p>
+        {step.hint && (
+          <p className="text-[12px] text-teal-300/90 leading-relaxed mt-2">{t(step.hint)}</p>
+        )}
+        <p className="text-[11px] text-gray-500 mt-2">{t('onboard.try')}</p>
+        <div className="flex items-center gap-2 mt-4">
+          <div className="flex-1 flex gap-1" aria-hidden="true">
             {STEPS.map((_, k) => (
               <div key={k} className={`h-1 flex-1 rounded-full ${k <= i ? 'bg-teal-400' : 'bg-gray-700'}`} />
             ))}
           </div>
           {i > 0 && (
-            <button onClick={() => setI(i - 1)} className="px-3 py-2 rounded-lg text-sm text-gray-300 hover:bg-gray-800 cursor-pointer">
+            <button type="button" onClick={() => setI(i - 1)} className="px-3 py-2 rounded-lg text-sm text-gray-300 hover:bg-gray-800 cursor-pointer">
               {t('onboard.back')}
             </button>
           )}
           <button
-            onClick={() => { if (last) close(); else setI(i + 1) }}
+            type="button"
+            autoFocus
+            onClick={() => { if (last) finish(); else setI(i + 1) }}
             className="px-4 py-2 rounded-lg text-sm font-semibold bg-teal-500 hover:bg-teal-400 text-white cursor-pointer"
           >
             {last ? t('onboard.done') : t('onboard.next')}

@@ -38,12 +38,23 @@ export interface PushResponse {
   rev: number
 }
 
+/** 服务端上的库存。每人一份，所以没有 id、没有墓碑。 */
+export interface RemoteInventory {
+  data: unknown
+  rev: number
+  updatedAt: number
+}
+
 export type SyncEvent =
   | { type: 'start' }
   | { type: 'idle'; rev: number }
   | { type: 'pushed'; id: string; rev: number }
   | { type: 'pulled'; count: number; rev: number }
   | { type: 'conflict'; id: string; copyId: string }
+  | { type: 'inventory-pushed'; rev: number }
+  | { type: 'inventory-pulled'; rev: number }
+  /** 库存两端都改过。服务端那份已生效，本地那份存进了 stashKey。 */
+  | { type: 'inventory-conflict'; stashKey: string }
   | { type: 'quota'; feature: string; used: number; limit: number }
   | { type: 'error'; error: unknown }
 

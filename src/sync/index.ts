@@ -7,9 +7,9 @@
 //
 // 不传 baseUrl 就什么都不做——开源本地版的默认状态，行为与从前完全一致。
 
-import { docs } from '../engine-api'
+import { docs, storage } from '../engine-api'
 import type {
-  DocRecord, PullResponse, PushResponse, RemoteDoc, SyncEvent, SyncOptions,
+  DocRecord, PullResponse, PushResponse, RemoteDoc, RemoteInventory, SyncEvent, SyncOptions,
 } from './types'
 
 const CURSOR_KEY = 'quadro.sync.rev'
@@ -135,6 +135,64 @@ export function createSync(opts: SyncOptions = {}) {
     emit({ type: 'pulled', count: n, rev })
   }
 
+  // —— 库存 ——
+  //
+  // 库存每人只有一份，所以比文档简单：没有 id、没有列表、没有墓碑
+  // （清空就是存一份空的）。engine/storage.js 早就把记账写好了
+  // （inventoryMeta / putRemoteInventory / markInventorySynced），
+  // 这里同样只补"跟服务器说话"的那一半。
+
+  /** 冲突时本地那份存这儿，别静默丢掉。 */
+  const INV_STASH_KEY = 'quadro.inventory.conflict.v1'
+
+  /**
+   * 冲突处理和文档不一样：文档能另存一份副本，库存不能——
+   * 一个人只有一份库存，凭空多出"库存（冲突副本）"没有意义。
+   * 所以取服务端那份生效，本地那份原样存进 localStorage 并抛事件，
+   * 让 UI 能提示、用户能找回。合并交给人：数量该取大还是取小，
+   * 只有他自己知道（在这台机器上减到 3，不代表另一台的 8 是错的）。
+   */
+  function stashInventoryConflict(local: unknown): string {
+    try {
+      localStorage.setItem(INV_STASH_KEY, JSON.stringify({ at: Date.now(), inventory: local }))
+    } catch { /* 隐私模式下存不了，那就只剩事件 */ }
+    return INV_STASH_KEY
+  }
+
+  async function pushInventory(): Promise<void> {
+    const meta = storage.inventoryMeta()
+    if (!meta.dirty) return
+    const local = storage.loadInventory()
+    if (local == null) return
+    const stamp = meta.updatedAt          // 上传期间用户可能又改了
+    try {
+      const r = await call<RemoteInventory>('/inventory', {
+        method: 'PUT',
+        body: JSON.stringify({ data: local, baseRev: meta.rev }),
+      })
+      storage.markInventorySynced(r.rev, stamp)
+      emit({ type: 'inventory-pushed', rev: r.rev })
+    } catch (err) {
+      if (err instanceof ConflictError) {
+        const remote = err.remote as unknown as RemoteInventory
+        const key = stashInventoryConflict(local)
+        storage.putRemoteInventory(remote)
+        emit({ type: 'inventory-conflict', stashKey: key })
+        return
+      }
+      throw err
+    }
+  }
+
+  async function pullInventory(): Promise<void> {
+    const meta = storage.inventoryMeta()
+    if (meta.dirty) return                // 本地更新，下一轮由 push 处理
+    const remote = await call<RemoteInventory>('/inventory')
+    if (remote.rev <= meta.rev) return    // 没有更新的
+    storage.putRemoteInventory(remote)
+    emit({ type: 'inventory-pulled', rev: remote.rev })
+  }
+
   async function syncNow(): Promise<void> {
     if (!enabled || running) return
     running = true
@@ -142,6 +200,8 @@ export function createSync(opts: SyncOptions = {}) {
     try {
       await push()
       await pull()
+      await pushInventory()
+      await pullInventory()
       emit({ type: 'idle', rev: readCursor() })
     } catch (error) {
       emit({ type: 'error', error })

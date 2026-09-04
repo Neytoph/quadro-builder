@@ -1,4 +1,3 @@
-import { useRef } from 'react'
 import { useEngine, type BomRow } from '../store/EngineContext'
 import { useI18n } from '../i18n'
 import { formatCatalogPrice } from '../money'
@@ -23,6 +22,15 @@ function colorWord(color: string | null | undefined) {
   return colorLabel(color)
 }
 
+function rowLabel(r: BomRow) {
+  let label = labelOf(r.id || '', r.name)
+  if (r.kind === 'textiles' && r.w && r.h) {
+    const size = `${r.w}×${r.h}`
+    if (!label.includes('×')) label = label ? `${label} ${size} cm` : `${size} cm`
+  }
+  return label
+}
+
 function Section({ title, rows, onPick }: { title: string; rows: BomRow[]; onPick: (r: BomRow) => void }) {
   if (!rows.length) return null
   return (
@@ -31,7 +39,8 @@ function Section({ title, rows, onPick }: { title: string; rows: BomRow[]; onPic
       <div className="flex flex-col gap-0.5">
         {rows.map(r => {
           const tint = colorWord(r.color)
-          const label = tint ? `${labelOf(r.id || '', r.name)} · ${tint}` : labelOf(r.id || '', r.name)
+          const base = rowLabel(r)
+          const label = tint && base ? `${base} · ${tint}` : (base || tint)
           return (
             <button key={r.key} onClick={() => onPick(r)} title={label}
               aria-label={`${label} ×${r.count}`}
@@ -95,49 +104,5 @@ export function BomPane() {
           )}
       </div>
     </>
-  )
-}
-
-export function InventoryPane() {
-  const api = useEngine()
-  const { t } = useI18n()
-  const invRef = useRef<HTMLInputElement>(null)
-
-  return (
-    <div className="p-3 space-y-1">
-      <div className="flex gap-1.5 pb-2">
-        <button onClick={api.exportInventory}
-          className="flex-1 text-[11px] rounded-lg border border-gray-700 bg-gray-800 hover:border-teal-400 px-2 py-1.5 cursor-pointer">{t('btn.invExport')}</button>
-        <button onClick={() => invRef.current?.click()}
-          className="flex-1 text-[11px] rounded-lg border border-gray-700 bg-gray-800 hover:border-teal-400 px-2 py-1.5 cursor-pointer">{t('btn.invImport')}</button>
-        <input ref={invRef} type="file" accept="application/json,.json" hidden
-          onChange={e => {
-            const f = e.target.files?.[0]
-            if (!f) return
-            e.target.value = ''
-            if (!window.confirm(t('confirm.importInv'))) return
-            void api.importInventory(f)
-          }} />
-      </div>
-      {api.invRows.length === 0 && <div className="text-xs text-gray-500">{t('side.empty')}</div>}
-      {api.invRows.length > 0 && (
-        <div className="flex items-center gap-2 text-[10px] text-gray-500 px-2 pb-1">
-          <span className="flex-1">{t('side.inventory')}</span>
-          <span className="w-8 text-right">{t('side.need')}</span>
-          <span className="w-12 text-right">{t('side.have')}</span>
-        </div>
-      )}
-      {api.invRows.map(r => (
-        <div key={`${r.group}:${r.key}`} className={`flex items-center gap-2 text-xs rounded-lg px-2 py-1.5 ${r.ok ? 'bg-gray-900' : 'bg-amber-950/40'}`}>
-          <RowIcon id={r.key} kind={r.group} />
-          <span className="flex-1 truncate">{labelOf(r.key, r.name)}</span>
-          <span className="w-8 text-right text-gray-400 tabular-nums">{r.need}</span>
-          <input type="number" min={0} aria-label={`${labelOf(r.key, r.name)} ${t('side.have')}`}
-            value={api.inventory[r.group as keyof typeof api.inventory]?.[r.key] ?? 0}
-            onChange={e => api.setInv(r.group as keyof typeof api.inventory, r.key, Number(e.target.value) || 0)}
-            className="w-12 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 tabular-nums" />
-        </div>
-      ))}
-    </div>
   )
 }

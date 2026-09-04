@@ -72,6 +72,25 @@ export const PART_ZH: Record<string, string> = {
   screw_slide: '滑梯螺丝',
   screw_slide_conical: '滑梯锥头螺丝',
   screw_slide_conical_counter: '滑梯螺丝对件',
+  roof2: '顶棚',
+  textil2: '布面',
+  lattice2: '网',
+  'textil-round2': '圆弧布墙',
+  'roof-large2': '大顶棚布',
+  bag2: '玩具袋',
+  'multi-wheel2': '多向轮',
+  'floating-wheel2': '浮动轮',
+  'hub-cap2': '轮盖',
+  casters2: '脚轮',
+  adapter2: '脚轮适配',
+  bearing2: '轮轴承',
+  'steering-lock2': '方向锁',
+  'tube-cap2': '管帽',
+  'open-connector2': '开口套管',
+  slide2: '经典滑梯',
+  'slide-new2': '一体滑梯',
+  'slide-end2': '滑梯末端',
+  'curved-slide2': '弯滑梯',
 }
 
 export const PART_EN: Record<string, string> = {
@@ -144,6 +163,25 @@ export const PART_EN: Record<string, string> = {
   screw_slide: 'Slide screw',
   screw_slide_conical: 'Conical slide screw',
   screw_slide_conical_counter: 'Slide screw counterpart',
+  roof2: 'Roof',
+  textil2: 'Textile',
+  lattice2: 'Net',
+  'textil-round2': 'Curved textile',
+  'roof-large2': 'Large roof cloth',
+  bag2: 'Play bag',
+  'multi-wheel2': 'Multi wheel',
+  'floating-wheel2': 'Floating wheel',
+  'hub-cap2': 'Hub cap',
+  casters2: 'Caster',
+  adapter2: 'Caster adapter',
+  bearing2: 'Wheel bearing',
+  'steering-lock2': 'Steering lock',
+  'tube-cap2': 'Tube cap',
+  'open-connector2': 'Open sleeve',
+  slide2: 'Modular slide',
+  'slide-new2': 'Integral slide',
+  'slide-end2': 'Slide run-out',
+  'curved-slide2': 'Curved slide',
 }
 
 export const PART_DE: Record<string, string> = {
@@ -216,6 +254,25 @@ export const PART_DE: Record<string, string> = {
   screw_slide: 'Rutschenschraube',
   screw_slide_conical: 'Konische Rutschenschraube',
   screw_slide_conical_counter: 'Rutschenschraube Gegenstück',
+  roof2: 'Dach',
+  textil2: 'Textil',
+  lattice2: 'Netz',
+  'textil-round2': 'Bogenwand',
+  'roof-large2': 'Großes Dach',
+  bag2: 'Spielsack',
+  'multi-wheel2': 'Multirad',
+  'floating-wheel2': 'Schwimmrad',
+  'hub-cap2': 'Radkappe',
+  casters2: 'Lenkrolle',
+  adapter2: 'Rollenadapter',
+  bearing2: 'Radlager',
+  'steering-lock2': 'Lenkfeststeller',
+  'tube-cap2': 'Rohrkappe',
+  'open-connector2': 'Offene Hülse',
+  slide2: 'Modularrutsche',
+  'slide-new2': 'Integralrutsche',
+  'slide-end2': 'Rutschenauslauf',
+  'curved-slide2': 'Bogenrutsche',
 }
 
 export const CONN_KIND_ZH: Record<string, string> = {
@@ -321,8 +378,16 @@ function currentLang(): Lang {
   return l === 'zh' || l === 'de' || l === 'en' ? l : 'en'
 }
 
+function cleanLabel(s?: string) {
+  if (!s || s === 'undefined' || s === 'null') return ''
+  return s
+}
+
 export function labelOf(id: string, fallback?: string) {
-  return PART_BY_LANG[currentLang()][id] ?? fallback ?? id
+  const key = cleanLabel(id)
+  const fb = cleanLabel(fallback)
+  if (!key) return fb
+  return PART_BY_LANG[currentLang()][key] ?? (fb || key)
 }
 
 export function zhName(id: string, fallback?: string) {

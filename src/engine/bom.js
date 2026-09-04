@@ -1,6 +1,6 @@
 // Stueckliste (BOM) + Kupplungstyp-Heuristik + Bestands-/Machbarkeitscheck.
 
-import { getTube, getConnector, getPanel, colorName, partName, reinforcementPart, partForFitting, getPartById, getScrew, poolLinerFor, geometry } from "./catalog.js";
+import { getTube, getConnector, getPanel, colorName, partName, reinforcementPart, partForFitting, getPartById, getScrew, poolLinerFor, geometry, slideKindName } from "./catalog.js";
 import { round2, xAxisOf, yAxisOf, zAxisOf } from "./util.js";
 import { POOL_KINDS, isHolePart, isBoltPart, BOLT_PART, HINGE_PART, ARM_FITTINGS } from "./model.js";
 
@@ -705,16 +705,30 @@ export function computeBOM(model) {
   const panelCount = panels.reduce((s, r) => s + r.count, 0);
 
   // --- Netze/Stoffe (textil2) nach Groesse + Farbe ---
+  // Ein Tuch hat kein Katalogteil je Groesse -- es gibt EINES (`textile`).
+  // Name + Masse muessen hier schon stehen, sonst wird in der Stueckliste
+  // aus fehlendem id/name das Wort "undefined".
+  const textileDef = getPartById("textile");
   const textileMap = new Map();
   for (const tx of (model.textiles ? model.textiles.values() : [])) {
     const key = tx.w + "x" + tx.h + "|" + tx.color;
     if (!textileMap.has(key)) textileMap.set(key, { w: tx.w, h: tx.h, color: tx.color, count: 0 });
     textileMap.get(key).count++;
   }
-  const textiles = [...textileMap.values()].map((r) => ({
-    key: r.w + "x" + r.h + "|" + r.color, w: r.w, h: r.h,
-    color: r.color, colorName: colorName(r.color), count: r.count,
-  })).sort((a, b) => b.count - a.count);
+  const textiles = [...textileMap.values()].map((r) => {
+    const base = textileDef ? partName(textileDef) : "textile";
+    const size = r.w && r.h ? ` ${r.w}×${r.h} cm` : "";
+    return {
+      key: r.w + "x" + r.h + "|" + r.color,
+      id: (textileDef && textileDef.id) || "textile",
+      kind: "textil2",
+      w: r.w, h: r.h,
+      name: `${base}${size}`,
+      color: r.color, colorName: colorName(r.color), count: r.count,
+      price: (textileDef && textileDef.price) || 0,
+      subtotal: 0,
+    };
+  }).sort((a, b) => b.count - a.count);
   const textileCount = textiles.reduce((s, r) => s + r.count, 0);
 
   // --- Baellebaeder: je Pool EIN Teil ------------------------------------
@@ -762,7 +776,7 @@ export function computeBOM(model) {
   }
   const fittings = [...fitMap.entries()].map(([key, r]) => ({
     key, id: key, kind: r.kind,
-    name: r.def ? partName(r.def) : r.kind,
+    name: r.def ? partName(r.def) : (partName(getPartById(key)) || r.kind),
     code: (r.def && r.def.code) || "",
     count: r.count,
     price: (r.def && r.def.price) || 0,
@@ -782,8 +796,8 @@ export function computeBOM(model) {
     const def = partForFitting(kind);
     return {
       key: kind, kind, count,
-      id: def ? def.id : null,
-      name: def ? partName(def) : null,
+      id: def ? def.id : kind,
+      name: def ? partName(def) : slideKindName(kind),
       code: (def && def.code) || "",
       price: (def && def.price) || 0,
       subtotal: round2(((def && def.price) || 0) * count),
@@ -876,6 +890,12 @@ export function neededParts(bom) {
   for (const r of bom.slides || []) {
     if (!r.id) continue;
     fittings.set(r.id, (fittings.get(r.id) || 0) + r.count);
+  }
+  // Quadratische Tuecher leben in model.textiles, nicht in fittings -- sonst
+  // fehlen sie im Bestand und die Zeile hat keine Katalog-id.
+  for (const r of bom.textiles || []) {
+    const id = r.id || "textile";
+    fittings.set(id, (fittings.get(id) || 0) + r.count);
   }
   const reinforcements = new Map(); // id -> physische Stueckzahl (40-cm-Profile)
   for (const r of bom.reinforcements || [])

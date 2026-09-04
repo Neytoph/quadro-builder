@@ -5,7 +5,8 @@ import FilePanel from './FilePanel'
 import LibraryPanel from './LibraryPanel'
 import SavesPanel from './SavesPanel'
 import KitAdvisor from './KitAdvisor'
-import { BomPane, InventoryPane } from './PartsList'
+import { BomPane } from './PartsList'
+import InventoryPane from './InventoryPane'
 
 const TITLE: Record<DockPane, string> = {
   file: 'btn.file',
@@ -26,6 +27,7 @@ export default function RightDock() {
 
   return (
     <aside
+      data-tour="dock-panel"
       className="fixed z-[45] flex flex-col overflow-y-auto scrollbar-thin bg-gray-950/92 backdrop-blur border border-gray-800 rounded-2xl shadow-xl text-gray-200"
       style={narrow
         ? { left: PANEL_GAP, right: PANEL_GAP, top: TAB_BAR_H + PANEL_GAP, bottom: PANEL_GAP, width: 'auto', height: 'auto' }

@@ -65,6 +65,7 @@ function ToolDrop({
   title,
   children,
   menu,
+  tour,
 }: {
   open: boolean
   active: boolean
@@ -72,11 +73,12 @@ function ToolDrop({
   title?: string
   children: ReactNode
   menu: ReactNode
+  tour?: string
 }) {
   const ref = useRef<HTMLButtonElement>(null)
   return (
     <>
-      <button ref={ref} type="button" title={title} className={btn(active)} onClick={onClick}>{children}</button>
+      <button ref={ref} type="button" title={title} data-tour={tour} className={btn(active)} onClick={onClick}>{children}</button>
       {open && <Pop anchor={ref.current}>{menu}</Pop>}
     </>
   )
@@ -154,7 +156,7 @@ export default function TopToolbar() {
       className={`fixed z-50 flex flex-col items-stretch gap-1.5 pointer-events-none ${narrow ? 'left-2 right-2' : 'left-1/2 -translate-x-1/2 items-center'}`}
       style={{ top: toolbarTop(left, vw) }}
     >
-      <div ref={barRef} className="flex items-stretch gap-1 bg-gray-950/90 backdrop-blur border border-gray-800 rounded-2xl p-1 shadow-xl pointer-events-auto max-w-[calc(100vw-1rem)] overflow-x-auto scrollbar-thin">
+      <div ref={barRef} data-tour="toolbar" className="flex items-stretch gap-1 bg-gray-950/90 backdrop-blur border border-gray-800 rounded-2xl p-1 shadow-xl pointer-events-auto max-w-[calc(100vw-1rem)] overflow-x-auto scrollbar-thin">
       <button disabled={!api.canUndo} onClick={api.undo} title={t('hint.undo')}
         className="flex items-center justify-center min-w-[2.5rem] h-12 px-2 rounded-xl text-gray-200 hover:bg-gray-800 disabled:opacity-30 cursor-pointer disabled:cursor-default">
         <Svg16 inner={TOOL_ICON.undo} />
@@ -174,6 +176,7 @@ export default function TopToolbar() {
       </button>
 
       <ToolDrop
+        tour="tool-tubes"
         open={open === 'tubes'}
         active={open === 'tubes' || (api.mode === 'add' && !api.placingConnector)}
         onClick={() => { api.setMode('add'); toggle('tubes') }}

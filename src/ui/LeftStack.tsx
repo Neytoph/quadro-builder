@@ -17,6 +17,7 @@ export default function LeftStack() {
   return (
     <aside
       data-ui="left-stack"
+      data-tour="left-color"
       className="fixed z-30 flex flex-col gap-2 min-h-0 overflow-y-auto scrollbar-thin"
       style={{ top, left: PANEL_GAP, width, maxHeight: maxH }}
     >

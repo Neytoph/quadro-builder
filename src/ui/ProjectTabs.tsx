@@ -58,7 +58,7 @@ export default function ProjectTabs() {
             {group.map(item => {
               const on = pane === item.id
               return (
-                <button key={item.id} onClick={() => toggle(item.id)}
+                <button key={item.id} data-tour={`dock-${item.id}`} onClick={() => toggle(item.id)}
                   className={`text-xs px-2.5 min-h-8 rounded-lg cursor-pointer whitespace-nowrap ${
                     on ? 'bg-teal-500 text-white font-semibold' : 'text-gray-300 hover:text-teal-600 hover:bg-gray-900'
                   }`}>

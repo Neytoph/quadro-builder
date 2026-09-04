@@ -26,6 +26,7 @@ export default function SceneToggle() {
 
   return (
     <div
+      data-tour="scene-buttons"
       className="fixed z-20 flex flex-row pointer-events-none"
       style={{ left: pos.sceneLeft, top: pos.sceneTop, width: clusterW, gap: SCENE_CLUSTER_GAP }}
     >

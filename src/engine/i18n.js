@@ -1085,6 +1085,7 @@ const zh = {
   slide_end: '滑梯末端',
   slide_curved: '弯滑梯',
   slide_roof: '顶棚',
+  bom_textile: '布面',
   doc_untitled: '未命名',
   notice_panel_above: '板铺在管子上面。',
   notice_panel_pick_second: (n) => `已选承重管，再点 ${n} 根绿色对面管里的一根。`,

@@ -4,7 +4,7 @@
 
 import { jsPDF } from "jspdf";
 import {
-  partForFitting, partName, slideKindName, getPanel, geometry, colorHex, colorName,
+  partForFitting, partName, slideKindName, getPanel, getPartById, geometry, colorHex, colorName,
   reinforcementPart, poolLinerFor,
 } from "./catalog.js";
 import { connectorsForNode } from "./bom.js";
@@ -421,11 +421,13 @@ function extraStepItems(model, step) {
   for (const id of step.textileIds || []) {
     const tx = model.textiles?.get?.(id);
     if (!tx) continue;
-    const def = tx.panelId ? getPanel(tx.panelId) : null;
+    const def = tx.panelId ? getPanel(tx.panelId) : getPartById("textile");
     const key = `${tx.w}x${tx.h}|${tx.color}`;
+    const base = def ? partName(def) : "";
+    const size = tx.w && tx.h ? `${tx.w}×${tx.h} cm` : "";
     bump(map, key, {
-      key, id: tx.panelId || "textile", kind: "textiles",
-      name: def ? partName(def) : `${tx.w}×${tx.h}`,
+      key, id: (def && def.id) || tx.panelId || "textile", kind: "textiles",
+      name: [base, size].filter(Boolean).join(" ") || size,
       color: tx.color, colorName: colorName(tx.color),
     });
   }
