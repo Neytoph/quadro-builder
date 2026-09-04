@@ -20,7 +20,10 @@ export function officialQdfPath(id: string) {
 }
 
 export function officialThumbPath(id: string) {
-  return `/thumbs/official/${id.toUpperCase()}.jpg?v=2`
+  // 缩略图跟着构建产物走，所以要带上 base。写死 `/thumbs/…` 的话，
+  // 部署在子路径下（线上是 --base=/builder/）就会去站点根目录找，全 404。
+  // /mdb-files 那类不同：那是平台在根路径上供给的，不归 base 管。
+  return `${import.meta.env.BASE_URL}thumbs/official/${id.toUpperCase()}.jpg?v=2`
 }
 
 export async function fetchOfficialQdf(id: string) {

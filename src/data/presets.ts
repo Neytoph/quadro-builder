@@ -22,7 +22,8 @@ export const PRESETS: PresetDef[] = [
 ]
 
 export function presetThumbPath(key: string) {
-  return `/thumbs/presets/${key}.jpg?v=2`
+  // 同 officialThumbPath：跟着产物走的资源要带 base
+  return `${import.meta.env.BASE_URL}thumbs/presets/${key}.jpg?v=2`
 }
 
 const SPAN = 40
