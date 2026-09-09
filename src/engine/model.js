@@ -2720,6 +2720,9 @@ export class BuildModel {
         const dx = g2.n.x - g1.n.x, dz = g2.n.z - g1.n.z;
         const d = Math.hypot(dx, dz);
         if (Math.abs(d - len) > 2) continue;
+        // First immer in +X, sonst +Z zaehlen -- sonst waere derselbe Grat
+        // zweimal mit entgegengesetztem Bezugspunkt im Angebot.
+        if (dx < -0.5 || (Math.abs(dx) <= 0.5 && dz < 0)) continue;
         const ax = [dx / d, 0, dz / d];
         // First steht quer zu den Sparren -- an beiden Enden gleich.
         if (Math.abs(ax[0] * g1.perp[0] + ax[2] * g1.perp[1]) > 0.05) continue;
@@ -2740,11 +2743,13 @@ export class BuildModel {
         // Bezugspunkt: Dach in der Firstmitte, Dachtextil 40 cm hinter dem Anfang.
         const pos = kind === "roof2" ? mid
           : [g1.n.x + ax[0] * 40, g1.n.y, g1.n.z + ax[2] * 40];
+        const posAlt = kind === "roof2" ? mid
+          : [g2.n.x - ax[0] * 40, g2.n.y, g2.n.z - ax[2] * 40];
+        const near = (p, o) => Math.hypot(o.x - p[0], o.y - p[1], o.z - p[2]) < 3;
         // Da liegt schon ein Dach (gleich welcher Art).
-        const belegt = [...this.slides.values()].some((s) => s.kind === "roof2"
-          && Math.hypot(s.x - mid[0], s.y - mid[1], s.z - mid[2]) < 3)
+        const belegt = [...this.slides.values()].some((s) => s.kind === "roof2" && near(mid, s))
           || [...this.fittings.values()].some((f) => f.kind === "roof-large2"
-            && Math.hypot(f.x - pos[0], f.y - pos[1], f.z - pos[2]) < 3);
+            && (near(pos, f) || near(posAlt, f)));
         if (belegt && !alle) continue;
         seen.add(key);
         // Lokal +Z und -Y fallen ab: Y zeigt schraeg nach oben, Z = X x Y muss
