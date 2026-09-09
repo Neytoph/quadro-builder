@@ -16,6 +16,8 @@ import { CONNECTOR_ARM_BITS } from "./qdfimport.js";
 // Teile, die sich um ein Rohr klemmen lassen. Die Lochzapfenkupplung gehört
 // NICHT dazu -- sie umschließt kein Rohr (siehe PLACEABLE_FITTINGS).
 const TUBE_CLAMP_PARTS = { "bearing-clamp": "bearing" };
+// Dachtuecher: sie liegen auf einem Giebel-Gerippe (siehe model.roofMounts).
+const ROOF_KINDS = new Set(["roof2", "roof-large2"]);
 
 // So lange wartet der Seitenwechsel einer Platte auf einen zweiten Klick. Der
 // Doppelklick dreht sie stattdessen; 250 ms ist der uebliche Abstand, den
@@ -90,7 +92,7 @@ export class Builder {
     this.tubeId = geometry().defaultTube;
     this.panelId = defaultPanel();
     this.fittingKind = "multi-wheel2";   // gewaehltes Anbauteil (QDF-Art)
-    this.clampPart = "double_tube";      // Doppelrohrverbinder oder Rohrklammer
+    this.poolLinerId = null;             // pool_liner_xs/s/l/xxl, wenn Folie gesetzt wird    this.clampPart = "double_tube";      // Doppelrohrverbinder oder Rohrklammer
     this.placeConnectorId = null;       // 普通通型：套到现有空插座接头上
     // Platten-Modus: erstes angeklicktes Tragrohr + Stelle entlang davon.
     this.panelRail = null;
@@ -219,7 +221,88 @@ export class Builder {
     if (mode === "assembly") this.enterAssembly(); // Aufbau zeigt wieder eigene Labels
     this.scene.setCursor("default");
     this.refresh();
+    if (mode === "slide" || mode === "fitting") this._hintPlaceMode();
   }
+
+  /** 选了配件却没有绿面/绿点时，立刻说清：没有可挂的位置。 */
+  _hintPlaceMode() {
+    if (this.mode === "slide") {
+      if (this.slideKind === "slide-end2") {
+        if (!this.model.slideChainMounts(this.slideKind).length) {
+          // Gibt es Ausgaenge, nur zu hoch? Dann fehlt erst noch ein Koerper.
+          const offen = [...this.model.slides.values()].some((s) => {
+            const e = this.model.slideExit(s);
+            return e && !this.model._slideAt(e.pos);
+          });
+          this.onNotice(t(offen ? "notice_slide_end_high" : "notice_slide_end_none"), "info");
+        }
+        return;
+      }
+      const n = this.model.slideMounts(40, 2, this.slideKind).length
+        + this.model.slideChainMounts(this.slideKind).length;
+      if (!n) this.onNotice(t("notice_slide_no_mount"), "info");
+      return;
+    }
+    if (this.mode !== "fitting") return;
+    if (ROOF_KINDS.has(this.fittingKind)) {
+      if (this.model.roofMounts(this.fittingKind).length) return;
+      // Alle Gerippe schon bedeckt? Dann ist das die Nachricht. Gerippe da, nur
+      // mit der anderen Firstlaenge? Dann gleich das passende Tuch nennen.
+      const andere = this.fittingKind === "roof2" ? "roof-large2" : "roof2";
+      const key = this.model.roofMounts(this.fittingKind, true).length ? "notice_roof_covered"
+        : this.model.roofMounts(andere, true).length
+          ? (this.fittingKind === "roof2" ? "notice_roof_use_large" : "notice_roof_use_small")
+          : "notice_roof_no_frame";
+      this.onNotice(t(key), "info");
+      return;
+    }
+    if (this.fittingKind === "textil-round2") {
+      if (!this.model.fittingMounts("textil-round2").length) {
+        this.onNotice(t("notice_round_no_bow"), "info");
+      }
+      return;
+    }
+    if (RAIL_FITTINGS.has(this.fittingKind)
+      && !this.model.railFittingMounts(this.fittingKind).length) {
+      this.onNotice(t("notice_textile_no_cell"), "info");
+      return;
+    }
+    if (POOL_KINDS.has(this.fittingKind)) {
+      const spec = this.poolLinerId && POOL_SETS[this.poolLinerId];
+      if (spec && !this.model.poolLinerMounts(spec).length) {
+        this.onNotice(t("notice_pool_no_frame"), "info");
+      }
+      return;
+    }
+    if (!this._countFittingPlaces()) {
+      const key = (this.fittingKind === "hub-cap2" || this.fittingKind === "tube-cap2")
+        ? "notice_cap_no_end" : "notice_fitting_no_mount";
+      this.onNotice(t(key), "info");
+    }
+  }
+
+  /** Wieviele Stellen das gewaehlte Anbauteil jetzt hat -- wie _buildFittingHandles. */
+  _countFittingPlaces() {
+    const kind = this.fittingKind;
+    const cs = geometry().connectorSize;
+    if (RAIL_FITTINGS.has(kind)) return this.model.railFittingMounts(kind).length;
+    if (ROOF_KINDS.has(kind)) return this.model.roofMounts(kind).length;
+    if (kind === "textil-round2") return this.model.fittingMounts(kind).length;
+    if (HOLE_MASKS[kind]) return this.model.holeArmMounts(cs).length;
+    if (kind === BOLT_PART) return this.model.boltMounts(cs).length;
+    if (kind === HINGE_PART) return this.model.hingeMounts(cs).length;
+    if (TUBE_CLAMP_PARTS[kind]) {
+      let n = 0;
+      for (const t of this.model.tubes.values()) {
+        if (!t.arm && !t.link && !t.bow) n++;
+      }
+      if (kind === "bearing-clamp") n += this.model.bearingArmMounts(cs).length;
+      return n;
+    }
+    return this.model.fittingMounts(kind, cs).length
+      + this.model.tubeFittingSpots(kind, cs).length;
+  }
+
   setTube(tubeId) { this.tubeId = tubeId; this.placeConnectorId = null; }
 
   /**
@@ -260,6 +343,7 @@ export class Builder {
 
   setFitting(kind) {
     this.fittingKind = kind;
+    this.poolLinerId = null;
     this._clearPanelRail();          // Rohr-Auswahl gilt nur fuer das Netz
     if (this.mode === "fitting") this.refresh();
   }
@@ -503,19 +587,25 @@ export class Builder {
   }
 
   /**
-   * Kopie an den Zeiger haengen. Sie steckt ab sofort IM Modell (nur so
-   * zeichnet die Szene sie und nur so laesst sich auf Kollisionen pruefen);
-   * abgebrochen wird ueber den Schnappschuss.
-   */
-  /**
-   * Baellebad an den Zeiger haengen: Rahmen und Folie kommen als FRAGMENT ins
-   * Modell und werden wie eine Kopie abgesetzt -- mit Rasterung, Kollisions-
-   * pruefung und Abbruch per Escape. Ein Becken steht immer auf dem Boden,
-   * also wandert es nur in der Ebene; genau das tut das Einfuegen ohnehin.
+   * 泳池内衬：有现成方框就标绿面让人点挂；没有框则整套跟指针走，↑↓ 换楼层。
    */
   startPool(linerId) {
     const spec = POOL_SETS[linerId];
     if (!spec) return false;
+    this.poolLinerId = linerId;
+    const mounts = this.model.poolLinerMounts(spec);
+    if (mounts.length) {
+      this.cancelPaste();
+      this.fittingKind = spec.kind;
+      this.setMode("fitting");
+      this.onNotice(t("notice_pool_pick_frame"), "info");
+      return "mount";
+    }
+    this.onNotice(t("notice_pool_no_frame"), "info");
+    return this._startPoolPaste(spec) ? "paste" : false;
+  }
+
+  _startPoolPaste(spec) {
     const cs = geometry().connectorSize;
     const frag = this.model.poolFragment(spec, {
       // Der Rahmen wird bunt: je Rohr eine zufaellige Farbe, so wie das
@@ -527,7 +617,7 @@ export class Builder {
       // Zu einer Spannweite das passende Rohr: die Kupplung steuert `cs` bei.
       tubeFor: (span) => getTube(this._tubeIdForSpan(span, cs)),
     });
-    return frag ? this.startPaste(frag, { flat: true }) : false;
+    return frag ? this.startPaste(frag) : false;
   }
 
   /** Katalog-Rohr zu einem Kupplungsabstand (Spannweite = Rohr + Kupplung). */
@@ -542,6 +632,11 @@ export class Builder {
     return best ? best.id : null;
   }
 
+  /**
+   * Kopie an den Zeiger haengen. Sie steckt ab sofort IM Modell (nur so
+   * zeichnet die Szene sie und nur so laesst sich auf Kollisionen pruefen);
+   * abgebrochen wird ueber den Schnappschuss.
+   */
   startPaste(frag, opts = {}) {
     if (!frag) return false;
     this.cancelPaste();
@@ -1006,7 +1101,8 @@ export class Builder {
   uiState() {
     return {
       mode: this.mode, tubeId: this.tubeId, panelId: this.panelId,
-      fittingKind: this.fittingKind, clampPart: this.clampPart, slideKind: this.slideKind,
+      fittingKind: this.fittingKind, poolLinerId: this.poolLinerId,
+      clampPart: this.clampPart, slideKind: this.slideKind,
       color: this.color,
       assemblyOrder: this.assemblyOrder, assemblyStep: this.assemblyStep,
       undo: this._undoStack.slice(), redo: this._redoStack.slice(),
@@ -1019,6 +1115,7 @@ export class Builder {
     if (s.tubeId) this.tubeId = s.tubeId;
     if (s.panelId) this.panelId = s.panelId;
     if (s.fittingKind) this.fittingKind = s.fittingKind;
+    this.poolLinerId = s.poolLinerId || null;
     if (s.clampPart) this.clampPart = s.clampPart;
     if (s.slideKind) this.slideKind = s.slideKind;
     if (s.color) this.color = s.color;
@@ -1957,7 +2054,28 @@ export class Builder {
     // Merkt sich, an welchen Kupplungen das gewaehlte Teil sitzen darf -- der
     // Zeiger zeigt dort eine Hand, auch wenn er den Ankerpunkt knapp verfehlt.
     this._fittingMountNodes = new Set();
-    if (RAIL_FITTINGS.has(this.fittingKind)) return;  // Netz/Sack laufen ueber zwei Rohre
+    if (POOL_KINDS.has(this.fittingKind)) {
+      const spec = this.poolLinerId && POOL_SETS[this.poolLinerId];
+      if (spec) {
+        for (const m of this.model.poolLinerMounts(spec)) {
+          this.scene.addPanelHandle(m.corners, { poolMount: m });
+        }
+      }
+      return;
+    }
+    if (RAIL_FITTINGS.has(this.fittingKind)) {
+      for (const m of this.model.railFittingMounts(this.fittingKind)) {
+        this.scene.addPanelHandle(m.corners, { railMount: m });
+      }
+      return;
+    }
+    if (ROOF_KINDS.has(this.fittingKind)) {
+      // Beide Dachschraegen leuchten -- ein Klick auf eine legt das Tuch auf.
+      for (const m of this.model.roofMounts(this.fittingKind)) {
+        for (const c of m.faces) this.scene.addPanelHandle(c, { roofMount: m });
+      }
+      return;
+    }
     // Lochzapfenkupplung: je freiem Stutzen einer Kupplung ein Punkt -- dort
     // steckt ihr Loch darauf.
     if (HOLE_MASKS[this.fittingKind]) {
@@ -2554,13 +2672,22 @@ export class Builder {
       else if (kind === "tube") obj = this._railUsable(p.data.id) ? p.object : null;
     } else if (this.mode === "slide") {
       obj = handle();                            // nur die Feld-Handles
+    } else if (this.mode === "fitting" && POOL_KINDS.has(this.fittingKind)) {
+      obj = handle();
     } else if (this.mode === "fitting" && RAIL_FITTINGS.has(this.fittingKind)) {
-      // Netz: Rohre waehlen wie im Platten-Modus, gesetzte Netze entfernen.
-      const p = (this.panelRail && this.highlight && this.scene.pickAmong(x, y, this.highlight))
-        || this.scene.pickForDelete(x, y);
-      const kind = p && p.data.kind;
-      if (kind === "fitting") obj = null;   // Netz und Sack lassen sich nicht drehen
-      else if (kind === "tube") obj = this._railUsable(p.data.id, true) ? p.object : null;
+      const h = this.scene.pickHandle(x, y);
+      if (h) obj = h.object;
+      else {
+        const p = (this.panelRail && this.highlight && this.scene.pickAmong(x, y, this.highlight))
+          || this.scene.pickForDelete(x, y);
+        const kind = p && p.data.kind;
+        if (kind === "fitting") obj = null;
+        else if (kind === "tube") obj = this._railUsable(p.data.id, true) ? p.object : null;
+        else if (kind === "node") {
+          const ids = this.model.incidentTubeIds(p.data.id);
+          obj = ids.some((id) => this._railUsable(id, true)) ? p.object : null;
+        }
+      }
     } else if (this.mode === "fitting"
         && (TUBE_CLAMP_PARTS[this.fittingKind] || TUBE_FITTINGS[this.fittingKind])) {
       // Der Ankerpunkt folgt dem Zeiger am Rohr entlang.
@@ -2864,9 +2991,79 @@ export class Builder {
       }
     }
     // Freie Ausgaenge schon gesetzter Teile: dort wird die Kette fortgesetzt.
+    // Gezeichnet wird die Standflaeche des naechsten Teils, nicht ein Punkt:
+    // der Punkt laege in der Muendung des Koerpers, unsichtbar und vom Koerper
+    // verdeckt -- der Klick ging ins Leere.
     for (const m of this.model.slideChainMounts(this.slideKind)) {
-      this.scene.addHandle(m.pos, { slideChain: m }, "dir");
+      this.scene.addPanelHandle(this._slideChainFootprint(m), { slideChain: m });
     }
+  }
+
+  /**
+   * Standflaeche des Kettenteils, das an diesem Ausgang beginnen wuerde --
+   * waagerecht auf Hoehe des Ausgangs, in dessen Laufrichtung (lokales +Z),
+   * 40 cm breit. Laengen nach den Teilen: Auslauf 47,5 cm, Modularkoerper 120 cm
+   * (Folgeteil bei +120), Bogenkoerper ein 60x60-Quadrat nach +X/+Z (Folgeteil
+   * bei (60, -80, 60)).
+   */
+  _slideChainFootprint(m) {
+    const q = m.quat || [0, 0, 0, 1];
+    const ex = xAxisOf(q), ez = zAxisOf(q);
+    const kind = this.slideKind;
+    const len = kind === "slide-end2" ? 47.5 : kind === "curved-slide2" ? 60 : 120;
+    const x0 = kind === "curved-slide2" ? 0 : -20;
+    const x1 = kind === "curved-slide2" ? 60 : 20;
+    const y = m.pos[1] + 0.5;
+    const at = (sx, sz) => [
+      m.pos[0] + ex[0] * sx + ez[0] * sz, y + ex[1] * sx + ez[1] * sz, m.pos[2] + ex[2] * sx + ez[2] * sz,
+    ];
+    return [at(x0, 0), at(x1, 0), at(x1, len), at(x0, len)];
+  }
+
+  /** Dachtuch: Klick auf eine gruene Dachschraege legt es auf das Gerippe. */
+  _clickRoof(e) {
+    const h = this.scene.pickHandle(e.clientX, e.clientY);
+    if (h && h.data && h.data.roofMount) {
+      const m = h.data.roofMount;
+      let added = null;
+      this.recordHistory(() => { added = this.model.addRoofAt(m, this.colorFor("slide")); });
+      if (added) this._notePlaced(added.id, m.kind === "roof2" ? "slide" : "fitting");
+      else this.onNotice(t("notice_fitting_exists"), "warn");
+      this.refresh();
+      return;
+    }
+    this._hintPlaceMode();
+  }
+
+  /**
+   * Nach dem Setzen einer Rutsche: steckt sie in Rohren, Platten oder Kupplungen,
+   * sagt eine Warnung wie viele -- weggenommen wird nichts, das entscheidet der
+   * Nutzer selbst.
+   */
+  _warnSlideConflicts(slide) {
+    const c = this.model.slideConflicts(slide);
+    if (!c.total) return false;
+    const teile = [];
+    if (c.tubes) teile.push(t("conflict_tubes", c.tubes));
+    if (c.nodes) teile.push(t("conflict_nodes", c.nodes));
+    if (c.panels) teile.push(t("conflict_panels", c.panels));
+    if (c.textiles) teile.push(t("conflict_textiles", c.textiles));
+    if (c.fittings) teile.push(t("conflict_fittings", c.fittings));
+    this.onNotice(t("notice_slide_conflict", teile.join(t("conflict_sep"))), "warn");
+    return true;
+  }
+
+  _clickPoolLiner(e) {
+    const h = this.scene.pickHandle(e.clientX, e.clientY);
+    if (h && h.data && h.data.poolMount) {
+      let added = null;
+      this.recordHistory(() => { added = this.model.addPoolLiner(h.data.poolMount); });
+      if (added) this._notePlaced(added.id, "fitting");
+      else this.onNotice(t("notice_fitting_exists"), "warn");
+      this.refresh();
+      return;
+    }
+    this.onNotice(t("notice_pool_pick_frame"), "info");
   }
 
   /**
@@ -2875,6 +3072,8 @@ export class Builder {
    * sonst laege ein Ankerpunkt hinter einem Teil und man kaeme nicht daran.
    */
   _clickFitting(e) {
+    if (ROOF_KINDS.has(this.fittingKind)) { this._clickRoof(e); return; }
+    if (POOL_KINDS.has(this.fittingKind)) { this._clickPoolLiner(e); return; }
     if (RAIL_FITTINGS.has(this.fittingKind)) { this._clickLattice(e); return; }
     if (HOLE_MASKS[this.fittingKind]) { this._clickHoleClamp(e); return; }
     if (this.fittingKind === BOLT_PART || this.fittingKind === HINGE_PART) { this._clickFlexi(e); return; }
@@ -3228,46 +3427,89 @@ export class Builder {
   }
 
   /**
-   * Netz: haengt wie eine Platte an ZWEI parallelen Rohren und wird genauso
-   * gesetzt -- erst ein Tragrohr anklicken, dann eines der hervorgehobenen
-   * Gegenrohre. Ein Klick auf ein gesetztes Netz nimmt es weg.
+   * 布面 / 网 / 袋：优先点绿色格子一下放下；也可以先点承重管再点对面管。
+   * 点到接头上时，按接到这颗接头的承重管来算。
    */
   _clickLattice(e) {
-    const pick = (this.panelRail && this.highlight
-      && this.scene.pickAmong(e.clientX, e.clientY, this.highlight))
-      || this.scene.pickForDelete(e.clientX, e.clientY);
-    if (!pick) { this._clearPanelRail(); return; }
-    if (pick.data.kind === "fitting" && !this.panelRail) {
-      const f = this.model.fittings.get(pick.data.id);
-      // Netz und Sack lassen sich nicht drehen -- sie haengen an ihren Rohren.
-      if (f && RAIL_FITTINGS.has(f.kind)) { this.onNotice(t("notice_fitting_fixed"), "warn"); return; }
+    const h = this.scene.pickHandle(e.clientX, e.clientY);
+    if (h && h.data && h.data.railMount) {
+      const m = h.data.railMount;
+      this._placeRailFitting(m.a, m.b, m.t0, m.len);
+      return;
     }
-    if (pick.data.kind !== "tube") { this._clearPanelRail(); return; }
-    const tube = this.model.tubes.get(pick.data.id);
-    if (!tube || tube.arm || tube.link || tube.bow) { this._clearPanelRail(); return; }
-
-    if (this.panelRail) {
-      if (pick.data.id === this.panelRail.id) { this._clearPanelRail(); return; }
-      const partner = this._railPartners(this.panelRail.id).find((c) => c.id === pick.data.id);
-      if (!partner) { this.onNotice(t("notice_panel_no_fit"), "warn"); return; }
-      const sec = this.model.panelSection(partner, this.panelRail.at);
-      let added = null;
-      this.recordHistory(() => {
-        const wohin = this.fittingKind === "bag2" ? "addBag"
-          : this.fittingKind === "textil2" ? "addTextile" : "addLattice";
-        added = this.model[wohin](this.panelRail.id, partner.id, sec.t0, sec.len, this.colorFor("panel"));
-      });
-      if (added) this._notePlaced(added.id, this.fittingKind === "textil2" ? "textile" : "fitting");
-      else this.onNotice(t("notice_fitting_exists"), "warn");
+    const hit = this._pickRailFromEvent(e);
+    if (!hit || !hit.id) {
+      if (hit && hit.pick && hit.pick.data.kind === "fitting" && !this.panelRail) {
+        const f = this.model.fittings.get(hit.pick.data.id);
+        if (f && RAIL_FITTINGS.has(f.kind)) {
+          this.onNotice(t("notice_fitting_fixed"), "warn");
+          return;
+        }
+      }
       this._clearPanelRail();
       return;
     }
-    const partners = this._railPartners(pick.data.id);
-    if (!partners.length) { this.onNotice(t("notice_panel_no_partner"), "warn"); return; }
-    this.panelRail = { id: pick.data.id, at: this._alongTube(pick.data.id, pick.point) };
-    this.highlight = new Set([pick.data.id, ...partners.map((c) => c.id)]);
+    const { id, point } = hit;
+
+    if (this.panelRail) {
+      if (id === this.panelRail.id) { this._clearPanelRail(); return; }
+      const partner = this._railPartners(this.panelRail.id).find((c) => c.id === id);
+      if (!partner) { this.onNotice(t("notice_panel_no_fit"), "warn"); return; }
+      const sec = this.model.panelSection(partner, this.panelRail.at);
+      this._placeRailFitting(this.panelRail.id, partner.id, sec.t0, sec.len);
+      return;
+    }
+    const partners = this._railPartners(id);
+    if (!partners.length) { this.onNotice(t("notice_textile_no_partner"), "warn"); return; }
+    this.panelRail = { id, at: this._alongTube(id, point) };
+    this.highlight = new Set([id, ...partners.map((c) => c.id)]);
     this.onNotice(t("notice_panel_pick_second", partners.length), "info");
     this.refresh();
+  }
+
+  _placeRailFitting(aId, bId, t0, len) {
+    let added = null;
+    this.recordHistory(() => {
+      const wohin = this.fittingKind === "bag2" ? "addBag"
+        : this.fittingKind === "textil2" ? "addTextile" : "addLattice";
+      added = this.model[wohin](aId, bId, t0, len, this.colorFor("panel"));
+    });
+    if (added) this._notePlaced(added.id, this.fittingKind === "textil2" ? "textile" : "fitting");
+    else this.onNotice(t("notice_fitting_exists"), "warn");
+    // Direkt auf die gruene Flaeche geklickt: kein Tragrohr gewaehlt, also raeumt
+    // _clearPanelRail nichts auf und zeichnet auch nicht neu -- das Teil bliebe
+    // bis zum naechsten Moduswechsel unsichtbar.
+    this.panelRail = null;
+    this.highlight = null;
+    this.refresh();
+  }
+
+  /** 布件点选：管子，或接到这颗接头上的承重管。 */
+  _pickRailFromEvent(e) {
+    const pick = (this.panelRail && this.highlight
+      && this.scene.pickAmong(e.clientX, e.clientY, this.highlight))
+      || this.scene.pickForDelete(e.clientX, e.clientY);
+    if (!pick) return null;
+    if (pick.data.kind === "tube") {
+      const tube = this.model.tubes.get(pick.data.id);
+      if (!tube || tube.arm || tube.link || tube.bow) return { pick, id: null };
+      return { id: pick.data.id, point: pick.point, pick };
+    }
+    if (pick.data.kind === "node") {
+      const n = this.model.nodes.get(pick.data.id);
+      if (!n) return { pick, id: null };
+      const ids = this.model.incidentTubeIds(pick.data.id);
+      const usable = ids.filter((id) => this._railUsable(id, true));
+      if (!usable.length) return { pick, id: null };
+      let id = usable[0];
+      if (this.panelRail) {
+        const hit = usable.find((u) => u === this.panelRail.id
+          || this._railPartners(this.panelRail.id).some((c) => c.id === u));
+        if (hit) id = hit;
+      }
+      return { id, point: { x: n.x, y: n.y, z: n.z }, pick };
+    }
+    return { pick, id: null };
   }
 
   _clickSlide(e) {
@@ -3279,7 +3521,7 @@ export class Builder {
       this.recordHistory(() => {
         added = this.model.addSlideAt(this.slideKind, h.data.slideChain, this.colorFor("slide"));
       });
-      if (added) this._notePlaced(added.id, "slide");
+      if (added) { if (!this._warnSlideConflicts(added)) this._notePlaced(added.id, "slide"); }
       else this.onNotice(t("notice_slide_exists"), "warn");
       this.refresh();
       return;
@@ -3297,7 +3539,7 @@ export class Builder {
     }
     let added = null;
     this.recordHistory(() => { added = this.model.addSlide(m.hook, n, this.slideKind, this.colorFor("slide")); });
-    if (added) this._notePlaced(added.id, "slide");
+    if (added) { if (!this._warnSlideConflicts(added)) this._notePlaced(added.id, "slide"); }
     else this.onNotice(t("notice_slide_exists"), "warn");
     this.refresh();
   }

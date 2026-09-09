@@ -85,6 +85,7 @@ export const ACC_CAT_ICON: Record<string, string> = {
   'textil2': TOOL_ICON.textile,
   'textil-round2': '<path d="M3 13 L3 8 A8 8 0 0 1 11 13 Z" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M3 8 A8 8 0 0 1 11 13" fill="none" stroke="currentColor" stroke-width="1.6"/>',
   'roof-large2': '<path d="M2 12 L8 4 L14 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><line x1="4.4" y1="12" x2="11.6" y2="12" stroke="currentColor" stroke-width="1.2"/>',
+  'roof2': '<path d="M3.5 12 L8 6 L12.5 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>',
   'lattice2': '<rect x="2.5" y="4" width="11" height="8" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M6 4 L6 12 M9.5 4 L9.5 12 M2.5 6.7 L13.5 6.7 M2.5 9.3 L13.5 9.3" stroke="currentColor" stroke-width="0.8"/>',
   'bag2': '<path d="M3 4 L13 4 L11.6 13 L4.4 13 Z" fill="none" stroke="currentColor" stroke-width="1.4"/><line x1="3" y1="4" x2="13" y2="4" stroke="currentColor" stroke-width="1.8"/>',
 }
@@ -105,6 +106,7 @@ const BY_ID: Record<string, string> = {
   'bearing-clamp': CONN_CAT_ICON.bearing,
   textile: ACC_CAT_ICON.textil2,
   textile_round: ACC_CAT_ICON['textil-round2'],
+  roof: ACC_CAT_ICON.roof2,
   roof_large: ACC_CAT_ICON['roof-large2'],
   lattice: ACC_CAT_ICON.lattice2,
   bag: ACC_CAT_ICON.bag2,

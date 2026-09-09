@@ -14,7 +14,7 @@ const COL: Record<string, number> = {
   wheel: 20, 'multi-wheel2': 20,
   wheel_bearing: 21, bearing2: 21,
   hub_cap: 22, 'hub-cap2': 22,
-  roof_large: 24, 'roof-large2': 24, roof2: 24,
+  roof_large: 24, 'roof-large2': 24, roof: 24, roof2: 24,
   double_tube: 25,
   caster: 29, casters2: 29,
   wheel_adapter: 30, adapter2: 30,

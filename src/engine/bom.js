@@ -869,7 +869,7 @@ export function computeBOM(model) {
 // Netz, Rundwand, Spielsack, Dachtextil -- ist Zubehoer: es fehlt vielleicht,
 // aber das Modell steht trotzdem. Die Zeilen bleiben in der Liste und faerben
 // sich rot, nur der Haken bleibt gruen.
-export const SOFT_PARTS = new Set(["textile", "lattice", "textile_round", "bag", "roof_large"]);
+export const SOFT_PARTS = new Set(["textile", "lattice", "textile_round", "bag", "roof", "roof_large"]);
 
 export function neededParts(bom) {
   const tubes = new Map();   // tubeId -> count

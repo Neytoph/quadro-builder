@@ -87,7 +87,7 @@ function ToolDrop({
 const REGULAR_JOINT = new Set(['6way', '5way', '4way', '3way', 'cross', 't', 'straight', 'elbow'])
 const JOINT_FITTING = new Set(['hole_1', 'hole_2', 'hole_t', 'flexi_bolt', 'flexi_hinge', 'bearing-clamp'])
 const WHEEL_QDF = new Set(['multi-wheel2', 'floating-wheel2', 'casters2', 'steering-lock2', 'hub-cap2', 'bearing2', 'adapter2'])
-const TEXTIL_QDF = new Set(['textil2', 'textil-round2', 'roof-large2', 'lattice2', 'bag2'])
+const TEXTIL_QDF = new Set(['textil2', 'textil-round2', 'roof2', 'roof-large2', 'lattice2', 'bag2'])
 
 function pickJoint(id: string, api: ReturnType<typeof useEngine>) {
   if (id === 'diagonal') { api.startC45(); return }
@@ -137,7 +137,7 @@ export default function TopToolbar() {
   }, [])
 
   const wheels = api.catalog.accessories.filter(a => a.qdf && ['multi-wheel2', 'floating-wheel2', 'casters2', 'steering-lock2', 'hub-cap2', 'bearing2', 'adapter2'].includes(a.qdf))
-  const textiles = api.catalog.accessories.filter(a => a.qdf && ['textil2', 'textil-round2', 'roof-large2', 'lattice2', 'bag2'].includes(a.qdf))
+  const textiles = api.catalog.accessories.filter(a => a.qdf && ['textil2', 'textil-round2', 'roof2', 'roof-large2', 'lattice2', 'bag2'].includes(a.qdf))
   const pools = api.catalog.accessories.filter(a => a.id.startsWith('pool_liner'))
   const slides = [
     { id: 'slide-new2', part: 'slide_integral' },
@@ -287,11 +287,11 @@ export default function TopToolbar() {
       </ToolDrop>
       <ToolDrop
         open={open === 'pools'}
-        active={open === 'pools'}
+        active={open === 'pools' || api.poolLinerId != null && (api.mode === 'fitting' || api.pasting)}
         onClick={() => toggle('pools')}
         menu={pools.map(a => (
           <button key={a.id} onClick={() => { api.startPool(a.id); close() }}
-            className={dropItem(false)}>
+            className={dropItem(api.poolLinerId === a.id && (api.mode === 'fitting' || api.pasting))}>
             <Svg16 inner={TOOL_ICON.pool} size={18} />
             <span className="whitespace-nowrap">{labelOf(a.id, a.name)}</span>
           </button>

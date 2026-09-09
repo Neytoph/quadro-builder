@@ -1582,7 +1582,7 @@ export class SceneManager {
       }
       const teile = [mesh];
       const wasser = f.kind === "pool2" || f.kind === "pool-small2"
-        ? this._poolWater(f, q) : null;
+        ? this._markPoolWater(this._poolWater(f, q)) : null;
       if (wasser) teile.push(wasser);
       return teile;
     }
@@ -1807,10 +1807,10 @@ export class SceneManager {
           new THREE.Mesh(g, this._fittingMaterial(hex, false)), f, q));
         // Wasser: 75 % Fuellhoehe, knapp innerhalb der Folie.
         const wasserH = hoehe * 0.75;
-        const wasser = this._placeFitting(new THREE.Mesh(
+        const wasser = this._markPoolWater(this._placeFitting(new THREE.Mesh(
           wand(breite - 2 * dick, wasserH, laenge - 2 * dick,
             0, -ph + dick + wasserH / 2, mitte),
-          this._waterMaterial()), f, q);
+          this._waterMaterial()), f, q));
         return [...teile, wasser];
       }
       case "bag2": {                    // Spielsack: offener Kasten aus Tuch
@@ -1862,6 +1862,12 @@ export class SceneManager {
         return g;
       });
     return this._placeFitting(new THREE.Mesh(geo, this._waterMaterial()), f, q);
+  }
+
+  /** Wasser ist nur Dekoration: nicht mitfaerben, sonst wirkt die Auswahl wie ein oranger Kasten. */
+  _markPoolWater(mesh) {
+    if (mesh) mesh.userData.role = "water";
+    return mesh;
   }
 
   _placeFitting(mesh, f, q) {
@@ -3874,9 +3880,12 @@ export class SceneManager {
       const st = stateOf(f.id);
       if (st === "future") continue;
       for (const mesh of this._fittingMeshes(f)) {
-        mesh.userData = { kind: "fitting", id: f.id };
+        const role = mesh.userData.role;
+        mesh.userData = { kind: "fitting", id: f.id, role };
         const base = mesh.material;
-        mesh.material = matFor(f.id, (suggest && suggest.has(f.id)) ? this._suggestMaterial(base)
+        // Wasser bleibt blau -- es ist kein Bauteil, Orange wuerde wie ein Kasten wirken.
+        mesh.material = role === "water" ? base
+          : matFor(f.id, (suggest && suggest.has(f.id)) ? this._suggestMaterial(base)
           : (asm && st === "done") ? this._fadedMaterial(base.side === THREE.DoubleSide) : base);
         this.buildGroup.add(mesh);
         this.pickFittings.push(mesh);
@@ -5157,7 +5166,9 @@ export class SceneManager {
         }
         return;
       }
-      if (o.isMesh && o.userData && ids.has(o.userData.id)) add(o.geometry, o.material, o.matrixWorld);
+      if (o.isMesh && o.userData && ids.has(o.userData.id) && o.userData.role !== "water") {
+        add(o.geometry, o.material, o.matrixWorld);
+      }
     });
     this._applyClip();
   }

@@ -15,6 +15,9 @@ import { round2 as round, quatFromXAxis, quatFromBasis, xAxisOf, yAxisOf, zAxisO
 const FITTING_MOUNTS = {
   "bearing2":        { at: "node", offset: 0 },   // Radlager: 5-cm-Stueck an der Kupplung
   "casters2":        { at: "node", offset: 0 },   // Laufrolle; der Adapter kommt mit
+  // Laufrollen-Adapter allein: in den Herstellerdateien 40-mal als eigenes Teil
+  // auf einem freien Stutzen (meist waagerecht), ohne Rolle darauf.
+  "adapter2":        { at: "node", offset: 0 },
   // Offenes Verbinderende: eine 5 cm lange, beidseitig offene Huelse auf einem
   // freien Stutzen der Kupplung. Sie ERZWINGT diesen Stutzen -- ohne Rohr
   // rechnet und zeichnet ihn sonst niemand (genau wie in der Herstellersoftware).
@@ -2093,12 +2096,80 @@ export class BuildModel {
   }
 
   /**
-   * Netz auf zwei parallele Rohre setzen -- derselbe Ablauf wie bei einer
-   * Platte, nur entsteht ein Anbauteil mit eigenen Massen. Die Masse sind an
-   * den Ball-Cage-Entwuerfen gemessen: laengs der Rohre das Rastermass minus
-   * eine Kupplung (1600 -> 1550), quer dazu minus eine halbe (800 -> 775), und
-   * das Netz schliesst oben buendig mit dem Rohr ab, unten bleiben 25 mm Luft.
+   * 布面 / 网 / 袋可点的格子：一对承重管 + 一段重叠。同一块开口只出一次，
+   * 避免竖管对和横管对在同一面上叠两块绿。
    */
+  railFittingMounts(kind) {
+    const out = [];
+    const seenPair = new Set();
+    const seenFace = new Set();
+    for (const t of this.tubes.values()) {
+      if (t.arm || t.link || t.bow) continue;
+      const partners = kind === "bag2" ? this.bagPartners(t.id) : this.latticePartners(t.id);
+      for (const p of partners) {
+        const count = Math.max(1, Math.floor((p.hi - p.lo + 0.5) / p.len));
+        for (let k = 0; k < count; k++) {
+          const t0 = round(p.lo + k * p.len);
+          const pairKey = [t.id, p.id].sort().join("|") + "|" + t0 + "|" + p.len;
+          if (seenPair.has(pairKey)) continue;
+          seenPair.add(pairKey);
+          if (this._railFittingTaken(kind, t.id, p.id, t0, p.len)) continue;
+          const cor = this.panelCorners({ a: t.id, b: p.id, t0, len: p.len });
+          if (!cor) continue;
+          const faceKey = this._railFaceKey(cor);
+          if (seenFace.has(faceKey) || this._railFaceTaken(kind, cor)) continue;
+          seenFace.add(faceKey);
+          // Auf einer Platte, einem Tuch oder quer ueber ein Rohr laesst sich
+          // nichts spannen -- das Feld muss frei sein.
+          if (!this._openingFree(cor)) continue;
+          out.push({ a: t.id, b: p.id, t0, len: p.len, corners: cor });
+        }
+      }
+    }
+    return out;
+  }
+
+  _railFaceKey(cor) {
+    return cor.map((c) => c.map((v) => Math.round(v)).join(",")).sort().join(";");
+  }
+
+  _railFaceTaken(kind, cor) {
+    const faceKey = this._railFaceKey(cor);
+    if (kind === "textil2") {
+      for (const x of this.textiles.values()) {
+        const existing = this.panelCorners(x);
+        if (existing && this._railFaceKey(existing) === faceKey) return true;
+      }
+      return false;
+    }
+    const mid = [0, 1, 2].map((i) => cor.reduce((s, q) => s + q[i], 0) / 4);
+    const near = kind === "bag2" ? 5 : 2;
+    for (const f of this.fittings.values()) {
+      if (f.kind !== kind) continue;
+      if (Math.hypot(f.x - mid[0], f.y - mid[1], f.z - mid[2]) < near) return true;
+    }
+    return false;
+  }
+
+  _railFittingTaken(kind, aId, bId, t0, len) {
+    if (kind === "textil2") {
+      for (const x of this.textiles.values()) {
+        if (((x.a === aId && x.b === bId) || (x.a === bId && x.b === aId))
+          && Math.abs((x.t0 || 0) - t0) < 2) return true;
+      }
+      return false;
+    }
+    const cor = this.panelCorners({ a: aId, b: bId, t0, len });
+    if (!cor) return false;
+    const c = [0, 1, 2].map((i) => cor.reduce((s, q) => s + q[i], 0) / 4);
+    const near = kind === "bag2" ? 5 : 2;
+    for (const f of this.fittings.values()) {
+      if (f.kind !== kind) continue;
+      if (Math.hypot(f.x - c[0], f.y - c[1], f.z - c[2]) < near) return true;
+    }
+    return false;
+  }
+
   /**
    * Textil zwischen zwei parallele Rohre spannen -- gesetzt wie das Netz, nur
    * dass daraus kein Anbauteil wird, sondern ein Eintrag in `textiles`: dieselbe
@@ -2125,6 +2196,13 @@ export class BuildModel {
     return tx;
   }
 
+  /**
+   * Netz auf zwei parallele Rohre setzen -- derselbe Ablauf wie bei einer
+   * Platte, nur entsteht ein Anbauteil mit eigenen Massen. Die Masse sind an
+   * den Ball-Cage-Entwuerfen gemessen: laengs der Rohre das Rastermass minus
+   * eine Kupplung (1600 -> 1550), quer dazu minus eine halbe (800 -> 775), und
+   * das Netz schliesst oben buendig mit dem Rohr ab, unten bleiben 25 mm Luft.
+   */
   addLattice(aId, bId, t0, len, color) {
     const ra = this._rail(aId), rb = this._rail(bId);
     if (!ra || !rb) return null;
@@ -2235,8 +2313,15 @@ export class BuildModel {
     // Eine Laufrolle sitzt immer auf ihrem Adapter -- der kommt deshalb im
     // selben Zug mit. In der Stueckliste bleiben es zwei Teile.
     if (f && kind === "casters2") {
-      this.addFitting("adapter2", mount.pos[0], mount.pos[1], mount.pos[2],
-        { quat: mount.quat || quatFromXAxis(mount.dir) });
+      const quat = mount.quat || quatFromXAxis(mount.dir);
+      const ax = xAxisOf(quat);
+      // Steckt dort schon ein einzeln gesetzter Adapter, bleibt es bei dem.
+      const schonDa = [...this.fittings.values()].some((o) => o.kind === "adapter2"
+        && Math.hypot(o.x - mount.pos[0], o.y - mount.pos[1], o.z - mount.pos[2]) < 3
+        && o.quat && dot3(xAxisOf(o.quat), ax) > 0.9);
+      if (!schonDa) {
+        this.addFitting("adapter2", mount.pos[0], mount.pos[1], mount.pos[2], { quat });
+      }
     }
     return f;
   }
@@ -2247,23 +2332,64 @@ export class BuildModel {
   // Einhaengepunkt (Mitte zwischen beiden Rohren, kurz ueber den unteren
   // Kupplungen), normal die Richtung, in die die Rutsche abfaellt.
   //
-  // Weil das Teil eine feste Groesse hat, kommen nur Rohrpaare in Frage, deren
-  // untere Kupplungen GENAU zwei Rasterebenen ueber dem Boden sitzen -- und nur
-  // dann, wenn die Bahn davor frei ist (siehe _slidePathFree).
+  // 滑梯落差固定约 80 cm。挂钩挂在两根竖管之间的 35 cm 横梁上——官方文件里
+  // 全部 130 多处滑梯都是这样：横梁是平台那一层的边，两根竖管在横梁上方
+  // 继续往上（护栏），滑梯从护栏之间这个空档滑出去。所以绿面标的是横梁
+  // 【上方】的那个空档，空档里有板、网、布就挂不了。
+  //
+  // 横梁两端只有一端有竖管往上（比如舞台正面一整片 80 cm 宽的开口）时，横梁
+  // 本身也能挂，条件同样是它上方那 40×40 的空档里什么都没有。
+  //
+  // 竖管到横梁就结束（两层立方框的顶面）时，滑梯也能搭在顶梁上——这时绿面
+  // 是横梁下方那一格；只有上面什么都不接时才这样算，免得同一根横梁出两个面。
   slideMounts(width = 40, tol = 2, kind = "slide-new2") {
     // Ein Koerper einer Kette endet nicht hier: hinter ihm kommt das naechste
     // Teil, sein Fuss muss also nichts tragen. Nur die Integralrutsche braucht
     // Boden oder Geruest unter dem Auslauf.
     const kette = !!(SLIDE_PARTS[kind] && SLIDE_PARTS[kind].chain);
-    const braucthAuflage = !kette;
+    const brauchtAuflage = !kette;
     const out = [];
     const seen = new Set();
     const groundY = this._groundLevel();
-    // Alle SENKRECHTEN Rohre samt ihrem unteren Endknoten. Die Rohrlaenge ist
-    // egal -- entscheidend ist nur, dass beide Rohre senkrecht stehen, ihre
-    // unteren Kupplungen gleich hoch liegen und der Abstand der Rutschenbreite
-    // entspricht. (Die Suche lief frueher ueber findRectangles und verlangte
-    // dadurch gleich lange Rohre; beim Bauen kommen aber auch ungleiche vor.)
+
+    // Gemeinsame Pruefung einer Stelle: Querrohr als Haken, Hoehe, freies Feld,
+    // keine Rutsche schon dort, freie Bahn und (Integralrutsche) Auflage.
+    // p/q: { x, z, lowId?, highId?, low?, high?, len? } der beiden Seiten.
+    const pruefe = (p, q, hookY, y0, y1) => {
+      if (y1 - y0 < 10) return;
+      if (!this._slideEntryOk(p, q, hookY) || hookY - groundY < SLIDE_DROP - 1) return;
+      const dx = q.x - p.x, dz = q.z - p.z;
+      const d = Math.hypot(dx, dz);
+      const hook = [(p.x + q.x) / 2, hookY + (kette ? 0 : SLIDE_HOOK_LIFT), (p.z + q.z) / 2];
+      const key = [Math.round(hook[0]), Math.round(hook[1]), Math.round(hook[2])].join("|");
+      if (seen.has(key)) return;
+      const corners = [
+        [p.x, y0, p.z], [q.x, y0, q.z],
+        [q.x, y1, q.z], [p.x, y1, p.z],
+      ];
+      // Platte, Netz, Tuch oder Rohr auf dem Feld: da kommt keine Rutsche durch.
+      if (!this._openingFree(corners)) return;
+      // Dort haengt schon eine Rutsche (gleich welcher Art).
+      if (this._slideHooked(hook)) return;
+      const nrm = [-dz / d, 0, dx / d];
+      let front = 0, back = 0;
+      for (const n of this.nodes.values()) {
+        const sdist = (n.x - hook[0]) * nrm[0] + (n.z - hook[2]) * nrm[2];
+        if (sdist > 5) front++; else if (sdist < -5) back++;
+      }
+      let dir = front > back ? [-nrm[0], 0, -nrm[2]] : nrm;
+      const usable = (vec) => this._slidePathFree(hook, vec)
+        && (!brauchtAuflage || this._slideFootRests(hook, vec, groundY));
+      if (!usable(dir)) {
+        const other = [-dir[0], 0, -dir[2]];
+        if (!usable(other)) return;
+        dir = other;
+      }
+      seen.add(key);
+      out.push({ hook, normal: dir, corners });
+    };
+
+    // 1. Pfostenpaare: zwei senkrechte Rohre im Abstand `width`.
     const posts = [];
     for (const t of this.tubes.values()) {
       if (t.arm || t.link || t.bow) continue;
@@ -2271,74 +2397,149 @@ export class BuildModel {
       if (!a || !b) continue;
       if (Math.abs(a.x - b.x) > 0.5 || Math.abs(a.z - b.z) > 0.5) continue; // nicht senkrecht
       if (Math.abs(a.y - b.y) < 0.5) continue;
-      posts.push({ x: a.x, z: a.z, low: Math.min(a.y, b.y), high: Math.max(a.y, b.y),
-        len: t.length, lowId: a.y <= b.y ? a.id : b.id });
+      const aLow = a.y <= b.y;
+      posts.push({
+        x: a.x, z: a.z,
+        low: Math.min(a.y, b.y), high: Math.max(a.y, b.y),
+        len: t.length,
+        lowId: aLow ? a.id : b.id,
+        highId: aLow ? b.id : a.id,
+      });
     }
     for (let i = 0; i < posts.length; i++) {
       for (let j = i + 1; j < posts.length; j++) {
         const p = posts[i], q = posts[j];
-        if (Math.abs(p.low - q.low) > 0.5) continue;          // untere Kupplungen versetzt
-        const dx = q.x - p.x, dz = q.z - p.z;
-        const d = Math.hypot(dx, dz);
-        if (Math.abs(d - width) > tol) continue;              // falscher Abstand
-        // Modular- und Bogenrutsche werden am Einstieg VERSCHRAUBT: dafuer
-        // braucht es beidseits ein 15er Rohr (dort sitzen die Loecher) und
-        // darunter ein 35er zwischen den beiden. Die Integralrutsche haengt
-        // nur ein und ist deshalb an keine Rohrlaenge gebunden.
-        if (kette && !this._slideEntryOk(p, q)) continue;
-        // Feste Bauhoehe: unterhalb von SLIDE_DROP ueber dem Boden wuerde der
-        // Fuss in den Boden laufen. Nach oben ist alles erlaubt -- die Rutsche
-        // endet dann auf einer Plattform statt auf dem Boden.
-        if (p.low - groundY < SLIDE_DROP - 1) continue;
-        // Die Integralrutsche hängt 5 cm über der unteren Kupplung ein; die
-        // Kettenteile führen ihren Punkt direkt auf der Kupplung -- so stehen
-        // sie in den Herstellerdateien (Rasterhöhen 80, 120, 200) und nur so
-        // landet das nächste Kettenglied wieder auf dem Raster.
-        const hook = [(p.x + q.x) / 2, p.low + (kette ? 0 : SLIDE_HOOK_LIFT), (p.z + q.z) / 2];
-        const key = [Math.round(hook[0]), Math.round(hook[1]), Math.round(hook[2])].join("|");
-        if (seen.has(key)) continue;
-        seen.add(key);
-        // Abfallrichtung: waagerecht, quer zur Verbindung der beiden Rohre.
-        // Voreinstellung ist die Seite mit weniger Bauteilen (weg vom Geruest);
-        // die tatsaechliche Seite entscheidet beim Klick der Blickwinkel.
-        const nrm = [-dz / d, 0, dx / d];
-        let front = 0, back = 0;
-        for (const n of this.nodes.values()) {
-          const sdist = (n.x - hook[0]) * nrm[0] + (n.z - hook[2]) * nrm[2];
-          if (sdist > 5) front++; else if (sdist < -5) back++;
+        const d = Math.hypot(q.x - p.x, q.z - p.z);
+        if (Math.abs(d - width) > tol) continue;
+        const hakenOk = (y) => this._slideEntryOk(p, q, y) && y - groundY >= SLIDE_DROP - 1;
+        // Haken am unteren Ende: die Rutsche laeuft durch die Oeffnung ZWISCHEN
+        // den beiden Pfosten hinaus -- der Regelfall.
+        const untenGleich = Math.abs(p.low - q.low) <= 0.5;
+        if (untenGleich) pruefe(p, q, p.low, p.low, Math.min(p.high, q.high));
+        // Haken am oberen Ende (Rutsche ueber die Oberkante gehaengt): nur wenn
+        // dort kein Pfosten weitergeht (sonst liefert das Paar darueber dieselbe
+        // Stelle mit der richtigen Oeffnung) und das untere Ende selbst kein
+        // Haken sein kann -- sonst laege auf EINEM Feld zweimal Gruen.
+        if (Math.abs(p.high - q.high) <= 0.5 && !(untenGleich && hakenOk(p.low))
+          && !this._postAbove(p.highId) && !this._postAbove(q.highId)) {
+          pruefe(p, q, p.high, Math.max(p.low, q.low), p.high);
         }
-        let dir = front > back ? [-nrm[0], 0, -nrm[2]] : nrm;
-        // Reicht der Platz und traegt der Auslauf? Sonst die Gegenseite
-        // versuchen, sonst gibt es hier keine Montagestelle.
-        const usable = (d) => this._slidePathFree(hook, d)
-          && (!braucthAuflage || this._slideFootRests(hook, d, groundY));
-        if (!usable(dir)) {
-          const other = [-dir[0], 0, -dir[2]];
-          if (!usable(other)) continue;
-          dir = other;
-        }
-        // Auswahlflaeche: unten am Rohrpaar, eine Rutschenbreite hoch.
-        const top = Math.min(p.high, q.high);
-        const h2 = Math.min(top, p.low + width);
-        out.push({
-          hook, normal: dir,
-          corners: [
-            [p.x, p.low, p.z], [q.x, q.low, q.z],
-            [q.x, h2, q.z], [p.x, h2, p.z],
-          ],
-        });
       }
+    }
+
+    // 2. Querrohre ohne passendes Pfostenpaar: mindestens an einem Ende geht
+    //    es nach oben weiter (sonst ist es die Oberkante -- Fall 1), und das
+    //    Feld darueber ist frei.
+    for (const t of this.tubes.values()) {
+      if (t.arm || t.link || t.bow) continue;
+      const a = this.nodes.get(t.a), b = this.nodes.get(t.b);
+      if (!a || !b || Math.abs(a.y - b.y) > 0.5) continue;              // nicht waagerecht
+      if (Math.abs(Math.hypot(b.x - a.x, b.z - a.z) - width) > tol) continue;
+      if (!this._postAbove(a.id) && !this._postAbove(b.id)) continue;
+      const p = { x: a.x, z: a.z, low: a.y, high: a.y, lowId: a.id, highId: a.id, len: 0 };
+      const q = { x: b.x, z: b.z, low: b.y, high: b.y, lowId: b.id, highId: b.id, len: 0 };
+      pruefe(p, q, a.y, a.y, a.y + width);
     }
     return out;
   }
 
   /**
-   * Taugt dieses Rohrpaar als Einstieg fuer eine geschraubte Rutsche? Beide
-   * senkrechten Rohre muessen 15 cm lang sein -- nur die haben an der
-   * richtigen Stelle Loecher --, und unten muss ein 35er zwischen ihnen
-   * liegen, an dem die Rutsche aufsitzt.
+   * Ist dieses Feld frei -- keine Platte, kein Tuch, kein Netz darauf, kein
+   * Rohr und keine Kupplung mittendrin? Der Rand (die tragenden Rohre und ihre
+   * Kupplungen) zaehlt nicht. Platten und Tuecher werden ueber die gemeinsame
+   * Ebene und Trennachsen verglichen, so faellt auch ein breiteres Tuch auf,
+   * das dieses Feld nur mit abdeckt.
    */
-  _slideEntryOk(p, q) {
+  _openingFree(corners) {
+    for (const p of this.panels.values()) {
+      const c = this.panelCorners(p);
+      if (c && this._panelsOverlap(corners, c)) return false;
+    }
+    for (const x of this.textiles.values()) {
+      const c = this.panelCorners(x);
+      if (c && this._panelsOverlap(corners, c)) return false;
+    }
+    for (const f of this.fittings.values()) {
+      if (f.kind !== "lattice2") continue;
+      const c = this._latticeCorners(f);
+      if (c && this._panelsOverlap(corners, c)) return false;
+    }
+    const [c0, c1, , c3] = corners;
+    const u = [c1[0] - c0[0], c1[1] - c0[1], c1[2] - c0[2]];
+    const v = [c3[0] - c0[0], c3[1] - c0[1], c3[2] - c0[2]];
+    const U = Math.hypot(...u), V = Math.hypot(...v);
+    if (U < 1 || V < 1) return true;
+    const n = cross3([u[0] / U, u[1] / U, u[2] / U], [v[0] / V, v[1] / V, v[2] / V]);
+    const margin = 3;
+    const innen = (pt) => {
+      const d = [pt[0] - c0[0], pt[1] - c0[1], pt[2] - c0[2]];
+      if (Math.abs(dot3(d, n)) > margin) return false;
+      const s = dot3(d, u) / U, t = dot3(d, v) / V;
+      return s > margin && s < U - margin && t > margin && t < V - margin;
+    };
+    for (const nd of this.nodes.values()) if (innen([nd.x, nd.y, nd.z])) return false;
+    for (const t of this.tubes.values()) {
+      const a = this.nodes.get(t.a), b = this.nodes.get(t.b);
+      if (!a || !b) continue;
+      if (innen([(a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2])) return false;
+    }
+    return true;
+  }
+
+  /** Die vier Ecken eines Netzes (lattice2): Mitte, Dreibein, Masse w x h. */
+  _latticeCorners(f) {
+    if (!f.quat || f.quat.length !== 4 || !f.w || !f.h) return null;
+    const ex = xAxisOf(f.quat), ey = yAxisOf(f.quat);
+    const hx = f.h / 2, hy = f.w / 2;
+    const at = (sx, sy) => [
+      f.x + ex[0] * sx * hx + ey[0] * sy * hy,
+      f.y + ex[1] * sx * hx + ey[1] * sy * hy,
+      f.z + ex[2] * sx * hx + ey[2] * sy * hy,
+    ];
+    return [at(-1, -1), at(-1, 1), at(1, 1), at(1, -1)];
+  }
+
+  /** Geht von dieser Kupplung ein gerades Rohr senkrecht nach OBEN weiter? */
+  _postAbove(nodeId) {
+    const n = this.nodes.get(nodeId);
+    if (!n) return false;
+    for (const t of this.tubes.values()) {
+      if (t.arm || t.link || t.bow) continue;
+      if (t.a !== nodeId && t.b !== nodeId) continue;
+      const o = this.nodes.get(t.a === nodeId ? t.b : t.a);
+      if (!o) continue;
+      if (Math.abs(o.x - n.x) <= 0.5 && Math.abs(o.z - n.z) <= 0.5 && o.y > n.y + 0.5) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Haengt an diesem Querrohr schon eine Rutsche? Verglichen wird der Einstieg
+   * jedes Rutschenteils; die Integralrutsche fuehrt ihren 5 cm hoeher, darum
+   * die grosszuegige Hoehentoleranz.
+   */
+  _slideHooked(hook) {
+    for (const s of this.slides.values()) {
+      const e = this.slideEntry(s);
+      if (!e) continue;
+      if (Math.hypot(e.x - hook[0], e.z - hook[2]) < 3 && Math.abs(e.y - hook[1]) <= SLIDE_HOOK_LIFT + 1) return true;
+    }
+    return false;
+  }
+
+  /**
+   * 滑梯的挂钩：这一高度上两根竖管之间要有 35 cm 横梁，一体、模块、弯滑梯
+   * 都一样（官方文件里 36 处一体滑梯、100 多处模块/弯滑梯无一例外）。官方
+   * 用法是两根 15 cm 竖管站在平台上；两层立方框顶面的 35 cm 竖管 + 顶梁也算。
+   */
+  _slideEntryOk(p, q, hookY = p.low) {
+    const idAt = (post) => (Math.abs(post.low - hookY) <= 0.5 ? post.lowId
+      : Math.abs(post.high - hookY) <= 0.5 ? post.highId : null);
+    const a = idAt(p), b = idAt(q);
+    if (a && b) {
+      const quer = this.tubeBetween(a, b);
+      if (quer && !quer.arm && !quer.link && Math.abs((quer.length || 0) - 35) < 0.5) return true;
+    }
     if (Math.abs((p.len || 0) - 15) > 0.5 || Math.abs((q.len || 0) - 15) > 0.5) return false;
     const quer = this.tubeBetween(p.lowId, q.lowId);
     return !!quer && !quer.arm && !quer.link && Math.abs((quer.length || 0) - 35) < 0.5;
@@ -2432,12 +2633,20 @@ export class BuildModel {
    */
   slideChainMounts(kind) {
     if (!SLIDE_CHAIN_KINDS.includes(kind)) return [];
+    const spec = SLIDE_PARTS[kind];
+    const groundY = this._groundLevel();
     const out = [];
     for (const s of this.slides.values()) {
       const exit = this.slideExit(s);
       if (!exit) continue;
       if (this._slideAt(exit.pos)) continue;          // dort haengt schon eines
       if (this.isBelowGround(exit.pos[1])) continue;
+      // Ein Koerper faellt weitere 80 cm: unter den Boden darf er nicht. Der
+      // Auslauf liegt auf dem Boden -- an einem Ausgang in der Luft haengt er
+      // nicht (dort gehoert erst noch ein Koerper hin). Boden ist die Nullebene
+      // oder, wenn das Modell tiefer/hoeher steht, seine unterste Kupplung.
+      if (spec.exit && exit.pos[1] + spec.exit.off[1] < Math.min(groundY, 0) - 1) continue;
+      if (!spec.exit && exit.pos[1] > Math.max(groundY, 0) + 1) continue;
       out.push(exit);
     }
     return out;
@@ -2458,6 +2667,212 @@ export class BuildModel {
     };
     this.slides.set(slide.id, slide);
     return slide;
+  }
+
+  /**
+   * Wo ein Dachtuch hinpasst. Beide Daecher sitzen auf demselben Gerippe --
+   * ein waagerechter First, an dessen beiden Enden je zwei 45-Grad-Sparren
+   * nach beiden Seiten hinunterlaufen (zur Traufe aus C45-Kupplungen):
+   *   roof2 (Dach):            First 80 cm  -- in 50 der 70 Herstellerdateien
+   *                            sitzt der Punkt genau auf der Firstmitte;
+   *   roof-large2 (Dachtextil): First 160 cm (zwei 75er), der Punkt liegt 40 cm
+   *                            hinter dem Firstanfang (so zeichnet es die Szene).
+   * Lokale X-Achse laeuft am First entlang, Y und Z sind um 45 Grad gekippt --
+   * die beiden Dachschraegen fallen entlang +Z und -Y ab.
+   * Liefert { pos, quat, faces: [Ecken Schraege A, Ecken Schraege B] }.
+   */
+  roofMounts(kind, alle = false) {
+    const len = kind === "roof-large2" ? 160 : kind === "roof2" ? 80 : 0;
+    if (!len) return [];
+    const STEP = 40, EAVE = 60;
+    // Nachbarn je Kupplung ueber gerade Rohre.
+    const nb = new Map();
+    for (const t of this.tubes.values()) {
+      if (t.arm || t.link || t.bow) continue;
+      if (!this.nodes.has(t.a) || !this.nodes.has(t.b)) continue;
+      if (!nb.has(t.a)) nb.set(t.a, new Set());
+      if (!nb.has(t.b)) nb.set(t.b, new Set());
+      nb.get(t.a).add(t.b); nb.get(t.b).add(t.a);
+    }
+    // Giebelknoten: zwei 45-Grad-Sparren nach unten, einander gegenueber.
+    // Merkt sich die waagerechte Sparrenachse (senkrecht zum First).
+    const gable = [];
+    for (const n of this.nodes.values()) {
+      const down = [];
+      for (const id of nb.get(n.id) || []) {
+        const o = this.nodes.get(id);
+        const dy = n.y - o.y, dh = Math.hypot(o.x - n.x, o.z - n.z);
+        if (dy < 10 || Math.abs(dy - dh) > 3) continue;           // kein 45-Grad-Sparren
+        down.push([(o.x - n.x) / dh, (o.z - n.z) / dh]);
+      }
+      for (let i = 0; i < down.length; i++) {
+        for (let j = i + 1; j < down.length; j++) {
+          if (down[i][0] * down[j][0] + down[i][1] * down[j][1] > -0.98) continue;
+          gable.push({ n, perp: down[i] });
+        }
+      }
+    }
+    const out = [];
+    const seen = new Set();
+    for (const g1 of gable) {
+      for (const g2 of gable) {
+        if (g1 === g2 || Math.abs(g1.n.y - g2.n.y) > 1) continue;
+        const dx = g2.n.x - g1.n.x, dz = g2.n.z - g1.n.z;
+        const d = Math.hypot(dx, dz);
+        if (Math.abs(d - len) > 2) continue;
+        const ax = [dx / d, 0, dz / d];
+        // First steht quer zu den Sparren -- an beiden Enden gleich.
+        if (Math.abs(ax[0] * g1.perp[0] + ax[2] * g1.perp[1]) > 0.05) continue;
+        if (Math.abs(ax[0] * g2.perp[0] + ax[2] * g2.perp[1]) > 0.05) continue;
+        // Durchgehender First: an jedem Rasterpunkt eine Kupplung, dazwischen Rohr.
+        let prev = g1.n, ok = true;
+        for (let k = 1; ok && k <= Math.round(len / STEP); k++) {
+          const px = g1.n.x + ax[0] * STEP * k, pz = g1.n.z + ax[2] * STEP * k;
+          const here = [...this.nodes.values()].find((o) => Math.abs(o.y - g1.n.y) < 1
+            && Math.hypot(o.x - px, o.z - pz) < 2);
+          if (!here || !(nb.get(prev.id) || new Set()).has(here.id)) ok = false;
+          prev = here;
+        }
+        if (!ok) continue;
+        const mid = [(g1.n.x + g2.n.x) / 2, g1.n.y, (g1.n.z + g2.n.z) / 2];
+        const key = [Math.round(mid[0]), Math.round(mid[1]), Math.round(mid[2])].join("|");
+        if (seen.has(key)) continue;
+        // Bezugspunkt: Dach in der Firstmitte, Dachtextil 40 cm hinter dem Anfang.
+        const pos = kind === "roof2" ? mid
+          : [g1.n.x + ax[0] * 40, g1.n.y, g1.n.z + ax[2] * 40];
+        // Da liegt schon ein Dach (gleich welcher Art).
+        const belegt = [...this.slides.values()].some((s) => s.kind === "roof2"
+          && Math.hypot(s.x - mid[0], s.y - mid[1], s.z - mid[2]) < 3)
+          || [...this.fittings.values()].some((f) => f.kind === "roof-large2"
+            && Math.hypot(f.x - pos[0], f.y - pos[1], f.z - pos[2]) < 3);
+        if (belegt && !alle) continue;
+        seen.add(key);
+        // Lokal +Z und -Y fallen ab: Y zeigt schraeg nach oben, Z = X x Y muss
+        // nach unten weisen -- sonst die Sparrenseite wechseln.
+        let perp = [g1.perp[0], 0, g1.perp[1]];
+        const s2 = Math.SQRT1_2;
+        let ay = [perp[0] * s2, s2, perp[2] * s2];
+        let az = cross3(ax, ay);
+        if (az[1] > 0) {
+          perp = [-perp[0], 0, -perp[2]];
+          ay = [perp[0] * s2, s2, perp[2] * s2];
+          az = cross3(ax, ay);
+        }
+        const quat = quatFromBasis(ax, ay, az).map((v) => Math.round(v * 1e4) / 1e4);
+        const face = (sg) => {
+          const A = [g1.n.x, g1.n.y, g1.n.z], B = [g2.n.x, g2.n.y, g2.n.z];
+          const off = [perp[0] * EAVE * sg, -EAVE, perp[2] * EAVE * sg];
+          return [A, B, [B[0] + off[0], B[1] + off[1], B[2] + off[2]], [A[0] + off[0], A[1] + off[1], A[2] + off[2]]];
+        };
+        out.push({ pos, quat, kind, faces: [face(1), face(-1)] });
+      }
+    }
+    return out;
+  }
+
+  /** Dachtuch auf ein Gerippe legen: das Dach ist ein Rutschen-Eintrag, das Dachtextil ein Anbauteil. */
+  addRoofAt(mount, color = null) {
+    if (!mount || !mount.pos) return null;
+    const [x, y, z] = mount.pos;
+    if (mount.kind === "roof2") {
+      if (this._slideAt(mount.pos, 3)) return null;
+      const slide = { id: this._id("s"), x: round(x), y: round(y), z: round(z), quat: mount.quat, kind: "roof2", color };
+      this.slides.set(slide.id, slide);
+      return slide;
+    }
+    for (const f of this.fittings.values()) {
+      if (f.kind === "roof-large2" && Math.hypot(f.x - x, f.y - y, f.z - z) < 3) return null;
+    }
+    return this.addFitting("roof-large2", x, y, z, { quat: mount.quat, color });
+  }
+
+  /**
+   * Womit ein Rutschenteil zusammenstoesst: Rohre, Kupplungen, Platten, Tuecher
+   * und Anbauteile, die in seinem Koerper stecken. Gesetzt wird trotzdem -- der
+   * Nutzer entscheidet, was weicht. Die Bahn wird als gerades Stueck vom
+   * Einstieg zum Ausgang genommen (beim Bogen die Sehne), 40 cm breit, von
+   * knapp unter der Rutschflaeche bis zur Oberkante der Seitenwaende.
+   * Ausgenommen sind die Kupplungen und Rohre am Einstieg selbst (der Haken).
+   * Liefert { tubes, nodes, panels, textiles, fittings, total }.
+   */
+  slideConflicts(slide) {
+    const res = { tubes: 0, nodes: 0, panels: 0, textiles: 0, fittings: 0, total: 0 };
+    if (!slide) return res;
+    const spec = SLIDE_PARTS[slide.kind];
+    if (!spec) return res;
+    const entry = this.slideEntry(slide);
+    if (!entry) return res;
+    const q = slide.quat && slide.quat.length === 4 ? slide.quat : [0, 0, 0, 1];
+    const start = [entry.x, entry.y, entry.z];
+    const lokal = (v) => { const o = rotateVecByQuat(q, v); return [slide.x + o[0], slide.y + o[1], slide.z + o[2]]; };
+    // Bahn als Polygonzug: gerade Teile ein Stueck, der Bogen eine Bezierkurve
+    // (Einlauf lokal +Z, Auslauf lokal +X -- wie die Szene ihn zeichnet).
+    let pts;
+    if (slide.kind === "curved-slide2") {
+      const P0 = start, P3 = lokal(spec.exit.off);
+      const C1 = lokal([0, 0, 33]), C2 = lokal([spec.exit.off[0] - 33, spec.exit.off[1], spec.exit.off[2]]);
+      pts = [];
+      for (let i = 0; i <= 8; i++) {
+        const tt = i / 8, uu = 1 - tt, a = uu ** 3, b = 3 * uu * uu * tt, c = 3 * uu * tt * tt, d = tt ** 3;
+        pts.push([0, 1, 2].map((k) => a * P0[k] + b * C1[k] + c * C2[k] + d * P3[k]));
+      }
+    } else if (spec.exit) {
+      pts = [start, lokal(spec.exit.off)];
+    } else if (slide.kind === "slide-end2") {
+      pts = [start, lokal([0, 0, 47.5])];
+    } else {
+      pts = [start, [slide.x, slide.y, slide.z]];      // Integralrutsche: Punkt am Fuss
+    }
+    const segs = [];
+    for (let i = 0; i + 1 < pts.length; i++) {
+      const a = pts[i], b = pts[i + 1];
+      const L = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+      const len = Math.hypot(...L);
+      if (len < 1) continue;
+      const u = [L[0] / len, L[1] / len, L[2] / len];
+      const hz = Math.hypot(u[0], u[2]) || 1;
+      const side = [-u[2] / hz, 0, u[0] / hz];             // quer zur Bahn, waagerecht
+      segs.push({ a, u, len, side, up: cross3(side, u) }); // up: senkrecht zur Rutschflaeche
+    }
+    if (!segs.length) return res;
+    const HALF_W = 18, BELOW = 3, ABOVE = 28, HEAD = 12, FOOT = 4;
+    const inside = (p) => segs.some((sg, i) => {
+      const d = [p[0] - sg.a[0], p[1] - sg.a[1], p[2] - sg.a[2]];
+      const s = dot3(d, sg.u);
+      const s0 = i === 0 ? HEAD : 0, s1 = sg.len - (i === segs.length - 1 ? FOOT : 0);
+      if (s < s0 || s > s1) return false;
+      if (Math.abs(dot3(d, sg.side)) > HALF_W) return false;
+      const v = dot3(d, sg.up);
+      return v > -BELOW && v < ABOVE;
+    });
+    const anyOf = (pts) => pts.some(inside);
+    const seg = (a, b, n = 6) => {
+      const pts = [];
+      for (let i = 0; i <= n; i++) pts.push([a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n, a[2] + (b[2] - a[2]) * i / n]);
+      return pts;
+    };
+    for (const n of this.nodes.values()) if (inside([n.x, n.y, n.z])) res.nodes++;
+    for (const t of this.tubes.values()) {
+      const a = this.nodes.get(t.a), b = this.nodes.get(t.b);
+      if (!a || !b) continue;
+      if (anyOf(seg([a.x, a.y, a.z], [b.x, b.y, b.z]))) res.tubes++;
+    }
+    const flaeche = (c) => {
+      if (!c) return false;
+      const pts = [];
+      for (let i = 0; i < 4; i++) pts.push(...seg(c[i], c[(i + 1) % 4], 4));
+      pts.push(...seg([(c[0][0] + c[3][0]) / 2, (c[0][1] + c[3][1]) / 2, (c[0][2] + c[3][2]) / 2],
+        [(c[1][0] + c[2][0]) / 2, (c[1][1] + c[2][1]) / 2, (c[1][2] + c[2][2]) / 2], 4));
+      return anyOf(pts);
+    };
+    for (const p of this.panels.values()) if (flaeche(this.panelCorners(p))) res.panels++;
+    for (const x of this.textiles.values()) if (flaeche(this.panelCorners(x))) res.textiles++;
+    for (const f of this.fittings.values()) {
+      if (f.kind === "lattice2") { if (flaeche(this._latticeCorners(f))) res.textiles++; continue; }
+      if (inside([f.x, f.y, f.z])) res.fittings++;
+    }
+    res.total = res.tubes + res.nodes + res.panels + res.textiles + res.fittings;
+    return res;
   }
 
   // Rutsche an einer Montagestelle einhaengen. Feste Groesse: zwei Rasterebenen
@@ -2962,6 +3377,155 @@ export class BuildModel {
       quat: [0, 0, 0, 1], color: fixedFittingColor(spec.kind) || farbe(), w, h, d,
     }];
     return { anchor: [0, 0, 0], nodes, tubes, panels: [], textiles: [], clamps: [], slides: [], fittings };
+  }
+
+  /**
+   * Offene Rechtecke, in die eine Poolfolie der gegebenen Groesse haengt.
+   * Gemessen wird der OBERE Ring: vier Ecken im Abstand `w` x `d` (oder gedreht),
+   * die Kanten mit Rohren belegt, innen keine Kupplung. Die Folie sitzt an der
+   * Oberkante der Frontwand -- derselbe Bezug wie in poolFragment.
+   */
+  poolLinerMounts(spec, opts = {}) {
+    if (!spec) return [];
+    const all = this._poolLinerOpenings(spec);
+    if (opts.includeTaken) return all;
+    return all.filter((m) => !this._poolOpeningTaken(m));
+  }
+
+  addPoolLiner(mount) {
+    if (!mount || !POOL_KINDS.has(mount.kind)) return null;
+    if (this._poolOpeningTaken(mount)) return null;
+    return this.addFitting(mount.kind, mount.pos[0], mount.pos[1], mount.pos[2], {
+      quat: mount.quat || [0, 0, 0, 1],
+      color: fixedFittingColor(mount.kind) || "blue",
+      w: mount.w, h: mount.h, d: mount.d,
+    });
+  }
+
+  _poolLinerOpenings(spec) {
+    const w = spec.w, d = spec.d, h = spec.h, kind = spec.kind;
+    const tol = 2.5;
+    const out = [];
+    const seen = new Set();
+    const byY = new Map();
+    for (const n of this.nodes.values()) {
+      if (n.unused) continue;
+      const y = Math.round(n.y);
+      if (!byY.has(y)) byY.set(y, []);
+      byY.get(y).push(n);
+    }
+    const near = (nodes, x, z) => nodes.find((n) => Math.abs(n.x - x) <= tol && Math.abs(n.z - z) <= tol);
+    for (const [y, nodes] of byY) {
+      const xs = [...new Set(nodes.map((n) => round(n.x)))].sort((a, b) => a - b);
+      const zs = [...new Set(nodes.map((n) => round(n.z)))].sort((a, b) => a - b);
+      for (const x0 of xs) {
+        for (const z0 of zs) {
+          for (const [sx, sz, rotated] of [[w, d, false], [d, w, true]]) {
+            const c0 = near(nodes, x0, z0);
+            const c1 = near(nodes, x0 + sx, z0);
+            const c2 = near(nodes, x0 + sx, z0 + sz);
+            const c3 = near(nodes, x0, z0 + sz);
+            if (!c0 || !c1 || !c2 || !c3) continue;
+            if (!this._axisEdgeCovered(c0, c1) || !this._axisEdgeCovered(c1, c2)
+              || !this._axisEdgeCovered(c2, c3) || !this._axisEdgeCovered(c3, c0)) continue;
+            if (!this._poolRectClear(x0, y, z0, sx, sz)) continue;
+            const key = `${y}|${round(x0)}|${round(z0)}|${sx}x${sz}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            const corners = [
+              [c0.x, c0.y, c0.z], [c1.x, c1.y, c1.z],
+              [c2.x, c2.y, c2.z], [c3.x, c3.y, c3.z],
+            ];
+            // Front = die kleinere Z- (bzw. gedreht X-) Kante; lokale +Z geht ins Becken.
+            const mount = rotated
+              ? {
+                pos: [x0, y, z0 + sz / 2],
+                quat: quatFromBasis([0, 0, 1], [0, 1, 0], [1, 0, 0]),
+              }
+              : {
+                pos: [x0 + sx / 2, y, z0],
+                quat: [0, 0, 0, 1],
+              };
+            out.push({
+              ...mount, kind, w, h, d, corners,
+            });
+          }
+        }
+      }
+    }
+    return out;
+  }
+
+  _poolRectClear(x0, y, z0, sx, sz) {
+    const pad = 3;
+    for (const n of this.nodes.values()) {
+      if (n.unused || Math.abs(n.y - y) > 2) continue;
+      if (n.x > x0 + pad && n.x < x0 + sx - pad && n.z > z0 + pad && n.z < z0 + sz - pad) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  _poolOpeningTaken(mount) {
+    const fd = Math.abs(mount.d || 0);
+    const want = [mount.pos[0], mount.pos[1], mount.pos[2]];
+    if (mount.quat) {
+      const z = zAxisOf(mount.quat);
+      want[0] += z[0] * fd / 2;
+      want[1] += z[1] * fd / 2;
+      want[2] += z[2] * fd / 2;
+    } else {
+      want[2] += fd / 2;
+    }
+    for (const f of this.fittings.values()) {
+      if (!POOL_KINDS.has(f.kind)) continue;
+      if (Math.abs(f.y - mount.pos[1]) > 3) continue;
+      const depth = Math.abs(f.d || 0);
+      let cx = f.x, cy = f.y, cz = f.z;
+      if (f.quat) {
+        const z = zAxisOf(f.quat);
+        cx += z[0] * depth / 2;
+        cy += z[1] * depth / 2;
+        cz += z[2] * depth / 2;
+      } else {
+        cz += depth / 2;
+      }
+      if (Math.hypot(cx - want[0], cy - want[1], cz - want[2]) < 10) return true;
+    }
+    return false;
+  }
+
+  /** Kante a--b mit geraden Rohren belegt (Zwischenknoten erlaubt). */
+  _axisEdgeCovered(a, b, tol = 2.5) {
+    const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
+    const L = Math.hypot(dx, dy, dz);
+    if (L < 1) return true;
+    const ux = dx / L, uy = dy / L, uz = dz / L;
+    const param = (n) => {
+      const px = n.x - a.x, py = n.y - a.y, pz = n.z - a.z;
+      const t = px * ux + py * uy + pz * uz;
+      const qx = px - ux * t, qy = py - uy * t, qz = pz - uz * t;
+      if (Math.hypot(qx, qy, qz) > tol) return null;
+      if (t < -tol || t > L + tol) return null;
+      return t;
+    };
+    const segs = [];
+    for (const t of this.tubes.values()) {
+      if (t.arm || t.link || t.bow) continue;
+      const na = this.nodes.get(t.a), nb = this.nodes.get(t.b);
+      if (!na || !nb) continue;
+      const ta = param(na), tb = param(nb);
+      if (ta == null || tb == null) continue;
+      segs.push([Math.min(ta, tb), Math.max(ta, tb)]);
+    }
+    segs.sort((p, q) => p[0] - q[0]);
+    let reach = 0;
+    for (const [lo, hi] of segs) {
+      if (lo > reach + tol) return false;
+      reach = Math.max(reach, hi);
+    }
+    return reach >= L - tol;
   }
 
   /**

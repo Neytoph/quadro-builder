@@ -742,13 +742,23 @@
       "url": "https://quadroshop.com/products/round-textile"
     },
     {
+      "id": "roof",
+      "code": "",
+      "name": "Dach",
+      "name_en": "Roof",
+      "price": 0,
+      "qdf": "roof2",
+      "note": "Dachtuch über ein 80-cm-Gerippe (First aus zwei 35ern, 45-Grad-Sparren zu C45-Traufen) · in 70 Herstellerdateien · Preis noch offen",
+      "url": "https://quadroshop.com/collections/textiles"
+    },
+    {
       "id": "roof_large",
       "code": "",
       "name": "Dachtextil",
       "name_en": "Roof textile",
       "price": 32.99,
       "qdf": "roof-large2",
-      "note": "Textil, das über eine bestimmte Dachkonstruktion gestülpt wird (First aus zwei 75ern) · wird geladen, aber nicht frei gesetzt · Preis: quadroshop.com „Dachtextil“, Stand 2026-08-16",
+      "note": "Textil, das über eine bestimmte Dachkonstruktion gestülpt wird (First 160 cm aus zwei 75ern, 45-Grad-Sparren) · Preis: quadroshop.com „Dachtextil“, Stand 2026-08-16",
       "url": "https://quadroshop.com/products/roof-textile"
     },
     {

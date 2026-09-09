@@ -94,6 +94,7 @@ interface EngineApi {
   panelId: string
   slideKind: string
   fittingKind: string
+  poolLinerId: string | null
   clampPart: string
   canUndo: boolean
   canRedo: boolean
@@ -196,8 +197,8 @@ interface EngineApi {
 const Ctx = createContext<EngineApi | null>(null)
 
 const TEXTIL = new Set([
-  'textil2', 'lattice2', 'textil-round2', 'bag2', 'roof-large2',
-  'textile', 'lattice', 'textile_round', 'bag', 'roof_large',
+  'textil2', 'lattice2', 'textil-round2', 'bag2', 'roof-large2', 'roof2',
+  'textile', 'lattice', 'textile_round', 'bag', 'roof_large', 'roof',
 ])
 const WHEEL = new Set([
   'multi-wheel2', 'floating-wheel2', 'hub-cap2', 'casters2', 'adapter2', 'bearing2', 'steering-lock2',
@@ -697,10 +698,9 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   }, [builder, bump, clearBomHighlight])
   const startPool = useCallback((id: string) => {
     clearBomHighlight()
-    const ok = builder?.startPool?.(id)
-    if (ok) notify(t('toast.pasteHint'))
+    builder?.startPool?.(id)
     bump()
-  }, [builder, bump, notify, t, clearBomHighlight])
+  }, [builder, bump, clearBomHighlight])
   const startC45 = useCallback(() => { clearBomHighlight(); builder?.setMode('c45'); bump() }, [builder, bump, clearBomHighlight])
   const startReinforce = useCallback(() => { clearBomHighlight(); builder?.setMode('reinforce'); bump() }, [builder, bump, clearBomHighlight])
   const placeConnector = useCallback((id: string) => { clearBomHighlight(); builder?.placeConnector?.(id); bump() }, [builder, bump, clearBomHighlight])
@@ -1314,6 +1314,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     panelId: (builder?.panelId as string) || '',
     slideKind: (builder?.slideKind as string) || 'slide-new2',
     fittingKind: (builder?.fittingKind as string) || 'multi-wheel2',
+    poolLinerId: (builder?.poolLinerId as string) || null,
     clampPart: (builder?.clampPart as string) || 'double_tube',
     canUndo: !!builder?.canUndo?.(),
     canRedo: !!builder?.canRedo?.(),
