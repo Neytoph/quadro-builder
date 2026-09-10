@@ -69,6 +69,24 @@ Esc 退出当前模式。标签栏可以同时开多个设计，关掉未保存�
 
 界面中 / EN / DE。可安装成 PWA；已经缓存过的页面离线也能打开。
 
+## 功能展示
+
+工作台。顶栏选零件，左栏改颜色，草地场景里直接搭。
+
+![工作台：Baby Farm 在三维网格上](docs/shots/ui-workbench.jpg)
+
+模型库。约 495 个官方造型，点卡片打开就能改。
+
+![模型库：官方造型卡片](docs/shots/ui-library.jpg)
+
+零件清单。管子、接头、板、螺丝按类列出，点一行会在场景里标出来。
+
+![零件清单：按类列出用量](docs/shots/ui-bom.jpg)
+
+逐层拼装。从下往上翻，当前这一层高亮，旁边能看到这一步用哪些件。
+
+![逐层拼装：第 1 步只显示底层](docs/shots/ui-assembly.jpg)
+
 ## 界面
 
 
@@ -250,7 +268,7 @@ src/sync/       可选的云端同步（本地默认关闭）
 public/data/    零件目录，以及从原厂程序抽出的网格
 public/qdf/     官方造型的 .qdf（约 495 个）
 public/thumbs/  官方和起步造型的空背景缩略图
-docs/shots/     README 用的产品图
+docs/shots/     README 用的产品图和界面截图
 ```
 
 界面按 [vokako/quadro-3d-designer](https://github.com/vokako/quadro-3d-designer) 重做；搭建、QDF、料表、官方网格用的是 [thecodingdad/quadro-3D](https://github.com/thecodingdad/quadro-3D) 的引擎。两边都是 MIT。本项目不是把 designer 整仓拷过来当底座，3D 也不是 React Three Fiber。
