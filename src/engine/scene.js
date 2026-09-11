@@ -1969,7 +1969,7 @@ export class SceneManager {
   }
 
   // Hervorhebungs-Variante eines beliebigen Bauteil-Materials: durchgehend orange
-  // (清禾主橙 P1). Geklont statt neu gebaut, damit Eigenschaften wie DoubleSide oder
+  // (小麦坊主橙 P1). Geklont statt neu gebaut, damit Eigenschaften wie DoubleSide oder
   // Transparenz (Platten, Netze) erhalten bleiben. Pro Basis-Material einmal
   // gecacht -- _disposeGroup gibt nur Geometrien frei.
   _selectedMaterial(base) {

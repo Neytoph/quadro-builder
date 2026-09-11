@@ -41,17 +41,6 @@ export default defineConfig({
     react(),
     tailwindcss(),
     {
-      name: 'qinghe-demo-index',
-      configureServer(server) {
-        server.middlewares.use((req, _res, next) => {
-          if (req.url === '/qinghe-demo' || req.url === '/qinghe-demo/') {
-            req.url = '/qinghe-demo/index.html'
-          }
-          next()
-        })
-      },
-    },
-    {
       name: 'thumb-writer',
       configureServer(server) {
         server.middlewares.use(async (req, res, next) => {
@@ -98,7 +87,7 @@ export default defineConfig({
     },
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.svg'],
+      includeAssets: ['favicon.svg', 'favicon-32.png'],
       manifest: {
         name: 'Quadro Builder',
         short_name: 'Quadro',
@@ -110,6 +99,7 @@ export default defineConfig({
         lang: 'zh-CN',
         icons: [
           { src: 'favicon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
+          { src: 'favicon-32.png', sizes: '32x32', type: 'image/png', purpose: 'any' },
         ],
       },
       workbox: {

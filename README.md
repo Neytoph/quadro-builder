@@ -1,14 +1,40 @@
 # Quadro Builder
 
-[清禾](https://qinghe.io/) 做的 QUADRO 攀爬架浏览器设计器。打开网页就能按官方网格搭，搭完能出料表、对库存、导出拼装说明书。`.qdf` 能和原厂软件互相打开。
+小麦坊做的 QUADRO 攀爬架浏览器设计器。打开网页就能按官方网格搭，搭完能出料表、对库存、导出拼装说明书。`.qdf` 能和原厂软件互相打开。
 
-在线使用：[qinghe.io](https://qinghe.io/)
+在线使用：[qinghe.io/builder](https://qinghe.io/builder/)
 
-QUADRO 是原厂商标。这是非官方社区工具，和 QUADRO GmbH 没有关系。
+QUADRO 是原厂商标。这是非官方社区工具。
 
 ![攀爬架 Builder：三维网格搭建、官方造型库、料表对库存、逐层装配](docs/shots/qh-can.jpg)
 
-零件按官方网格走，料表能对库存，`.qdf` 与原厂软件互相打开。浏览器打开就能用。
+## 功能展示
+
+工作台。顶栏选零件，左栏改颜色，草地场景里直接搭。
+
+![工作台：Baby Farm 在三维网格上](docs/shots/ui-workbench.jpg)
+
+模型库。约 495 个官方造型，点卡片打开就能改。
+
+![模型库：官方造型卡片](docs/shots/ui-library.jpg)
+
+零件清单。管子、接头、板、螺丝按类列出，点一行会在场景里标出来。
+
+![零件清单：按类列出用量](docs/shots/ui-bom.jpg)
+
+逐层拼装。从下往上翻，当前这一层高亮，旁边能看到这一步用哪些件。
+
+![逐层拼装：第 1 步只显示底层](docs/shots/ui-assembly.jpg)
+
+拼装说明书。左上角导出 PDF：封面是成品正反面和总料表，后面一步一页，每页正反两张，下列本步零件。下面是官方造型 Play Castle（A0036）导出的封面和第 1 步。
+
+![拼装说明书封面：Play Castle 正反面和总料表](docs/shots/ui-manual.jpg)
+
+![拼装说明书第 1 步：底层框架正反面和本步零件](docs/shots/ui-manual-step.jpg)
+
+界面中 / EN / DE。可安装成 PWA；已经缓存过的页面离线也能打开。
+
+窗口变窄时，左栏和三个按钮会落到工具栏下面，避免叠在一起。
 
 ## 动手之前，常卡在这三件事
 
@@ -55,54 +81,6 @@ QUADRO 是原厂商标。这是非官方社区工具，和 QUADRO GmbH 没有关
 
 Esc 退出当前模式。标签栏可以同时开多个设计，关掉未保存的标签前会问一次。
 
-## 功能
-
-**搭建** — 管、连接件、面板、轮、布件、泳池、滑梯、加固，按官方网格吸附。经典四色和 Home 柔和色，可按家族换色或全部改成同色。支持选择、框选、整块选择、复制粘贴（可升降楼层）、旋转、删除。多标签同时开几个设计。
-
-**模型库** — 约 495 个官方造型，卡片是空背景 3D 图；QDF 在仓库 `public/qdf/`，点开即用。起步造型（立方框、塔、桌、隧道、金字塔等）可挂到指针上再放下。本地 `.qdf` 可单文件或整夹导入。
-
-**料表和选购** — 「零件清单」按类列出，点一行会在场景里标出对应零件。「我的库存」按可买配件目录填写数量（管 / 接头 / 板 / 滑梯 / 轮 / 布 / 泳池衬 / 管帽 / 加固 / 螺丝），可搜索、按全部 / 已有 / 缺件筛选，也可导入导出 JSON。店里不单卖的件默认不出现，当前造型用到的仍会列出来。「选购建议」对照官方件看缺什么、哪套能盖住；中文界面套装价按人民币显示。
-
-**视图** — 左上三个按钮：草地、框住模型（F）、导出说明书。房间边界可填家里能摆下的宽深高；超尺寸只在右栏警告，不拦住搭建。
-
-**导出** — 拼装说明书 PDF（封面成品图、每步正反两张、本步零件、总料表）；`.qdf`（和原厂软件互开；Home 色导出会落到官方红绿蓝黄）；JSON、PNG。分享链接把设计写进网址，对方打开即见，不用账号。「我的设计」存在本机浏览器。
-
-界面中 / EN / DE。可安装成 PWA；已经缓存过的页面离线也能打开。
-
-## 功能展示
-
-工作台。顶栏选零件，左栏改颜色，草地场景里直接搭。
-
-![工作台：Baby Farm 在三维网格上](docs/shots/ui-workbench.jpg)
-
-模型库。约 495 个官方造型，点卡片打开就能改。
-
-![模型库：官方造型卡片](docs/shots/ui-library.jpg)
-
-零件清单。管子、接头、板、螺丝按类列出，点一行会在场景里标出来。
-
-![零件清单：按类列出用量](docs/shots/ui-bom.jpg)
-
-逐层拼装。从下往上翻，当前这一层高亮，旁边能看到这一步用哪些件。
-
-![逐层拼装：第 1 步只显示底层](docs/shots/ui-assembly.jpg)
-
-## 界面
-
-
-| 位置     | 做什么                          |
-| ------ | ---------------------------- |
-| 顶栏     | 选择、删除、管、面板、连接件、轮、布件、泳池、滑梯、加固 |
-| 左栏     | 颜色、一键换色                      |
-| 左上三个按钮 | 草地、框住模型、导出说明书                |
-| 画布上方   | 设计标签                         |
-| 右栏     | 文件、我的设计、模型库、选购建议、零件清单、我的库存   |
-| 底栏     | 逐层拼装                         |
-| 左下角    | 当前模式能用的快捷键，点标题可收起            |
-
-
-窗口变窄时，左栏和三个按钮会落到工具栏下面，避免叠在一起。
-
 ### 怎么搭
 
 1. **管**：选长度后点接头上的箭头，往空方向接一根。连接件会按已经接上的管子长出来。数字键 1–6 换管长（15 / 25 / 35 / 10 / 20 / 75 cm）。
@@ -112,7 +90,7 @@ Esc 退出当前模式。标签栏可以同时开多个设计，关掉未保存�
 5. **轮 / 布 / 泳池 / 45° / 双管 / 管夹 / 孔锁 / 柔性接头**：从顶栏拿出，吸到高亮点上。
 6. **加固**：点两根共线的 35 cm 管，插入 80 cm 木芯。
 
-`.qdf` 从「文件」导入或导出。官方网格和特殊件用 JSON 保真。
+`.qdf` 从「文件」导入或导出。官方网格和特殊件用 JSON 保真。Home 色导出会落到官方红绿蓝黄。
 
 ### 快捷键
 
@@ -138,33 +116,33 @@ Esc 退出当前模式。标签栏可以同时开多个设计，关掉未保存�
 
 ## 本机部署
 
-需要 Node 22+、[pnpm](https://pnpm.io/) 和 Git。开发用 `pnpm dev`，上线先 `pnpm build` 打出 `dist/`，再预览或丢给静态站点。
+需要 Node 22+、[pnpm](https://pnpm.io/) 和 Git。开发用 `pnpm dev`，上线先 `pnpm build` 打出 `dist/`。
 
-官方造型的 `.qdf`（约 495 个）和缩略图都在仓库里，`pnpm dev` / `pnpm preview` / 静态托管都走本地文件，不用代理官网。clone 会带上这些资源，大约几十 MB。
+官方造型的 `.qdf`（约 495 个）和缩略图都在仓库里，clone 大约几十 MB，不用代理官网。
 
-Linux 与 macOS 同一套命令，跳过 Homebrew 那几行即可。
+### 安装 Node 和 pnpm
 
-### macOS
-
-1. 安装 Node。可用 [官网安装包](https://nodejs.org/)，或 Homebrew：
+**macOS**（[官网安装包](https://nodejs.org/)，或 Homebrew）：
 
 ```bash
 brew install node@24
 echo 'export PATH="/opt/homebrew/opt/node@24/bin:$PATH"' >> ~/.zshrc
 source ~/.zshrc
-node -v    # 应是 v22 或更新
+corepack enable
 ```
 
 Intel Mac 把 `/opt/homebrew` 换成 `/usr/local`。
 
-2. 启用 pnpm：
+**Windows**（PowerShell；不要复制上面的 `export PATH`）：
 
-```bash
-corepack enable
-pnpm -v
+```powershell
+winget install OpenJS.NodeJS.LTS
+winget install Git.Git
 ```
 
-3. 拉代码并启动开发服：
+关掉窗口再开一个新的 PowerShell，然后 `corepack enable`。没有 corepack 时改用 `npm install -g pnpm`。仓库尽量放短路径，例如 `C:\src\`。
+
+### 跑起来
 
 ```bash
 git clone https://github.com/Neytoph/quadro-builder.git
@@ -175,61 +153,10 @@ pnpm dev
 
 浏览器打开终端里打印的地址，一般是 `http://localhost:5173/`。端口被占用时 Vite 会顺延。
 
-4. 打生产包，本机预览：
-
 ```bash
-pnpm exec tsc -b --noEmit   # 可选，类型检查
-pnpm build                  # 产出 dist/
-pnpm preview                # 一般是 http://localhost:4173/
-```
-
-### Windows
-
-用 **PowerShell**。不要复制 macOS 的 `export PATH=...`，那是 Unix 语法。
-
-1. 安装 Node 和 Git。关掉当前窗口，再开一个新的 PowerShell，让 PATH 生效：
-
-```powershell
-winget install OpenJS.NodeJS.LTS
-winget install Git.Git
-```
-
-也可以从 [nodejs.org](https://nodejs.org/) 下载安装包，勾选 Add to PATH。装完检查：
-
-```powershell
-node -v    # 应是 v22 或更新
-git --version
-```
-
-2. 启用 pnpm：
-
-```powershell
-corepack enable
-pnpm -v
-```
-
-若提示没有 corepack，改用 `npm install -g pnpm`。
-
-3. 拉代码并启动开发服。仓库尽量放在较短路径，例如 `C:\src\`，避免 Windows 路径过长：
-
-```powershell
-git clone https://github.com/Neytoph/quadro-builder.git
-cd quadro-builder
-pnpm install
-pnpm dev
-```
-
-浏览器打开 `http://localhost:5173/`。
-
-4. 打生产包，本机预览：
-
-```powershell
-pnpm exec tsc -b --noEmit
 pnpm build
-pnpm preview
+pnpm preview    # 一般是 http://localhost:4173/
 ```
-
-一般是 `http://localhost:4173/`。
 
 ### 放到网上
 
@@ -255,7 +182,7 @@ server {
 }
 ```
 
-开源本地版不必配置 `VITE_SYNC_BASE`、`VITE_ANALYTICS_URL`，默认同步和埋点都是关掉的。
+本机自己跑不必配置 `VITE_SYNC_BASE`、`VITE_ANALYTICS_URL`，默认同步和埋点都是关掉的。
 
 ## 目录
 
@@ -271,9 +198,11 @@ public/thumbs/  官方和起步造型的空背景缩略图
 docs/shots/     README 用的产品图和界面截图
 ```
 
-界面按 [vokako/quadro-3d-designer](https://github.com/vokako/quadro-3d-designer) 重做；搭建、QDF、料表、官方网格用的是 [thecodingdad/quadro-3D](https://github.com/thecodingdad/quadro-3D) 的引擎。两边都是 MIT。本项目不是把 designer 整仓拷过来当底座，3D 也不是 React Three Fiber。
-
 ## 许可
 
-MIT。见 [LICENSE](LICENSE)。
+版权归小麦坊所有。未经书面许可，不得商用。见 [LICENSE](LICENSE)。
 
+上游 MIT 原文在 [licenses/upstream-MIT.txt](licenses/upstream-MIT.txt)，使用那些部分时须保留原版权声明。
+
+感谢 [vokako/quadro-3d-designer](https://github.com/vokako/quadro-3d-designer)、[thecodingdad/quadro-3D](https://github.com/thecodingdad/quadro-3D)。
+ 

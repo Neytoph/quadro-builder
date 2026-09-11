@@ -1,21 +1,20 @@
-MIT License
+Copyright (c) 2026 小麦坊（Xiaomaifang）
+All rights reserved.
 
-Copyright (c) 2026 thecodingdad, k3mpaxl
+本仓库的源代码、文档与资源（除下方「上游代码」外）版权归小麦坊所有。
+未经书面许可，不得复制、修改、分发、再许可或用于商业目的。
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+This repository’s source, documentation, and assets (except “Upstream”
+below) are copyright 小麦坊 (Xiaomaifang). No permission is granted to copy, modify,
+distribute, sublicense, or use them commercially without prior written
+consent.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+------------------------------------------------------------------------
+上游代码 / Upstream
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+界面参考自 vokako/quadro-3d-designer（MIT）。
+搭建引擎、QDF、料表与官方网格来自 thecodingdad/quadro-3D（MIT）。
+
+这些上游文件仍按原 MIT 许可提供，版权声明与许可全文见
+licenses/upstream-MIT.txt。使用或再分发这些部分时，须保留原文要求的
+版权声明与许可文本。

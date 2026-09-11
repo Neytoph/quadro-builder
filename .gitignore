@@ -3,3 +3,6 @@ dist
 .DS_Store
 *.tsbuildinfo
 .vite
+.playwright-mcp
+*.pdf
+
