@@ -2,7 +2,7 @@
 
 小麦坊做的 QUADRO 攀爬架浏览器设计器。打开网页就能按官方网格搭，搭完能出料表、对库存、导出拼装说明书。`.qdf` 能和原厂软件互相打开。
 
-在线使用：[qinghe.io/builder](https://qinghe.io/builder/)
+在线使用：[xiaomaifang.com/builder](https://xiaomaifang.com/builder/)
 
 QUADRO 是原厂商标。这是非官方社区工具。
 
