@@ -5,6 +5,7 @@ import { kitsCovering, shortages, usedRows, vecFromBom, vecFromInventory } from 
 import { labelOf, skuLabel } from '../names'
 import { useDock } from './dock'
 import { formatKitPrice } from '../money'
+import { track } from '../analytics/track'
 
 export default function KitAdvisor() {
   const api = useEngine()
@@ -34,6 +35,14 @@ export default function KitAdvisor() {
       lines.push(`  ${i === 0 ? '★ ' : '  '}${k.disp}${price}`)
     })
     void navigator.clipboard?.writeText(lines.join('\n'))
+    // 缺口有多大，是二手那边该收什么货的直接依据。只发数量，
+    // 具体缺哪些件由 builder.part.pick 和存盘快照回答。
+    track('builder.kit.copy', {
+      kinds: rows.length,
+      miss_kinds: missing.length,
+      miss_qty: missing.reduce((a, m) => a + (Number(m.short) || 0), 0),
+      kits: buildable.length,
+    })
     api.notify(t('kit.copied'))
   }
 
@@ -41,8 +50,8 @@ export default function KitAdvisor() {
     <div>
       <div className="sticky top-0 z-10 bg-gray-950/90 backdrop-blur px-3 py-2 border-b border-gray-800">
         <div className="flex gap-1 bg-gray-800/70 rounded-lg p-0.5">
-          <button onClick={() => setTab('buy')} className={`flex-1 px-2 py-1.5 rounded-md text-xs cursor-pointer ${tab === 'buy' ? 'bg-teal-500 text-white font-semibold' : 'text-gray-300'}`}>{t('kit.buy')}</button>
-          <button onClick={() => setTab('inv')} className={`flex-1 px-2 py-1.5 rounded-md text-xs cursor-pointer ${tab === 'inv' ? 'bg-teal-500 text-white font-semibold' : 'text-gray-300'}`}>{t('kit.stock')}</button>
+          <button onClick={() => { track('builder.kit.tab', { tab: 'buy' }); setTab('buy') }} className={`flex-1 px-2 py-1.5 rounded-md text-xs cursor-pointer ${tab === 'buy' ? 'bg-teal-500 text-white font-semibold' : 'text-gray-300'}`}>{t('kit.buy')}</button>
+          <button onClick={() => { track('builder.kit.tab', { tab: 'inv' }); setTab('inv') }} className={`flex-1 px-2 py-1.5 rounded-md text-xs cursor-pointer ${tab === 'inv' ? 'bg-teal-500 text-white font-semibold' : 'text-gray-300'}`}>{t('kit.stock')}</button>
         </div>
       </div>
 

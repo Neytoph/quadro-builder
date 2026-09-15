@@ -3,6 +3,7 @@ import { useI18n } from '../i18n'
 import { UI_ESCAPE_EVENT } from './events'
 import { useDock, type DockPane } from './dock'
 import { usePanelLayout } from './panelLayout'
+import { track } from '../analytics/track'
 
 const KEY = 'quadro.builder.onboarded.v2'
 export const ONBOARDING_EVENT = 'quadro:onboarding'
@@ -91,7 +92,11 @@ export default function Onboarding() {
   const step = STEPS[i]
   const last = i >= STEPS.length - 1
 
-  const finish = () => {
+  // how: done=走到最后一步、skip=点了跳过、esc=按 Esc 关掉。
+  // 三者分开记，因为它们说明的事完全不同——skip 是引导没用，
+  // esc 多半是挡着视线了。
+  const finish = (how: 'done' | 'skip' | 'esc') => {
+    track('builder.onboard.end', { how, step: i + 1, of: STEPS.length })
     markDone()
     setOpen(false)
     setI(0)
@@ -99,17 +104,19 @@ export default function Onboarding() {
   }
 
   useEffect(() => {
-    const replay = () => { setI(0); setOpen(true) }
+    const replay = () => { track('builder.onboard.replay'); setI(0); setOpen(true) }
     window.addEventListener(ONBOARDING_EVENT, replay)
     return () => window.removeEventListener(ONBOARDING_EVENT, replay)
   }, [])
 
+  // deps 里要带上 i：finish 现在会把"停在第几步"发出去，只依赖 open 的话
+  // 这里闭包住的是引导刚打开那一刻的 i，按 Esc 永远报第 1 步。
   useEffect(() => {
     if (!open) return
-    const onEsc = () => finish()
+    const onEsc = () => finish('esc')
     window.addEventListener(UI_ESCAPE_EVENT, onEsc)
     return () => window.removeEventListener(UI_ESCAPE_EVENT, onEsc)
-  }, [open])
+  }, [open, i])
 
   useEffect(() => {
     if (!open || !step) return
@@ -181,7 +188,7 @@ export default function Onboarding() {
           <div className="text-[11px] tracking-wide text-teal-400">
             {t('onboard.kicker')} · {i + 1}/{STEPS.length}
           </div>
-          <button type="button" onClick={finish} className="text-gray-400 hover:text-teal-300 text-sm cursor-pointer">
+          <button type="button" onClick={() => finish('skip')} className="text-gray-400 hover:text-teal-300 text-sm cursor-pointer">
             {t('onboard.skip')}
           </button>
         </div>
@@ -205,7 +212,7 @@ export default function Onboarding() {
           <button
             type="button"
             autoFocus
-            onClick={() => { if (last) finish(); else setI(i + 1) }}
+            onClick={() => { if (last) finish('done'); else { track('builder.onboard.step', { i: i + 2 }); setI(i + 1) } }}
             className="px-4 py-2 rounded-lg text-sm font-semibold bg-teal-500 hover:bg-teal-400 text-white cursor-pointer"
           >
             {last ? t('onboard.done') : t('onboard.next')}

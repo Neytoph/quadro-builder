@@ -219,6 +219,15 @@ function inventoryUsed(inv: Inventory) {
   return Object.values(inv).some(group => Object.values(group).some(n => Number(n) > 0))
 }
 
+/** 库存里记了多少种件（数量 > 0 的算一种）。打点用，别跟上面的布尔混了。 */
+function inventoryRows(inv: Inventory) {
+  let n = 0
+  for (const group of Object.values(inv)) {
+    for (const v of Object.values(group)) if (Number(v) > 0) n++
+  }
+  return n
+}
+
 const INV_GROUPS = ['tubes', 'connectors', 'panels', 'reinforcements', 'fittings', 'screws'] as const
 const QDF_COLORS = new Set(['red', 'green', 'blue', 'yellow', 'black'])
 
@@ -256,6 +265,33 @@ function modelPartCount(model: unknown) {
   const n = (v: unknown) => Array.isArray(v) ? v.length : (v && typeof v === 'object' ? Object.keys(v).length : 0)
   // 只有连接件、没有管/板，不算一份设计（空场景误点通型会留下一个节点）。
   return n(rec.tubes) + n(rec.panels) + n(rec.slides) + n(rec.fittings)
+}
+
+// 选件打点。连着选同一个不重复发——工具条的下拉每打开一次就会把当前件
+// 再点一遍，不去重的话一次正经搭建能刷出几十条一模一样的记录。
+let lastPick = ''
+function pickPart(kind: string, id: string) {
+  const key = kind + ':' + id
+  if (key === lastPick) return
+  lastPick = key
+  track('builder.part.pick', { kind, id })
+}
+
+// 存盘时的构成快照。比"每放一根管发一条"便宜几百倍，回答的还是更该问的
+// 那个问题：什么件真的被留下了——试了又删的不算数，那才是定价和二手
+// 该看的口径。props 最多 8 个（gateway/internal/events 的 maxProps），
+// 下面 7 个正好卡住。
+function modelShape(model: unknown) {
+  const rec = (model && typeof model === 'object' ? model : {}) as AnyRec
+  const n = (v: unknown) => Array.isArray(v) ? v.length : (v && typeof v === 'object' ? Object.keys(v).length : 0)
+  return {
+    parts: modelPartCount(model),
+    tubes: n(rec.tubes),
+    conns: n(rec.connectors),
+    panels: n(rec.panels),
+    slides: n(rec.slides),
+    fittings: n(rec.fittings),
+  }
 }
 
 function cubeLabels() {
@@ -665,45 +701,51 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     builder?.setMode(mode)
     bump()
   }, [builder, bump, clearBomHighlight])
-  const setColor = useCallback((id: string) => { builder?.setColor(id); bump() }, [builder, bump])
+  const setColor = useCallback((id: string) => { track('builder.color.set', { id }); builder?.setColor(id); bump() }, [builder, bump])
   const setTube = useCallback((id: string) => {
+    pickPart('tubes', id)
     clearBomHighlight()
     builder?.setTube(id)
     builder?.setMode('add')
     bump()
   }, [builder, bump, clearBomHighlight])
   const setPanel = useCallback((id: string) => {
+    pickPart('panels', id)
     clearBomHighlight()
     builder?.setPanel(id)
     builder?.setMode('panel')
     bump()
   }, [builder, bump, clearBomHighlight])
   const setSlide = useCallback((kind: string) => {
+    pickPart('slides', kind)
     clearBomHighlight()
     if (builder) builder.slideKind = kind
     builder?.setMode('slide')
     bump()
   }, [builder, bump, clearBomHighlight])
   const setFitting = useCallback((kind: string) => {
+    pickPart('fittings', kind)
     clearBomHighlight()
     builder?.setFitting(kind)
     builder?.setMode('fitting')
     bump()
   }, [builder, bump, clearBomHighlight])
   const setClamp = useCallback((id: string) => {
+    pickPart('clamps', id)
     clearBomHighlight()
     builder?.setClampPart(id)
     builder?.setMode('clamp')
     bump()
   }, [builder, bump, clearBomHighlight])
   const startPool = useCallback((id: string) => {
+    pickPart('pools', id)
     clearBomHighlight()
     builder?.startPool?.(id)
     bump()
   }, [builder, bump, clearBomHighlight])
-  const startC45 = useCallback(() => { clearBomHighlight(); builder?.setMode('c45'); bump() }, [builder, bump, clearBomHighlight])
-  const startReinforce = useCallback(() => { clearBomHighlight(); builder?.setMode('reinforce'); bump() }, [builder, bump, clearBomHighlight])
-  const placeConnector = useCallback((id: string) => { clearBomHighlight(); builder?.placeConnector?.(id); bump() }, [builder, bump, clearBomHighlight])
+  const startC45 = useCallback(() => { pickPart('tubes', 'c45'); clearBomHighlight(); builder?.setMode('c45'); bump() }, [builder, bump, clearBomHighlight])
+  const startReinforce = useCallback(() => { pickPart('reinforcements', 'reinforce'); clearBomHighlight(); builder?.setMode('reinforce'); bump() }, [builder, bump, clearBomHighlight])
+  const placeConnector = useCallback((id: string) => { pickPart('connectors', id); clearBomHighlight(); builder?.placeConnector?.(id); bump() }, [builder, bump, clearBomHighlight])
 
   const highlight = useCallback((kind: string, id: string, color?: string | null) => {
     if (!builder || !model) return
@@ -822,7 +864,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     tab.dirty = false
     tab.model = data
     syncTabs()
-    track('builder.design.save', { parts: modelPartCount(data), named: !!name })
+    track('builder.design.save', { ...modelShape(data), named: !!name })
     notify(t('toast.saved', { name: saved.name }))
   }, [notify, syncTabs, t])
 
@@ -1023,6 +1065,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   }, [builder, bump])
 
   const setAssemblyOrder = useCallback((order: string) => {
+    track('builder.assembly.order', { key: order })
     builder?.setAssemblyOrder?.(order)
     bump()
   }, [builder, bump])
@@ -1036,11 +1079,13 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const importInventory = useCallback(async (file: File) => {
     try {
       const next = parseInventory(JSON.parse(await file.text()))
-      if (!next) { notify(t('toast.invInvalid'), 'err'); return }
+      if (!next) { track('builder.inventory.import', { ok: false }); notify(t('toast.invInvalid'), 'err'); return }
       storage.saveInventory(next)
       setInventory(next)
+      track('builder.inventory.import', { ok: true, rows: inventoryRows(next) })
       notify(t('toast.invImported'))
     } catch {
+      track('builder.inventory.import', { ok: false })
       notify(t('toast.invInvalid'), 'err')
     }
   }, [notify, t])
@@ -1309,7 +1354,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     ready, error, hostRef, tick,
     mode: (builder?.mode as string) || 'select',
     color: (builder?.color as string) || 'random',
-    recolorAll: (colors) => { builder?.recolorAll?.(colors); bump() },
+    recolorAll: (colors) => { track('builder.color.all', { n: colors.length }); builder?.recolorAll?.(colors); bump() },
     tubeId: (builder?.tubeId as string) || 'T35',
     panelId: (builder?.panelId as string) || '',
     slideKind: (builder?.slideKind as string) || 'slide-new2',
@@ -1365,8 +1410,16 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     removeDoc: async (id) => { await docs.removeDoc(id); bump() },
     renameDoc: async (id, name) => { await docs.renameDoc(id, name); bump() },
     importFile, openLibraryId, exportQdf, exportJson,
-    setAssembly: (on) => setMode(on ? 'assembly' : 'select'),
-    stepAssembly: (delta) => { builder?.setAssemblyStep?.((builder.assemblyStep || 0) + delta); bump() },
+    // 装配模式是"图纸能不能照着搭"的唯一信号：进去了、翻到第几步、
+    // 中途退出还是翻到底，说明的事完全不同。
+    setAssembly: (on) => {
+      track(on ? 'builder.assembly.on' : 'builder.assembly.off', {
+        steps: builder?.buildPlan?.steps?.length ?? 0,
+        at: (builder?.assemblyStep as number) || 0,
+      })
+      setMode(on ? 'assembly' : 'select')
+    },
+    stepAssembly: (delta) => { bumpCount('builder.assembly.step'); builder?.setAssemblyStep?.((builder.assemblyStep || 0) + delta); bump() },
     engineLang: (l) => setEngineLang(l),
     catalog,
     applyColorTune,

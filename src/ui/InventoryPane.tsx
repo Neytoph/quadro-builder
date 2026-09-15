@@ -4,6 +4,7 @@ import { useI18n } from '../i18n'
 import { labelOf } from '../names'
 import { inventoryCatalog, INV_SECTIONS, INV_SECTION_TITLE, type InvCatalogItem, type InvGroup, type InvSection } from '../data/inventoryCatalog'
 import { Svg16, partIcon } from './icons'
+import { bumpCount, track } from '../analytics/track'
 
 const COLOR_ONLY = new Set(['tubes', 'panels', 'screws'])
 
@@ -116,6 +117,17 @@ export default function InventoryPane() {
     })
   }, [catalog, api.inventory, api.invRows, needByKey, query, filter])
 
+  // 搜索打点：停手 600ms 才发一条，不然每敲一个字母就是一条。
+  // 只发长度和有没有命中——搜索词是用户输入，按 track.ts 第 2 条规矩
+  // 不进 props。"搜了但没结果"才是这里要看的信号：那说明件不在库里，
+  // 或者名字跟用户嘴里叫的对不上。
+  useEffect(() => {
+    const q = query.trim()
+    if (!q) return
+    const id = setTimeout(() => track('builder.inventory.search', { len: q.length, hit: rows.length > 0 }), 600)
+    return () => clearTimeout(id)
+  }, [query, rows.length])
+
   // Inventory 是固定六个字段的接口而不是索引签名，Object.values 推不出元素类型，
   // 这里标一次，下面两个统计就都不用各标各的。
   const groups = Object.values(api.inventory) as Array<Record<string, number>>
@@ -154,7 +166,7 @@ export default function InventoryPane() {
         />
         <div className="flex gap-1 bg-gray-800/70 rounded-lg p-0.5">
           {filters.map(f => (
-            <button key={f.id} type="button" onClick={() => setFilter(f.id)}
+            <button key={f.id} type="button" onClick={() => { track('builder.inventory.filter', { id: f.id }); setFilter(f.id) }}
               className={`flex-1 px-2 py-1.5 rounded-md text-xs cursor-pointer ${filter === f.id ? 'bg-teal-500 text-white font-semibold' : 'text-gray-300'}`}>
               {f.label}
             </button>
@@ -216,7 +228,7 @@ export default function InventoryPane() {
                         name={`${name} ${t('side.have')}`}
                         minus={t('inv.minus')}
                         plus={t('inv.plus')}
-                        onCommit={n => api.setInv(item.group, item.id, n)}
+                        onCommit={n => { bumpCount('builder.inventory.edit'); api.setInv(item.group, item.id, n) }}
                       />
                     </div>
                   )

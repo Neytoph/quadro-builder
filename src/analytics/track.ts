@@ -13,10 +13,20 @@
 //  3. 打点绝不能反过来伤到产品。所有出口都包在 try 里，
 //     失败就算了，不重试、不报错、不弹提示。
 //
-// 会话串存在 sessionStorage，关掉标签页就换一个，跨设备串不起来。
+// 两个标识，回答的是两个不同的问题：
+//
+//   session  存 sessionStorage，关掉标签页就换一个。回答"这一程做了什么"。
+//            注册成功时服务端只按它回填 user_id——只认领这一程，
+//            因为同一台设备可能是一家人在用，全量认领会把别人的行为记到你头上。
+//   device   存 localStorage，长期不变。回答"这人来过几次"。
+//            不做回填，查询时 join，原始数据留着，判断错了还能改。
+//
+// 两个都是本地生成的随机串，跟 IP 无关：IP 在 CGNAT 下既会把一个小区
+// 并成一个人，又会因为切网把一个人拆成好几个，两头都错。
 
 const URL_ = import.meta.env.VITE_ANALYTICS_URL as string | undefined
 const SESSION_KEY = 'quadro.analytics.session'
+const DEVICE_KEY = 'quadro.analytics.device'
 const BATCH_MS = 4000
 const MAX_BATCH = 20
 
@@ -30,17 +40,30 @@ let timer: ReturnType<typeof setTimeout> | null = null
 // 也回答不了任何问题——真正想知道的是"这一程搭了多少步"。
 const rolled = new Map<string, number>()
 
-function session(): string {
+function rid(): string {
+  return Math.random().toString(36).slice(2, 10) + Date.now().toString(36)
+}
+
+function stored(store: Storage | undefined, key: string): string {
   try {
-    let s = sessionStorage.getItem(SESSION_KEY)
-    if (!s) {
-      s = Math.random().toString(36).slice(2, 10) + Date.now().toString(36)
-      sessionStorage.setItem(SESSION_KEY, s)
+    if (!store) return ''
+    let v = store.getItem(key)
+    if (!v) {
+      v = rid()
+      store.setItem(key, v)
     }
-    return s
+    return v
   } catch {
-    return '' // 隐私模式下存不了，那就每批各算一个会话
+    return '' // 无痕模式下存不了。这是用户的选择，不去绕过它。
   }
+}
+
+function session(): string {
+  return stored(typeof sessionStorage === 'undefined' ? undefined : sessionStorage, SESSION_KEY)
+}
+
+function device(): string {
+  return stored(typeof localStorage === 'undefined' ? undefined : localStorage, DEVICE_KEY)
 }
 
 function drainRolled(): void {
@@ -52,8 +75,11 @@ function flush(beacon = false): void {
   if (!URL_) return
   drainRolled()
   if (queue.length === 0) return
-  const body = JSON.stringify({ session: session(), events: queue.splice(0, MAX_BATCH) })
+  const body = JSON.stringify({ session: session(), device: device(), events: queue.splice(0, MAX_BATCH) })
   if (timer) { clearTimeout(timer); timer = null }
+  // 一次只发 MAX_BATCH 条，超出的留在队列里。不在这儿重排定时器的话，
+  // 剩下的要等下一次 track 或者 pagehide 才走。
+  if (queue.length > 0) timer = setTimeout(() => flush(), BATCH_MS)
   try {
     // 页面要走的时候必须用 sendBeacon：fetch 的请求会在卸载那一下
     // 被浏览器掐掉，而"用完就走"恰恰是最该记下来的一批。
@@ -84,6 +110,12 @@ export function bumpCount(name: string): void {
   if (!URL_) return
   rolled.set(name, (rolled.get(name) || 0) + 1)
   if (!timer) timer = setTimeout(() => flush(), BATCH_MS)
+}
+
+/** 立刻发，不等 4 秒的批量窗口。给崩溃这类"页面马上就没了"的场合用。 */
+export function flushNow(): void {
+  if (!URL_) return
+  flush(true)
 }
 
 /** 挂在页面生命周期上。App 挂载时调一次就够。 */
