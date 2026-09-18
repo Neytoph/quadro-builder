@@ -152,6 +152,23 @@ function spinAroundY(q, grad) {
   return fuehrend < 0 ? out.map((v) => (v === 0 ? 0 : -v)) : out;
 }
 
+/** Quaternion um eine Weltachse `u` um `radians` drehen (r * q). */
+function spinAroundAxis(q, u, radians) {
+  if (!q || q.length !== 4 || Math.abs(radians) < 1e-12) return q ? q.slice() : q;
+  const h = radians / 2, s = Math.sin(h);
+  const [x1, y1, z1, w1] = [u[0] * s, u[1] * s, u[2] * s, Math.cos(h)];
+  const [x2, y2, z2, w2] = q;
+  const r9 = (v) => (Math.round(v * 1e9) / 1e9) || 0;
+  const out = [
+    r9(w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2),
+    r9(w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2),
+    r9(w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2),
+    r9(w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2),
+  ];
+  const fuehrend = out[3] !== 0 ? out[3] : out.find((v) => Math.abs(v) > 1e-9);
+  return fuehrend < 0 ? out.map((v) => (v === 0 ? 0 : -v)) : out;
+}
+
 function rotateX(q) {
   const [x, y, z, w] = q;
   return [
@@ -356,6 +373,22 @@ const norm3 = (v) => { const L = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0]
 const round4 = (v) => Math.round(v * 1e4) / 1e4;
 const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const cross3 = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+/** Rodrigues: Punkt `p` um Achse durch `o` in Richtung `u` drehen (co=cos, si=sin). */
+function rodriguesAt(p, o, u, co, si) {
+  const r = [p[0] - o[0], p[1] - o[1], p[2] - o[2]];
+  const c = cross3(u, r), d = dot3(u, r) * (1 - co);
+  return [o[0] + r[0] * co + c[0] * si + u[0] * d,
+    o[1] + r[1] * co + c[1] * si + u[1] * d,
+    o[2] + r[2] * co + c[2] * si + u[2] * d];
+}
+function rodriguesDir(v, u, co, si) {
+  const c = cross3(u, v), d = dot3(u, v) * (1 - co);
+  return [v[0] * co + c[0] * si + u[0] * d, v[1] * co + c[1] * si + u[1] * d, v[2] * co + c[2] * si + u[2] * d];
+}
+/** Vorzeichenbehafteter Winkel von `from` nach `to` um Achse `u` (Bogenmass). */
+function signedAngleAround(from, to, u) {
+  return Math.atan2(dot3(u, cross3(from, to)), dot3(from, to));
+}
 
 // Baellebad-Bausaetze: die vier Poolfolien und der Rahmen, den jede braucht.
 // `w` ist die Breite der Frontwand, `d` die Tiefe, `h` die Wandhoehe -- so
@@ -2968,23 +3001,502 @@ export class BuildModel {
   }
 
   /**
-   * Doppelrohrverbinder um 45 Grad um sein Rohr weiterdrehen. Er sitzt mit dem
-   * einen Loch auf dem Rohr, das andere zeigt zur Seite -- gedreht wird also der
-   * Versatz zwischen beiden Loechern.
+   * Doppelrohrverbinder um sein Rohr drehen. Standard: 45 Grad (ein Klick).
+   * Beliebiger Winkel: `radians` (Bogenmass), Vorzeichen um die Rohrachse.
+   *
+   * Das zweite Loch wandert auf dem Kreis um das gehaltene Rohr; die zweite
+   * Tube und alles, was nur ueber sie (oder eine Platte an ihr) haengt, dreht
+   * mit -- eine Klappe um die Achse, oder zwei parallele Klemmen zusammen als
+   * Tablett. Das gehaltene Rohr selbst bleibt.
    */
-  rotateClamp(id) {
+  rotateClamp(id, radians = Math.PI / 4) {
     const c = this.clamps.get(id);
     if (!c || !c.dir || !c.off) return false;
-    const u = c.dir, o = c.off;
-    const co = Math.SQRT1_2, si = Math.SQRT1_2;
-    const cr = cross3(u, o), d = dot3(u, o) * (1 - co);
-    const no = [o[0] * co + cr[0] * si + u[0] * d, o[1] * co + cr[1] * si + u[1] * d,
-      o[2] * co + cr[2] * si + u[2] * d];
-    // Der Punkt IST die Achse des umschlossenen Rohrs -- er bleibt stehen,
-    // gedreht wird nur das zweite Loch um ihn herum.
+    if (!Number.isFinite(radians) || Math.abs(radians) < 1e-9) return false;
+    const u = norm3(c.dir);
+    const co = Math.cos(radians), si = Math.sin(radians);
+    const no = rodriguesDir(c.off, u, co, si);
     if (this.isBelowGround(c.y + no[1])) return false;
-    c.off = no.map(round);
+
+    const flap = this._clampFlap(c);
+    const tagged = this._flapNodeAxes(c, flap);
+    const hingeAx = { o: [c.x, c.y, c.z], u };
+    const frozenBase = new Set();
+    for (const cid of flap.clampIds) {
+      const k = this.clamps.get(cid);
+      const base = k && this._clampBaseTube(k);
+      if (base && !flap.second.has(base.id)) frozenBase.add(base.id);
+    }
+    const axAt = (x, y, z) => {
+      if (frozenBase.size <= 1) return hingeAx;
+      let best = hingeAx, bestD = Infinity;
+      for (const [nid, ax] of tagged) {
+        const n = this.nodes.get(nid);
+        if (!n) continue;
+        const d = (n.x - x) ** 2 + (n.y - y) ** 2 + (n.z - z) ** 2;
+        if (d < bestD) { bestD = d; best = ax; }
+      }
+      return best;
+    };
+    const neu = [];
+    for (const [nid, ax] of tagged) {
+      const n = this.nodes.get(nid);
+      if (!n) continue;
+      const p = rodriguesAt([n.x, n.y, n.z], ax.o, ax.u, co, si);
+      if (this.isBelowGround(p[1])) return false;
+      neu.push({ n, p, ax });
+    }
+    const clampMove = [];
+    for (const cid of flap.clampIds) {
+      const k = this.clamps.get(cid);
+      if (!k || !k.off || !k.dir) continue;
+      const base = this._clampBaseTube(k);
+      const frozen = base && frozenBase.has(base.id);
+      const ax = frozen ? { o: [k.x, k.y, k.z], u: norm3(k.dir) } : axAt(k.x, k.y, k.z);
+      const pos = frozen ? [k.x, k.y, k.z] : rodriguesAt([k.x, k.y, k.z], ax.o, ax.u, co, si);
+      const ko = rodriguesDir(k.off, ax.u, co, si);
+      const kd = frozen ? k.dir : rodriguesDir(k.dir, ax.u, co, si);
+      if (this.isBelowGround(pos[1] + ko[1]) || this.isBelowGround(pos[1])) return false;
+      clampMove.push({ k, pos, off: ko, dir: kd });
+    }
+    const bearingDone = new Set();
+    for (const e of neu) if (e.n.bearingOn) bearingDone.add(e.n.bearingOn);
+    const extraMove = [];
+    for (const f of this.fittings.values()) {
+      if (bearingDone.has(f.id)) continue;
+      let ax = null;
+      for (const [nid, a] of tagged) {
+        const n = this.nodes.get(nid);
+        if (n && Math.hypot(n.x - f.x, n.y - f.y, n.z - f.z) <= 3) { ax = a; break; }
+      }
+      if (!ax) continue;
+      const p = rodriguesAt([f.x, f.y, f.z], ax.o, ax.u, co, si);
+      if (this.isBelowGround(p[1])) return false;
+      extraMove.push({ o: f, p, ax, hook: null });
+    }
+    for (const s of this.slides.values()) {
+      let ax = null;
+      for (const [nid, a] of tagged) {
+        const n = this.nodes.get(nid);
+        if (n && Math.hypot(n.x - s.x, n.y - s.y, n.z - s.z) <= 3) { ax = a; break; }
+      }
+      if (!ax) continue;
+      const p = rodriguesAt([s.x, s.y, s.z], ax.o, ax.u, co, si);
+      if (this.isBelowGround(p[1])) return false;
+      const hook = s.hook ? rodriguesAt(s.hook, ax.o, ax.u, co, si) : null;
+      extraMove.push({ o: s, p, ax, hook });
+    }
+
+    for (const e of neu) {
+      e.n.x = round(e.p[0]); e.n.y = round(e.p[1]); e.n.z = round(e.p[2]);
+      this._spinNodeAround(e.n, e.ax, co, si, radians);
+    }
+    const moved = new Set(neu.map((e) => e.n.id));
+    for (const e of clampMove) {
+      e.k.x = round(e.pos[0]); e.k.y = round(e.pos[1]); e.k.z = round(e.pos[2]);
+      const len = Math.hypot(e.k.off[0], e.k.off[1], e.k.off[2]) || 1;
+      const d = norm3(e.off);
+      e.k.off = [round(d[0] * len), round(d[1] * len), round(d[2] * len)];
+      e.k.dir = [round4(e.dir[0]), round4(e.dir[1]), round4(e.dir[2])];
+    }
+    for (const e of extraMove) {
+      e.o.x = round(e.p[0]); e.o.y = round(e.p[1]); e.o.z = round(e.p[2]);
+      e.o.quat = spinAroundAxis(e.o.quat && e.o.quat.length === 4 ? e.o.quat : [0, 0, 0, 1], e.ax.u, radians);
+      if (e.hook) e.o.hook = [round(e.hook[0]), round(e.hook[1]), round(e.hook[2])];
+    }
+    this._moveTubeGeom(moved);
+    this._movePanelGeom(moved);
     return true;
+  }
+
+  /** Ausrichtung eines Knotens um Achse `ax.u` mitdrehen (Stutzen, Quaternion). */
+  _spinNodeAround(n, ax, co, si, radians) {
+    const spin = (v) => {
+      if (!v || v.length !== 3) return v;
+      const d = rodriguesDir(v, ax.u, co, si);
+      const L = Math.hypot(d[0], d[1], d[2]) || 1;
+      return [round4(d[0] / L), round4(d[1] / L), round4(d[2] / L)];
+    };
+    if (n.stub) n.stub = spin(n.stub);
+    if (n.c45axis) n.c45axis = spin(n.c45axis);
+    if (n.arms) n.arms = n.arms.map(spin);
+    if (n.armDirs) n.armDirs = n.armDirs.map((a) => {
+      const vec = spin(a.vec || a);
+      return a.vec ? { name: a.name, vec } : vec;
+    });
+    n.quat = spinAroundAxis(n.quat && n.quat.length === 4 ? n.quat : [0, 0, 0, 1], ax.u, radians);
+    if (n.c45quat) n.c45quat = spinAroundAxis(n.c45quat, ax.u, radians);
+    if (n.partQuat) n.partQuat = spinAroundAxis(n.partQuat, ax.u, radians);
+    if (n.bearingOn) {
+      const f = this.fittings.get(n.bearingOn);
+      if (f) {
+        const p = rodriguesAt([f.x, f.y, f.z], ax.o, ax.u, co, si);
+        f.x = round(p[0]); f.y = round(p[1]); f.z = round(p[2]);
+        f.quat = spinAroundAxis(f.quat && f.quat.length === 4 ? f.quat : [0, 0, 0, 1], ax.u, radians);
+      }
+    }
+  }
+
+  /**
+   * Zweites Loch auf eine gegebene Querrichtung drehen (Laenge von `off`
+   * bleibt). `dir` muss nicht senkrecht sein -- der Laengsanteil faellt weg.
+   */
+  setClampOffDir(id, dir) {
+    const c = this.clamps.get(id);
+    if (!c || !c.dir || !c.off || !dir) return false;
+    const u = norm3(c.dir);
+    const along = dot3(dir, u);
+    let q = [dir[0] - u[0] * along, dir[1] - u[1] * along, dir[2] - u[2] * along];
+    const L = Math.hypot(q[0], q[1], q[2]);
+    if (L < 1e-6) return false;
+    q = [q[0] / L, q[1] / L, q[2] / L];
+    const cur = norm3(c.off);
+    return this.rotateClamp(id, signedAngleAround(cur, q, u));
+  }
+
+  /** Tube, deren Achse durch `point` laeuft und zu `dir` parallel ist. */
+  _clampTubeAt(point, dir, maxDist = 3) {
+    if (!dir) return null;
+    const u = norm3(dir);
+    let best = null, bestD = maxDist;
+    for (const t of this.tubes.values()) {
+      const rail = this._rail(t.id);
+      if (!rail) continue;
+      if (Math.abs(dot3(rail.dir, u)) < 0.9) continue;
+      const rel = [point[0] - rail.p0[0], point[1] - rail.p0[1], point[2] - rail.p0[2]];
+      const s = Math.max(0, Math.min(rail.len, dot3(rel, rail.dir)));
+      const cp = [rail.p0[0] + rail.dir[0] * s, rail.p0[1] + rail.dir[1] * s, rail.p0[2] + rail.dir[2] * s];
+      const d = Math.hypot(point[0] - cp[0], point[1] - cp[1], point[2] - cp[2]);
+      if (d < bestD) { bestD = d; best = t; }
+    }
+    return best;
+  }
+
+  _clampBaseTube(c) { return c ? this._clampTubeAt([c.x, c.y, c.z], c.dir) : null; }
+  _clampSecondTube(c) {
+    if (!c || !c.off) return null;
+    return this._clampTubeAt([c.x + c.off[0], c.y + c.off[1], c.z + c.off[2]], c.dir);
+  }
+
+  /**
+   * Klemmen, die zusammen eine Klappe bilden: dieselbe gehaltene Tube, oder
+   * zweite Tubes, die ueber eine Platte/ein Netz verbunden sind.
+   *
+   * Schwestern auf demselben Rohr kommen nur mit, wenn sie selbst eine zweite
+   * Tube halten -- eine leere Klemme daneben ist ein eigener Winkel, nicht
+   * dieselbe Klappe.
+   */
+  _clampFlap(c) {
+    const clampIds = new Set([c.id]);
+    const base0 = this._clampBaseTube(c);
+    if (base0) {
+      for (const o of this.clamps.values()) {
+        if (o.id === c.id) continue;
+        const b = this._clampBaseTube(o);
+        if (b && b.id === base0.id && this._clampSecondTube(o)) clampIds.add(o.id);
+      }
+    }
+    const bases = new Set();
+    const second = new Set();
+    const note = (k) => {
+      if (!k) return;
+      const b = this._clampBaseTube(k);
+      if (b) bases.add(b.id);
+      const t = this._clampSecondTube(k);
+      if (t) second.add(t.id);
+    };
+    for (const id of clampIds) note(this.clamps.get(id));
+    let grow = true;
+    while (grow) {
+      grow = false;
+      for (const map of [this.panels, this.textiles]) {
+        for (const p of map.values()) {
+          const a = second.has(p.a), bHas = second.has(p.b);
+          if (a === bHas) continue;
+          const other = a ? p.b : p.a;
+          if (bases.has(other) || second.has(other)) continue;
+          second.add(other);
+          grow = true;
+        }
+      }
+      for (const o of this.clamps.values()) {
+        if (clampIds.has(o.id)) continue;
+        const t = this._clampSecondTube(o);
+        const b = this._clampBaseTube(o);
+        // Auch Klemmen AUF einer schon mitdrehenden Tube (nicht nur solche,
+        // deren zweite Tube schon in der Klappe ist) -- sonst bleibt alles,
+        // was man an der zweiten Tube weitergebaut hat, stehen und die Rohre
+        // werden schief.
+        if ((t && second.has(t.id)) || (b && second.has(b.id))) {
+          clampIds.add(o.id);
+          note(o);
+          grow = true;
+        }
+      }
+      const baseNodes = new Set();
+      for (const id of bases) {
+        if (second.has(id)) continue;
+        const t = this.tubes.get(id);
+        if (t) { baseNodes.add(t.a); baseNodes.add(t.b); }
+      }
+      const seenN = new Set();
+      const stack = [];
+      const pushN = (nid) => {
+        if (!nid || baseNodes.has(nid) || seenN.has(nid)) return;
+        seenN.add(nid);
+        stack.push(nid);
+      };
+      for (const tid of second) {
+        const t = this.tubes.get(tid);
+        if (!t) continue;
+        pushN(t.a);
+        pushN(t.b);
+      }
+      for (const n of this.nodes.values()) {
+        if (n.clampOn && second.has(n.clampOn.tubeId)) pushN(n.id);
+      }
+      while (stack.length) {
+        const id = stack.pop();
+        for (const t of this.tubes.values()) {
+          const other = t.a === id ? t.b : t.b === id ? t.a : null;
+          if (other == null || baseNodes.has(other)) continue;
+          if (!second.has(t.id)) { second.add(t.id); grow = true; }
+          pushN(other);
+        }
+        for (const n of this.nodes.values()) {
+          const t = n.clampOn && this.tubes.get(n.clampOn.tubeId);
+          if (!t) continue;
+          if (t.a === id || t.b === id || second.has(t.id)) pushN(n.id);
+        }
+      }
+    }
+    return { clampIds, second };
+  }
+
+  /** Auswahl-Gruppe: die Klemme plus Schwestern mit zweiter Tube, und jene Tubes. */
+  clampCohort(id) {
+    const c = this.clamps.get(id);
+    if (!c) return { clamps: new Set(), tubes: new Set() };
+    const flap = this._clampFlap(c);
+    return { clamps: flap.clampIds, tubes: new Set(flap.second) };
+  }
+
+  /**
+   * Zweite Tube (und die Klappe) parallel zur gehaltenen Tube verschieben.
+   * `delta` ist der Weg entlang `c.dir`. Die Klemmen bleiben stehen -- das
+   * zweite Rohr gleitet durch ihr Loch. `snapDist` > 0: Enden der zweiten
+   * Tube ziehen an die der ersten.
+   */
+  slideClampFlap(id, delta, { snapDist = 0 } = {}) {
+    const c = this.clamps.get(id);
+    if (!c || !c.dir || !Number.isFinite(delta)) return false;
+    const u = norm3(c.dir);
+    const flap = this._clampFlap(c);
+    const tagged = this._flapNodeAxes(c, flap);
+    if (!flap.second.size && !tagged.size) {
+      // Leere Klemme: nur sie selbst gleitet auf dem Rohr.
+      let d = this._snapSlideDelta(c, flap, tagged, u, delta, snapDist);
+      d = this._limitSlideDelta(flap, u, d);
+      if (Math.abs(d) < 1e-6) return false;
+      const p = [c.x + u[0] * d, c.y + u[1] * d, c.z + u[2] * d];
+      if (this.isBelowGround(p[1])) return false;
+      c.x = round(p[0]); c.y = round(p[1]); c.z = round(p[2]);
+      this._reseatClamp(c);
+      return true;
+    }
+    let d = this._snapSlideDelta(c, flap, tagged, u, delta, snapDist);
+    d = this._limitSlideDelta(flap, u, d);
+    if (Math.abs(d) < 1e-6) return false;
+    const vec = [u[0] * d, u[1] * d, u[2] * d];
+    for (const nid of tagged.keys()) {
+      const n = this.nodes.get(nid);
+      if (n && this.isBelowGround(n.y + vec[1])) return false;
+    }
+    const moved = new Set();
+    for (const nid of tagged.keys()) {
+      const n = this.nodes.get(nid);
+      if (!n) continue;
+      n.x = round(n.x + vec[0]); n.y = round(n.y + vec[1]); n.z = round(n.z + vec[2]);
+      moved.add(n.id);
+    }
+    for (const cid of flap.clampIds) {
+      const k = this.clamps.get(cid);
+      const base = k && this._clampBaseTube(k);
+      if (!k || !base || !flap.second.has(base.id)) continue;
+      k.x = round(k.x + vec[0]); k.y = round(k.y + vec[1]); k.z = round(k.z + vec[2]);
+    }
+    this._moveTubeGeom(moved, vec);
+    this._movePanelGeom(moved, vec);
+    return true;
+  }
+
+  _reseatClamp(k) {
+    const base = this._clampBaseTube(k);
+    if (!base) return;
+    const rail = this._rail(base.id);
+    if (!rail) return;
+    const rel = [k.x - rail.p0[0], k.y - rail.p0[1], k.z - rail.p0[2]];
+    const s = Math.max(0, Math.min(rail.len, dot3(rel, rail.dir)));
+    k.x = round(rail.p0[0] + rail.dir[0] * s);
+    k.y = round(rail.p0[1] + rail.dir[1] * s);
+    k.z = round(rail.p0[2] + rail.dir[2] * s);
+  }
+
+  _limitSlideDelta(flap, u, d) {
+    let lo = -Infinity, hi = Infinity;
+    let anyHole = false;
+    for (const cid of flap.clampIds) {
+      const k = this.clamps.get(cid);
+      const sec = k && this._clampSecondTube(k);
+      const rail = sec && this._rail(sec.id);
+      if (!k || !k.off || !rail) continue;
+      anyHole = true;
+      const hole = [k.x + k.off[0], k.y + k.off[1], k.z + k.off[2]];
+      const sHole = dot3([hole[0] - rail.p0[0], hole[1] - rail.p0[1], hole[2] - rail.p0[2]], rail.dir);
+      const sign = dot3(rail.dir, u) >= 0 ? 1 : -1;
+      if (sign > 0) {
+        lo = Math.max(lo, sHole - rail.len);
+        hi = Math.min(hi, sHole);
+      } else {
+        lo = Math.max(lo, -sHole);
+        hi = Math.min(hi, rail.len - sHole);
+      }
+    }
+    if (!anyHole) {
+      for (const cid of flap.clampIds) {
+        const k = this.clamps.get(cid);
+        const base = k && this._clampBaseTube(k);
+        const rail = base && this._rail(base.id);
+        if (!k || !rail) continue;
+        const sign = dot3(rail.dir, u) >= 0 ? 1 : -1;
+        const s = dot3([k.x - rail.p0[0], k.y - rail.p0[1], k.z - rail.p0[2]], rail.dir);
+        if (sign > 0) {
+          lo = Math.max(lo, -s);
+          hi = Math.min(hi, rail.len - s);
+        } else {
+          lo = Math.max(lo, s - rail.len);
+          hi = Math.min(hi, s);
+        }
+      }
+    }
+    if (!(lo <= hi)) return 0;
+    if (d < lo) return lo;
+    if (d > hi) return hi;
+    return d;
+  }
+
+  _snapSlideDelta(c, flap, tagged, u, d, snapDist) {
+    if (!(snapDist > 0) || !tagged.size) return d;
+    const origin = [c.x, c.y, c.z];
+    const anchors = [];
+    const seen = new Set();
+    for (const cid of flap.clampIds) {
+      const base = this._clampBaseTube(this.clamps.get(cid));
+      if (!base || seen.has(base.id)) continue;
+      seen.add(base.id);
+      const t = this.tubes.get(base.id);
+      if (!t) continue;
+      for (const nid of [t.a, t.b]) {
+        const n = this.nodes.get(nid);
+        if (n) anchors.push(dot3([n.x - origin[0], n.y - origin[1], n.z - origin[2]], u));
+      }
+    }
+    if (!anchors.length) return d;
+    let best = d, bestErr = snapDist;
+    for (const nid of tagged.keys()) {
+      const n = this.nodes.get(nid);
+      if (!n) continue;
+      const s0 = dot3([n.x - origin[0], n.y - origin[1], n.z - origin[2]], u);
+      for (const a of anchors) {
+        const need = a - s0;
+        // Schon bündig: nicht festkleben, sonst kommt man mit einem Rasterschritt
+        // nicht mehr vom Ende weg.
+        if (Math.abs(need) < 1e-6) continue;
+        const err = Math.abs(need - d);
+        if (err < bestErr - 1e-6) { bestErr = err; best = need; }
+      }
+    }
+    return best;
+  }
+
+  /**
+   * Welche Knoten sich mitdrehen, und um welche Achse. Alles, was an der
+   * zweiten Tube haengt -- Rohre, Kupplungen, Klemm-Kupplungen -- kreist als
+   * ein starres Stueck um die Scharnierachse. Die gehaltene Tube bleibt.
+   */
+  _flapNodeAxes(driven, flap) {
+    const hingeAx = { o: [driven.x, driven.y, driven.z], u: norm3(driven.dir) };
+    const frozenTubes = new Set();
+    const hingeOf = new Map();
+    for (const cid of flap.clampIds) {
+      const k = this.clamps.get(cid);
+      if (!k || !k.dir) continue;
+      const ax = { o: [k.x, k.y, k.z], u: norm3(k.dir) };
+      const base = this._clampBaseTube(k);
+      const sec = this._clampSecondTube(k);
+      if (base && !flap.second.has(base.id)) {
+        frozenTubes.add(base.id);
+        if (sec) hingeOf.set(sec.id, ax);
+      }
+    }
+    const fence = new Set();
+    for (const id of frozenTubes) {
+      const t = this.tubes.get(id);
+      if (t) { fence.add(t.a); fence.add(t.b); }
+    }
+    const adj = this._nodeAdj();
+    const tagged = new Map();
+    const stack = [];
+    const seed = (nid, ax) => {
+      if (!nid || fence.has(nid) || tagged.has(nid) || !this.nodes.has(nid)) return;
+      tagged.set(nid, ax);
+      stack.push(nid);
+    };
+    for (const tid of flap.second) {
+      const t = this.tubes.get(tid);
+      if (!t) continue;
+      const ax = hingeOf.get(tid) || hingeAx;
+      seed(t.a, ax);
+      seed(t.b, ax);
+      const a = this.nodes.get(t.a), b = this.nodes.get(t.b);
+      if (a && b) {
+        for (const n of this.nodes.values()) {
+          if (fence.has(n.id) || tagged.has(n.id)) continue;
+          if (distPointToSeg(n.x, n.y, n.z, a, b) <= 1.2) seed(n.id, ax);
+        }
+      }
+    }
+    for (const n of this.nodes.values()) {
+      if (n.clampOn && flap.second.has(n.clampOn.tubeId)) {
+        seed(n.id, hingeOf.get(n.clampOn.tubeId) || hingeAx);
+      }
+    }
+    while (stack.length) {
+      const id = stack.pop();
+      const ax = tagged.get(id);
+      for (const other of adj.get(id) || []) seed(other, ax);
+    }
+    if (frozenTubes.size <= 1) {
+      for (const nid of [...tagged.keys()]) tagged.set(nid, hingeAx);
+    }
+    return tagged;
+  }
+
+  _nodeAdj() {
+    const adj = new Map();
+    const link = (a, b) => {
+      if (!a || !b || a === b) return;
+      if (!adj.has(a)) adj.set(a, []);
+      if (!adj.has(b)) adj.set(b, []);
+      adj.get(a).push(b);
+      adj.get(b).push(a);
+    };
+    for (const t of this.tubes.values()) link(t.a, t.b);
+    for (const n of this.nodes.values()) {
+      const t = n.clampOn && this.tubes.get(n.clampOn.tubeId);
+      if (t) { link(n.id, t.a); link(n.id, t.b); }
+    }
+    return adj;
   }
 
   // Klemm-Kupplungen haengen an ihrem umschlossenen Rohr: faellt es weg,
@@ -3176,19 +3688,7 @@ export class BuildModel {
   }
 
   _floodNodes(start) {
-    const adj = new Map();
-    const link = (a, b) => {
-      if (!a || !b || a === b) return;
-      if (!adj.has(a)) adj.set(a, []);
-      if (!adj.has(b)) adj.set(b, []);
-      adj.get(a).push(b);
-      adj.get(b).push(a);
-    };
-    for (const t of this.tubes.values()) link(t.a, t.b);
-    for (const n of this.nodes.values()) {
-      const t = n.clampOn && this.tubes.get(n.clampOn.tubeId);
-      if (t) { link(n.id, t.a); link(n.id, t.b); }
-    }
+    const adj = this._nodeAdj();
     const seen = new Set();
     const q = [];
     for (const id of start) {

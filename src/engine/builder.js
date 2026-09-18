@@ -118,6 +118,10 @@ export class Builder {
     this._maxUndo = 60;
 
     this._down = null;
+    this._clampDrag = null;
+    this._clampSlide = null;
+    this._clampDragKandidat = null;
+    this._clampSlideKandidat = null;
     this._panning = false;
     this._boxing = false;
     this._paste = null;              // Kopie, die gerade am Zeiger haengt
@@ -525,6 +529,20 @@ export class Builder {
    */
   moveSelectionBy(dir, step = this.moveStep) {
     if (this.mode !== "select" || !this.selection.size) return false;
+    const driver = this._selectedClampDriver();
+    if (driver) {
+      const c = this.model.clamps.get(driver);
+      if (c && c.dir) {
+        const u = c.dir;
+        const ul = Math.hypot(u[0], u[1], u[2]) || 1;
+        const along = (dir[0] * u[0] + dir[1] * u[1] + dir[2] * u[2]) / ul * step;
+        if (Math.abs(along) < 0.01) return false;
+        const before = JSON.stringify(this.model.toJSON());
+        if (!this.model.slideClampFlap(driver, along, { snapDist: this._snapRadius() })) return false;
+        this._afterMove(before, { merged: 0, detached: 0 });
+        return true;
+      }
+    }
     const before = JSON.stringify(this.model.toJSON());
     const res = this._move(dir[0] * step, dir[1] * step, dir[2] * step);
     if (!res.ok) { this.onNotice(t("notice_move_" + res.reason), "warn"); return false; }
@@ -542,6 +560,14 @@ export class Builder {
     if (this._drag) return false;         // laufender Zug hat seinen eigenen Stand
     if (this._paste) return this._rotatePaste(steps);
     if (this.mode !== "select" || !this.selection.size) return false;
+    const driver = this._selectedClampDriver();
+    if (driver) {
+      let ok = false;
+      this.recordHistory(() => { ok = this.model.rotateClamp(driver, steps * Math.PI / 2); });
+      if (!ok) { this.onNotice(t("notice_fitting_fixed"), "warn"); return false; }
+      this.refresh();
+      return true;
+    }
     const before = JSON.stringify(this.model.toJSON());
     const res = this.model.rotateSelection(this.selection, steps,
       { merge: true, validate: infeasibleConnectors, grid: SNAP_STEP });
@@ -1413,7 +1439,7 @@ export class Builder {
     // mit, obwohl der Stand noch gar nicht gilt. Beim Absetzen wird ohnehin neu
     // gezeichnet -- dann laeuft es einmal. Nur die Knoepfe, die vom Zustand
     // abhaengen (Drehen), werden nachgezogen.
-    if (!this._paste && !this._drag) this.onChange();
+    if (!this._paste && !this._drag && !this._clampDrag && !this._clampSlide) this.onChange();
     else this.onPreview();
   }
 
@@ -2407,18 +2433,36 @@ export class Builder {
         if (e.button === 0) this.scene.beginOrbit(e.clientX, e.clientY);
         return;
       }
+      this._clampDrag = null;
+      this._clampSlide = null;
+      this._clampDragKandidat = null;
+      this._clampSlideKandidat = null;
+      if (e.button === 0 && this.mode === "clamp") {
+        const pick = this.scene.pickClamp(e.clientX, e.clientY)
+          || this.scene.pickBuild(e.clientX, e.clientY);
+        if (pick && pick.data.kind === "clamp" && this._beginClampDrag(pick.data.id)) return;
+      }
       this._dragKandidat = null;
-      if (e.button === 0 && !this._down.box && this.mode === "select" && this.selection.size) {
-        const pick = this.scene.pickForDelete(e.clientX, e.clientY);
-        if (pick && this._isMoveHandle(pick.data.id)) {
-          if (e.pointerType === "touch") {
-            // Mit dem Finger entscheidet erst die BEWEGUNG, ob geschoben wird --
-            // sonst kaeme das Halten auf einem gewaehlten Teil nie an, weil der
-            // Zug schon begonnen haette.
-            this._dragKandidat = { e, pick };
-          } else {
-            this._beginMoveDrag(e, pick);
-            return;
+      if (e.button === 0 && !this._down.box && this.mode === "select") {
+        const pick = this._pickSelect(e.clientX, e.clientY);
+        if (pick && pick.data.kind === "clamp") {
+          if (this.selection.has(pick.data.id) && this._beginClampDrag(pick.data.id)) return;
+          this._clampDragKandidat = pick;
+        } else {
+          const slideId = pick && this._slideDriverForPick(pick);
+          if (slideId) {
+            if (this._selectedClampDriver() && this._beginClampSlide(slideId)) return;
+            this._clampSlideKandidat = slideId;
+          } else if (pick && this.selection.size && this._isMoveHandle(pick.data.id)) {
+            if (e.pointerType === "touch") {
+              // Mit dem Finger entscheidet erst die BEWEGUNG, ob geschoben wird --
+              // sonst kaeme das Halten auf einem gewaehlten Teil nie an, weil der
+              // Zug schon begonnen haette.
+              this._dragKandidat = { e, pick };
+            } else {
+              this._beginMoveDrag(e, pick);
+              return;
+            }
           }
         }
       }
@@ -2478,8 +2522,13 @@ export class Builder {
     this._longDone = true;            // das folgende pointerup ist kein Klick
     this.scene.endOrbit();            // ab jetzt dreht der Finger nicht mehr
     if (navigator.vibrate) { try { navigator.vibrate(15); } catch { /* egal */ } }
-    const pick = this.scene.pickForDelete(x, y);
+    const pick = this._pickSelect(x, y);
     if (pick) {
+      if (pick.data.kind === "clamp") {
+        this._selectClampCohort(pick.data.id, true);
+        this.onNotice(t("notice_touch_selected", this.selection.size), "info");
+        return;
+      }
       // Wie beim Klick: ein Verstaerkungsprofil meint alle Rohre seines Laufs.
       const ids = Array.isArray(pick.data.tubes) && pick.data.tubes.length
         ? pick.data.tubes : [pick.data.id];
@@ -2507,6 +2556,8 @@ export class Builder {
     this._clearLongPress();
     this._longDone = false;
     this._dragKandidat = null;
+    this._clampDragKandidat = null;
+    this._clampSlideKandidat = null;
     this._pointerId = null;
     this.cancelPaste();
     this._down = null;
@@ -2519,6 +2570,20 @@ export class Builder {
     if (this._drag) {
       const d = this._drag;
       this._drag = null;
+      this.model.loadJSON(JSON.parse(d.before));
+      this.scene.setCursor("default");
+      this.refresh();
+    }
+    if (this._clampDrag) {
+      const d = this._clampDrag;
+      this._clampDrag = null;
+      this.model.loadJSON(JSON.parse(d.before));
+      this.scene.setCursor("default");
+      this.refresh();
+    }
+    if (this._clampSlide) {
+      const d = this._clampSlide;
+      this._clampSlide = null;
       this.model.loadJSON(JSON.parse(d.before));
       this.scene.setCursor("default");
       this.refresh();
@@ -2595,8 +2660,30 @@ export class Builder {
       this._updateMoveDrag(e);
       return;
     }
+    if (this._clampDragKandidat && (e.buttons & 1) && this._down
+        && Math.hypot(e.clientX - this._down.x, e.clientY - this._down.y) > CLICK_TOLERANCE) {
+      const pick = this._clampDragKandidat;
+      this._clampDragKandidat = null;
+      this._clearLongPress();
+      this.scene.endOrbit();
+      this._selectClampCohort(pick.data.id, false);
+      if (this._beginClampDrag(pick.data.id)) this._updateClampDrag(e);
+      return;
+    }
+    if (this._clampSlideKandidat && (e.buttons & 1) && this._down
+        && Math.hypot(e.clientX - this._down.x, e.clientY - this._down.y) > CLICK_TOLERANCE) {
+      const id = this._clampSlideKandidat;
+      this._clampSlideKandidat = null;
+      this._clearLongPress();
+      this.scene.endOrbit();
+      this._selectClampCohort(id, false);
+      if (this._beginClampSlide(id)) this._updateClampSlide(e);
+      return;
+    }
     // Auswahl wird gerade geschoben.
     if (this._drag && (e.buttons & 1)) { this._updateMoveDrag(e); return; }
+    if (this._clampDrag && (e.buttons & 1)) { this._updateClampDrag(e); return; }
+    if (this._clampSlide && (e.buttons & 1)) { this._updateClampSlide(e); return; }
     if (this._panning && (e.buttons & 1)) {
       const dx = e.clientX - this._last.x, dy = e.clientY - this._last.y;
       this._last = { x: e.clientX, y: e.clientY };
@@ -2734,7 +2821,7 @@ export class Builder {
       else obj = null;
     } else if (this.mode === "clamp") {
       this._trackTubeHandles(x, y);
-      const p = build(["tube", "clamp"]);
+      const p = this.scene.pickClamp(x, y) || build(["tube", "clamp"]);
       const echt = p && (p.data.kind === "clamp" || this._straightTube(p.data.id));
       obj = handle() || (echt ? p.object : null);
     } else if (this.mode === "c45") {
@@ -2753,12 +2840,18 @@ export class Builder {
       obj = this.scene.pickForDelete(x, y)?.object || null;
     }
     if (this.mode === "select" || this.mode === "delete") {
-      const raw = this.scene.pickForDelete(x, y);
+      const raw = this.mode === "select"
+        ? this._pickSelect(x, y)
+        : this.scene.pickForDelete(x, y);
       const p = this.mode === "delete" ? this._resolveDeletePick(raw, x, y) : raw;
       this.scene.setHover(null);
       this.scene.setHoverPart(p, this.mode, x, y, this._deleteHoverExtras(p));
-      if (this.mode === "select" && this.selection.size && p && this._isMoveHandle(p.data.id)) {
-        this.scene.setCursor("move");
+      if (this.mode === "select" && p) {
+        if (p.data.kind === "clamp" && this.selection.has(p.data.id)) this.scene.setCursor("grab");
+        else if (this._slideDriverForPick(p)
+            && (this._selectedClampDriver() || this.selection.has(p.data.id))) {
+          this.scene.setCursor("move");
+        } else if (this.selection.size && this._isMoveHandle(p.data.id)) this.scene.setCursor("move");
       }
       return;
     }
@@ -2802,6 +2895,10 @@ export class Builder {
     // Verschieben abschliessen: hier faellt der eine Undo-Schritt an und hier
     // werden deckungsgleiche Kupplungen zusammengelegt.
     if (this._drag) { this._endMoveDrag(); return; }
+    if (this._clampDrag) { this._endClampDrag(e); return; }
+    if (this._clampSlide) { this._endClampSlide(); return; }
+    this._clampDragKandidat = null;
+    this._clampSlideKandidat = null;
     if (!d) { this.scene.endOrbit(); return; }
     // endOrbit() fuehrt den Drehpunkt nach und ruft controls.update() -- das
     // kann die Kamera minimal versetzen. Deshalb ERST den Klick auswerten,
@@ -2950,8 +3047,263 @@ export class Builder {
   }
 
   // Klick auf ein Rohr setzt einen Doppelrohrverbinder oder eine Rohrklammer an
-  // den Treffpunkt; ein Klick auf eine bestehende dreht sie weiter. Das Rohr in
-  // ihre freie Oeffnung kommt im BAU-Modus dazu, nicht hier.
+  // den Treffpunkt; ein Klick auf eine bestehende dreht sie weiter. Ziehen um
+  // das Rohr stellt einen beliebigen Winkel ein. Das Rohr in ihre freie
+  // Oeffnung kommt im BAU-Modus dazu, nicht hier.
+  // Im Auswahl-Modus gilt dasselbe Drehen, sobald die Klemme gewaehlt ist;
+  // Schwestern mit zweiter Tube kommen in die Auswahl und drehen mit.
+  // Die zweite Tube laesst sich entlang der ersten schieben und snappt an sie.
+
+  _pickSelect(x, y) {
+    const clampHit = this.scene.pickClamp(x, y);
+    const allHit = this.scene.pickForDelete(x, y);
+    if (clampHit && (!allHit || allHit.data.kind === "clamp"
+        || clampHit.distance <= allHit.distance + 6))
+      return clampHit;
+    return allHit;
+  }
+
+  _selectClampCohort(id, add) {
+    const group = this.model.clampCohort(id);
+    const clampIds = [...group.clamps];
+    const tubeIds = [...group.tubes];
+    const schonDrin = clampIds.every((x) => this.selection.has(x))
+      && tubeIds.every((x) => this.selection.has(x));
+    const n = clampIds.length + tubeIds.length;
+    if (add) {
+      if (schonDrin) {
+        for (const x of clampIds) this.selection.delete(x);
+        for (const x of tubeIds) this.selection.delete(x);
+      } else {
+        for (const x of clampIds) this.selection.set(x, "clamp");
+        for (const x of tubeIds) this.selection.set(x, "tube");
+      }
+    } else if (this.selection.size === n && schonDrin) {
+      this.selection.clear();
+    } else {
+      this.selection.clear();
+      for (const x of clampIds) this.selection.set(x, "clamp");
+      for (const x of tubeIds) this.selection.set(x, "tube");
+    }
+    this._profilAuswahl = null;
+    this.refresh();
+  }
+
+  _selectedClampDriver() {
+    let driver = null;
+    for (const [id, kind] of this.selection) {
+      if (kind === "clamp") { driver = id; break; }
+    }
+    if (!driver) {
+      for (const [id, kind] of this.selection) {
+        if (kind !== "tube") continue;
+        for (const c of this.model.clamps.values()) {
+          const t = this.model._clampSecondTube(c);
+          if (t && t.id === id) { driver = c.id; break; }
+        }
+        if (driver) break;
+      }
+    }
+    if (!driver) return null;
+    const c = this.model.clamps.get(driver);
+    if (!c) return null;
+    const flap = this.model._clampFlap(c);
+    const panelOk = (id, kind) => {
+      if (kind !== "panel" && kind !== "textile") return false;
+      const p = (kind === "panel" ? this.model.panels : this.model.textiles).get(id);
+      return !!(p && (flap.second.has(p.a) || flap.second.has(p.b)));
+    };
+    for (const [id, kind] of this.selection) {
+      if (kind === "clamp" && flap.clampIds.has(id)) continue;
+      if (kind === "tube" && flap.second.has(id)) continue;
+      if (panelOk(id, kind)) continue;
+      return null;
+    }
+    return driver;
+  }
+
+  _flapDriverForPick(pick) {
+    if (!pick || !this.selection.size) return null;
+    const kind = pick.data.kind;
+    const id = pick.data.id;
+    for (const [cid, k] of this.selection) {
+      if (k !== "clamp") continue;
+      const c = this.model.clamps.get(cid);
+      if (!c) continue;
+      const flap = this.model._clampFlap(c);
+      if (kind === "tube" && flap.second.has(id)) return cid;
+      if (kind === "panel" || kind === "textile") {
+        const p = (kind === "panel" ? this.model.panels : this.model.textiles).get(id);
+        if (p && (flap.second.has(p.a) || flap.second.has(p.b))) return cid;
+      }
+    }
+    return null;
+  }
+
+  /** Zweite Tube / Klappen-Platte: die Klemme, entlang deren Rohr sich das schiebt. */
+  _slideDriverForPick(pick) {
+    if (!pick) return null;
+    const fromSel = this._flapDriverForPick(pick);
+    if (fromSel) return fromSel;
+    const kind = pick.data.kind;
+    const id = pick.data.id;
+    if (kind === "tube") {
+      for (const c of this.model.clamps.values()) {
+        const t = this.model._clampSecondTube(c);
+        if (t && t.id === id) return c.id;
+      }
+      return null;
+    }
+    if (kind !== "panel" && kind !== "textile") return null;
+    const p = (kind === "panel" ? this.model.panels : this.model.textiles).get(id);
+    if (!p) return null;
+    for (const c of this.model.clamps.values()) {
+      const t = this.model._clampSecondTube(c);
+      if (t && (t.id === p.a || t.id === p.b)) return c.id;
+    }
+    return null;
+  }
+
+  _beginClampDrag(id) {
+    const c = this.model.clamps.get(id);
+    if (!c || !c.dir || !c.off) return false;
+    this._clampDrag = {
+      id,
+      before: JSON.stringify(this.model.toJSON()),
+      origin: [c.x, c.y, c.z],
+      axis: c.dir.slice(),
+      startOff: c.off.slice(),
+      moved: false,
+    };
+    this.scene.setCursor("grabbing");
+    return true;
+  }
+
+  _snapDirAroundAxis(dir, u, stepRad) {
+    let ref = Math.abs(u[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0];
+    const t = u[0] * ref[0] + u[1] * ref[1] + u[2] * ref[2];
+    ref = [ref[0] - u[0] * t, ref[1] - u[1] * t, ref[2] - u[2] * t];
+    const rl = Math.hypot(...ref) || 1;
+    ref = [ref[0] / rl, ref[1] / rl, ref[2] / rl];
+    const si = u[0] * (ref[1] * dir[2] - ref[2] * dir[1])
+      + u[1] * (ref[2] * dir[0] - ref[0] * dir[2])
+      + u[2] * (ref[0] * dir[1] - ref[1] * dir[0]);
+    const co = ref[0] * dir[0] + ref[1] * dir[1] + ref[2] * dir[2];
+    const snapped = Math.round(Math.atan2(si, co) / stepRad) * stepRad;
+    const cs = Math.cos(snapped), ss = Math.sin(snapped);
+    const c2 = [u[1] * ref[2] - u[2] * ref[1], u[2] * ref[0] - u[0] * ref[2], u[0] * ref[1] - u[1] * ref[0]];
+    const d = (u[0] * ref[0] + u[1] * ref[1] + u[2] * ref[2]) * (1 - cs);
+    return [ref[0] * cs + c2[0] * ss + u[0] * d, ref[1] * cs + c2[1] * ss + u[1] * d, ref[2] * cs + c2[2] * ss + u[2] * d];
+  }
+
+  _updateClampDrag(e) {
+    const d = this._clampDrag;
+    if (!d || !this._down) return;
+    if (!d.moved && Math.hypot(e.clientX - this._down.x, e.clientY - this._down.y) <= CLICK_TOLERANCE) return;
+    d.moved = true;
+    const hit = this.scene.pointOnPlane(e.clientX, e.clientY, d.origin, d.axis);
+    if (!hit) return;
+    const u = d.axis;
+    const ul = Math.hypot(u[0], u[1], u[2]) || 1;
+    const ux = u[0] / ul, uy = u[1] / ul, uz = u[2] / ul;
+    let q = [hit.x - d.origin[0], hit.y - d.origin[1], hit.z - d.origin[2]];
+    const along = q[0] * ux + q[1] * uy + q[2] * uz;
+    q = [q[0] - ux * along, q[1] - uy * along, q[2] - uz * along];
+    const ql = Math.hypot(q[0], q[1], q[2]);
+    if (ql < 0.4) return;
+    q = [q[0] / ql, q[1] / ql, q[2] / ql];
+    if (e.shiftKey) q = this._snapDirAroundAxis(q, [ux, uy, uz], Math.PI / 12);
+    this.model.loadJSON(JSON.parse(d.before));
+    const ok = this.model.setClampOffDir(d.id, q);
+    if (!ok && d.lastDir) this.model.setClampOffDir(d.id, d.lastDir);
+    else if (ok) d.lastDir = q;
+    this.refresh();
+    const c = this.model.clamps.get(d.id);
+    if (c && c.off && d.startOff) {
+      const a = d.startOff, b = c.off;
+      const al = Math.hypot(...a) || 1, bl = Math.hypot(...b) || 1;
+      const from = [a[0] / al, a[1] / al, a[2] / al];
+      const to = [b[0] / bl, b[1] / bl, b[2] / bl];
+      const si = ux * (from[1] * to[2] - from[2] * to[1])
+        + uy * (from[2] * to[0] - from[0] * to[2])
+        + uz * (from[0] * to[1] - from[1] * to[0]);
+      const co = from[0] * to[0] + from[1] * to[1] + from[2] * to[2];
+      const deg = Math.round(Math.atan2(si, co) * 180 / Math.PI);
+      this.onNotice(t("notice_clamp_angle", deg), "info");
+    }
+  }
+
+  _endClampDrag(e) {
+    const d = this._clampDrag;
+    this._clampDrag = null;
+    this.scene.setCursor("default");
+    this.scene.endOrbit();
+    if (!d) return;
+    if (!d.moved) {
+      let turned = false;
+      this.recordHistory(() => { turned = this.model.rotateClamp(d.id); });
+      if (!turned) this.onNotice(t("notice_fitting_fixed"), "warn");
+      this.refresh();
+      return;
+    }
+    this._pushHistory(d.before);
+    this.refresh();
+  }
+
+  _beginClampSlide(id) {
+    const c = this.model.clamps.get(id);
+    if (!c || !c.dir) return false;
+    const group = this.model.clampCohort(id);
+    if (!group.tubes.size) return false;
+    const tb = this.model.tubes.get([...group.tubes][0]);
+    const n0 = tb && this.model.nodes.get(tb.a);
+    this._clampSlide = {
+      id,
+      before: JSON.stringify(this.model.toJSON()),
+      origin: [c.x, c.y, c.z],
+      axis: c.dir.slice(),
+      mark: n0 ? [n0.id, n0.x, n0.y, n0.z] : null,
+      moved: false,
+    };
+    this.scene.setCursor("grabbing");
+    return true;
+  }
+
+  _updateClampSlide(e) {
+    const d = this._clampSlide;
+    if (!d || !this._down) return;
+    if (!d.moved && Math.hypot(e.clientX - this._down.x, e.clientY - this._down.y) <= CLICK_TOLERANCE) return;
+    d.moved = true;
+    const hit = this.scene.dragPlanePoint(e.clientX, e.clientY, d.origin);
+    if (!hit) return;
+    const u = d.axis;
+    const ul = Math.hypot(u[0], u[1], u[2]) || 1;
+    const ux = u[0] / ul, uy = u[1] / ul, uz = u[2] / ul;
+    let delta = (hit.x - d.origin[0]) * ux + (hit.y - d.origin[1]) * uy + (hit.z - d.origin[2]) * uz;
+    delta = Math.round(delta / SNAP_STEP) * SNAP_STEP;
+    this.model.loadJSON(JSON.parse(d.before));
+    this.model.slideClampFlap(d.id, delta, { snapDist: this._snapRadius() });
+    this.refresh();
+    let along = 0;
+    if (d.mark) {
+      const n = this.model.nodes.get(d.mark[0]);
+      if (n) {
+        along = Math.round((n.x - d.mark[1]) * ux + (n.y - d.mark[2]) * uy + (n.z - d.mark[3]) * uz);
+      }
+    }
+    this.onNotice(t("notice_clamp_slide", along), "info");
+  }
+
+  _endClampSlide() {
+    const d = this._clampSlide;
+    this._clampSlide = null;
+    this.scene.setCursor("default");
+    this.scene.endOrbit();
+    if (!d || !d.moved) return;
+    this._pushHistory(d.before);
+    this.refresh();
+  }
+
   _clickClamp(e) {
     const h = this.scene.pickHandle(e.clientX, e.clientY);
     if (h && h.data.clampTube) {
@@ -2964,7 +3316,8 @@ export class Builder {
         : { x: ct.pos[0], y: ct.pos[1] + 3, z: ct.pos[2] });
       return;
     }
-    const pick = this.scene.pickBuild(e.clientX, e.clientY);
+    const pick = this.scene.pickClamp(e.clientX, e.clientY)
+      || this.scene.pickBuild(e.clientX, e.clientY);
     if (!pick) return;
     if (pick.data.kind === "clamp") {
       // Erneuter Klick DREHT ihn um 45 Grad weiter -- geloescht wird im
@@ -3844,7 +4197,7 @@ export class Builder {
   // genau eines, Strg/Shift-Klick nimmt dazu bzw. wieder heraus, Klick ins
   // Leere hebt die Auswahl auf. Es werden KEINE Ankerpunkte gebaut.
   _clickSelect(e) {
-    const pick = this.scene.pickForDelete(e.clientX, e.clientY);
+    const pick = this._pickSelect(e.clientX, e.clientY);
     const add = e.ctrlKey || e.metaKey || e.shiftKey;
     if (!pick) {
       this._selectClick = null;
@@ -3852,6 +4205,23 @@ export class Builder {
       return;
     }
     const { kind, id } = pick.data;
+    if (kind === "clamp") {
+      if (this._isBlockClick(e, id)) {
+        this._selectConnectedFromPick(pick, add);
+        return;
+      }
+      this._selectClampCohort(id, add);
+      return;
+    }
+    const slideOwner = this._slideDriverForPick(pick);
+    if (slideOwner && (kind === "tube" || kind === "panel" || kind === "textile")) {
+      if (this._isBlockClick(e, id)) {
+        this._selectConnectedFromPick(pick, add);
+        return;
+      }
+      this._selectClampCohort(slideOwner, add);
+      return;
+    }
     // Ein Scharnier der Flexikupplung ist ein eigenes Teil, obwohl es am
     // Bolzen-Knoten haengt: es waehlt sich unter seiner eigenen Kennung.
     if (kind === "node" && pick.data.hinge != null) {

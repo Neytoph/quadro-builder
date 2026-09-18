@@ -30,6 +30,33 @@ const ARROW = {
   geoVer: 3,
 };
 const ARROW_TEAL = 0x2dd4bf;
+/**
+ * Bau-Hilfslinien: drei Achsen durch jeden Knoten -- X rot, Y gruen, Z blau,
+ * nach beiden Seiten gleich lang. Sie sagen nur "hier stehen die drei Achsen",
+ * nicht "hier kann etwas dran". Wohin wirklich etwas passt, sagen weiterhin
+ * die unsichtbaren Trefferkoerper und der helle Strahl beim Zeigen.
+ *
+ * 一个接点一套，不按方向重复画——否则三个可接方向会叠出三个十字。
+ * 颜色取自 builder 场景里那套，不另发明。
+ */
+const GUIDE = {
+  // Als Linie gezeichnet waere sie immer 1px duenn: LineBasicMaterial.linewidth
+  // wirkt in WebGL nicht. Deshalb duenne Zylinder -- Dicke laesst sich damit
+  // wirklich einstellen und sie liegen in derselben Tiefe wie das Modell.
+  half: 21,
+  r: 0.42,
+  beamHalf: 26,
+  beamR: 0.62,
+  // Der Trefferkoerper muss so weit reichen wie die Linie sichtbar ist --
+  // sonst reagiert nur das Stueck dicht am Knoten und die Linie wirkt tot.
+  hitLen: 21,
+  hitR: 2.6,
+  x: 0xe2574c,
+  y: 0x7cc242,
+  z: 0x4a90d9,
+  rest: 0.5,
+  hot: 0.95,
+};
 // Das große Dach liegt auf dem First-Rohr, nicht auf dessen Achse.
 const ROOF_LIFT = 5;
 const ROOF_THICK = 2.5;   // Materialstärke der beiden Dachschrägen
@@ -2935,6 +2962,99 @@ export class SceneManager {
     return this._materials[key];
   }
 
+  // Hilfslinien-Material: je Achse zwei Staerken (ruhend / angezeigt).
+  _guideMaterial(axis, hot) {
+    const key = "guide:" + axis + (hot ? ":hot" : ":rest");
+    if (!this._materials[key]) {
+      this._materials[key] = new THREE.MeshBasicMaterial({
+        color: axis === "x" ? GUIDE.x : axis === "y" ? GUIDE.y : GUIDE.z,
+        transparent: true,
+        opacity: hot ? GUIDE.hot : GUIDE.rest,
+        depthWrite: false,
+      });
+    }
+    return this._materials[key];
+  }
+
+  // Geteilte Geometrien: ein Arm (beidseitig) und ein Strahl (einseitig).
+  _guideArmGeo() {
+    if (!this._guideArm) {
+      this._guideArm = new THREE.CylinderGeometry(GUIDE.r, GUIDE.r, GUIDE.half * 2, 6);
+      this._keepGeos.add(this._guideArm);
+    }
+    return this._guideArm;
+  }
+
+  _guideBeamGeo() {
+    if (!this._guideBeam) {
+      this._guideBeam = new THREE.CylinderGeometry(GUIDE.beamR, GUIDE.beamR, GUIDE.beamHalf, 6);
+      this._keepGeos.add(this._guideBeam);
+    }
+    return this._guideBeam;
+  }
+
+  // Unsichtbarer Trefferkoerper, so lang wie die sichtbare Linie.
+  _guideHitGeo() {
+    if (!this._guideHit) {
+      this._guideHit = new THREE.CylinderGeometry(GUIDE.hitR, GUIDE.hitR, GUIDE.hitLen, 8);
+      this._keepGeos.add(this._guideHit);
+    }
+    return this._guideHit;
+  }
+
+  // Welche Weltachse liegt dieser Richtung am naechsten.
+  _guideAxisOf(dirArr) {
+    const ax = Math.abs(dirArr[0]), ay = Math.abs(dirArr[1]), az = Math.abs(dirArr[2]);
+    if (ay >= ax && ay >= az) return "y";
+    return ax >= az ? "x" : "z";
+  }
+
+  /**
+   * Das Achsenkreuz an einem Knoten -- genau einmal je Ort. Mehrere Richtungs-
+   * handles am selben Punkt teilen sich dasselbe Kreuz.
+   */
+  _addNodeGuide(origin) {
+    if (!this._guideAt) this._guideAt = new Map();
+    // 0.1cm 就算同一个点：接头上的几个方向手柄本来就落在同一个坐标上
+    const key = origin.map((v) => Math.round(v * 10)).join(",");
+    const seen = this._guideAt.get(key);
+    if (seen) return seen;
+    const h = GUIDE.half;
+    const group = new THREE.Group();
+    group.position.set(origin[0], origin[1], origin[2]);
+    group.userData = { kind: "guide", guideRoot: true };
+    const arms = [];
+    // 圆柱默认沿 +Y，X 轴那根绕 Z 转 90°，Z 轴那根绕 X 转 90°
+    for (const [axis, rx, rz] of [
+      ["x", 0, Math.PI / 2],
+      ["y", 0, 0],
+      ["z", Math.PI / 2, 0],
+    ]) {
+      const arm = new THREE.Mesh(this._guideArmGeo(), this._guideMaterial(axis, false));
+      arm.rotation.set(rx, 0, rz);
+      arm.renderOrder = 998;
+      // 引导线不接点击，点击照旧交给看不见的碰撞体
+      arm.raycast = () => {};
+      group.add(arm);
+      arms.push([axis, arm]);
+    }
+    group.userData.arms = arms;
+    this.handleGroup.add(group);
+    this._guideAt.set(key, group);
+    return group;
+  }
+
+  // 指到某个接头时，那个接点的三条线一起亮起来。
+  _lightNodeGuide(origin, hot) {
+    if (!this._guideAt) return;
+    const key = origin.map((v) => Math.round(v * 10)).join(",");
+    const group = this._guideAt.get(key);
+    if (!group || !group.userData.arms) return;
+    for (const [axis, line] of group.userData.arms) {
+      line.material = this._guideMaterial(axis, hot);
+    }
+  }
+
   // 箭头材质按语气分开，避免改透明度时整排一起亮。
   _arrowMaterial(tone) {
     const key = "arrow:" + tone;
@@ -4342,6 +4462,8 @@ export class SceneManager {
     this._clearTubePreview();
     this._disposeGroup(this.handleGroup);
     this.handleMeshes = [];
+    // 十字是按坐标去重的，句柄清掉了这张表也得跟着清，否则下一轮画不出来
+    if (this._guideAt) this._guideAt.clear();
   }
 
   // `radius` waechst nur dort, wo ein Punkt schwerer zu treffen ist -- etwa der
@@ -4374,8 +4496,13 @@ export class SceneManager {
   }
 
   /**
-   * Pfeil vom Ursprung entlang `dir`. Lokales +Y = Richtung.
-   * 加管默认短芽；指到该接头才展开完整箭头。隐形碰撞体保持好点。
+   * Richtungshandle. Sichtbar ist nichts Eigenes mehr: den Ort markiert das
+   * Achsenkreuz des Knotens, die Richtung markiert ein heller Strahl, der erst
+   * beim Zeigen erscheint. Lokales +Y = Richtung.
+   *
+   * 原来这儿是一根湖蓝色箭头（杆 + 锥）。换成引导线之后，静止时只剩接点上
+   * 那个十字；指到哪个方向，哪条亮起来。两个隐形碰撞体一个没动——
+   * 点起来的手感跟以前一样。
    */
   _addArrowHandle(origin, dirArr, userData, kind) {
     const dir = new THREE.Vector3(dirArr[0], dirArr[1], dirArr[2]);
@@ -4383,7 +4510,6 @@ export class SceneManager {
     else dir.normalize();
     const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
     const compact = !!userData.arrowCompact;
-    const mat = this._arrowMaterial(compact ? "rest" : "hot");
     const group = new THREE.Group();
     group.position.set(origin[0], origin[1], origin[2]);
     group.quaternion.copy(quat);
@@ -4391,53 +4517,54 @@ export class SceneManager {
       kind: "handle",
       arrowRoot: true,
       arrowStub: compact,
+      guideOrigin: [origin[0], origin[1], origin[2]],
+      guideAxis: this._guideAxisOf([dir.x, dir.y, dir.z]),
     }, userData);
 
-    const stub = new THREE.Mesh(this._arrowStubGeo(), mat);
-    stub.position.y = ARROW.offset + ARROW.stubLen / 2;
-    const shaft = new THREE.Mesh(this._arrowShaftGeo(), mat);
-    shaft.position.y = ARROW.offset + ARROW.shaftLen / 2;
-    const cone = new THREE.Mesh(this._arrowConeGeo(), mat);
-    cone.position.y = ARROW.offset + ARROW.shaftLen + ARROW.coneLen / 2;
-    const hitStub = new THREE.Mesh(this._arrowHitStubGeo(), this._arrowHitMaterial());
-    hitStub.position.y = (ARROW.offset + ARROW.stubLen + 1.5) / 2;
-    const hitFull = new THREE.Mesh(this._arrowHitGeo(), this._arrowHitMaterial());
-    hitFull.position.y = (ARROW.offset + ARROW.shaftLen + ARROW.coneLen) / 2;
+    this._addNodeGuide(origin);
+
+    // 指到这个方向时亮起来的那一条，从接点往外，比引导线略长也略粗
+    const beam = new THREE.Mesh(
+      this._guideBeamGeo(),
+      this._guideMaterial(group.userData.guideAxis, true),
+    );
+    beam.position.y = GUIDE.beamHalf / 2;
+    beam.renderOrder = 1000;
+    beam.visible = false;
+    beam.raycast = () => {};
+
+    // 两个碰撞体现在一样长：静止和指上去的区别只在那条亮线，
+    // 判定范围没有理由跟着变。长度跟引导线对齐，指到线的任何一段都算数。
+    const hitStub = new THREE.Mesh(this._guideHitGeo(), this._arrowHitMaterial());
+    hitStub.position.y = GUIDE.hitLen / 2;
+    const hitFull = new THREE.Mesh(this._guideHitGeo(), this._arrowHitMaterial());
+    hitFull.position.y = GUIDE.hitLen / 2;
     const childData = Object.assign({ kind: "handle", arrowRoot: group }, userData);
-    stub.userData = shaft.userData = cone.userData = hitStub.userData = hitFull.userData = childData;
-    stub.renderOrder = shaft.renderOrder = cone.renderOrder = 999;
-    group.userData.stubMesh = stub;
-    group.userData.shaftMesh = shaft;
-    group.userData.coneMesh = cone;
+    hitStub.userData = hitFull.userData = childData;
+    group.userData.beamMesh = beam;
     group.userData.hitStub = hitStub;
     group.userData.hitFull = hitFull;
-    group.add(stub);
-    group.add(shaft);
-    group.add(cone);
+    group.add(beam);
     group.add(hitStub);
     group.add(hitFull);
     this._applyArrowPose(group, !compact, compact ? "rest" : "hot");
     this.handleGroup.add(group);
-    this.handleMeshes.push(hitStub, hitFull, stub, shaft, cone);
+    this.handleMeshes.push(hitStub, hitFull);
     return group;
   }
 
   _paintArrow(group, tone) {
-    const mat = this._arrowMaterial(tone);
-    if (group.userData.stubMesh) group.userData.stubMesh.material = mat;
-    if (group.userData.shaftMesh) group.userData.shaftMesh.material = mat;
-    if (group.userData.coneMesh) group.userData.coneMesh.material = mat;
+    const beam = group.userData.beamMesh;
+    if (!beam) return;
+    const hot = tone === "hot" || tone === "focus";
+    beam.material = this._guideMaterial(group.userData.guideAxis, true);
+    beam.visible = hot;
+    if (group.userData.guideOrigin) this._lightNodeGuide(group.userData.guideOrigin, hot);
   }
 
   _applyArrowPose(group, expanded, tone) {
-    const stub = group.userData.stubMesh;
-    const shaft = group.userData.shaftMesh;
-    const cone = group.userData.coneMesh;
     const hitStub = group.userData.hitStub;
     const hitFull = group.userData.hitFull;
-    if (stub) stub.visible = !expanded;
-    if (shaft) shaft.visible = expanded;
-    if (cone) cone.visible = expanded;
     if (hitStub) hitStub.visible = !expanded;
     if (hitFull) hitFull.visible = expanded;
     if (tone) this._paintArrow(group, tone);
@@ -4938,6 +5065,13 @@ export class SceneManager {
   // durch schon gesetzte Anbauteile hindurch zielen muessen.
   pickTube(clientX, clientY) {
     const hit = this.raycastObjects(clientX, clientY, this.pickTubes);
+    const data = this._hitData(hit);
+    return data ? { object: hit.object, data, point: hit.point, distance: hit.distance, instanceId: hit.instanceId } : null;
+  }
+
+  // Nur Klemmen treffen -- im Klemmen-Modus liegen sie oft hinter einer Platte.
+  pickClamp(clientX, clientY) {
+    const hit = this.raycastObjects(clientX, clientY, this.pickClamps);
     const data = this._hitData(hit);
     return data ? { object: hit.object, data, point: hit.point, distance: hit.distance, instanceId: hit.instanceId } : null;
   }
