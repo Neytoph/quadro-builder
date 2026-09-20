@@ -7,9 +7,10 @@
 //
 // 不传 baseUrl 就什么都不做——开源本地版的默认状态，行为与从前完全一致。
 
-import { docs, storage } from '../engine-api'
+import { docs, storage, partsOfData } from '../engine-api'
 import type {
-  DocRecord, PullResponse, PushResponse, RemoteDoc, RemoteInventory, SyncEvent, SyncOptions,
+  DesignParts, DocRecord, PullResponse, PushResponse, RemoteDoc, RemoteInventory,
+  SyncEvent, SyncOptions,
 } from './types'
 
 const CURSOR_KEY = 'quadro.sync.rev'
@@ -98,9 +99,12 @@ export function createSync(opts: SyncOptions = {}) {
             `/models/${encodeURIComponent(doc.id)}?baseRev=${doc.rev}`, { method: 'DELETE' })
           await docs.markDocSynced(doc.id, r.rev, stamp)
         } else {
+          const parts = partsOfData(doc.data) as DesignParts | null
           const r = await call<PushResponse>(`/models/${encodeURIComponent(doc.id)}`, {
             method: 'PUT',
-            body: JSON.stringify({ name: doc.name, data: doc.data, baseRev: doc.rev }),
+            body: JSON.stringify({
+              name: doc.name, data: doc.data, parts, baseRev: doc.rev,
+            }),
           })
           await docs.markDocSynced(doc.id, r.rev, stamp)
         }

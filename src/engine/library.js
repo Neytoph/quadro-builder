@@ -51,6 +51,29 @@ export function designName(filename) {
  * Liste anzeigen und gegen den Bestand filtern, ohne alle Dateien neu zu parsen.
  * Liefert null, wenn die Datei kein brauchbares Modell enthaelt.
  */
+/**
+ * Teilebedarf eines geladenen Modells, gruppiert und ohne Weichteile --
+ * die Form, in der Bestand und Bedarf verglichen werden.
+ * Auch der Server bekommt sie so (sync schickt sie beim Speichern mit).
+ */
+export function partsOfModel(model) {
+  const need = neededParts(computeBOM(model));
+  const parts = {};
+  for (const g of GROUPS) {
+    const rec = Object.fromEntries(
+      [...need[g]].filter(([id, n]) => n > 0 && !SOFT_PARTS.has(id)));
+    if (Object.keys(rec).length) parts[g] = rec;
+  }
+  return parts;
+}
+
+/** Teilebedarf direkt aus dem gespeicherten Modell-JSON. */
+export function partsOfData(data) {
+  const model = new BuildModel();
+  if (!model.loadJSON(data).ok) return null;
+  return partsOfModel(model);
+}
+
 export function designEntry(id, filename, qdfText) {
   const data = parseDesign(qdfText);
   if (!data) return null;
@@ -58,12 +81,8 @@ export function designEntry(id, filename, qdfText) {
   if (!model.loadJSON(data).ok) return null;
 
   const bom = computeBOM(model);
-  const need = neededParts(bom);
   const b = model.bounds(geometry().connectorSize / 2);
-  const parts = {};
-  for (const g of GROUPS) {
-    parts[g] = Object.fromEntries([...need[g]].filter(([id]) => !SOFT_PARTS.has(id)));
-  }
+  const parts = partsOfModel(model);
 
   return {
     id,

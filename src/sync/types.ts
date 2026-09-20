@@ -17,6 +17,13 @@ export interface DocRecord {
   deletedAt?: number
 }
 
+/**
+ * 造型要用的零件，按组分：`{ tubes:{T35:16}, connectors:{"3way":6}, ... }`。
+ * 键是目录 id，跟库存完全同一套写法，服务端直接拿两份对减。
+ * 服务端不认造型文件的内部结构，料表由这里算好送上去。
+ */
+export type DesignParts = Record<string, Record<string, number>>
+
 /** 服务端下发的记录。 */
 export interface RemoteDoc {
   id: string
