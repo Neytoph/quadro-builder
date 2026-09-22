@@ -74,7 +74,7 @@ const MATERIALS = [
 // 功能板（兼容件）：同一个办法，材质名「<color> (<feature>)」，从 27 号起每种
 // 五个颜色。官方软件按颜色画一块普通板，我们导入时按名字认回来。顺序固定，
 // 编号才不会因为加了一种就全变。
-const FEATURE_KEYS = ["lego", "basketball", "honeycomb", "busy", "felt", "magnet", "climbing", "sensory", "pocket", "basin"];
+const FEATURE_KEYS = ["lego", "basketball", "honeycomb", "busy", "felt", "magnet", "climbing", "sensory", "pocket", "basin", "rainbow", "bridge"];
 const FEATURE_RGB = { red: "1.,0.,0.", green: "0.,0.4941,0.0941", blue: "0.,0.,1.", yellow: "1.,1.,0.", black: "0.,0.,0." };
 const FEATURE_MAT = {};
 {
@@ -688,7 +688,8 @@ export function buildQDF(model, opts = {}) {
     if (line) { lines.push(line); stats.panels++; }
   }
   for (const x of (model.textiles ? model.textiles.values() : [])) {
-    const line = rectLine("textil2", model.panelCorners(x), panelMat(x.color), [x.w, x.h], x.side);
+    // 彩虹带、彩虹桥是布件的变体：材质名带标记，官方软件里是普通布件
+    const line = rectLine("textil2", model.panelCorners(x), panelMat(x.color, x.variant || null), [x.w, x.h], x.side);
     if (line) { lines.push(line); stats.textiles++; }
   }
 
@@ -722,6 +723,8 @@ export function buildQDF(model, opts = {}) {
       : IDENTITY;
     // Tuchteile tragen die Platten-Materialien (Spielsack, Netz, Rundwand);
     // alles andere die der Rohre.
+    // 软包滚筒在 .qdf 里没有对应元素，只存在我们自己的存档里
+    if (f.kind === "sleeve") continue;
     const stoff = f.kind === "bag2" || f.kind === "lattice2" || f.kind === "textil-round2"
       || f.kind === "pool2" || f.kind === "pool-small2";
     // Ohne Farbe: Material 0 wie in der Datei (so stehen alle 50 Dach-Zeilen

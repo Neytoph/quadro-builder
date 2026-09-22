@@ -79,6 +79,9 @@ function decksOf(model) {
   const out = [];
   for (const p of model.panels.values()) {
     if (p.poolPart || p.panelId === "pool_floor") continue;
+    // 布兜、感官盆占着方框但不是能站的面
+    const pdef = getPanel(p.panelId);
+    if (pdef && (pdef.feature === "pocket" || pdef.feature === "basin")) continue;
     const c = cornersOf(model, p);
     if (!c) continue;
     if (Math.abs(normalOf(c)[1]) < 0.9) continue;

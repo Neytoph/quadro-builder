@@ -188,6 +188,10 @@ const BALL_FILL = 2 / 3;
 const BALL_COLORS = [0xd83a2e, 0x2f9e44, 0x2b6fd6, 0xf2c12e];
 // 功能板里靠贴图表现的几种；其余（乐高、攀岩、篮球）是板上加小几何
 const FEATURE_TEXTURED = new Set(["honeycomb", "busy", "felt", "magnet", "sensory"]);
+// 布兜、感官盆：方框里没有板面，画的是挂在框里的口袋 / 盆
+const FEATURE_OPEN = new Set(["pocket", "basin"]);
+// 彩虹带、彩虹桥的七色
+const RAINBOW = [0xd83a2e, 0xf07f1a, 0xf2c12e, 0x2f9e44, 0x2b6fd6, 0x6a3fb5, 0xc23f8e];
 // ARM_FITTINGS (aus model.js): Teile, die auf einem Stutzen der Kupplung sitzen
 // -- dort gehoert einer gezeichnet, auch wenn kein Rohr steckt. Beim offenen
 // Verbinderende ist genau das seine Aufgabe: es ERZWINGT den Stutzen (so auch
@@ -1635,6 +1639,24 @@ export class SceneManager {
     }
 
     switch (f.kind) {
+      case "sleeve": {                  // 软包滚筒：套在整根管子外面，两头留出接头
+        const model = this._renderModel;
+        const tube = model && f.tube ? model.tubes.get(f.tube) : null;
+        const a = tube ? model.nodes.get(tube.a) : null, b = tube ? model.nodes.get(tube.b) : null;
+        if (!a || !b) return [];
+        const dir = new THREE.Vector3(b.x - a.x, b.y - a.y, b.z - a.z);
+        const span = dir.length();
+        if (span < 1e-3) return [];
+        dir.normalize();
+        const len = Math.max(4, span - geometry().connectorSize - 3);
+        const r = (geometry().tubeRadius || 2.45) + 2.3;
+        const sgeo = this._cachedGeo(`sleeve:${len.toFixed(1)}`, () => new THREE.CylinderGeometry(r, r, len, 18));
+        const mesh = new THREE.Mesh(sgeo, this._fittingMaterial(hex, false));
+        mesh.position.set((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2);
+        mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+        mesh.castShadow = true;
+        return [mesh];
+      }
       case "multi-wheel2": {            // Speichenrad: Scheibe mit Kranz
         geo = this._wheelGeometry(WHEEL_R, 2.4, true);
         mat = this._fittingMaterial(hex, false);
@@ -2024,6 +2046,20 @@ export class SceneManager {
       for (let y = 12; y < 256; y += 24) for (let x = 12; x < 256; x += 24) {
         g.beginPath(); g.arc(x, y, 3.2, 0, Math.PI * 2); g.fill();
       }
+    } else if (feature === "sensory") {
+      // 凝胶垫：几团深浅不一的液体
+      for (let i = 0; i < 16; i++) {
+        g.fillStyle = `rgba(0,0,0,${0.12 + rnd() * 0.22})`;
+        g.beginPath();
+        g.ellipse(rnd() * 256, rnd() * 256, 18 + rnd() * 40, 12 + rnd() * 26, rnd() * Math.PI, 0, Math.PI * 2);
+        g.fill();
+      }
+      for (let i = 0; i < 8; i++) {
+        g.fillStyle = "rgba(255,255,255,0.5)";
+        g.beginPath();
+        g.ellipse(rnd() * 256, rnd() * 256, 6 + rnd() * 14, 4 + rnd() * 8, rnd() * Math.PI, 0, Math.PI * 2);
+        g.fill();
+      }
     }
     const tex = new THREE.CanvasTexture(cv);
     tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
@@ -2100,7 +2136,41 @@ export class SceneManager {
       const out = new THREE.Vector3(0, top, 0).multiplyScalar(thickness / 2 + 8.3);
       const lift = upLocal.clone().multiplyScalar(5);
       place(geo, mat, out.x + lift.x, out.y + lift.y, out.z + lift.z, q);
+    } else if (feature === "pocket" || feature === "basin") {
+      // 挂在方框里的口袋（深、软）或盆（浅、硬）：口沿和板面齐平，往框里面吊
+      const pocket = feature === "pocket";
+      const size = pocket ? 34 : 36, depth = pocket ? 26 : 8, wt = pocket ? 0.8 : 1.2;
+      const mat = this._panelMaterial(color, false, false);
+      const wall = this._cachedGeo(`feat:${feature}:wall`, () => new THREE.BoxGeometry(size, depth, wt));
+      const wallS = this._cachedGeo(`feat:${feature}:wallS`, () => new THREE.BoxGeometry(wt, depth, size));
+      const floor = this._cachedGeo(`feat:${feature}:floor`, () => new THREE.BoxGeometry(size, wt, size));
+      const yMid = top * (thickness / 2 - depth / 2);
+      const yFloor = top * (thickness / 2 - depth + wt / 2);
+      place(wall, mat, 0, yMid, size / 2 - wt / 2);
+      place(wall, mat, 0, yMid, -(size / 2 - wt / 2));
+      place(wallS, mat, size / 2 - wt / 2, yMid, 0);
+      place(wallS, mat, -(size / 2 - wt / 2), yMid, 0);
+      place(floor, mat, 0, yFloor, 0);
     }
+  }
+
+  /** 彩虹带：七色竖条，铺满一块布件。 */
+  _rainbowMaterial() {
+    if (this._materials["rainbow"]) return this._materials["rainbow"];
+    const cv = document.createElement("canvas");
+    cv.width = 256; cv.height = 32;
+    const g = cv.getContext("2d");
+    const n = RAINBOW.length;
+    for (let i = 0; i < n; i++) {
+      g.fillStyle = "#" + RAINBOW[i].toString(16).padStart(6, "0");
+      g.fillRect(Math.floor(i * 256 / n), 0, Math.ceil(256 / n) + 1, 32);
+    }
+    const tex = new THREE.CanvasTexture(cv);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    this._materials["rainbow"] = new THREE.MeshStandardMaterial({
+      map: tex, roughness: 0.85, metalness: 0, side: THREE.DoubleSide,
+    });
+    return this._materials["rainbow"];
   }
 
 
@@ -3502,6 +3572,7 @@ export class SceneManager {
   // opts.slideNameFor(slide) -> string|null : Beschriftung an der Rutsche/Dach.
   // opts.assembly { done:Set, current:Set } : Aufbaumodus (fertig/aktuell/kuenftig).
   renderModel(model, selectedNodeId, opts = {}) {
+    this._renderModel = model;   // 有的配件要回头看模型（软包滚筒套在哪根管上）
     this._disposeGroup(this.buildGroup);
     this._disposeLabels();
     this.pickNodes = [];
@@ -4158,7 +4229,9 @@ export class SceneManager {
       const plain = st === "future" || (asm && st === "done");
       const plateMat = (pdef.feature && !plain && FEATURE_TEXTURED.has(pdef.feature))
         ? this._featureMaterial(p.color, pdef.feature) : mat;
-      this._batchAdd(geo, matFor(p.id, plateMat), basis, "panel", p.id, this.pickPanels);
+      if (!FEATURE_OPEN.has(pdef.feature)) {
+        this._batchAdd(geo, matFor(p.id, plateMat), basis, "panel", p.id, this.pickPanels);
+      }
       if (pdef.feature && st !== "future") {
         // 板的哪一面朝外：板贴着管顶那一侧（sgn）就是露出来的面
         const top = yAxis.dot(new THREE.Vector3(nrm[0], nrm[1], nrm[2])) * sgn >= 0 ? 1 : -1;
@@ -4256,7 +4329,7 @@ export class SceneManager {
       // Abgegriffenes Originaltuch, wenn es die Groesse gibt. Die Normale
       // bestimmt hier dieselbe Regel wie bei der Platte, damit das Tuch nicht
       // je nach Ecken-Reihenfolge einmal oben und einmal unten liegt.
-      const echtesTuch = wantMeshes ? this._surfaceMeshFor("textil2", xAxis, zAxis,
+      const echtesTuch = wantMeshes && !tx.variant ? this._surfaceMeshFor("textil2", xAxis, zAxis,
         u.length(), w.length(), center.clone(),
         panelNormal([xAxis.x, xAxis.y, xAxis.z], [zAxis.x, zAxis.y, zAxis.z],
           [center.x, center.y, center.z], middle), tx.side) : null;
@@ -4264,8 +4337,25 @@ export class SceneManager {
         this._batchAdd(echtesTuch.geo, mat, echtesTuch.matrix, "textile", tx.id, this.pickTextiles);
         continue;
       }
+      const plain = st === "future" || (asm && st === "done");
+      if (tx.variant === "bridge") {
+        // 彩虹桥：一排软包横杠，每 10 厘米一根，七色轮着来
+        const n = Math.max(2, Math.round(u.length() / 10));
+        const rung = this._cachedGeo("rung:" + Math.round(w.length()), () => {
+          const g = new THREE.CylinderGeometry(3, 3, Math.max(4, w.length() - 6), 12);
+          g.rotateX(Math.PI / 2);
+          return g;
+        });
+        for (let i = 0; i < n; i++) {
+          const pos = va.clone().addScaledVector(u, (i + 0.5) / n).addScaledVector(w, 0.5);
+          const m4 = new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis).setPosition(pos);
+          const rm = plain ? mat : matFor(tx.id, this._accentMaterial(RAINBOW[i % RAINBOW.length]));
+          this._batchAdd(rung, rm, m4, "textile", tx.id, this.pickTextiles);
+        }
+        continue;
+      }
       const geo = new THREE.BoxGeometry(u.length(), 0.6, w.length());
-      const mesh = new THREE.Mesh(geo, mat);
+      const mesh = new THREE.Mesh(geo, tx.variant === "rainbow" && !plain ? matFor(tx.id, this._rainbowMaterial()) : mat);
       mesh.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis));
       mesh.position.copy(center);
       mesh.userData = { kind: "textile", id: tx.id };

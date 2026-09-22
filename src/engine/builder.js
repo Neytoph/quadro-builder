@@ -345,8 +345,10 @@ export class Builder {
 
   setClampPart(id) { this.clampPart = id; if (this.mode === "clamp") this.refresh(); }
 
-  setFitting(kind) {
+  setFitting(kind, partId = null) {
     this.fittingKind = kind;
+    // 同一种 qdf 元素下的具体件（布件 / 彩虹带 / 彩虹桥），放下去时给它打变体标记
+    this.fittingPart = partId;
     this.poolLinerId = null;
     this._clearPanelRail();          // Rohr-Auswahl gilt nur fuer das Netz
     if (this.mode === "fitting") this.refresh();
@@ -2250,6 +2252,19 @@ export class Builder {
     // Merkt sich, an welchen Kupplungen das gewaehlte Teil sitzen darf -- der
     // Zeiger zeigt dort eine Hand, auch wenn er den Ankerpunkt knapp verfehlt.
     this._fittingMountNodes = new Set();
+    if (this.fittingKind === "sleeve") {
+      // 软包滚筒：每根还没套的直管中点一个点
+      const taken = new Set();
+      for (const f of this.model.fittings.values()) if (f.kind === "sleeve" && f.tube) taken.add(f.tube);
+      for (const tb of this.model.tubes.values()) {
+        if (tb.arm || tb.link || tb.bow || taken.has(tb.id)) continue;
+        const a = this.model.nodes.get(tb.a), b = this.model.nodes.get(tb.b);
+        if (!a || !b) continue;
+        this.scene.addHandle([(a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2],
+          { sleeveTube: tb.id, placeNode: true }, "place");
+      }
+      return;
+    }
     if (this.fittingKind === "balls") {
       for (const f of this._pools()) {
         this.scene.addPanelHandle(this._poolOpeningCorners(f), { poolBalls: f.id });
@@ -3623,7 +3638,38 @@ export class Builder {
     this.refresh();
   }
 
+  _clickSleeve(e) {
+    const h = this.scene.pickHandle(e.clientX, e.clientY);
+    if (h && h.data && h.data.sleeveTube) {
+      const tb = this.model.tubes.get(h.data.sleeveTube);
+      const a = tb && this.model.nodes.get(tb.a), b = tb && this.model.nodes.get(tb.b);
+      if (!a || !b) return;
+      let added = null;
+      this.recordHistory(() => {
+        added = this.model.addFitting("sleeve", (a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2,
+          { color: this.colorFor("panel") });
+        if (added) added.tube = tb.id;
+      });
+      if (added) this.onNotice(t("notice_sleeve_on"));
+      this.refresh();
+      return;
+    }
+    // 点软包本身：取下来
+    const pick = this.scene.pickForDelete(e.clientX, e.clientY);
+    if (pick && pick.data && pick.data.kind === "fitting") {
+      const f = this.model.fittings.get(pick.data.id);
+      if (f && f.kind === "sleeve") {
+        this.recordHistory(() => { this.model.removeFitting(f.id); });
+        this.onNotice(t("notice_sleeve_off"));
+        this.refresh();
+        return;
+      }
+    }
+    this.onNotice(t("notice_sleeve_pick"), "info");
+  }
+
   _clickFitting(e) {
+    if (this.fittingKind === "sleeve") { this._clickSleeve(e); return; }
     if (this.fittingKind === "balls") { this._clickBalls(e); return; }
     if (ROOF_KINDS.has(this.fittingKind)) { this._clickRoof(e); return; }
     if (POOL_KINDS.has(this.fittingKind)) { this._clickPoolLiner(e); return; }
@@ -4026,6 +4072,10 @@ export class Builder {
       const wohin = this.fittingKind === "bag2" ? "addBag"
         : this.fittingKind === "textil2" ? "addTextile" : "addLattice";
       added = this.model[wohin](aId, bId, t0, len, this.colorFor("panel"));
+      if (added && this.fittingKind === "textil2" && this.fittingPart) {
+        const def = getPartById(this.fittingPart);
+        if (def && def.variant) added.variant = def.variant;
+      }
     });
     if (added) this._notePlaced(added.id, this.fittingKind === "textil2" ? "textile" : "fitting");
     else this.onNotice(t("notice_fitting_exists"), "warn");

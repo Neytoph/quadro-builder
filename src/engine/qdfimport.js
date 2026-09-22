@@ -109,7 +109,7 @@ const HOLE_SUFFIX = " (hole)";
 // Acrylglasplatte: gleicher Kniff, Name "<farbe> (acrylic)".
 const ACRYLIC_SUFFIX = " (acrylic)";
 // 功能板（兼容件）：名字「<farbe> (<feature>)」，feature 见 qdfexport.js FEATURE_KEYS。
-const FEATURE_SUFFIX_RE = / \((lego|basketball|honeycomb|busy|felt|magnet|climbing|sensory|pocket|basin)\)$/;
+const FEATURE_SUFFIX_RE = / \((lego|basketball|honeycomb|busy|felt|magnet|climbing|sensory|pocket|basin|rainbow|bridge)\)$/;
 const FALLBACK_COLOR = "blue";
 
 // So weit sitzt die Kupplung, die eine Lagerkupplung traegt, von deren Punkt
@@ -843,10 +843,12 @@ export function parseQDF(text, opts = {}) {
       const nodesFound = findPanelCorners(q, cx, cy, cz, wGrid / 2, hGrid / 2);
       if (!nodesFound) { skipped[p.name] = (skipped[p.name] || 0) + 1; continue; }
       const mat = typeof p.rest[0] === "number" ? p.rest[0] : null;
+      const variant = mat != null && featureMaterials.has(mat) ? featureMaterials.get(mat) : null;
       textiles.push({
         id: "x" + seq++, nodes: nodesFound.map((n) => n.id),
         w: Math.round(Math.min(wGrid, hGrid)), h: Math.round(Math.max(wGrid, hGrid)),
         color: materials.get(mat) || FALLBACK_COLOR, side: sideFromQuat(q, nodesFound),
+        ...(variant === "rainbow" || variant === "bridge" ? { variant } : {}),
       });
 
     } else if (p.name === "pool2" || p.name === "pool-small2") {

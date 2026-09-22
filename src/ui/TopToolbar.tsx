@@ -87,7 +87,7 @@ function ToolDrop({
 const REGULAR_JOINT = new Set(['6way', '5way', '4way', '3way', 'cross', 't', 'straight', 'elbow'])
 const JOINT_FITTING = new Set(['hole_1', 'hole_2', 'hole_t', 'flexi_bolt', 'flexi_hinge', 'bearing-clamp'])
 const WHEEL_QDF = new Set(['multi-wheel2', 'floating-wheel2', 'casters2', 'steering-lock2', 'hub-cap2', 'bearing2', 'adapter2'])
-const TEXTIL_QDF = new Set(['textil2', 'textil-round2', 'roof2', 'roof-large2', 'lattice2', 'bag2'])
+const TEXTIL_QDF = new Set(['textil2', 'textil-round2', 'roof2', 'roof-large2', 'lattice2', 'bag2', 'sleeve'])
 
 function pickJoint(id: string, api: ReturnType<typeof useEngine>) {
   if (id === 'diagonal') { api.startC45(); return }
@@ -300,13 +300,24 @@ export default function TopToolbar() {
         open={open === 'textiles'}
         active={open === 'textiles' || (api.mode === 'fitting' && TEXTIL_QDF.has(api.fittingKind))}
         onClick={() => toggle('textiles')}
-        menu={textiles.map(a => (
-          <button key={a.id} onClick={() => { if (a.qdf) api.setFitting(a.qdf); close() }}
-            className={dropItem(!!a.qdf && api.fittingKind === a.qdf && api.mode === 'fitting')}>
-            <Svg16 inner={(a.qdf && ACC_CAT_ICON[a.qdf]) || TOOL_ICON.textile} size={18} />
-            <span className="whitespace-nowrap">{labelOf(a.id, a.name)}</span>
-          </button>
-        ))}
+        menu={(
+          <>
+            {textiles.map(a => (
+              <button key={a.id} onClick={() => { if (a.qdf) api.setFitting(a.qdf, a.variant ? a.id : undefined); close() }}
+                className={dropItem(!!a.qdf && api.fittingKind === a.qdf && api.mode === 'fitting'
+                  && (a.variant ? api.fittingPart === a.id : !api.fittingPart))}>
+                <Svg16 inner={(a.qdf && ACC_CAT_ICON[a.qdf]) || TOOL_ICON.textile} size={18} />
+                <span className="whitespace-nowrap">{labelOf(a.id, a.name)}</span>
+              </button>
+            ))}
+            {/* 软包滚筒：套在管子上，不是布件，但归在这一栏最顺手 */}
+            <button key="sleeve" onClick={() => { api.setFitting('sleeve', 'sleeve'); close() }}
+              className={dropItem(api.fittingKind === 'sleeve' && api.mode === 'fitting')}>
+              <Svg16 inner={TOOL_ICON.textile} size={18} />
+              <span className="whitespace-nowrap">{labelOf('sleeve')}</span>
+            </button>
+          </>
+        )}
       >
         <Svg16 inner={TOOL_ICON.textile} />
         <span className="leading-none">{t('tool.textiles')}</span>

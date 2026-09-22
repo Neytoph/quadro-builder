@@ -850,6 +850,10 @@ export class BuildModel {
     this._prunePanels();
     this._pruneClamps();
     this._pruneOrphanedC45Bodies();
+    // 套在这根管上的软包跟着走
+    for (const f of [...this.fittings.values()]) {
+      if (f.kind === "sleeve" && f.tube === id) this.fittings.delete(f.id);
+    }
   }
 
   /**
@@ -4182,6 +4186,11 @@ export class BuildModel {
     }
     for (const f of frag.fittings || []) {
       const rec = versetzt(f, "f", "fittings");
+      // 软包滚筒记着管子的 id，片段里的管换了新 id；管没一起带过来就丢掉
+      if (rec.kind === "sleeve") {
+        rec.tube = rec.tube ? neu.get(rec.tube) || null : null;
+        if (!rec.tube) continue;
+      }
       this.fittings.set(rec.id, rec);
     }
     // 片段里的组换上新 id 再登记
@@ -5619,6 +5628,7 @@ export class BuildModel {
       textiles: [...this.textiles.values()].map((t) => {
         const o = { id: t.id, a: t.a, b: t.b, t0: round(t.t0), len: round(t.len), w: t.w, h: t.h, color: t.color };
         if ((t.side || 1) < 0) o.side = -1;
+        if (t.variant) o.variant = t.variant;   // 彩虹带 / 彩虹桥
         return o;
       }),
       fittings: [...this.fittings.values()].map((f) => {
@@ -5631,6 +5641,7 @@ export class BuildModel {
         if (f.mask != null) o.mask = f.mask;
         if (f.rest) o.rest = f.rest;
         if (f.balls) o.balls = true;      // 泳池里倒了海洋球
+        if (f.tube) o.tube = f.tube;      // 软包滚筒套在哪根管上
         return o;
       }),
       slides: [...this.slides.values()].map((s) => {
@@ -5728,6 +5739,7 @@ export class BuildModel {
       const rec = this._panelRecord(t);
       if (!rec) continue;
       rec.w = t.w; rec.h = t.h;
+      if (t.variant) rec.variant = t.variant;
       this.textiles.set(t.id, rec);
       maxSeq = Math.max(maxSeq, parseSeq(t.id));
     }
@@ -5743,6 +5755,7 @@ export class BuildModel {
         // Felder aus der Datei, die wir nur durchreichen (Flexikupplung & Co.)
         rest: f.rest || null,
         balls: !!f.balls,
+        tube: f.tube || null,
       });
       maxSeq = Math.max(maxSeq, parseSeq(f.id));
     }
