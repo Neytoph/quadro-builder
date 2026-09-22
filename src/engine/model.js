@@ -575,8 +575,10 @@ const PANEL_OVERLAP_EPS = 1;
 // Lage sitzen genau darauf (y = 0), erst ein negativer Wert liegt darunter. Die
 // Toleranz faengt Rundungsreste aus round2 ab.
 const GROUND_TOL = 0.01;
-// Unter dem Boden bauen ist erlaubt -- in den Herstellerdateien kommt es vor.
-const ALLOW_BELOW_GROUND = true;
+// 不许往地面以下搭。原来是放开的（官方文件里偶尔有地下的件），但放开之后
+// 地面接头会给出钻进地里的引导线，用户搭着搭着就把管子插到地下去了。
+// 官方文件里本来就在地下的件照样能打开，只是不能再往下接。
+const ALLOW_BELOW_GROUND = false;
 
 function dist2(a, b) {
   const dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
