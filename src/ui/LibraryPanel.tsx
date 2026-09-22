@@ -3,7 +3,7 @@ import { useEngine } from '../store/EngineContext'
 import { useI18n } from '../i18n'
 import { storage, designEntry, checkAgainstInventory, missingCount } from '../engine-api'
 import { OFFICIAL_MODELS, officialThumbPath } from '../data/official'
-import { MODULES, PRESETS, presetThumbPath, type PresetDef } from '../data/presets'
+import { MODULE_GROUPS, PRESETS, presetThumbPath, type PresetDef } from '../data/presets'
 
 export const LIBRARY_OPEN_EVENT = 'quadro:library-open'
 
@@ -204,11 +204,16 @@ export default function LibraryPanel() {
             <div>
               <div className="text-[10px] uppercase tracking-wider text-gray-400 mb-1.5">{t('section.modules')}</div>
               <p className="text-[11px] text-gray-500 mb-2 leading-snug">{t('hint.modules')}</p>
-              <div className="grid grid-cols-2 gap-2">
-                {MODULES.map(p => (
-                  <StartCard key={p.key} p={p} label={t(p.labelKey)} onClick={() => api.placeModule(p.key)} />
-                ))}
-              </div>
+              {MODULE_GROUPS.map(g => (
+                <div key={g.key} className="mb-3 last:mb-0">
+                  <div className="text-[11px] text-gray-300 mb-1.5">{t(g.labelKey)}</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {g.items.map(p => (
+                      <StartCard key={p.key} p={p} label={t(p.labelKey)} onClick={() => api.placeModule(p.key)} />
+                    ))}
+                  </div>
+                </div>
+              ))}
             </div>
             <div>
               <div className="text-[10px] uppercase tracking-wider text-gray-400 mb-1.5">{t('section.presets')}</div>
