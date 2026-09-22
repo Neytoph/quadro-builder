@@ -1773,6 +1773,7 @@ export class Builder {
       ? 0
       : spacingFor(tube ? tube.length_cm : 35);
     const previewColor = this.color === RANDOM_COLOR ? null : this.color;
+    const bowInHand = isCurvedTube(this.tubeId);
     for (const d of dirs) {
       if (occupied.has(d.name)) continue;
       if (lagerArm && (lagerArm[0] * d.vec[0] + lagerArm[1] * d.vec[1] + lagerArm[2] * d.vec[2]) > 0.9) continue;
@@ -1780,8 +1781,28 @@ export class Builder {
       // Belegung muss ueber die Richtung geprueft werden -- sonst bietet sie den
       // Punkt auch dann noch an, wenn das Rohr schon steckt.
       if (c45Dir && this._armOccupied(node, d.vec)) continue;
-      if (this._targetBelowGround(node, d.vec)) continue;
       const isCardDir = Math.max(Math.abs(d.vec[0]), Math.abs(d.vec[1]), Math.abs(d.vec[2])) > DIR_ALIGN_TOL;
+      // 弯管在手：一个方向给四根弧线手柄，四种弯法各一根，弧线画的就是点下去
+      // 之后弯管的走向。落到地下或目标接头已经连着的那几种不给。
+      if (bowInHand && isCardDir && !c45Dir) {
+        const R = gridSpacing();
+        for (const normal of this._bowNormalsFor(d.vec)) {
+          if (!this._bowFeasible(node, d.vec, normal, R)) continue;
+          this.scene.addHandle(
+            [node.x, node.y, node.z],
+            {
+              nodeId: node.id, dir: d.vec, dirName: d.name, slope: isSlope,
+              bow: true, bowNormal: normal, bowRadius: R,
+              arrowCompact: true,
+              previewSpan: 0,
+              previewColor,
+            },
+            "dir"
+          );
+        }
+        continue;
+      }
+      if (this._targetBelowGround(node, d.vec)) continue;
       // Pfeile wachsen aus der Kupplung heraus (wie designer), nicht als
       // schwebende Kugel auf `gap`. Die Richtung bleibt die des freien Arms.
       this.scene.addHandle(
@@ -1795,6 +1816,35 @@ export class Builder {
         ((useDiag || c45Dir) && !isCardDir) ? "diag" : "dir"
       );
     }
+  }
+
+  /**
+   * 弯管从某个方向出发时的四种弯法：和出发方向垂直的四个世界轴向。
+   * 顺序固定（先竖直再水平），四根弧线的颜色和位置才每次一样。
+   */
+  _bowNormalsFor(dirVec) {
+    const ax = Math.abs(dirVec[0]), ay = Math.abs(dirVec[1]), az = Math.abs(dirVec[2]);
+    const main = ay >= ax && ay >= az ? 1 : ax >= az ? 0 : 2;
+    const out = [];
+    for (const axis of [1, 0, 2]) {
+      if (axis === main) continue;
+      for (const s of [-1, 1]) {
+        const n = [0, 0, 0];
+        n[axis] = s;
+        out.push(n);
+      }
+    }
+    return out;
+  }
+
+  /** 这一种弯法放得下吗：弧线最低点不在地下，目标接头也还没和这个接头连着。 */
+  _bowFeasible(node, dir, normal, R) {
+    const cy = node.y + normal[1] * R;
+    const ty = node.y + R * (dir[1] + normal[1]);
+    if (this.model.isBelowGround(ty) || this.model.isBelowGround(cy)) return false;
+    const hit = this.model.findNodeNear(
+      node.x + R * (dir[0] + normal[0]), ty, node.z + R * (dir[2] + normal[2]));
+    return !(hit && this.model.tubeBetween(node.id, hit.id));
   }
 
   _targetBelowGround(node, vec) {
@@ -4132,8 +4182,9 @@ export class Builder {
         // model.extend() braucht das nicht zu unterscheiden.
         const tube = getTube(this.tubeId);
         this.recordHistory(() => {
+          // 弧线手柄自带弯法；键盘步进和老式手柄还是按默认弯法来。
           res = isCurvedTube(this.tubeId)
-            ? this.model.extendBow(h.data.nodeId, h.data.dir, this._bowNormal(h.data.dir), tube.id, this.colorFor("tube", h.data.nodeId), gridSpacing())
+            ? this.model.extendBow(h.data.nodeId, h.data.dir, h.data.bowNormal || this._bowNormal(h.data.dir), tube.id, this.colorFor("tube", h.data.nodeId), gridSpacing())
             : this.model.extend(
                 h.data.nodeId, h.data.dir, tube.id, this.colorFor("tube", h.data.nodeId), tube.length_cm, spacingFor(tube.length_cm)
               );

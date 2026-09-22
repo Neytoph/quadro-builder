@@ -4581,7 +4581,6 @@ export class SceneManager {
     const compact = !!userData.arrowCompact;
     const group = new THREE.Group();
     group.position.set(origin[0], origin[1], origin[2]);
-    group.quaternion.copy(quat);
     group.userData = Object.assign({
       kind: "handle",
       arrowRoot: true,
@@ -4591,6 +4590,33 @@ export class SceneManager {
     }, userData);
 
     this._addNodeGuide(origin);
+
+    // 弯管手柄：直棍换成四分之一圆弧，弧线的走向就是点下去之后弯管的走向。
+    // 弧线在世界坐标里画，组不旋转；碰撞体也沿弧线走，指到弧线的哪一段都算。
+    if (userData.bow && userData.bowNormal) {
+      const R = Number(userData.bowRadius) || 40;
+      const arc = new THREE.Mesh(
+        this._bowArcGeo(dirArr, userData.bowNormal, R, GUIDE.beamR, "arc"),
+        this._guideMaterial(group.userData.guideAxis, true),
+      );
+      arc.renderOrder = 1000;
+      arc.visible = false;
+      arc.raycast = () => {};
+      const hit = new THREE.Mesh(
+        this._bowArcGeo(dirArr, userData.bowNormal, R, GUIDE.hitR, "hit"),
+        this._arrowHitMaterial(),
+      );
+      hit.userData = Object.assign({ kind: "handle", arrowRoot: group }, userData);
+      group.userData.beamMesh = arc;
+      group.userData.bowArc = true;
+      group.add(arc);
+      group.add(hit);
+      this._applyArrowPose(group, !compact, compact ? "rest" : "hot");
+      this.handleGroup.add(group);
+      this.handleMeshes.push(hit);
+      return group;
+    }
+    group.quaternion.copy(quat);
 
     // 指到这个方向时亮起来的那一条，从接点往外，比引导线略长也略粗
     const beam = new THREE.Mesh(
@@ -4639,6 +4665,76 @@ export class SceneManager {
     if (tone) this._paintArrow(group, tone);
   }
 
+  /**
+   * 四分之一圆弧：从原点出发，切线是 dir，往 normal 那边弯，半径 R。
+   * 终点在 R * (dir + normal)，和 model.extendBow 落的点一样。
+   */
+  _bowArcCurve(dirArr, normalArr, R) {
+    const d = new THREE.Vector3(dirArr[0], dirArr[1], dirArr[2]).normalize();
+    const n = new THREE.Vector3(normalArr[0], normalArr[1], normalArr[2]).normalize();
+    const pts = [];
+    const SEG = 18;
+    for (let i = 0; i <= SEG; i++) {
+      const th = (Math.PI / 2) * (i / SEG);
+      pts.push(new THREE.Vector3()
+        .addScaledVector(d, R * Math.sin(th))
+        .addScaledVector(n, R * (1 - Math.cos(th))));
+    }
+    return new THREE.CatmullRomCurve3(pts);
+  }
+
+  // 弧线几何按（方向、弯法、半径、粗细）缓存：六个方向各四种弯法，一共就
+  // 二十四种，所有接头共用，不然每次刷新手柄要给每个接头造几十根管子。
+  _bowArcGeo(dirArr, normalArr, R, radius, tag) {
+    if (!this._bowArcGeos) this._bowArcGeos = new Map();
+    const key = [tag, R, ...dirArr.map((v) => Math.round(v * 100)), ...normalArr.map((v) => Math.round(v * 100))].join(",");
+    let geo = this._bowArcGeos.get(key);
+    if (!geo) {
+      geo = new THREE.TubeGeometry(this._bowArcCurve(dirArr, normalArr, R), 18, radius, tag === "hit" ? 8 : 6, false);
+      this._keepGeos.add(geo);
+      this._bowArcGeos.set(key, geo);
+    }
+    return geo;
+  }
+
+  // 悬停在弧线手柄上：沿弧线画一根半透明的管子，和放下去的弯管一个样。
+  _setBowPreview(group) {
+    const u = group.userData;
+    const cs = geometry().connectorSize;
+    const r = geometry().tubeRadius;
+    const R = Number(u.bowRadius) || 40;
+    // 两头各让出半个接头，管子端面贴着接头面
+    const curve = this._bowArcCurve(u.dir, u.bowNormal, R);
+    const trim = Math.min(0.45, (cs / 2) / ((Math.PI / 2) * R));
+    const pts = [];
+    for (let i = 0; i <= 18; i++) pts.push(curve.getPoint(trim + (1 - 2 * trim) * (i / 18)));
+    const geo = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 18, r, 14, false);
+    const colorId = u.previewColor;
+    const hex = colorId ? this._look(colorId) : ARROW_TEAL;
+    if (!this._bowPreview) {
+      const mat = new THREE.MeshStandardMaterial({
+        transparent: true, opacity: 0.28, roughness: 0.48, metalness: 0.04,
+        depthWrite: false,
+      });
+      this._bowPreview = new THREE.Mesh(geo, mat);
+      this._bowPreview.renderOrder = 998;
+      this.scene.add(this._bowPreview);
+    } else {
+      this._bowPreview.geometry.dispose();
+      this._bowPreview.geometry = geo;
+    }
+    this._bowPreview.material.color.set(hex);
+    this._bowPreview.position.copy(group.position);
+    this._bowPreview.visible = true;
+    this._needsRender = true;
+  }
+
+  _clearBowPreview() {
+    if (!this._bowPreview || !this._bowPreview.visible) return;
+    this._bowPreview.visible = false;
+    this._needsRender = true;
+  }
+
   _arrowFocusId(obj) {
     if (!obj || !obj.userData) return null;
     if (obj.userData.nodeId != null) return obj.userData.nodeId;
@@ -4659,6 +4755,12 @@ export class SceneManager {
   }
 
   _setTubePreview(group) {
+    if (group && group.userData && group.userData.bowArc) {
+      this._clearTubePreview();
+      this._setBowPreview(group);
+      return;
+    }
+    this._clearBowPreview();
     const span = Number(group && group.userData && group.userData.previewSpan);
     const dirArr = group && group.userData && group.userData.dir;
     if (!(span > 0) || !dirArr) {
@@ -4694,6 +4796,7 @@ export class SceneManager {
   }
 
   _clearTubePreview() {
+    this._clearBowPreview();
     if (!this._tubePreview || !this._tubePreview.visible) return;
     this._tubePreview.visible = false;
     this._needsRender = true;
