@@ -4652,9 +4652,11 @@ export class SceneManager {
     const beam = group.userData.beamMesh;
     if (!beam) return;
     const hot = tone === "hot" || tone === "focus";
-    // 弧线常显：静止半透明，指到接头变实。没有十字要跟着亮。
+    // 弧线：静止时只露每个方向默认那一根（半透明），指到接头四种全出来并变实。
+    // 没有十字要跟着亮。
     if (group.userData.bowArc) {
       beam.material = this._guideMaterial(group.userData.guideAxis, hot);
+      beam.visible = hot || !!group.userData.bowDefault;
       return;
     }
     beam.material = this._guideMaterial(group.userData.guideAxis, true);
