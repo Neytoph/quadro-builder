@@ -186,6 +186,8 @@ const POOL_INSET = 2.5;
 const BALL_R = 3;
 const BALL_FILL = 2 / 3;
 const BALL_COLORS = [0xd83a2e, 0x2f9e44, 0x2b6fd6, 0xf2c12e];
+// 功能板里靠贴图表现的几种；其余（乐高、攀岩、篮球）是板上加小几何
+const FEATURE_TEXTURED = new Set(["honeycomb", "busy", "felt", "magnet", "sensory"]);
 // ARM_FITTINGS (aus model.js): Teile, die auf einem Stutzen der Kupplung sitzen
 // -- dort gehoert einer gezeichnet, auch wenn kein Rohr steckt. Beim offenen
 // Verbinderende ist genau das seine Aufgabe: es ERZWINGT den Stutzen (so auch
@@ -1960,6 +1962,147 @@ export class SceneManager {
     }
     return this._materials["balls"];
   }
+
+  // ---- 功能板（兼容件）-----------------------------------------------------
+  // 蜂窝、忙碌、毛毡、磁吸：板面换一张画出来的图案，颜色还是板的颜色。
+  // 乐高、攀岩、篮球：在板上加小几何，和板同一批高亮、同一个拾取。
+
+  _featureTexture(feature) {
+    if (!this._featureTex) this._featureTex = {};
+    if (this._featureTex[feature]) return this._featureTex[feature];
+    const cv = document.createElement("canvas");
+    cv.width = cv.height = 256;
+    const g = cv.getContext("2d");
+    g.fillStyle = "#ffffff";
+    g.fillRect(0, 0, 256, 256);
+    // 固定种子的伪随机，图案每次一样
+    let seed = 7;
+    const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+    if (feature === "honeycomb") {
+      g.strokeStyle = "rgba(0,0,0,0.38)";
+      g.lineWidth = 5;
+      const R = 22, dx = R * Math.sqrt(3), dy = R * 1.5;
+      for (let row = -1; row < 9; row++) {
+        for (let col = -1; col < 8; col++) {
+          const cx = col * dx + (row % 2 ? dx / 2 : 0), cy = row * dy;
+          g.beginPath();
+          for (let k = 0; k < 6; k++) {
+            const a = Math.PI / 6 + k * Math.PI / 3;
+            const px = cx + R * Math.cos(a), py = cy + R * Math.sin(a);
+            if (k === 0) g.moveTo(px, py); else g.lineTo(px, py);
+          }
+          g.closePath();
+          g.stroke();
+        }
+      }
+    } else if (feature === "busy") {
+      // 几样常见的忙碌板配件：转盘、开关排、拉链、齿轮
+      g.fillStyle = "rgba(0,0,0,0.42)";
+      g.strokeStyle = "rgba(0,0,0,0.42)";
+      g.lineWidth = 6;
+      g.beginPath(); g.arc(66, 66, 34, 0, Math.PI * 2); g.stroke();
+      g.beginPath(); g.arc(66, 66, 8, 0, Math.PI * 2); g.fill();
+      for (let i = 0; i < 4; i++) g.fillRect(150 + i * 24, 40, 12, 40);
+      g.fillRect(40, 150, 80, 12);
+      for (let i = 0; i < 6; i++) g.fillRect(44 + i * 13, 146, 6, 20);
+      g.beginPath();
+      for (let k = 0; k < 16; k++) {
+        const a = k * Math.PI / 8, r = k % 2 ? 40 : 30;
+        const px = 186 + r * Math.cos(a), py = 186 + r * Math.sin(a);
+        if (k === 0) g.moveTo(px, py); else g.lineTo(px, py);
+      }
+      g.closePath(); g.stroke();
+      g.fillStyle = "rgba(255,255,255,0.9)";
+      g.beginPath(); g.arc(186, 186, 10, 0, Math.PI * 2); g.fill();
+    } else if (feature === "felt") {
+      for (let i = 0; i < 5000; i++) {
+        g.fillStyle = `rgba(0,0,0,${0.04 + rnd() * 0.09})`;
+        g.fillRect(rnd() * 256, rnd() * 256, 1 + rnd() * 2, 1 + rnd() * 2);
+      }
+    } else if (feature === "magnet") {
+      g.fillStyle = "rgba(0,0,0,0.22)";
+      for (let y = 12; y < 256; y += 24) for (let x = 12; x < 256; x += 24) {
+        g.beginPath(); g.arc(x, y, 3.2, 0, Math.PI * 2); g.fill();
+      }
+    }
+    const tex = new THREE.CanvasTexture(cv);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    // 挤出几何的 UV 就是板面的厘米坐标：一张图铺满一块 40 板
+    tex.repeat.set(1 / 38, 1 / 38);
+    tex.offset.set(0.5, 0.5);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 4;
+    this._featureTex[feature] = tex;
+    return tex;
+  }
+
+  _featureMaterial(color, feature) {
+    const key = "feat:" + feature + ":" + color;
+    if (!this._materials[key]) {
+      this._materials[key] = new THREE.MeshStandardMaterial({
+        color: new THREE.Color(this._look(color)),
+        map: this._featureTexture(feature),
+        roughness: feature === "felt" ? 1 : feature === "magnet" ? 0.32 : 0.72,
+        metalness: feature === "magnet" ? 0.55 : 0,
+      });
+    }
+    return this._materials[key];
+  }
+
+  _accentMaterial(hex) {
+    const key = "accent:" + hex;
+    if (!this._materials[key]) {
+      this._materials[key] = new THREE.MeshStandardMaterial({ color: hex, roughness: 0.55, metalness: 0.05 });
+    }
+    return this._materials[key];
+  }
+
+  /**
+   * 板上的小几何。basis 是板的局部坐标（x 沿板宽，y 是厚度方向，z 沿板长），
+   * top 是露出来那一面在局部 y 上的正负。faded 非空时（拼装里已装完）一律用它。
+   */
+  _addPanelFeature(feature, pid, color, thickness, basis, top, matFor, faded) {
+    const place = (geo, mat, lx, ly, lz, quat) => {
+      const m = new THREE.Matrix4().compose(
+        new THREE.Vector3(lx, ly, lz), quat || new THREE.Quaternion(), ONE);
+      this._batchAdd(geo, matFor(pid, faded || mat), basis.clone().multiply(m), "panel", pid, this.pickPanels);
+    };
+    const face = top * thickness / 2;
+    if (feature === "lego") {
+      // 6×6 的粗凸点（真乐高是 48×48，画不动也看不清），和板同色
+      const geo = this._cachedGeo("feat:stud", () => new THREE.CylinderGeometry(2.2, 2.2, 1.2, 12));
+      const mat = this._panelMaterial(color, false, false);
+      for (let i = 0; i < 6; i++) {
+        for (let j = 0; j < 6; j++) {
+          place(geo, mat, (i - 2.5) * 6, face + top * 0.6, (j - 2.5) * 6);
+        }
+      }
+    } else if (feature === "climbing") {
+      // 五个岩点，扁扁的椭球，各转一个角度
+      const geo = this._cachedGeo("feat:hold", () => {
+        const g = new THREE.SphereGeometry(3.2, 12, 8);
+        g.scale(1.35, 0.62, 1);
+        return g;
+      });
+      const mat = this._accentMaterial(0x3b4d78);
+      const spots = [[-10, -9, 0.4], [8, -12, 1.9], [-3, 2, 3.1], [11, 6, 0.9], [-11, 12, 2.4]];
+      for (const [x, z, a] of spots) {
+        place(geo, mat, x, face + top * 1.4, z, new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), a));
+      }
+    } else if (feature === "basketball") {
+      // 篮筐：圈面水平，从板面伸出去；板本身就是篮板
+      const geo = this._cachedGeo("feat:hoop", () => new THREE.TorusGeometry(7.5, 0.8, 8, 28));
+      const mat = this._accentMaterial(0xe8642c);
+      const rot = new THREE.Matrix4().extractRotation(basis);
+      const upLocal = new THREE.Vector3(0, 1, 0).applyMatrix4(new THREE.Matrix4().copy(rot).invert()).normalize();
+      // 圈的轴（几何的 z）对准世界的上
+      const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), upLocal);
+      const out = new THREE.Vector3(0, top, 0).multiplyScalar(thickness / 2 + 8.3);
+      const lift = upLocal.clone().multiplyScalar(5);
+      place(geo, mat, out.x + lift.x, out.y + lift.y, out.z + lift.z, q);
+    }
+  }
+
 
   /** Wasser ist nur Dekoration: nicht mitfaerben, sonst wirkt die Auswahl wie ein oranger Kasten. */
   _markPoolWater(mesh) {
@@ -3993,7 +4136,8 @@ export class SceneManager {
       // Die Acrylglasplatte ist ein Nachbau wie die Lochplatte: Rahmen aus der
       // Platten-Geometrie, Scheibe als eigene Box -- kein abgegriffenes Teil.
       const pdef = getPanel(p.panelId) || {};
-      const echteFlaeche = wantMeshes && !pdef.acrylic
+      // 功能板也是自己画的：板面要换贴图、板上要加东西，抓来的原件模型不合用
+      const echteFlaeche = wantMeshes && !pdef.acrylic && !pdef.feature
         ? this._surfaceMeshFor(pdef.holes ? p.panelId : "panel2",
           flaechenX, flaechenZ, spanX, spanZ, center.clone(), surfaceNormal, surfaceSide)
         : null;
@@ -4010,7 +4154,16 @@ export class SceneManager {
       // Buendel. In grossen Modellen sind die Platten sonst der groesste
       // verbliebene Posten (56 Platten = 56 Draw-Calls).
       const basis = new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis).setPosition(center);
-      this._batchAdd(geo, matFor(p.id, mat), basis, "panel", p.id, this.pickPanels);
+      // 功能板：贴图那几种换成带图案的材质；预览和拼装里已装完的那几种照旧
+      const plain = st === "future" || (asm && st === "done");
+      const plateMat = (pdef.feature && !plain && FEATURE_TEXTURED.has(pdef.feature))
+        ? this._featureMaterial(p.color, pdef.feature) : mat;
+      this._batchAdd(geo, matFor(p.id, plateMat), basis, "panel", p.id, this.pickPanels);
+      if (pdef.feature && st !== "future") {
+        // 板的哪一面朝外：板贴着管顶那一侧（sgn）就是露出来的面
+        const top = yAxis.dot(new THREE.Vector3(nrm[0], nrm[1], nrm[2])) * sgn >= 0 ? 1 : -1;
+        this._addPanelFeature(pdef.feature, p.id, p.color, thickness, basis, top, matFor, plain ? mat : null);
+      }
       if (pdef.acrylic) {
         // Im Aufbau-Modus (verblasst) und als Vorschau traegt die Scheibe das
         // Material des Rahmens, sonst Glas.

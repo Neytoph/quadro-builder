@@ -213,7 +213,7 @@ interface EngineApi {
   catalog: {
     tubes: Array<{ id: string; length_cm: number; name?: string }>
     curved: Array<{ id: string; name?: string }>
-    panels: Array<{ id: string; w?: number; h?: number; name?: string; holes?: number; acrylic?: boolean }>
+    panels: Array<{ id: string; w?: number; h?: number; name?: string; holes?: number; acrylic?: boolean; feature?: string; compat?: boolean }>
     colors: Array<{ id: string; hex: string; name?: string; name_en?: string }>
     connectors: Array<{ id: string; kind: string; qdf?: string; name?: string }>
     accessories: Array<{ id: string; qdf?: string; name?: string }>
