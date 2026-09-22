@@ -5429,10 +5429,14 @@ export class BuildModel {
    * ein dadurch verwaister Knoten wird entfernt.
    *
    * Liefert { node } oder { ground:true } / { duplicate:true }.
+   *
+   * steps < 0 转另一个方向（Q 键）；pivot 指定绕哪一头转（默认 a 头），
+   * 传 b 头就先把两头对调——弯管两头本来就没有先后。
    */
-  rotateBow(id) {
+  rotateBow(id, steps = 1, { pivot } = {}) {
     const t = this.tubes.get(id);
     if (!t || !t.bow || !t.bowCenter) return null;
+    if (pivot != null && pivot === t.b) { const tmp = t.a; t.a = t.b; t.b = tmp; }
     const a = this.nodes.get(t.a), b = this.nodes.get(t.b);
     if (!a || !b) return null;
     const c = { x: t.bowCenter[0], y: t.bowCenter[1], z: t.bowCenter[2] };
@@ -5446,9 +5450,11 @@ export class BuildModel {
     // genommen -- sonst liesse sich ein Bogen ueber dem Boden gar nicht mehr
     // bewegen, weil ausgerechnet der naechste Schritt nach unten zeigt.
     const perp = cross(t0, n);
-    const steps = [perp, [-n[0], -n[1], -n[2]], [-perp[0], -perp[1], -perp[2]]];
+    const back = [-n[0], -n[1], -n[2]];
+    const anti = [-perp[0], -perp[1], -perp[2]];
+    const order = steps < 0 ? [anti, back, perp] : [perp, back, anti];
     let blocked = null;
-    for (const n2 of steps) {
+    for (const n2 of order) {
       const target = {
         x: round(a.x + R * (t0[0] + n2[0])),
         y: round(a.y + R * (t0[1] + n2[1])),

@@ -568,12 +568,46 @@ export class Builder {
       this.refresh();
       return true;
     }
+    // 单选一根弯管：绕它接着的那头转 90 度，和放置时点它转是同一个动作。
+    const bow = this._selectedLoneBow();
+    if (bow) {
+      const pivot = this._bowPivotFor(bow);
+      if (!pivot) { this.onNotice(t("notice_bow_attached"), "warn"); return false; }
+      let res;
+      this.recordHistory(() => { res = this.model.rotateBow(bow.id, steps, { pivot }); });
+      if (res && res.ground) { this.onNotice(t("notice_ground"), "warn"); return false; }
+      if (res && res.duplicate) { this.onNotice(t("notice_bow_blocked"), "warn"); return false; }
+      this.refresh();
+      return !!(res && res.node);
+    }
     const before = JSON.stringify(this.model.toJSON());
     const res = this.model.rotateSelection(this.selection, steps,
       { merge: true, validate: infeasibleConnectors, grid: SNAP_STEP });
     if (!res.ok) { this.onNotice(t("notice_rotate_" + res.reason), "warn"); return false; }
     this._afterMove(before, res);
     return true;
+  }
+
+  /** 选中的正好是一根弯管（没有别的）就给它，否则 null。 */
+  _selectedLoneBow() {
+    if (this.selection.size !== 1) return null;
+    const [[id, kind]] = this.selection;
+    if (kind !== "tube") return null;
+    const tube = this.model.tubes.get(id);
+    return tube && tube.bow ? tube : null;
+  }
+
+  /**
+   * 弯管绕哪一头转：另一头得空着——只有这根管，接头上也没装配件。
+   * 两头都接着东西就转不了（返回 null）；两头都空着就绕 a 头。
+   */
+  _bowPivotFor(tube) {
+    const a = this.model.nodes.get(tube.a), b = this.model.nodes.get(tube.b);
+    if (!a || !b) return null;
+    const free = (n) => this.model.degree(n.id) === 1 && !n.part && !n.bearingOn && !n.c45body;
+    if (free(b)) return tube.a;
+    if (free(a)) return tube.b;
+    return null;
   }
 
   /** Die Kopie am Zeiger dreht sich an Ort und Stelle mit. */
@@ -4154,8 +4188,11 @@ export class Builder {
     const front = this.scene.pickBuild(e.clientX, e.clientY);
     const bow = front && front.data.kind === "tube" ? this.model.tubes.get(front.data.id) : null;
     if (bow && bow.bow && (!h || front.distance < h.distance)) {
+      // 另一头接着东西就不转：转了弯管会从那个接头上脱开。
+      const pivot = this._bowPivotFor(bow);
+      if (!pivot) { this.onNotice(t("notice_bow_attached"), "warn"); return; }
       let res;
-      this.recordHistory(() => { res = this.model.rotateBow(bow.id); });
+      this.recordHistory(() => { res = this.model.rotateBow(bow.id, 1, { pivot }); });
       if (res && res.ground) this.onNotice(t("notice_ground"), "warn");
       else if (res && res.duplicate) this.onNotice(t("notice_bow_blocked"));
       this.refresh();
