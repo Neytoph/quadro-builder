@@ -62,6 +62,13 @@ const MATERIALS = [
   'material3{17,"blue (hole)", 2, 0.,0.,1., 0.6,0.5,0.5,7.5, 0.6,0.5,0.5,7.5, "", 0}',
   'material3{18,"yellow (hole)", 2, 1.,1.,0., 0.6,0.5,0.5,7.5, 0.6,0.5,0.5,7.5, "", 0}',
   'material3{19,"black (hole)", 2, 0.,0.,0., 0.6,0.5,0.5,7.5, 0.6,0.5,0.5,7.5, "", 0}',
+  // Acrylglasplatten: derselbe Kniff wie bei den Lochplatten. Die Nummern 20
+  // und 21 tauchen in Herstellerdateien mit freien Namen auf, deshalb 22 bis 26.
+  'material3{22,"red (acrylic)", 2, 1.,0.,0., 0.6,0.5,0.5,7.5, 0.6,0.5,0.5,7.5, "", 0}',
+  'material3{23,"green (acrylic)", 2, 0.,0.4941,0.0941, 0.6,0.5,0.5,7.5, 0.6,0.5,0.5,7.5, "", 0}',
+  'material3{24,"blue (acrylic)", 2, 0.,0.,1., 0.6,0.5,0.5,7.5, 0.6,0.5,0.5,7.5, "", 0}',
+  'material3{25,"yellow (acrylic)", 2, 1.,1.,0., 0.6,0.5,0.5,7.5, 0.6,0.5,0.5,7.5, "", 0}',
+  'material3{26,"black (acrylic)", 2, 0.,0.,0., 0.6,0.5,0.5,7.5, 0.6,0.5,0.5,7.5, "", 0}',
 ];
 
 // Farb-ID -> Material-Nummer. Rohre nehmen den ersten Satz, Platten den zweiten;
@@ -73,6 +80,8 @@ const PANEL_MAT = { red: 6, green: 7, blue: 8, yellow: 9, black: 1, white: 14 };
 // Lochplatten: dieselbe Farbe, eigene Materialnummer -- daran erkennen wir sie
 // beim Einlesen wieder (siehe MATERIALS). Weiss hat keine Lochplatte.
 const HOLE_MAT = { red: 15, green: 16, blue: 17, yellow: 18, black: 19 };
+// Acrylglasplatten: Rahmenfarbe, eigene Materialnummer (siehe MATERIALS).
+const ACRYLIC_MAT = { red: 22, green: 23, blue: 24, yellow: 25, black: 26 };
 // Verstaerkungsprofil: Material 11 in 166 von 174 Vorkommen der Herstellerdateien.
 const ALU_MAT = 11;
 const CONNECTOR_MAT = 1;
@@ -229,16 +238,23 @@ function tuple(q, x, y, z) {
 function tubeMat(color) {
   return TUBE_MAT[officialColorId(color)] || TUBE_MAT.blue;
 }
-/** Traegt diese Platte ein Lochraster? (Katalogteil `holes`) */
+/**
+ * Sonderplatte? "hole" fuer das Lochraster (Katalogteil `holes`), "acrylic" fuer
+ * die Rahmenplatte mit Acrylglas (`acrylic`), sonst null. Beide tragen im QDF
+ * ein eigenes Material, weil das Format sie nicht kennt (siehe MATERIALS).
+ */
 function lochplatte(p) {
   const def = getPanel(p.panelId);
-  return !!(def && def.holes);
+  if (!def) return null;
+  if (def.holes) return "hole";
+  if (def.acrylic) return "acrylic";
+  return null;
 }
 
-function panelMat(color, holes) {
+function panelMat(color, variant) {
   const off = officialColorId(color);
-  if (holes && HOLE_MAT[off]) return HOLE_MAT[off];
-  if (holes) return HOLE_MAT.blue;
+  const special = variant === "hole" ? HOLE_MAT : variant === "acrylic" ? ACRYLIC_MAT : null;
+  if (special) return special[off] || special.blue;
   if (PANEL_MAT[color]) return PANEL_MAT[color];
   return PANEL_MAT[off] || PANEL_MAT.blue;
 }

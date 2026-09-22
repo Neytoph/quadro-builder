@@ -35,6 +35,8 @@ export const TOOL_ICON = {
   panel: '<rect x="3" y="3" width="10" height="10" rx="1.8" fill="none" stroke="currentColor" stroke-width="1.5"/>',
   holePanel: '<rect x="3" y="3" width="10" height="10" rx="1.8" fill="none" stroke="currentColor" stroke-width="1.5"/>'
     + [5.1, 8, 10.9].map(y => [5.1, 8, 10.9].map(x => `<circle cx="${x}" cy="${y}" r="0.95" fill="currentColor"/>`).join('')).join(''),
+  acrylicPanel: '<rect x="3" y="3" width="10" height="10" rx="1.8" fill="none" stroke="currentColor" stroke-width="1.5"/>'
+    + '<rect x="5.4" y="5.4" width="5.2" height="5.2" rx="0.6" fill="currentColor" fill-opacity="0.35"/>',
   slide: '<path d="M3 13 C7 13 5 4 13 3" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>',
   wheel: '<circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="1.5" fill="currentColor"/><path d="M8 2.4 L8 13.6 M2.4 8 L13.6 8 M4 4 L12 12 M12 4 L4 12" stroke="currentColor" stroke-width="0.9"/>',
   textile: '<path d="M2.5 4 L13.5 4 L13.5 12 L2.5 12 Z" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M2.5 6.5 C5 5.4 6.5 7.6 8 6.5 C9.5 5.4 11 7.6 13.5 6.5" fill="none" stroke="currentColor" stroke-width="1"/><path d="M2.5 9.5 C5 8.4 6.5 10.6 8 9.5 C9.5 8.4 11 10.6 13.5 9.5" fill="none" stroke="currentColor" stroke-width="1"/>',
@@ -114,6 +116,9 @@ const BY_ID: Record<string, string> = {
   slide_module: TOOL_ICON.slide,
   slide_curved: TOOL_ICON.slide,
   hole_panel_40x40: TOOL_ICON.holePanel,
+  acrylic_panel_40x40: TOOL_ICON.acrylicPanel,
+  acrylic_glass: TOOL_ICON.acrylicPanel,
+  screw_acrylic: SCREW_ICON,
   slide_end: TOOL_ICON.slide,
   'slide-new2': TOOL_ICON.slide,
   slide2: TOOL_ICON.slide,
@@ -149,6 +154,7 @@ export function partIcon(id?: string | null, kind?: string | null): string {
   if (key.startsWith('TC')) return CURVED_TUBE_ICON
   if (key.startsWith('T')) return tubeIcon(key)
   if (key.startsWith('hole_panel')) return TOOL_ICON.holePanel
+  if (key.startsWith('acrylic')) return TOOL_ICON.acrylicPanel
   if (key.startsWith('panel')) return TOOL_ICON.panel
   if (key.startsWith('pool_liner')) return TOOL_ICON.pool
   if (key.startsWith('screw')) return SCREW_ICON

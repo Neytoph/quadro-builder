@@ -106,6 +106,8 @@ const COLOR_BY_NAME = {
 // qdfexport.js). Die Herstellersoftware zeichnet damit eine gewoehnliche Platte
 // in derselben Farbe, wir erkennen sie hier wieder.
 const HOLE_SUFFIX = " (hole)";
+// Acrylglasplatte: gleicher Kniff, Name "<farbe> (acrylic)".
+const ACRYLIC_SUFFIX = " (acrylic)";
 const FALLBACK_COLOR = "blue";
 
 // So weit sitzt die Kupplung, die eine Lagerkupplung traegt, von deren Punkt
@@ -293,6 +295,7 @@ export function parseQDF(text, opts = {}) {
 
   const materials = new Map(); // id -> colorId
   const holeMaterials = new Set(); // Material-Nummern, die eine Lochplatte kennzeichnen
+  const acrylicMaterials = new Set(); // dito fuer die Acrylglasplatte
   const nodes = [];            // { id, x, y, z }
   const tubes = [];            // { id, a, b, tubeId, color, length }
   const panels = [];           // { id, nodes:[4 ids], panelId, color }
@@ -312,9 +315,11 @@ export function parseQDF(text, opts = {}) {
   // ueber das Material (siehe HOLE_SUFFIX), dafuer steht `holePanelId`.
   const panelByDims = new Map();
   let holePanelId = null;
+  let acrylicPanelId = null;
   for (const pa of opts.panels || []) {
     if (pa.w == null || pa.h == null) continue;
     if (pa.holes) { if (!holePanelId) holePanelId = pa.id; continue; }
+    if (pa.acrylic) { if (!acrylicPanelId) acrylicPanelId = pa.id; continue; }
     const a = Math.round(pa.w), b = Math.round(pa.h);
     panelByDims.set(Math.min(a, b) + "x" + Math.max(a, b), pa.id);
   }
@@ -461,6 +466,9 @@ export function parseQDF(text, opts = {}) {
       if (typeof colorName === "string" && colorName.endsWith(HOLE_SUFFIX)) {
         if (id != null) holeMaterials.add(id);
         colorName = colorName.slice(0, -HOLE_SUFFIX.length);
+      } else if (typeof colorName === "string" && colorName.endsWith(ACRYLIC_SUFFIX)) {
+        if (id != null) acrylicMaterials.add(id);
+        colorName = colorName.slice(0, -ACRYLIC_SUFFIX.length);
       }
       if (id != null) materials.set(id, COLOR_BY_NAME[colorName] || FALLBACK_COLOR);
     } else if (p.name === "connector3" || p.name === "connector45_2") {
@@ -792,7 +800,10 @@ export function parseQDF(text, opts = {}) {
       // Lochplatte? Dann nicht ueber das Mass suchen -- das Lochraster steht im
       // Material (siehe HOLE_SUFFIX), die Groesse ist dieselbe wie bei der vollen.
       const panelId = (matNr != null && holeMaterials.has(matNr) && holePanelId)
-        ? holePanelId : panelIdForDims(dimW + conn, dimH + conn);
+        ? holePanelId
+        : (matNr != null && acrylicMaterials.has(matNr) && acrylicPanelId)
+          ? acrylicPanelId
+          : panelIdForDims(dimW + conn, dimH + conn);
       if (!panelId) { skipped[p.name] = (skipped[p.name] || 0) + 1; continue; }
       const nodesFound = findPanelCorners(q, cx, cy, cz, (dimW + padW + conn) / 2, (dimH + padH + conn) / 2);
       if (!nodesFound) { skipped[p.name] = (skipped[p.name] || 0) + 1; continue; }

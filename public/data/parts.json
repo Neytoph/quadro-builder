@@ -589,6 +589,20 @@
       "url": "https://quadroshop.com/products/hole-panel-40-40cm"
     },
     {
+      "id": "acrylic_panel_40x40",
+      "code": "PAC",
+      "name": "Platte für Acrylglas 40 x 40 cm",
+      "name_en": "Acrylic window panel 40 x 40 cm",
+      "w": 40,
+      "h": 40,
+      "acrylic": true,
+      "price": 17.99,
+      "buildable": true,
+      "colored": true,
+      "note": "Rahmenplatte mit zweiseitiger Aussparung (Art. 00392–00395, 17,99 €), in die eine Acrylglasscheibe 35 x 35 cm (acrylic_glass) mit vier Acrylglasschrauben (screw_acrylic) eingesetzt wird. Gleiches Feld wie panel_40x40; acrylic steuert Darstellung, Stückliste und den Material-Marker im QDF · Preis: quadroshop.com, Stand 2026-09-22",
+      "url": "https://quadroshop.com/products/acrylic-glass-panel-two-sided"
+    },
+    {
       "id": "panel_70x120",
       "code": "P7C",
       "name": "Platte 70 x 120 cm",
@@ -882,6 +896,15 @@
       },
       "note": "Pool XXL, Art. 11680 · Außenmaß 325 x 125 x 45 cm, Innenmaß der Folie 242,5 x 122,5 x 45 cm · Rahmen 240 x 120 cm bei 40 cm Wandhöhe · Preis: quadroshop.com „Poolfolie XXL“, Stand 2026-08-18",
       "url": "https://quadroshop.com/products/pool-liner-xxl"
+    },
+    {
+      "id": "acrylic_glass",
+      "code": "00359",
+      "name": "Acrylglas 35 x 35 cm",
+      "name_en": "Acrylic sheet 35 x 35 cm",
+      "price": 32.99,
+      "note": "Transparente Scheibe, sitzt in der Rahmenplatte acrylic_panel_40x40; eine je Platte, wird aus den Platten gerechnet und nicht selbst gesetzt · Preis: quadroshop.com „Acrylglas“, Stand 2026-09-22",
+      "url": "https://quadroshop.com/products/acrylic-glass"
     }
   ],
   "screws": [
@@ -905,6 +928,16 @@
       "pack": 8,
       "url": "https://quadroshop.com/collections/screws/products/panel-screw",
       "note": "Hält eine Platte durch das Rohr hindurch an der Kupplung; vier je Platte. Immer schwarz · Preis und Packgröße: quadroshop.com, Stand 2026-08-18"
+    },
+    {
+      "id": "screw_acrylic",
+      "code": "40641",
+      "name": "Acrylglasschraube",
+      "name_en": "Acrylic screw",
+      "price": 3.49,
+      "pack": 8,
+      "url": "https://quadroshop.com/products/acrylic-glass-screw",
+      "note": "Hält die Acrylglasscheibe in der Rahmenplatte; vier je Scheibe, zusätzlich zu den vier Plattenschrauben. Weiß · Preis und Packgröße: quadroshop.com, Stand 2026-09-22"
     },
     {
       "id": "screw_slide_conical",

@@ -149,7 +149,13 @@ export default function TopToolbar() {
   const tubeCurved = api.catalog.curved.some(c => c.id === api.tubeId)
   const tubeMark = tubeCurved ? t('hint.curved') : (tubeDef ? String(tubeDef.length_cm) : '')
   const panelDef = api.catalog.panels.find(p => p.id === api.panelId)
-  const panelMark = panelDef?.w && panelDef?.h ? `${panelDef.w}×${panelDef.h}` : ''
+  // 洞洞板和透明窗板与 40×40 同尺寸，尺寸后面带一个词区分
+  const panelLabel = (p: { w?: number; h?: number; holes?: number; acrylic?: boolean }) => {
+    if (!p.w || !p.h) return ''
+    const variant = p.holes ? t('panel.hole') : p.acrylic ? t('panel.acrylic') : ''
+    return `${p.w}×${p.h}${variant ? ` · ${variant}` : ''}`
+  }
+  const panelMark = panelDef ? panelLabel(panelDef) : ''
 
   return (
     <div
@@ -214,7 +220,7 @@ export default function TopToolbar() {
               <button key={p.id} onClick={() => { api.setPanel(p.id); close() }}
                 className={dropItem(api.panelId === p.id)}>
                 <Svg16 inner={partIcon(p.id, 'panels')} size={18} />
-                <span className="whitespace-nowrap">{p.w && p.h ? `${p.w}×${p.h}` : labelOf(p.id, p.name)}</span>
+                <span className="whitespace-nowrap">{panelLabel(p) || labelOf(p.id, p.name)}</span>
               </button>
             ))}
           </>
