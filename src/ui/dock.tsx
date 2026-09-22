@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { usePanelLayout } from './panelLayout'
 import { LIBRARY_OPEN_EVENT } from './LibraryPanel'
 
-export type DockPane = 'file' | 'library' | 'saves' | 'advisor' | 'bom' | 'inventory'
+export type DockPane = 'file' | 'library' | 'saves' | 'advisor' | 'bom' | 'inventory' | 'safety'
 
 export const LIB_DOCK_MIN = 360
 
@@ -13,6 +13,7 @@ export const DOCK_PILLS: { id: DockPane; labelKey: string }[] = [
   { id: 'advisor', labelKey: 'btn.advisor' },
   { id: 'bom', labelKey: 'side.bom' },
   { id: 'inventory', labelKey: 'side.inventory' },
+  { id: 'safety', labelKey: 'btn.safety' },
 ]
 
 type Ctx = {

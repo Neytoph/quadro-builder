@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { bumpCount, track } from '../analytics/track'
 import {
-  BuildModel, Builder, SceneManager, loadCatalog, computeBOM, compareInventory, connectorsForNode,
+  BuildModel, Builder, SceneManager, loadCatalog, computeBOM, compareInventory, connectorsForNode, computeSafety,
   parseQDF, parseDesign, designEntry, buildQDF, buildableTubes, buildableCurvedTubes, buildablePanels, tubeColors, allConnectors, accessories,
   panels, geometry, RANDOM_COLOR, BUILD_ORDERS, docs, storage, setLang as setEngineLang, t as engineT,
 } from '../engine-api'
@@ -29,6 +29,20 @@ export interface RoomSettings {
   h: number
   visible: boolean
   showExtents: boolean
+}
+
+export type SafetyLevel = 'error' | 'warn' | 'info'
+export interface SafetyFinding {
+  rule: string
+  level: SafetyLevel
+  /** 官方安全须知的章节号，引擎自己的规则是 builder */
+  ref: string
+  params: Record<string, unknown>
+  ids: { nodes?: string[]; tubes?: string[]; panels?: string[] }
+}
+export interface SafetyResult {
+  findings: SafetyFinding[]
+  height: number
 }
 
 export interface TabInfo {
@@ -152,6 +166,9 @@ interface EngineApi {
   toggleGrass: () => void
   grassOn: boolean
   highlight: (kind: string, id: string, color?: string | null) => void
+  /** 按零件 id 高亮一批（安全审查点行用），再点同一批取消 */
+  highlightIds: (key: string, ids: string[]) => void
+  safety: SafetyResult | null
   setInv: (group: keyof Inventory, key: string, value: number) => void
   newTab: () => void
   closeTab: (tabId: string) => void
@@ -644,6 +661,14 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     try { return asBom(computeBOM(model) as AnyRec) } catch { return null }
   }, [model, ready, tick, lang])
 
+  const safety = useMemo<SafetyResult | null>(() => {
+    if (!model || !ready) return null
+    return computeSafety(model, {
+      room: room.visible ? { w: room.w, d: room.d } : null,
+      indoor: room.visible,
+    }) as SafetyResult
+  }, [model, ready, tick, room])
+
   const cmp = useMemo(() => {
     if (!model || !ready) return { rows: [] as InvRow[], feasible: null as boolean | null }
     try {
@@ -786,6 +811,20 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     highlightKey.current = ids.size ? key : null
     bump()
   }, [builder, model, bump])
+
+  const highlightIds = useCallback((key: string, list: string[]) => {
+    if (!builder) return
+    const k = `safety:${key}`
+    if (highlightKey.current === k || !list.length) {
+      builder.setHighlight(null)
+      highlightKey.current = null
+      bump()
+      return
+    }
+    builder.setHighlight(new Set(list))
+    highlightKey.current = k
+    bump()
+  }, [builder, bump])
 
   const setInv = useCallback((group: keyof Inventory, key: string, value: number) => {
     setInventory(prev => {
@@ -1435,7 +1474,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       bump()
     },
     grassOn: !!scene?._sceneOn,
-    highlight, setInv, newTab, closeTab, activateTab, renameTab, saveCurrent, openDoc,
+    highlight, highlightIds, safety, setInv, newTab, closeTab, activateTab, renameTab, saveCurrent, openDoc,
     listDocs: async () => (await docs.listDocs()).map((d: AnyRec) => ({ id: String(d.id), name: String(d.name), updatedAt: Number(d.updatedAt || 0) })),
     removeDoc: async (id) => { await docs.removeDoc(id); bump() },
     renameDoc: async (id, name) => { await docs.renameDoc(id, name); bump() },

@@ -8,6 +8,7 @@ const GROUPS: (typeof DOCK_PILLS)[] = [
   DOCK_PILLS.filter(p => p.id === 'file' || p.id === 'saves'),
   DOCK_PILLS.filter(p => p.id === 'library'),
   DOCK_PILLS.filter(p => p.id === 'advisor' || p.id === 'bom' || p.id === 'inventory'),
+  DOCK_PILLS.filter(p => p.id === 'safety'),
 ]
 
 export default function ProjectTabs() {
@@ -57,12 +58,18 @@ export default function ProjectTabs() {
             {i > 0 && <span className="w-px h-4 bg-gray-700 mx-0.5" />}
             {group.map(item => {
               const on = pane === item.id
+              // 安全入口带上错误和提醒的数量；没有就打个勾
+              const issues = item.id === 'safety' && api.safety
+                ? api.safety.findings.filter(f => f.level !== 'info').length
+                : null
+              const mark = issues == null ? '' : issues ? ` · ${issues}` : ' ✓'
+              const tone = issues == null || on ? '' : issues ? ' text-amber-300' : ' text-teal-400'
               return (
                 <button key={item.id} data-tour={`dock-${item.id}`} onClick={() => toggle(item.id)}
                   className={`text-xs px-2.5 min-h-8 rounded-lg cursor-pointer whitespace-nowrap ${
-                    on ? 'bg-teal-500 text-white font-semibold' : 'text-gray-300 hover:text-teal-600 hover:bg-gray-900'
+                    on ? 'bg-teal-500 text-white font-semibold' : `text-gray-300 hover:text-teal-600 hover:bg-gray-900${tone}`
                   }`}>
-                  {t(item.labelKey)}
+                  {t(item.labelKey)}{mark}
                 </button>
               )
             })}
