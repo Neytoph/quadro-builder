@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useEngine } from '../store/EngineContext'
 import { OFFICIAL_MODELS } from '../data/official'
-import { MODULES, PRESETS } from '../data/presets'
+import { ALL_PRESETS } from '../data/presets'
 
-const PRESET_KEYS = [...MODULES, ...PRESETS].map(p => p.key)
+const PRESET_KEYS = ALL_PRESETS.map(p => p.key)
 
 type Listed = { official: string[]; presets: string[] }
 

@@ -1078,6 +1078,11 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const data = geometricPreset(key)
     const frag = data ? jsonToFragment(data) : null
     if (!frag) { notify(t('toast.presetFailed'), 'err'); return }
+    // 单元里的板用当前选中色，管子保留四色轮换
+    if (builder && frag.panels.length) {
+      const panelColor = builder.colorFor('panel') as string
+      frag.panels = frag.panels.map(p => ({ ...p, color: panelColor }))
+    }
     clipboard.current = frag
     track('builder.model.module', { key })
     builder?.startPaste?.(frag)
