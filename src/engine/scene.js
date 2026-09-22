@@ -1281,7 +1281,7 @@ export class SceneManager {
     const nrm = new THREE.Vector3(nrmArr[0], nrmArr[1], nrmArr[2]).normalize()
       .multiplyScalar((side || 1) < 0 ? -1 : 1);
     // Rechtshaendiges Dreibein zur gewaehlten Normalen, X bleibt die Kante A->B.
-    const ex = gedreht ? zAxis.clone() : xAxis.clone();
+    const ex = gedreht ? new THREE.Vector3().crossVectors(nrm, xAxis) : xAxis.clone();
     ex.addScaledVector(nrm, -ex.dot(nrm)).normalize();
     const ey = new THREE.Vector3().crossVectors(nrm, ex).normalize();
     return {
@@ -3916,16 +3916,29 @@ export class SceneManager {
       // ist ein Nachbau, kein Mitschnitt, und hat kein eigenes Masspaar.
       // Gedrehte Platte: ihre Lippen liegen quer. Achsen tauschen, damit man es
       // sieht -- das abgegriffene Modell bringt die Lippe mit.
-      const flaechenX = p.turned ? zAxis : xAxis;
-      const flaechenZ = p.turned ? xAxis : zAxis;
-      const spanX = p.turned ? w.length() : u.length();
-      const spanZ = p.turned ? u.length() : w.length();
+      let flaechenX = p.turned ? zAxis : xAxis;
+      let flaechenZ = p.turned ? xAxis : zAxis;
+      let spanX = p.turned ? w.length() : u.length();
+      let spanZ = p.turned ? u.length() : w.length();
+      let surfaceNormal = nrm;
+      let surfaceSide = p.side;
+      // 导入面板的旋转来自 QDF，支撑管的枚举顺序不能改变面板方向。
+      if (p.geom?.quat && p.geom?.p) {
+        const rotation = new THREE.Quaternion(...p.geom.quat).normalize();
+        flaechenX = new THREE.Vector3(1, 0, 0).applyQuaternion(rotation);
+        flaechenZ = new THREE.Vector3(0, 1, 0).applyQuaternion(rotation);
+        surfaceNormal = new THREE.Vector3(0, 0, 1).applyQuaternion(rotation).toArray();
+        surfaceSide = 1;
+        spanX = p.geom.h + geometry().connectorSize;
+        spanZ = p.geom.w + geometry().connectorSize;
+        center.fromArray(p.geom.p);
+      }
       // Die Acrylglasplatte ist ein Nachbau wie die Lochplatte: Rahmen aus der
       // Platten-Geometrie, Scheibe als eigene Box -- kein abgegriffenes Teil.
       const pdef = getPanel(p.panelId) || {};
       const echteFlaeche = wantMeshes && !pdef.acrylic
         ? this._surfaceMeshFor(pdef.holes ? p.panelId : "panel2",
-          flaechenX, flaechenZ, spanX, spanZ, center.clone(), nrm, p.side)
+          flaechenX, flaechenZ, spanX, spanZ, center.clone(), surfaceNormal, surfaceSide)
         : null;
       if (echteFlaeche) {
         this._batchAdd(echteFlaeche.geo, matFor(p.id, mat), echteFlaeche.matrix,
