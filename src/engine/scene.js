@@ -4717,8 +4717,9 @@ export class SceneManager {
     const colorId = u.previewColor;
     const hex = colorId ? this._look(colorId) : ARROW_TEAL;
     if (!this._bowPreview) {
+      // 比直管预览实得多：二十根弧线挤在一个接头上，太透就分不清指的是哪根
       const mat = new THREE.MeshStandardMaterial({
-        transparent: true, opacity: 0.28, roughness: 0.48, metalness: 0.04,
+        transparent: true, opacity: 0.6, roughness: 0.48, metalness: 0.04,
         depthWrite: false,
       });
       this._bowPreview = new THREE.Mesh(geo, mat);
