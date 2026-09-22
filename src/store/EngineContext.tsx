@@ -15,6 +15,7 @@ import { fetchOfficialQdf, officialLibId, OFFICIAL_BY_ID, parseOfficialId } from
 import { applyFrameHex, loadTune } from '../engine/colorTune.js'
 import { exportAssemblyPdf as runAssemblyPdf } from '../engine/assemblyManual.js'
 import { takeModelThumb, waitSceneReady } from '../engine/thumbShot.js'
+import { bomToCsv, bomToPngDataUrl, loadImage } from '../ui/bomExport'
 
 // 引擎来自 Vanilla JS，这里不跟它的推断类型较劲。
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -199,6 +200,10 @@ interface EngineApi {
   loadPreset: (key: string) => void
   setViewCubePad: (right: number, bottom: number, size?: number) => void
   exportPng: () => void
+  /** 料表存成表格文件 */
+  exportBomCsv: () => void
+  /** 料表存成一张图，发群里直接能看 */
+  exportBomPng: () => Promise<void>
   exportAssemblyPdf: () => Promise<void>
   confirmExportManual: () => Promise<void>
   cancelExportManual: () => void
@@ -450,6 +455,11 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const thumbBatch = useRef<{ json: unknown; camera: unknown; sceneOn: boolean; mode: string } | null>(null)
   const tabsRef = useRef<Array<TabInfo & { model: unknown; view: AnyRec }>>([])
   const activeRef = useRef<string | null>(null)
+  // 料表导出在回调里跑，用 ref 取当下的料表、尺寸、库存和语言
+  const bomRef = useRef<BomView | null>(null)
+  const sizeRef = useRef<[number, number, number] | null>(null)
+  const invRowsRef = useRef<InvRow[]>([])
+  const langRef = useRef<'zh' | 'en' | 'de'>('zh')
   const switching = useRef(false)
   const clipboard = useRef<unknown>(null)
   const sessionTimer = useRef<number | null>(null)
@@ -689,6 +699,12 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     if (!b) return null
     return [Math.round(b.size[0]), Math.round(b.size[2]), Math.round(b.size[1])]
   }, [model, ready, tick])
+
+  bomRef.current = bom
+  sizeRef.current = sizeCm
+  // 没填库存时不导出拥有和还缺两列
+  invRowsRef.current = cmp.feasible == null ? [] : cmp.rows
+  langRef.current = lang
 
   const roomOverflow = useMemo(() => {
     const extra = { w: 0, d: 0, h: 0 }
@@ -1224,6 +1240,49 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     notify(t('toast.pngSaved'))
   }, [notify, t])
 
+  /** 料表导出用到的几样东西，回调里取当下的值。 */
+  const bomExportInput = () => ({
+    bom: bomRef.current as BomView,
+    name: activeName(),
+    sizeCm: sizeRef.current,
+    invRows: invRowsRef.current,
+    lang: langRef.current,
+    t,
+  })
+
+  const exportBomCsv = useCallback(() => {
+    if (!bomRef.current) { notify(t('toast.manualEmpty'), 'warn'); return }
+    track('builder.export.bom.csv')
+    download(`${activeName()} ${t('bomx.file')}.csv`, bomToCsv(bomExportInput()), 'text/csv;charset=utf-8')
+    notify(t('toast.exported'))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notify, t])
+
+  const exportBomPng = useCallback(async () => {
+    const e2 = eng.current
+    if (!e2 || !bomRef.current) { notify(t('toast.manualEmpty'), 'warn'); return }
+    // 抬头那张缩略图走模型库封面同一条截图通路（空背景，截完复位）；
+    // 截不出来也照样出表
+    let thumb: HTMLImageElement | null = null
+    startThumbBatch()
+    try {
+      const url = await takeModelThumb(e2.scene, e2.model)
+      if (typeof url === 'string') thumb = await loadImage(url)
+    } catch { /* ignore */ } finally {
+      endThumbBatch()
+    }
+    const data = bomToPngDataUrl(bomExportInput(), thumb)
+    if (!data) { notify(t('toast.manualEmpty'), 'warn'); return }
+    track('builder.export.bom.png')
+    const a = document.createElement('a')
+    a.href = data
+    a.download = `${activeName()} ${t('bomx.file')}.png`
+    a.click()
+    notify(t('toast.pngSaved'))
+    // startThumbBatch / endThumbBatch 在下面定义，只在回调里调用，不进依赖表
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notify, t])
+
   const cancelExportManual = useCallback(() => setExportManualConfirm(false), [])
 
   const exportAssemblyPdf = useCallback(async () => {
@@ -1442,7 +1501,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     toast,
     tabs, activeTabId, bom, inventory,
     invRows: cmp.rows, feasible: cmp.feasible, sizeCm, room, setRoom, roomOverflow,
-    loadPreset, placeModule, exportPng, exportAssemblyPdf, confirmExportManual, cancelExportManual, exportManualConfirm, exportingManual, shareCurrent,
+    loadPreset, placeModule, exportPng, exportBomCsv, exportBomPng, exportAssemblyPdf, confirmExportManual, cancelExportManual, exportManualConfirm, exportingManual, shareCurrent,
     assembly: {
       step: builder?.assemblyStep ?? 0,
       max: Math.max(0, (builder?.buildPlan?.steps?.length ?? 1) - 1),
