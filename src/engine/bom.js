@@ -521,7 +521,7 @@ export function computeScrews(model) {
     return null;
   };
 
-  const count = { panel: 0, conical: 0, counter: 0, slide: 0 };
+  const count = { panel: 0, acrylic: 0, conical: 0, counter: 0, slide: 0 };
 
   // 2. Platten: vier Schrauben. Eine Platte hat ZWEI Lippen mit je zwei
   //    Schrauben, sie wird also an einem Rohr-PAAR verschraubt -- nicht an allen
@@ -529,9 +529,14 @@ export function computeScrews(model) {
   //    beiden Tragrohre (p.a und p.b), gedreht die beiden quer dazu. Die
   //    Schrauben laufen durch das Rohr in die Kupplung; liegt dort schon eine,
   //    ist der Platz weg.
+  //    Die Acrylglasplatte ist eine Rahmenplatte: sie haengt wie jede Platte an
+  //    vier Plattenschrauben, und ihre Scheibe sitzt mit vier eigenen
+  //    Acrylglasschrauben im Rahmen -- die belegen keinen Platz am Rohr.
   for (const p of model.panels.values()) {
     if (p.poolPart) continue;                  // Baellebad ist eine Folie
     count.panel += 4;
+    const pdef = getPanel(p.panelId);
+    if (pdef && pdef.acrylic) count.acrylic += 4;
     const corners = model.panelCorners(p);
     if (!corners) continue;
     // corners: [Anfang a, Ende a, Ende b, Anfang b]
@@ -621,6 +626,7 @@ export function computeScrews(model) {
   for (const [color, anzahl] of [...tubeScrews.entries()]
     .sort((a, b) => b[1] - a[1])) push("screw_tube", anzahl, color);
   push("screw_panel", count.panel);
+  push("screw_acrylic", count.acrylic);
   push("screw_slide_conical", count.conical);
   push("screw_slide_conical_counter", count.counter);
   push("screw_slide", count.slide);
@@ -773,6 +779,16 @@ export function computeBOM(model) {
   // mit Katalogpreis wie Sack, Netz oder Dachtextil.
   for (const [id, count] of poolLiners) {
     fitMap.set(id, { def: getPartById(id), kind: "pool2", count });
+  }
+  // Die Acrylglasscheibe wird nicht gesetzt, sie steckt in jeder Rahmenplatte:
+  // eine Scheibe je Acrylglasplatte, gerechnet aus den Platten.
+  let acrylicSheets = 0;
+  for (const p of model.panels.values()) {
+    const def = getPanel(p.panelId);
+    if (def && def.acrylic) acrylicSheets++;
+  }
+  if (acrylicSheets) {
+    fitMap.set("acrylic_glass", { def: getPartById("acrylic_glass"), kind: "acrylic", count: acrylicSheets });
   }
   const fittings = [...fitMap.entries()].map(([key, r]) => ({
     key, id: key, kind: r.kind,

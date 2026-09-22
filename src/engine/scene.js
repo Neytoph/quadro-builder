@@ -1480,8 +1480,9 @@ export class SceneManager {
     const d = Math.max(1, dSpan - PANEL_GAP);
     const def = getPanel(panelId);
     const holes = (def && def.holes) || 0;
+    const acrylic = !!(def && def.acrylic);
     const seg = this._q().notch;
-    const key = `${holes}:${seg}:${w.toFixed(2)}x${d.toFixed(2)}x${thickness}`;
+    const key = `${holes}:${acrylic ? "a" : ""}:${seg}:${w.toFixed(2)}x${d.toFixed(2)}x${thickness}`;
     const hit = this._panelGeos.get(key);
     if (hit) return hit;
 
@@ -1520,6 +1521,18 @@ export class SceneManager {
       for (const gx of [-off, 0, off])
         for (const gy of [-off, 0, off])
           shape.holes.push(new THREE.Path().absarc(gx, gy, r, 0, Math.PI * 2, true));
+    }
+    if (acrylic) {
+      // Rahmenplatte: der Rahmen ist so breit wie die Eckaussparung plus ein
+      // Stueck Lippe, innen bleibt das Fenster fuer die Scheibe frei.
+      const [ix, iy] = this._acrylicInner(w, d);
+      const win = new THREE.Path();
+      win.moveTo(-ix, -iy);
+      win.lineTo(-ix, iy);
+      win.lineTo(ix, iy);
+      win.lineTo(ix, -iy);
+      win.closePath();
+      shape.holes.push(win);
     }
     const geo = new THREE.ExtrudeGeometry(shape, {
       depth: thickness, bevelEnabled: false, curveSegments: Math.max(seg, 6),
@@ -2611,6 +2624,39 @@ export class SceneManager {
       this._materials[key].color.set(this._look(colorId));
     }
     return this._materials[key];
+  }
+
+  /** Halbe Fenstermasse der Acrylglasplatte: Rahmen 5 cm rundum im 40er-Feld. */
+  _acrylicInner(w, d) {
+    const frame = Math.min(w, d) * 0.13;
+    return [Math.max(1, w / 2 - frame), Math.max(1, d / 2 - frame)];
+  }
+
+  /** Scheibe der Acrylglasplatte: flache Box im Fenster, duenner als der Rahmen. */
+  _acrylicPaneGeometry(wSpan, dSpan, thickness) {
+    const w = Math.max(1, wSpan - PANEL_GAP);
+    const d = Math.max(1, dSpan - PANEL_GAP);
+    const key = `acrylic-pane:${w.toFixed(2)}x${d.toFixed(2)}x${thickness}`;
+    const hit = this._panelGeos.get(key);
+    if (hit) return hit;
+    const [ix, iy] = this._acrylicInner(w, d);
+    const geo = new THREE.BoxGeometry(ix * 2 + 0.6, thickness * 0.5, iy * 2 + 0.6);
+    this._panelGeos.set(key, geo);
+    this._keepGeos.add(geo);
+    return geo;
+  }
+
+  // Acrylglas: fast klar, leicht blaeulich, von beiden Seiten sichtbar.
+  _glassMaterial() {
+    if (!this._materials["glass"]) {
+      this._materials["glass"] = new THREE.MeshStandardMaterial({
+        color: new THREE.Color(0xd7edf7),
+        roughness: 0.08, metalness: 0.05,
+        transparent: true, opacity: 0.32,
+        side: THREE.DoubleSide, depthWrite: false,
+      });
+    }
+    return this._materials["glass"];
   }
 
   // Bällebad-Wasser: semitransparentes Blau (wird über pool_floor-Panel gerendert).
@@ -3874,8 +3920,11 @@ export class SceneManager {
       const flaechenZ = p.turned ? xAxis : zAxis;
       const spanX = p.turned ? w.length() : u.length();
       const spanZ = p.turned ? u.length() : w.length();
-      const echteFlaeche = wantMeshes
-        ? this._surfaceMeshFor((getPanel(p.panelId) || {}).holes ? p.panelId : "panel2",
+      // Die Acrylglasplatte ist ein Nachbau wie die Lochplatte: Rahmen aus der
+      // Platten-Geometrie, Scheibe als eigene Box -- kein abgegriffenes Teil.
+      const pdef = getPanel(p.panelId) || {};
+      const echteFlaeche = wantMeshes && !pdef.acrylic
+        ? this._surfaceMeshFor(pdef.holes ? p.panelId : "panel2",
           flaechenX, flaechenZ, spanX, spanZ, center.clone(), nrm, p.side)
         : null;
       if (echteFlaeche) {
@@ -3892,6 +3941,13 @@ export class SceneManager {
       // verbliebene Posten (56 Platten = 56 Draw-Calls).
       const basis = new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis).setPosition(center);
       this._batchAdd(geo, matFor(p.id, mat), basis, "panel", p.id, this.pickPanels);
+      if (pdef.acrylic) {
+        // Im Aufbau-Modus (verblasst) und als Vorschau traegt die Scheibe das
+        // Material des Rahmens, sonst Glas.
+        const paneMat = (st === "future" || (asm && st === "done")) ? mat : this._glassMaterial();
+        const pane = this._acrylicPaneGeometry(u.length(), w.length(), thickness);
+        this._batchAdd(pane, matFor(p.id, paneMat), basis, "panel", p.id, this.pickPanels);
+      }
 
       // Bällebad-Boden: Wasser-Volumen (75 % Füllhöhe) über dem Boden rendern.
       if (p.panelId === "pool_floor" && st !== "future") {
