@@ -155,7 +155,11 @@ export default function TopToolbar() {
     const variant = p.holes ? t('panel.hole') : p.acrylic ? t('panel.acrylic') : ''
     return `${p.w}×${p.h}${variant ? ` · ${variant}` : ''}`
   }
-  const panelMark = panelDef ? panelLabel(panelDef) : ''
+  // 顶栏按钮位置窄：特殊板只显示那个词，普通板显示尺寸
+  const panelMark = !panelDef ? ''
+    : panelDef.holes ? t('panel.hole')
+    : panelDef.acrylic ? t('panel.acrylic')
+    : panelLabel(panelDef)
 
   return (
     <div
@@ -227,7 +231,7 @@ export default function TopToolbar() {
         )}
       >
         <Svg16 inner={TOOL_ICON.panel} />
-        <span className="leading-none">{t('tool.panels')}{panelMark ? <span className="opacity-80"> {panelMark}</span> : null}</span>
+        <span className="leading-none whitespace-nowrap">{t('tool.panels')}{panelMark ? <span className="opacity-80"> {panelMark}</span> : null}</span>
       </ToolDrop>
 
       <ToolDrop
