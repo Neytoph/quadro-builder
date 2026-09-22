@@ -7,6 +7,7 @@ import SavesPanel from './SavesPanel'
 import KitAdvisor from './KitAdvisor'
 import { BomPane } from './PartsList'
 import InventoryPane from './InventoryPane'
+import SafetyPane from './SafetyPane'
 
 const TITLE: Record<DockPane, string> = {
   file: 'btn.file',
@@ -15,6 +16,7 @@ const TITLE: Record<DockPane, string> = {
   advisor: 'btn.advisor',
   bom: 'side.bom',
   inventory: 'side.inventory',
+  safety: 'safety.title',
 }
 
 export default function RightDock() {
@@ -48,6 +50,7 @@ export default function RightDock() {
       {pane === 'advisor' && <KitAdvisor />}
       {pane === 'bom' && <BomPane />}
       {pane === 'inventory' && <InventoryPane />}
+      {pane === 'safety' && <SafetyPane />}
     </aside>
   )
 }
