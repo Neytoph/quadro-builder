@@ -6,6 +6,7 @@ import {
   panels, geometry, RANDOM_COLOR, BUILD_ORDERS, docs, storage, setLang as setEngineLang, t as engineT,
 } from '../engine-api'
 import { useI18n } from '../i18n'
+import { syncNow } from '../sync/bootstrap'
 import { geometricPreset, jsonToFragment } from '../data/presets'
 import pyramidQdf from '../data/A0128.qdf?raw'
 import { clearSharePayload, decodeShare, peekSharePayload, shareUrl } from '../share'
@@ -161,6 +162,7 @@ interface EngineApi {
   listDocs: () => Promise<Array<{ id: string; name: string; updatedAt: number }>>
   removeDoc: (docId: string) => Promise<void>
   renameDoc: (docId: string, name: string) => Promise<void>
+  pushDoc: (docId: string) => Promise<boolean>
   importFile: (file: File) => Promise<void>
   openLibraryId: (id: string) => Promise<void>
   exportQdf: () => void
@@ -866,7 +868,30 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     syncTabs()
     track('builder.design.save', { ...modelShape(data), named: !!name })
     notify(t('toast.saved', { name: saved.name }))
+    // 存下就推上去。等一个同步周期的话，这中间关掉页面这一座就只在这台
+    // 机器上；社区发帖页更是当场就要读服务器那张列表。不挡着上面那句提示：
+    // 存进本地这件事已经成了，网络慢不该让用户对着按钮等。
+    void syncNow()
   }, [notify, syncTabs, t])
+
+  /**
+   * 把这一座送到服务器上，送到了才返回 true。
+   *
+   * 问的不是"同步跑过了"而是"服务器上确实有这一座"：本地记账里 rev 有了、
+   * dirty 没了，才算真的过去。要它的是"发到社区"——对面只认服务器那张列表，
+   * 没送到就跳过去，用户看到的是一句"你还没存过造型"。
+   *
+   * 推两轮：点下来的那一刻可能正好有一轮在跑，而那一轮开始时这一座
+   * 还没存下，等到它结束什么也没带走。
+   */
+  const pushDoc = useCallback(async (docId: string) => {
+    for (let i = 0; i < 2; i++) {
+      await syncNow()
+      const doc = await docs.getDoc(docId) as AnyRec | null
+      if (doc && Number(doc.rev) > 0 && !doc.dirty) return true
+    }
+    return false
+  }, [])
 
   const openDoc = useCallback(async (docId: string) => {
     const doc = await docs.getDoc(docId)
@@ -1409,6 +1434,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     listDocs: async () => (await docs.listDocs()).map((d: AnyRec) => ({ id: String(d.id), name: String(d.name), updatedAt: Number(d.updatedAt || 0) })),
     removeDoc: async (id) => { await docs.removeDoc(id); bump() },
     renameDoc: async (id, name) => { await docs.renameDoc(id, name); bump() },
+    pushDoc,
     importFile, openLibraryId, exportQdf, exportJson,
     // 装配模式是"图纸能不能照着搭"的唯一信号：进去了、翻到第几步、
     // 中途退出还是翻到底，说明的事完全不同。

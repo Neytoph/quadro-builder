@@ -50,7 +50,10 @@ export function createSync(opts: SyncOptions = {}) {
   const { baseUrl, intervalMs = 30_000, fetchImpl = globalThis.fetch, onEvent } = opts
   const enabled = Boolean(baseUrl)
   let timer: ReturnType<typeof setInterval> | null = null
-  let running = false
+  // 正在跑的那一轮。存的是 Promise 而不是一个布尔值，调用方等 syncNow()
+  // 才等得到结果——「存完马上发到社区」要的就是这个：那一刻可能正好有
+  // 一轮在跑，返回 undefined 就成了「以为推完了，其实刚开始」。
+  let inflight: Promise<void> | null = null
 
   const emit = (e: SyncEvent) => { try { onEvent?.(e) } catch { /* 回调自己的错不该拖垮同步 */ } }
 
@@ -197,9 +200,7 @@ export function createSync(opts: SyncOptions = {}) {
     emit({ type: 'inventory-pulled', rev: remote.rev })
   }
 
-  async function syncNow(): Promise<void> {
-    if (!enabled || running) return
-    running = true
+  async function round(): Promise<void> {
     emit({ type: 'start' })
     try {
       await push()
@@ -209,9 +210,14 @@ export function createSync(opts: SyncOptions = {}) {
       emit({ type: 'idle', rev: readCursor() })
     } catch (error) {
       emit({ type: 'error', error })
-    } finally {
-      running = false
     }
+  }
+
+  /** 跑一轮。已经有一轮在跑就把那一轮给出去，两边都能等到它结束。 */
+  function syncNow(): Promise<void> {
+    if (!enabled) return Promise.resolve()
+    if (!inflight) inflight = round().finally(() => { inflight = null })
+    return inflight
   }
 
   function start(): void {

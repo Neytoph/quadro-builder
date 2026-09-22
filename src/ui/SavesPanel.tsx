@@ -34,10 +34,28 @@ export default function SavesPanel() {
   const { setPane } = useDock()
   const [docs, setDocs] = useState<Array<{ id: string; name: string; updatedAt: number }>>([])
   const write = useCommunityWrite()
+  const [sending, setSending] = useState('')
 
   useEffect(() => {
     void api.listDocs().then(setDocs)
   }, [api])
+
+  /**
+   * 发帖页只认服务器上那张列表，所以先把这一座送上去，送到了再走。
+   * 送不上去就留在原地说一声——跳过去只会让人对着一句"你还没存过造型"发愣。
+   */
+  const share = async (docId: string) => {
+    setSending(docId)
+    try {
+      if (!await api.pushDoc(docId)) {
+        api.notify(t('saves.shareNotYet'), 'warn')
+        return
+      }
+      location.href = `${write}?board=show&model=${encodeURIComponent(docId)}`
+    } finally {
+      setSending('')
+    }
+  }
 
   return (
     <div className="p-3">
@@ -56,8 +74,10 @@ export default function SavesPanel() {
             }} className="text-xs text-gray-400 hover:text-teal-600 cursor-pointer">{t('saves.rename')}</button>
             {/* 刚搭完是最想说两句的时候。从这儿走，那座会跟着进正文，不用再挑一遍。 */}
             {write && (
-              <a href={`${write}?board=show&model=${encodeURIComponent(d.id)}`}
-                className="text-xs text-gray-400 hover:text-teal-600 cursor-pointer">{t('saves.share')}</a>
+              <button onClick={() => { void share(d.id) }} disabled={!!sending}
+                className="text-xs text-gray-400 hover:text-teal-600 cursor-pointer disabled:cursor-wait">
+                {sending === d.id ? t('saves.sharing') : t('saves.share')}
+              </button>
             )}
             <button onClick={() => {
               if (window.confirm(t('confirm.delete'))) void api.removeDoc(d.id).then(() => api.listDocs().then(setDocs))

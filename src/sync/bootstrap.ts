@@ -15,6 +15,21 @@ import { createSync, QuotaError } from './index'
 import type { SyncEvent } from './types'
 
 let started = false
+// 已经在跑的那一个。应用要「这就推上去」时找它。
+let live: ReturnType<typeof createSync> | null = null
+
+/**
+ * 立刻跑一轮同步，等它跑完。
+ *
+ * 存下来的造型先落在这台机器的 IndexedDB 里，要等下一个同步周期才上服务器。
+ * 中间这段时间，别处（比如社区发帖页，它只认服务器那张列表）看不见这一座。
+ * 所以存完、发出去之前，都在这里等一等。
+ *
+ * 没接同步的部署（开源本地版）和还没登录的时候是空转：本来就没有服务器。
+ */
+export function syncNow(): Promise<void> {
+  return started && live ? live.syncNow() : Promise.resolve()
+}
 
 /** 后端认不认得出当前访客。401/403 = 没登录，其它错误当"暂时说不准"。 */
 async function authenticated(baseUrl: string): Promise<boolean | null> {
@@ -70,6 +85,7 @@ export function startSyncIfConfigured(
   const begin = () => {
     if (started) return
     started = true
+    live = sync
     track('builder.sync.start')
     sync.start()
     // 关页面前推一把，别把最后的改动留在本地
