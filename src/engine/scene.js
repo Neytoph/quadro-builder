@@ -182,6 +182,10 @@ const POOL_SMALL_OFFSET = 20;
 const POOL_SKIN = 2;
 // Sie haengt innen im Rahmen -- eine halbe Rohrbreite von den Rohrachsen weg.
 const POOL_INSET = 2.5;
+// 海洋球：官方一袋 500 个，直径 6 厘米，红绿蓝黄四色；铺到池深的三分之二。
+const BALL_R = 3;
+const BALL_FILL = 2 / 3;
+const BALL_COLORS = [0xd83a2e, 0x2f9e44, 0x2b6fd6, 0xf2c12e];
 // ARM_FITTINGS (aus model.js): Teile, die auf einem Stutzen der Kupplung sitzen
 // -- dort gehoert einer gezeichnet, auch wenn kein Rohr steckt. Beim offenen
 // Verbinderende ist genau das seine Aufgabe: es ERZWINGT den Stutzen (so auch
@@ -1621,8 +1625,9 @@ export class SceneManager {
         mesh.position.addScaledVector(new THREE.Vector3(1, 0, 0).applyQuaternion(q), -POOL_SMALL_OFFSET);
       }
       const teile = [mesh];
+      // 池里：倒了海洋球就画球，不然画水
       const wasser = f.kind === "pool2" || f.kind === "pool-small2"
-        ? this._markPoolWater(this._poolWater(f, q)) : null;
+        ? this._markPoolWater(f.balls ? this._poolBalls(f, q) : this._poolWater(f, q)) : null;
       if (wasser) teile.push(wasser);
       return teile;
     }
@@ -1845,7 +1850,8 @@ export class SceneManager {
           wand(breite, dick, laenge, 0, -ph + dick / 2, mitte),          // Boden
         ].map((g) => this._placeFitting(
           new THREE.Mesh(g, this._fittingMaterial(hex, false)), f, q));
-        // Wasser: 75 % Fuellhoehe, knapp innerhalb der Folie.
+        // 池里：倒了海洋球就画球，不然画水（75 % 水位，贴着内衬里侧）。
+        if (f.balls) return [...teile, this._markPoolWater(this._poolBalls(f, q))];
         const wasserH = hoehe * 0.75;
         const wasser = this._markPoolWater(this._placeFitting(new THREE.Mesh(
           wand(breite - 2 * dick, wasserH, laenge - 2 * dick,
@@ -1902,6 +1908,57 @@ export class SceneManager {
         return g;
       });
     return this._placeFitting(new THREE.Mesh(geo, this._waterMaterial()), f, q);
+  }
+
+  /**
+   * 海洋球：直径 6 厘米的四色球，铺到池深的三分之二。位置用格子加一点固定的
+   * 抖动，同一个池子每次画出来一样。一个 InstancedMesh 就够，L 池大约一千六百颗。
+   */
+  _poolBalls(f, q) {
+    const pw = f.w || 0, ph = f.h || 0, pd = f.d || 0;
+    if (!pw || !ph || !pd) return null;
+    const tief = Math.abs(pd), dz = pd < 0 ? -1 : 1;
+    const ein = POOL_INSET, dick = POOL_SKIN;
+    const breite = pw - 2 * ein - 2 * dick, laenge = tief - 2 * ein - 2 * dick;
+    const fill = (ph - ein) * BALL_FILL;
+    const r = BALL_R;
+    if (breite < 2 * r || laenge < 2 * r || fill < 2 * r) return null;
+    const nx = Math.max(1, Math.floor(breite / (2 * r + 0.4)));
+    const nz = Math.max(1, Math.floor(laenge / (2 * r + 0.4)));
+    const ny = Math.max(1, Math.floor((fill - 2 * r) / (2 * r * 0.88)) + 1);
+    const geo = this._cachedGeo("ball", () => new THREE.SphereGeometry(r, 10, 8));
+    const mesh = new THREE.InstancedMesh(geo, this._ballMaterial(), nx * ny * nz);
+    const sx = breite / nx, sz = laenge / nz, sy = 2 * r * 0.88;
+    const m4 = new THREE.Matrix4();
+    const col = new THREE.Color();
+    let i = 0;
+    for (let iy = 0; iy < ny; iy++) {
+      for (let ix = 0; ix < nx; ix++) {
+        for (let iz = 0; iz < nz; iz++) {
+          const hsh = ((ix + 1) * 73856093 ^ (iy + 1) * 19349663 ^ (iz + 1) * 83492791) >>> 0;
+          const jx = ((hsh & 0xff) / 255 - 0.5) * Math.max(0, sx - 2 * r);
+          const jz = (((hsh >> 8) & 0xff) / 255 - 0.5) * Math.max(0, sz - 2 * r);
+          const x = -breite / 2 + sx * (ix + 0.5) + jx;
+          const y = -ph + dick + r + sy * iy;
+          const z = dz * (ein + dick + sz * (iz + 0.5)) + jz;
+          mesh.setMatrixAt(i, m4.makeTranslation(x, y, z));
+          mesh.setColorAt(i, col.setHex(BALL_COLORS[(hsh >> 16) & 3]));
+          i++;
+        }
+      }
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    this._placeFitting(mesh, f, q);
+    mesh.castShadow = false;
+    return mesh;
+  }
+
+  _ballMaterial() {
+    if (!this._materials["balls"]) {
+      this._materials["balls"] = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.42, metalness: 0.02 });
+    }
+    return this._materials["balls"];
   }
 
   /** Wasser ist nur Dekoration: nicht mitfaerben, sonst wirkt die Auswahl wie ein oranger Kasten. */

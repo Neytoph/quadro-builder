@@ -633,6 +633,20 @@ export function computeScrews(model) {
   return rows;
 }
 
+/**
+ * 一个泳池要几袋海洋球（一袋 500 个）。内空 = 外框去掉内衬的缩进和皮厚，
+ * 铺到池深的三分之二；一颗球直径 6 厘米，随意堆放约占 180 立方厘米。
+ * 口径和场景里画球的一致（scene.js `_poolBalls`）。
+ */
+export function ballBagsFor(f) {
+  const w = Math.abs(f.w || 0), h = Math.abs(f.h || 0), d = Math.abs(f.d || 0);
+  if (!w || !h || !d) return 0;
+  const inset = 2.5, skin = 2;
+  const wIn = w - 2 * inset - 2 * skin, dIn = d - 2 * inset - 2 * skin, fill = (h - inset) * 2 / 3;
+  if (wIn <= 0 || dIn <= 0 || fill <= 0) return 0;
+  return Math.max(1, Math.ceil(wIn * dIn * fill / 180 / 500));
+}
+
 export function computeBOM(model) {
   // --- Rohre nach Typ + Farbe ---
   const tubeMap = new Map();
@@ -758,6 +772,11 @@ export function computeBOM(model) {
     const def = poolLinerFor(span(0, 1), span(0, 3));
     if (def) poolLiners.set(def.id, (poolLiners.get(def.id) || 0) + 1);
   }
+  // 海洋球：按池子的内空算袋数，一袋 500 个。
+  let ballBags = 0;
+  for (const f of (model.fittings ? model.fittings.values() : [])) {
+    if (POOL_KINDS.has(f.kind) && f.balls) ballBags += ballBagsFor(f);
+  }
 
   // --- Anbauteile (Raeder, Rollen, Netze, Sonderkupplungen) --------------
   // Gezaehlt wird nach Katalogteil, nicht nach QDF-Art: ein- und dreiarmige
@@ -780,6 +799,7 @@ export function computeBOM(model) {
   for (const [id, count] of poolLiners) {
     fitMap.set(id, { def: getPartById(id), kind: "pool2", count });
   }
+  if (ballBags) fitMap.set("balls", { def: getPartById("balls"), kind: "balls", count: ballBags });
   // Die Acrylglasscheibe wird nicht gesetzt, sie steckt in jeder Rahmenplatte:
   // eine Scheibe je Acrylglasplatte, gerechnet aus den Platten.
   let acrylicSheets = 0;

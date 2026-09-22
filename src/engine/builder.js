@@ -717,6 +717,17 @@ export class Builder {
    * 泳池内衬：有现成方框就标绿面让人点挂；没有框则整套跟指针走，↑↓ 换楼层。
    */
   startPool(linerId) {
+    // 海洋球：不是内衬，是往现成的泳池里倒。每个泳池上方给一块绿面，点一下
+    // 倒进去，再点一次倒出来。
+    if (linerId === "balls") {
+      if (!this._pools().length) { this.onNotice(t("notice_balls_none"), "info"); return false; }
+      this.cancelPaste();
+      this.poolLinerId = "balls";
+      this.fittingKind = "balls";
+      this.setMode("fitting");
+      this.onNotice(t("notice_balls_pick"), "info");
+      return "mount";
+    }
     const spec = POOL_SETS[linerId];
     if (!spec) return false;
     this.poolLinerId = linerId;
@@ -2239,6 +2250,12 @@ export class Builder {
     // Merkt sich, an welchen Kupplungen das gewaehlte Teil sitzen darf -- der
     // Zeiger zeigt dort eine Hand, auch wenn er den Ankerpunkt knapp verfehlt.
     this._fittingMountNodes = new Set();
+    if (this.fittingKind === "balls") {
+      for (const f of this._pools()) {
+        this.scene.addPanelHandle(this._poolOpeningCorners(f), { poolBalls: f.id });
+      }
+      return;
+    }
     if (POOL_KINDS.has(this.fittingKind)) {
       const spec = this.poolLinerId && POOL_SETS[this.poolLinerId];
       if (spec) {
@@ -3583,7 +3600,31 @@ export class Builder {
    * auf ein gesetztes Anbauteil nimmt es wieder weg. Naeher am Auge gewinnt --
    * sonst laege ein Ankerpunkt hinter einem Teil und man kaeme nicht daran.
    */
+  /** 模型里的泳池（配件 pool2 / pool-small2）。 */
+  _pools() {
+    return [...this.model.fittings.values()].filter((f) => POOL_KINDS.has(f.kind));
+  }
+
+  /** 泳池口的四个角（世界坐标）：局部 x 是宽，z 是深（带正负），y=0 是前墙上沿。 */
+  _poolOpeningCorners(f) {
+    const q = f.quat && f.quat.length === 4 ? f.quat : [0, 0, 0, 1];
+    const ex = xAxisOf(q), ez = zAxisOf(q);
+    const w = f.w || 120, d = f.d || 120;
+    const at = (lx, lz) => [f.x + ex[0] * lx + ez[0] * lz, f.y + ex[1] * lx + ez[1] * lz, f.z + ex[2] * lx + ez[2] * lz];
+    return [at(-w / 2, 0), at(w / 2, 0), at(w / 2, d), at(-w / 2, d)];
+  }
+
+  _clickBalls(e) {
+    const h = this.scene.pickHandle(e.clientX, e.clientY);
+    const f = h && h.data && h.data.poolBalls ? this.model.fittings.get(h.data.poolBalls) : null;
+    if (!f) { this.onNotice(t("notice_balls_pick"), "info"); return; }
+    this.recordHistory(() => { f.balls = !f.balls; });
+    this.onNotice(t(f.balls ? "notice_balls_in" : "notice_balls_out"));
+    this.refresh();
+  }
+
   _clickFitting(e) {
+    if (this.fittingKind === "balls") { this._clickBalls(e); return; }
     if (ROOF_KINDS.has(this.fittingKind)) { this._clickRoof(e); return; }
     if (POOL_KINDS.has(this.fittingKind)) { this._clickPoolLiner(e); return; }
     if (RAIL_FITTINGS.has(this.fittingKind)) { this._clickLattice(e); return; }

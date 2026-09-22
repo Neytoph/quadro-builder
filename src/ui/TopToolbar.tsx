@@ -138,7 +138,8 @@ export default function TopToolbar() {
 
   const wheels = api.catalog.accessories.filter(a => a.qdf && ['multi-wheel2', 'floating-wheel2', 'casters2', 'steering-lock2', 'hub-cap2', 'bearing2', 'adapter2'].includes(a.qdf))
   const textiles = api.catalog.accessories.filter(a => a.qdf && ['textil2', 'textil-round2', 'roof2', 'roof-large2', 'lattice2', 'bag2'].includes(a.qdf))
-  const pools = api.catalog.accessories.filter(a => a.id.startsWith('pool_liner'))
+  // 四种内衬，末尾跟着海洋球（往现成的泳池里倒）
+  const pools = api.catalog.accessories.filter(a => a.id.startsWith('pool_liner') || a.id === 'balls')
   const slides = [
     { id: 'slide-new2', part: 'slide_integral' },
     { id: 'slide2', part: 'slide_module' },

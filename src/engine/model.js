@@ -5630,6 +5630,7 @@ export class BuildModel {
         if (f.d != null) o.d = f.d;
         if (f.mask != null) o.mask = f.mask;
         if (f.rest) o.rest = f.rest;
+        if (f.balls) o.balls = true;      // 泳池里倒了海洋球
         return o;
       }),
       slides: [...this.slides.values()].map((s) => {
@@ -5741,6 +5742,7 @@ export class BuildModel {
         w: f.w, h: f.h, d: f.d, mask: f.mask,
         // Felder aus der Datei, die wir nur durchreichen (Flexikupplung & Co.)
         rest: f.rest || null,
+        balls: !!f.balls,
       });
       maxSeq = Math.max(maxSeq, parseSeq(f.id));
     }
