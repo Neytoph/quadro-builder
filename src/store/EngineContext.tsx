@@ -154,6 +154,12 @@ interface EngineApi {
   undo: () => void
   redo: () => void
   rotate: (dir: 1 | -1) => void
+  /** 左右（lr）或前后（fb）镜像，按当前视角定轴；粘贴中就翻手上的副本 */
+  mirror: (dir: 'lr' | 'fb') => void
+  group: () => void
+  ungroup: () => void
+  /** 当前选中涉及几个组 */
+  selectionGroups: number
   deleteSel: () => void
   copy: () => void
   paste: () => void
@@ -1461,6 +1467,17 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     undo: () => { bumpCount('builder.edit.undo'); builder?.undo(); bump() },
     redo: () => { bumpCount('builder.edit.redo'); builder?.redo(); bump() },
     rotate: (dir) => { bumpCount('builder.edit.rotate'); builder?.rotateSelectionBy?.(dir); bump() },
+    mirror: (dir) => {
+      bumpCount('builder.edit.mirror')
+      // 「左右」= 垂直于相机右方向的镜面；取右方向里占主导的世界轴
+      const axes = scene?.getHorizontalAxes?.() || { forward: [0, 0, -1], right: [1, 0, 0] }
+      const v = dir === 'lr' ? axes.right : axes.forward
+      builder?.mirrorSelectionBy?.(Math.abs(v[0]) >= Math.abs(v[2]) ? 'x' : 'z')
+      bump()
+    },
+    group: () => { bumpCount('builder.edit.group'); builder?.groupSelection?.(); bump() },
+    ungroup: () => { bumpCount('builder.edit.ungroup'); builder?.ungroupSelection?.(); bump() },
+    selectionGroups: builder?.groupsInSelection?.() ?? 0,
     deleteSel: () => { bumpCount('builder.edit.delete'); builder?.deleteSelection(); bump() },
     copy, paste, cancelPaste, selectAll, selectConnected,
     nudgePasteY: (steps) => { builder?.nudgePasteY?.(steps); bump() },
