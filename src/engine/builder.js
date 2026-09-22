@@ -588,6 +588,73 @@ export class Builder {
     return true;
   }
 
+  /** 选中部分沿世界轴 x 或 z 翻转；挂在指针上的副本就地翻。 */
+  mirrorSelectionBy(axis = "x") {
+    if (this._drag) return false;
+    if (this._paste) return this._mirrorPaste(axis);
+    if (this.mode !== "select" || !this.selection.size) return false;
+    const before = JSON.stringify(this.model.toJSON());
+    const res = this.model.mirrorSelection(this.selection, axis,
+      { merge: true, validate: infeasibleConnectors, grid: SNAP_STEP });
+    if (!res.ok) { this.onNotice(t("notice_mirror_" + res.reason), "warn"); return false; }
+    this._afterMove(before, res);
+    return true;
+  }
+
+  _mirrorPaste(axis) {
+    const d = this._paste;
+    if (!d || !d.sel) return false;
+    const res = this.model.mirrorSelection(d.sel, axis, { merge: false, grid: SNAP_STEP });
+    if (!res.ok) { this.onNotice(t("notice_mirror_" + res.reason), "warn"); return false; }
+    d.valid = !this._troubleWith(d.sel, d.collidedBefore);
+    this.refresh();
+    return true;
+  }
+
+  // --- 成组 ----------------------------------------------------------------
+  _kindOf(id) {
+    const m = this.model;
+    if (m.tubes.has(id)) return "tube";
+    if (m.panels.has(id)) return "panel";
+    if (m.textiles.has(id)) return "textile";
+    if (m.slides.has(id)) return "slide";
+    if (m.clamps.has(id)) return "clamp";
+    if (m.fittings.has(id)) return "fitting";
+    return "node";
+  }
+
+  groupSelection() {
+    if (this.mode !== "select" || this.selection.size < 2) {
+      this.onNotice(t("notice_group_few"), "warn");
+      return false;
+    }
+    let gid = null;
+    this.recordHistory(() => { gid = this.model.groupParts([...this.selection.keys()]); });
+    if (!gid) { this.onNotice(t("notice_group_few"), "warn"); return false; }
+    this.onNotice(t("notice_group_done", this.model.groups.get(gid).size));
+    this.refresh();
+    return true;
+  }
+
+  ungroupSelection() {
+    let n = 0;
+    this.recordHistory(() => { n = this.model.ungroupParts([...this.selection.keys()]); });
+    if (!n) { this.onNotice(t("notice_ungroup_none"), "warn"); return false; }
+    this.onNotice(t("notice_ungroup_done", n));
+    this.refresh();
+    return true;
+  }
+
+  /** 选中里涉及几个组。 */
+  groupsInSelection() {
+    const s = new Set();
+    for (const id of this.selection.keys()) {
+      const g = this.model.groupOf(id);
+      if (g) s.add(g);
+    }
+    return s.size;
+  }
+
   // --- Kopieren und Einfuegen ---------------------------------------------
   // Das Einfuegen laeuft wie das Ziehen einer Auswahl: Schnappschuss, bei jeder
   // Zeigerbewegung neu einsetzen, am Ende EIN Undo-Schritt. Der Unterschied --
@@ -4196,7 +4263,26 @@ export class Builder {
   // Cursor-Modus: bereits platzierte Teile auswaehlen. Einfacher Klick waehlt
   // genau eines, Strg/Shift-Klick nimmt dazu bzw. wieder heraus, Klick ins
   // Leere hebt die Auswahl auf. Es werden KEINE Ankerpunkte gebaut.
+  /** 选中里有组员的，整组都进选中：夹子、滑梯那几条路各自选完再统一扩。 */
+  _expandSelectionGroups() {
+    if (!this.model.groups.size) return;
+    const gids = new Set();
+    for (const id of this.selection.keys()) {
+      const g = this.model.groupOf(id);
+      if (g) gids.add(g);
+    }
+    for (const g of gids) {
+      for (const m of this.model.groups.get(g)) if (!this.selection.has(m)) this.selection.set(m, this._kindOf(m));
+    }
+  }
+
   _clickSelect(e) {
+    this._clickSelectRaw(e);
+    this._expandSelectionGroups();
+    this.refresh();
+  }
+
+  _clickSelectRaw(e) {
     const pick = this._pickSelect(e.clientX, e.clientY);
     const add = e.ctrlKey || e.metaKey || e.shiftKey;
     if (!pick) {
@@ -4256,15 +4342,20 @@ export class Builder {
     // Auswahl spaeter nicht mehr damit ueberein, gilt der Vermerk nicht mehr --
     // so muss ihn niemand aufraeumen.
     this._profilAuswahl = Array.isArray(pick.data.tubes) ? new Set(ids) : null;
-    const schonDrin = ids.every((x) => this.selection.has(x));
+    // 组里的零件一起选
+    const kinds = new Map(ids.map((x) => [x, kind]));
+    const gid = this.model.groupOf(ids[0]);
+    if (gid) for (const m of this.model.groups.get(gid)) if (!kinds.has(m)) kinds.set(m, this._kindOf(m));
+    const alle = [...kinds.keys()];
+    const schonDrin = alle.every((x) => this.selection.has(x));
     if (add) {
-      if (schonDrin) for (const x of ids) this.selection.delete(x);
-      else for (const x of ids) this.selection.set(x, kind);
-    } else if (this.selection.size === ids.length && schonDrin) {
+      if (schonDrin) for (const x of alle) this.selection.delete(x);
+      else for (const [x, k] of kinds) this.selection.set(x, k);
+    } else if (this.selection.size === alle.length && schonDrin) {
       this.selection.clear();
     } else {
       this.selection.clear();
-      for (const x of ids) this.selection.set(x, kind);
+      for (const [x, k] of kinds) this.selection.set(x, k);
     }
     this.refresh();
   }

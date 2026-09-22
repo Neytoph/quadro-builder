@@ -127,7 +127,13 @@ function AppInner() {
       if (meta && (e.key === 'v' || e.key === 'V')) { e.preventDefault(); api.paste(); return }
       if (meta && (e.key === 's' || e.key === 'S')) { e.preventDefault(); void api.saveCurrent(); return }
       if (meta && (e.key === 'a' || e.key === 'A')) { e.preventDefault(); api.selectAll(); return }
+      if (meta && (e.key === 'g' || e.key === 'G')) { e.preventDefault(); e.shiftKey ? api.ungroup() : api.group(); return }
       if (meta) return
+      if ((e.key === 'm' || e.key === 'M') && (api.selectionCount || api.pasting)) {
+        e.preventDefault()
+        api.mirror(e.shiftKey ? 'fb' : 'lr')
+        return
+      }
       if ((e.key === 'l' || e.key === 'L') && !api.pasting) { e.preventDefault(); api.selectConnected(); return }
       if (e.key === 'Delete' || e.key === 'Backspace') { api.deleteSel(); return }
       if (e.key === 'f' || e.key === 'F') { e.preventDefault(); api.frame(); return }

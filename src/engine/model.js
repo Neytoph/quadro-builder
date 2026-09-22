@@ -605,6 +605,9 @@ export class BuildModel {
     // Rundwaende, grosse Daecher, Netze, Saecke.
     // id -> { id, kind, x, y, z, quat, color, w?, h?, mask? }
     this.fittings = new Map();
+    // 成组：一组是一批零件 id（管、板、布、滑梯、夹子、配件、接头）。
+    // 点到组里任何一件整组一起选。gid -> Set<id>
+    this.groups = new Map();
     this._seq = 1;
   }
 
@@ -4075,12 +4078,24 @@ export class BuildModel {
     const relPunkt = (p) => (Array.isArray(p) && p.length === 3
       ? [p[0] - anchor[0], p[1] - anchor[1], p[2] - anchor[2]] : p);
 
+    const panels = aufRohren(json.panels);
+    const textiles = aufRohren(json.textiles);
+    // 整组都在片段里的组跟着走
+    const drin = new Set([
+      ...nodes.map((n) => n.id), ...tubeIds, ...panels.map((p) => p.id), ...textiles.map((x) => x.id),
+      ...clamps.map((c) => c.id), ...slides.map((s) => s.id), ...fittings.map((f) => f.id),
+    ]);
+    const groups = [...this.groups.entries()]
+      .filter(([, set]) => set.size >= 2 && [...set].every((id) => drin.has(id)))
+      .map(([id, set]) => ({ id, ids: [...set] }));
+
     return {
       anchor,
       nodes: nodes.map(rel),
       tubes,
-      panels: aufRohren(json.panels),
-      textiles: aufRohren(json.textiles),
+      panels,
+      textiles,
+      groups,
       clamps: clamps.map(rel),
       slides: slides.map((s) => {
         const o = rel(s);
@@ -4146,6 +4161,7 @@ export class BuildModel {
         const a = neu.get(p.a), b = neu.get(p.b);
         if (!a || !b) continue;
         const id = this._id(prefix);
+        neu.set(p.id, id);
         out[art].push(id);
         map.set(id, { ...p, id, a, b });
       }
@@ -4165,6 +4181,11 @@ export class BuildModel {
     for (const f of frag.fittings || []) {
       const rec = versetzt(f, "f", "fittings");
       this.fittings.set(rec.id, rec);
+    }
+    // 片段里的组换上新 id 再登记
+    for (const g of frag.groups || []) {
+      const ids = (g.ids || []).map((id) => neu.get(id)).filter(Boolean);
+      if (ids.length >= 2) this.groups.set(this._id("g"), new Set(ids));
     }
     return out;
   }
@@ -4378,6 +4399,190 @@ export class BuildModel {
    *
    * Liefert { ok, reason, merged, detached }.
    */
+  // --- 成组 --------------------------------------------------------------
+  _partExists(id) {
+    return this.tubes.has(id) || this.panels.has(id) || this.textiles.has(id) || this.slides.has(id)
+      || this.clamps.has(id) || this.fittings.has(id) || this.nodes.has(id);
+  }
+
+  /** 删掉零件之后组里可能剩下不存在的 id；剩一件的组没有意义。 */
+  _pruneGroups() {
+    for (const [gid, set] of [...this.groups]) {
+      for (const id of [...set]) if (!this._partExists(id)) set.delete(id);
+      if (set.size < 2) this.groups.delete(gid);
+    }
+  }
+
+  groupOf(id) {
+    for (const [gid, set] of this.groups) if (set.has(id)) return gid;
+    return null;
+  }
+
+  /** 把这些零件成一组。已经在别的组里的换到新组。少于两件返回 null。 */
+  groupParts(ids) {
+    const set = new Set(ids.filter((id) => this._partExists(id)));
+    if (set.size < 2) return null;
+    for (const id of set) {
+      const g = this.groupOf(id);
+      if (g) this.groups.get(g).delete(id);
+    }
+    const gid = this._id("g");
+    this.groups.set(gid, set);
+    this._pruneGroups();
+    return gid;
+  }
+
+  /** 解散这些零件所在的组，返回解散了几组。 */
+  ungroupParts(ids) {
+    let n = 0;
+    for (const id of ids) {
+      const g = this.groupOf(id);
+      if (g) { this.groups.delete(g); n++; }
+    }
+    return n;
+  }
+
+  // --- 镜像 --------------------------------------------------------------
+  /**
+   * 选中部分沿一根世界轴翻转（axis = "x" 或 "z"），镜面穿过选中部分的中心，
+   * 中心对齐 grid。和 rotateSelection 同一条路：快照、和外面断开、翻转、
+   * 碰撞、合并、接头校验。弯滑梯有手性，镜像后没有对应零件，直接拒绝。
+   */
+  mirrorSelection(sel, axis = "x", { merge = true, validate = null, grid = 5 } = {}) {
+    const tg = this.moveTargets(sel);
+    if (!tg.nodes.size && !tg.clamps.size && !tg.slides.size && !tg.fittings.size) return { ok: false, reason: "empty" };
+    for (const id of tg.slides) {
+      const sl = this.slides.get(id);
+      if (sl && sl.kind === "curved-slide2") return { ok: false, reason: "chiral" };
+    }
+    const i = axis === "z" ? 2 : 0;
+    const punkte = [];
+    for (const id of tg.nodes) punkte.push(this.nodes.get(id));
+    for (const id of tg.clamps) punkte.push(this.clamps.get(id));
+    for (const id of tg.slides) punkte.push(this.slides.get(id));
+    for (const id of tg.fittings || []) punkte.push(this.fittings.get(id));
+    const gueltig = punkte.filter(Boolean);
+    if (!gueltig.length) return { ok: false, reason: "empty" };
+    const vs = gueltig.map((o) => (i === 0 ? o.x : o.z));
+    const c = Math.round((Math.min(...vs) + Math.max(...vs)) / 2 / grid) * grid;
+
+    const snapshot = this.toJSON();
+    const movedTubes = this.tubesAt(tg.nodes);
+    const collidedBefore = this.collisions({ only: movedTubes });
+    const badBefore = validate ? validate(this) : null;
+    const fail = (reason) => { this.loadJSON(snapshot); return { ok: false, reason }; };
+
+    const detached = this._detachBoundary(tg.nodes);
+    this._applyMirror(tg, i, c);
+    for (const id of this.collisions({ only: movedTubes, allowCoincide: merge })) {
+      if (!collidedBefore.has(id)) return fail("collision");
+    }
+    const merged = merge ? this._mergeMovedNodes(tg.nodes) : 0;
+    if (badBefore) {
+      for (const id of validate(this)) if (!badBefore.has(id)) return fail("connector");
+    }
+    return { ok: true, merged, detached };
+  }
+
+  /**
+   * 翻转本身：位置沿第 i 个坐标对镜面 c 反射，方向的第 i 个分量取反。
+   * 朝向（四元数）翻过来是左手系，把局部 x 轴（零件的宽度方向）重新按
+   * y × z 算回来：滑梯的走向和顶棚的屋脊都不变，只有左右互换。
+   */
+  _applyMirror(tg, i, c) {
+    const r6 = (t) => Math.round(t * 1e6) / 1e6;
+    const flipPos = (o) => {
+      if (!o) return;
+      if (i === 0) o.x = round(2 * c - o.x); else o.z = round(2 * c - o.z);
+    };
+    const flipPt = (p) => {
+      if (!Array.isArray(p) || p.length !== 3) return p;
+      const q = p.slice(); q[i] = round(2 * c - q[i]); return q;
+    };
+    const flipDir = (v) => {
+      if (!v || v.length !== 3) return v;
+      const q = v.slice(); q[i] = -q[i]; return q.map(r6);
+    };
+    const flipQuat = (q) => {
+      if (!q || q.length !== 4) return q;
+      const ey = flipDir(yAxisOf(q)), ez = flipDir(zAxisOf(q));
+      const ex = cross3(ey, ez);
+      return quatFromBasis(ex, ey, ez).map((v) => Math.round(v * 1e4) / 1e4);
+    };
+
+    // 板和布在承重管上的起点：管的方向翻过来之后，从另一头量
+    for (const list of [this.panels, this.textiles]) {
+      for (const p of list.values()) {
+        const t = this.tubes.get(p.a);
+        if (!t || !tg.nodes.has(t.a) || !tg.nodes.has(t.b)) continue;
+        const ra = this._rail(p.a);
+        if (!ra || Math.abs(ra.dir[i]) < 0.5) continue;
+        p.t0 = round(ra.len - (p.t0 + p.len));
+      }
+    }
+
+    for (const id of tg.nodes) {
+      const n = this.nodes.get(id);
+      if (!n) continue;
+      flipPos(n);
+      if (n.quat) n.quat = flipQuat(n.quat);
+      if (n.c45quat) n.c45quat = flipQuat(n.c45quat);
+      if (n.partQuat) n.partQuat = flipQuat(n.partQuat);
+      if (n.stub) n.stub = flipDir(n.stub);
+      if (n.c45axis) n.c45axis = flipDir(n.c45axis);
+      if (n.arms) n.arms = n.arms.map(flipDir);
+      if (n.armDirs) n.armDirs = n.armDirs.map((a) => {
+        const vec = flipDir(a.vec || a);
+        return a.vec ? { name: cardinalName(vec), vec } : vec;
+      });
+    }
+    for (const id of tg.clamps) {
+      const cl = this.clamps.get(id);
+      if (!cl) continue;
+      flipPos(cl);
+      if (cl.dir) cl.dir = flipDir(cl.dir);
+      if (cl.off) cl.off = flipDir(cl.off).map(round);
+    }
+    for (const id of tg.slides) {
+      const sl = this.slides.get(id);
+      if (!sl) continue;
+      flipPos(sl);
+      if (sl.quat) sl.quat = flipQuat(sl.quat);
+      if (sl.hook) sl.hook = flipPt(sl.hook);
+      if (sl.foot && sl.foot.p0) sl.foot = { ...sl.foot, p0: flipPt(sl.foot.p0), dir: flipDir(sl.foot.dir) };
+    }
+    for (const id of tg.fittings || []) {
+      const f = this.fittings.get(id);
+      if (!f) continue;
+      flipPos(f);
+      if (f.quat) f.quat = flipQuat(f.quat);
+    }
+    for (const t of this.tubes.values()) {
+      const ba = tg.nodes.has(t.a), bb = tg.nodes.has(t.b);
+      if (!ba && !bb) continue;
+      if (t.bow && t.bowCenter && ba && bb) t.bowCenter = flipPt(t.bowCenter);
+      if (!t.geom) continue;
+      if (ba && bb) {
+        t.geom = { ...t.geom, p0: flipPt(t.geom.p0), dir: flipDir(t.geom.dir) };
+        if (t.geom.up) t.geom.up = flipDir(t.geom.up);
+      } else {
+        delete t.geom;
+      }
+    }
+    for (const p of this.panels.values()) {
+      if (!p.geom) continue;
+      const traeger = [this.tubes.get(p.a), this.tubes.get(p.b)].filter(Boolean);
+      const ids = traeger.flatMap((t) => [t.a, t.b]);
+      const bewegt = ids.filter((id) => tg.nodes.has(id)).length;
+      if (!bewegt) continue;
+      if (bewegt === ids.length && p.geom.p) {
+        p.geom = { ...p.geom, p: flipPt(p.geom.p), quat: p.geom.quat ? flipQuat(p.geom.quat) : p.geom.quat };
+      } else {
+        delete p.geom;
+      }
+    }
+  }
+
   rotateSelection(sel, steps = 1, { merge = true, validate = null, grid = 5 } = {}) {
     const schritte = ((steps % 4) + 4) % 4;
     if (!schritte) return { ok: true, merged: 0, detached: 0 };
@@ -5343,11 +5548,14 @@ export class BuildModel {
     this.textiles.clear();
     this.slides.clear();
     this.fittings.clear();
+    this.groups.clear();
     this._seq = 1;
   }
 
   // --- Serialisierung -----------------------------------------------------
   toJSON() {
+    // 删过零件的组在这里收拾：存档、撤销快照、复制都经过这一步
+    this._pruneGroups();
     return {
       format: FORMAT_VERSION,
       nodes: [...this.nodes.values()].map((n) => {
@@ -5424,6 +5632,7 @@ export class BuildModel {
         if (s.foot) o.foot = s.foot;   // Lage des Fussrohrs, gehoert zur Rutsche
         return o;
       }),
+      groups: [...this.groups.entries()].map(([id, set]) => ({ id, ids: [...set] })),
     };
   }
 
@@ -5532,6 +5741,12 @@ export class BuildModel {
         color: s.color || null, foot: s.foot || null, kind: s.kind });
       maxSeq = Math.max(maxSeq, parseSeq(s.id));
     }
+    for (const g of data.groups || []) {
+      if (!g || !g.id || !Array.isArray(g.ids)) continue;
+      this.groups.set(g.id, new Set(g.ids));
+      maxSeq = Math.max(maxSeq, parseSeq(g.id));
+    }
+    this._pruneGroups();
     this._seq = maxSeq + 1;
     return { ok: true };
   }

@@ -149,6 +149,10 @@ const zh: Dict = {
   'btn.paste': '粘贴 {paste}',
   'btn.selectAll': '全选 {selectAll}',
   'btn.selectBlock': '选择整块 L',
+  'keys.mirror': '左右 / 前后镜像',
+  'keys.group': '成组 / 解组',
+  'keys.chord.group': '{group}',
+  'keys.chord.ungroup': '{ungroup}',
   'hint.selectBlock': '选中指针下（或当前件）连着的整块',
   'btn.invExport': '导出库存',
   'btn.invImport': '导入库存',
@@ -518,6 +522,10 @@ const en: Dict = {
   'btn.paste': 'Paste {paste}',
   'btn.selectAll': 'Select all {selectAll}',
   'btn.selectBlock': 'Select block L',
+  'keys.mirror': 'Mirror left–right / front–back',
+  'keys.group': 'Group / ungroup',
+  'keys.chord.group': '{group}',
+  'keys.chord.ungroup': '{ungroup}',
   'hint.selectBlock': 'Select everything connected to the part under the pointer (or the current pick)',
   'btn.invExport': 'Export stock',
   'btn.invImport': 'Import stock',
@@ -887,6 +895,10 @@ const de: Dict = {
   'btn.paste': 'Einfügen {paste}',
   'btn.selectAll': 'Alles {selectAll}',
   'btn.selectBlock': 'Verbund L',
+  'keys.mirror': 'Spiegeln links–rechts / vorn–hinten',
+  'keys.group': 'Gruppieren / auflösen',
+  'keys.chord.group': '{group}',
+  'keys.chord.ungroup': '{ungroup}',
   'hint.selectBlock': 'Alles wählen, was mit dem Teil unter dem Zeiger (oder der Auswahl) zusammenhängt',
   'btn.invExport': 'Bestand exportieren',
   'btn.invImport': 'Bestand importieren',
@@ -1165,6 +1177,8 @@ function shortcutVars(os: OsFamily, lang: Lang): Record<string, string> {
       paste: '⌘V',
       copyPaste: '⌘C/V',
       addSelect: 'Shift/⌘',
+      group: '⌘G',
+      ungroup: '⌘⇧G',
     }
   }
   const ctrl = lang === 'de' ? 'Strg' : 'Ctrl'
@@ -1180,6 +1194,8 @@ function shortcutVars(os: OsFamily, lang: Lang): Record<string, string> {
     paste: `${ctrl}+V`,
     copyPaste: `${ctrl}+C/V`,
     addSelect: `Shift/${ctrl}`,
+    group: `${ctrl}+G`,
+    ungroup: `${ctrl}+Shift+G`,
   }
 }
 

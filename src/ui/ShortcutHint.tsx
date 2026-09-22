@@ -13,6 +13,8 @@ function rowsFor(
   if (pasting) {
     return [
       { chord: '↑ ↓', action: t('keys.lift') },
+      { chord: 'Q / E', action: t('keys.rotate') },
+      { chord: 'M / ⇧M', action: t('keys.mirror') },
       { chord: t('keys.click'), action: t('keys.drop') },
       { chord: 'Esc', action: t('keys.escCancel') },
     ]
@@ -68,6 +70,8 @@ function rowsFor(
         { chord: t('keys.chord.copyPaste'), action: t('keys.copyPaste') },
         { chord: t('keys.chord.delete'), action: t('keys.deleteSel') },
         { chord: 'Q / E', action: t('keys.rotate') },
+        { chord: 'M / ⇧M', action: t('keys.mirror') },
+        { chord: `${t('keys.chord.group')} / ${t('keys.chord.ungroup')}`, action: t('keys.group') },
         { chord: 'D', action: t('keys.deleteMode') },
       ]
   }
