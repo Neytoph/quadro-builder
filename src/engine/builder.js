@@ -1470,7 +1470,10 @@ export class Builder {
   /** Meldet unten links, was gerade gesetzt wurde. */
   _notePlaced(id, kind) {
     const name = this._partLabel(id, kind);
-    if (name) this.onNotice(t("notice_placed", name));
+    if (!name) return;
+    // 弯管放下去是默认弯法，告诉用户点它能换方向
+    const tube = kind === "tube" ? this.model.tubes.get(id) : null;
+    this.onNotice(t(tube && tube.bow ? "notice_bow_placed" : "notice_placed", name));
   }
 
   /**
@@ -4276,6 +4279,7 @@ export class Builder {
       this.recordHistory(() => { res = this.model.rotateBow(bow.id, 1, { pivot }); });
       if (res && res.ground) this.onNotice(t("notice_ground"), "warn");
       else if (res && res.duplicate) this.onNotice(t("notice_bow_blocked"));
+      else if (res && res.node) this.onNotice(t("notice_bow_turned"));
       this.refresh();
       return;
     }
