@@ -11,6 +11,7 @@ import { TUBE_FITTINGS, POOL_KINDS, isHolePart, holeArmDirs, holeClampDirsAt, HO
   BOLT_PART, HINGE_PART, isBoltPart, boltArmDirs, boltDepth, hingeDir, hingeKey, splitHingeKey,
   POOL_SETS, ARM_FITTINGS, armFittingDirsAt, fixedFittingColor } from "./model.js";
 import { CONNECTOR_ARM_BITS } from "./qdfimport.js";
+import { ACCESSORY_IDS } from './accessoryPack.js';
 
 // Kupplungen, die auf einem Rohr sitzen statt im Raster: QDF-Art -> Katalogteil.
 // Teile, die sich um ein Rohr klemmen lassen. Die Lochzapfenkupplung gehört
@@ -1386,6 +1387,7 @@ export class Builder {
       for (const id of s.panelIds) target.add(id);
       for (const id of s.textileIds || []) target.add(id);
       for (const id of s.slideIds || []) target.add(id);
+      for (const id of s.fittingIds || []) target.add(id);
     }
     return { done, current };
   }
@@ -2236,6 +2238,10 @@ export class Builder {
     // Merkt sich, an welchen Kupplungen das gewaehlte Teil sitzen darf -- der
     // Zeiger zeigt dort eine Hand, auch wenn er den Ankerpunkt knapp verfehlt.
     this._fittingMountNodes = new Set();
+    if (ACCESSORY_IDS.has(this.fittingKind)) {
+      for (const mount of this.model.accessoryMounts(this.fittingKind)) this.scene.addHandle(mount.pos, { accessoryTube: mount.tube, placeNode: true }, 'place');
+      return;
+    }
     if (this.fittingKind === "sleeve") {
       // 软包滚筒：每根还没套的直管中点一个点
       const taken = new Set();
@@ -3660,6 +3666,16 @@ export class Builder {
   }
 
   _clickFitting(e) {
+    if (ACCESSORY_IDS.has(this.fittingKind)) {
+      const handle = this.scene.pickHandle(e.clientX, e.clientY);
+      const pick = handle?.data?.accessoryTube ? null : this.scene.pickForDelete(e.clientX, e.clientY);
+      const tubeId = handle?.data?.accessoryTube || (pick?.data?.kind === 'tube' ? pick.data.id : null);
+      if (!tubeId) { this.onNotice(t('notice_accessory_pick'), 'info'); return; }
+      let added;
+      this.recordHistory(() => { added = this.model.addAccessory(this.fittingKind, tubeId, this.colorFor('panel')); });
+      this.onNotice(t(added ? 'notice_accessory_added' : 'notice_accessory_invalid'), added ? 'ok' : 'warn');
+      this.refresh(); return;
+    }
     if (this.fittingKind === "sleeve") { this._clickSleeve(e); return; }
     if (this.fittingKind === "balls") { this._clickBalls(e); return; }
     if (ROOF_KINDS.has(this.fittingKind)) { this._clickRoof(e); return; }

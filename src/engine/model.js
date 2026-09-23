@@ -2,6 +2,7 @@
 // Bewusst ohne Three.js-Abhaengigkeit, damit es testbar und Backend-tauglich bleibt.
 
 import { MERGE_EPS, FORMAT_VERSION, DIAGONAL_SNAP_TOL, DIRECTIONS, DIAGONAL_DIRECTIONS, anchorGap } from "./config.js";
+import { ACCESSORY_IDS, accessoryMount } from './accessoryPack.js';
 
 // Zellweite des Rasters, mit dem die Kollisionspruefung Nachbarn sucht. Etwas
 // groesser als das laengste Rohr (75 cm + Kupplung): ein Rohr liegt damit in
@@ -852,7 +853,7 @@ export class BuildModel {
     this._pruneOrphanedC45Bodies();
     // 套在这根管上的软包跟着走
     for (const f of [...this.fittings.values()]) {
-      if (f.kind === "sleeve" && f.tube === id) this.fittings.delete(f.id);
+      if (f.tube === id) this.fittings.delete(f.id);
     }
   }
 
@@ -1174,6 +1175,19 @@ export class BuildModel {
     // Verweis muss weg, sonst zeichnet die Szene weiter einen Stutzen ins Leere.
     for (const n of this.nodes.values()) if (n.bearingOn === id) { n.bearingOn = null; n.stub = null; }
     this.fittings.delete(id);
+  }
+
+  accessoryMounts(kind) {
+    const occupied = new Set([...this.fittings.values()].filter(f => ACCESSORY_IDS.has(f.kind)).map(f => f.tube));
+    return [...this.tubes.keys()].filter(id => !occupied.has(id)).map(id => accessoryMount(this, kind, id)).filter(Boolean);
+  }
+
+  addAccessory(kind, tubeId, color) {
+    const mount = this.accessoryMounts(kind).find(item => item.tube === tubeId);
+    if (!mount) return null;
+    const f = this.addFitting(kind, ...mount.pos, { color });
+    f.tube = tubeId;
+    return f;
   }
 
   /**
@@ -3620,7 +3634,20 @@ export class BuildModel {
       }
       else if (kind === "clamp") { if (this.clamps.has(id)) clamps.add(id); }
       else if (kind === "slide") { if (this.slides.has(id)) slides.add(id); }
-      else if (kind === "fitting") { if (this.fittings.has(id)) fittings.add(id); }
+      else if (kind === "fitting") {
+        const f = this.fittings.get(id);
+        if (f) {
+          fittings.add(id);
+          if (ACCESSORY_IDS.has(f.kind)) {
+            const tube = this.tubes.get(f.tube);
+            if (tube) addNodes([tube.a, tube.b]);
+          }
+        }
+      }
+    }
+    for (const f of this.fittings.values()) {
+      const tube = this.tubes.get(f.tube);
+      if (ACCESSORY_IDS.has(f.kind) && tube && nodes.has(tube.a) && nodes.has(tube.b)) fittings.add(f.id);
     }
     return { nodes, clamps, slides, fittings };
   }
@@ -3674,6 +3701,7 @@ export class BuildModel {
     } else if (kind === "fitting") {
       const f = this.fittings.get(id);
       if (f) {
+        if (f.tube) addTube(f.tube);
         for (const n of this.nodes.values()) if (n.bearingOn === id) out.add(n.id);
         const reach = POOL_KINDS.has(f.kind)
           ? Math.max(50, Math.hypot(f.w || 0, f.h || 0, f.d || 0) / 2 + 25)
@@ -3788,6 +3816,7 @@ export class BuildModel {
     }
     for (const f of this.fittings.values()) {
       if (sel.has(f.id)) continue;
+      if (f.tube && tubeIds.has(f.tube)) { sel.set(f.id, 'fitting'); continue; }
       const nodeReach = POOL_KINDS.has(f.kind)
         ? Math.max(50, Math.hypot(f.w || 0, f.h || 0, f.d || 0) / 2 + 25)
         : 16;
@@ -4203,7 +4232,7 @@ export class BuildModel {
     for (const f of frag.fittings || []) {
       const rec = versetzt(f, "f", "fittings");
       // 软包滚筒记着管子的 id，片段里的管换了新 id；管没一起带过来就丢掉
-      if (rec.kind === "sleeve") {
+      if (rec.kind === "sleeve" || ACCESSORY_IDS.has(rec.kind)) {
         rec.tube = rec.tube ? neu.get(rec.tube) || null : null;
         if (!rec.tube) continue;
       }

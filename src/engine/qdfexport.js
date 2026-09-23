@@ -22,6 +22,7 @@
 // Bewusst ohne Three.js und DOM -- wie qdfimport.js in Node testbar.
 
 import { geometry, getPanel, getTube } from "./catalog.js";
+import { ACCESSORY_IDS } from './accessoryPack.js';
 import { officialColorId } from "./colors.js";
 import { panelNormal, modelMiddle } from "./util.js";
 import { isHolePart, HOLE_MASKS, BLACK_FITTINGS, isBoltPart, boltAxis, boltDepth, hingeDir, fixedFittingColor } from "./model.js";
@@ -723,8 +724,8 @@ export function buildQDF(model, opts = {}) {
       : IDENTITY;
     // Tuchteile tragen die Platten-Materialien (Spielsack, Netz, Rundwand);
     // alles andere die der Rohre.
-    // 软包滚筒在 .qdf 里没有对应元素，只存在我们自己的存档里
-    if (f.kind === "sleeve") continue;
+    // 软包滚筒和非官方的扩展配件在 .qdf 里没有对应元素，只存在我们自己的存档里
+    if (f.kind === "sleeve" || ACCESSORY_IDS.has(f.kind)) continue;
     const stoff = f.kind === "bag2" || f.kind === "lattice2" || f.kind === "textil-round2"
       || f.kind === "pool2" || f.kind === "pool-small2";
     // Ohne Farbe: Material 0 wie in der Datei (so stehen alle 50 Dach-Zeilen

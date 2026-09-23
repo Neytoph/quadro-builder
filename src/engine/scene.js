@@ -1,6 +1,8 @@
 // 3D-Szene + Rendering (Three.js). Kennt das Modell nur zum Zeichnen.
 
 import * as THREE from "three";
+import { ACCESSORY_IDS } from './accessoryPack.js';
+import { accessoryMeshes } from './accessoryMeshes.js';
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { geometry, colorHex, connectorColor, getPanel } from "./catalog.js";
 import { panelNormal, modelMiddle } from "./util.js";
@@ -1588,6 +1590,7 @@ export class SceneManager {
    * Flaechennormale) -- genau wie im QDF.
    */
   _fittingMeshes(f) {
+    if (ACCESSORY_IDS.has(f.kind)) return accessoryMeshes(this, this._renderModel, f, this._look(f.color || 'yellow'));
     const q = f.quat && f.quat.length === 4
       ? new THREE.Quaternion(f.quat[0], f.quat[1], f.quat[2], f.quat[3]).normalize()
       : new THREE.Quaternion();

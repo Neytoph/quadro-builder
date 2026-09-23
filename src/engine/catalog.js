@@ -2,6 +2,7 @@
 // Einziger Ort, der das JSON kennt -> spaeter leicht durch ein Backend ersetzbar.
 
 import { t, getLang } from "./i18n.js";
+import { ACCESSORY_PACK } from './accessoryPack.js';
 import { COLOR_HEX, isHexColor } from "./colors.js";
 import { COLOR_ZH, COLOR_EN, COLOR_DE, PART_ZH, PART_EN, PART_DE } from "../names";
 
@@ -12,6 +13,7 @@ export async function loadCatalog() {
   const res = await fetch(`${import.meta.env.BASE_URL}data/parts.json`, { cache: "no-cache" });
   if (!res.ok) throw new Error(t("catalog_load_error", res.status));
   _data = await res.json();
+  _data.accessories.push(...ACCESSORY_PACK.map(part => ({ ...part, compat: true, qdf: part.id })));
   return _data;
 }
 
