@@ -76,20 +76,6 @@ const ok = (cond, msg) => { assert.ok(cond, msg); n++ }
   }
   const atTop = bows.filter((h) => h.data.nodeId === top.id)
   const atBase = bows.filter((h) => h.data.nodeId === a.id)
-  // 每个方向恰好一根默认的（静止时只露它）
-  for (const list of [atTop, atBase]) {
-    const byDir = new Map()
-    for (const h of list) byDir.set(h.data.dirName, (byDir.get(h.data.dirName) || 0) + (h.data.bowDefault ? 1 : 0))
-    for (const [name, cnt] of byDir) ok(cnt === 1, `方向 ${name} 该有且只有一根默认弧线，得到 ${cnt}`)
-  }
-  // 水平方向默认往下弯，竖直方向默认水平弯（和键盘放下去的一样）
-  const defTopX = atTop.find((h) => h.data.dir[0] === 1 && h.data.bowDefault)
-  ok(defTopX && defTopX.data.bowNormal[1] === -1, '水平出发的默认弯法该是往下')
-  const defTopY = atTop.find((h) => h.data.dir[1] === 1 && h.data.bowDefault)
-  ok(defTopY && defTopY.data.bowNormal[1] === 0, '竖直出发的默认弯法该是水平的')
-  // 地面接头：往下弯会钻进地里，默认改成往上
-  const defBaseX = atBase.find((h) => h.data.dir[0] === 1 && h.data.bowDefault)
-  ok(defBaseX && defBaseX.data.bowNormal[1] === 1, '地面接头水平出发的默认弯法该是往上')
   // 顶接头：下方向被管占着；上 4 种 + 四个水平方向各 4 种 = 20
   ok(atTop.length === 20, `顶接头该有 20 根弧线，得到 ${atTop.length}`)
   // 底接头：上方向被管占着，其余五个方向各 4 种 = 20。

@@ -1833,28 +1833,20 @@ export class Builder {
       // 之后弯管的走向。落到地下或目标接头已经连着的那几种不给。
       if (bowInHand && isCardDir && !c45Dir) {
         const R = gridSpacing();
-        const normals = this._bowNormalsFor(d.vec).filter((n) => this._bowFeasible(node, d.vec, n, R));
-        // 静止时一个方向只画默认那种弯法（和键盘放下去的一样），指到接头再
-        // 展开四种。默认那种会钻到地面以下（地面接头往下弯）就改成往上，
-        // 放不下就拿第一种顶上。
-        const ground = this.model._groundLevel ? this.model._groundLevel() : 0;
-        let def = this._bowNormal(d.vec);
-        if (node.y + R * (d.vec[1] + def[1]) < ground - 0.01 || node.y + R * def[1] < ground - 0.01) def = [0, 1, 0];
-        let defaultIdx = normals.findIndex((n) => n[0] === def[0] && n[1] === def[1] && n[2] === def[2]);
-        if (defaultIdx < 0) defaultIdx = 0;
-        normals.forEach((normal, i) => {
+        for (const normal of this._bowNormalsFor(d.vec)) {
+          if (!this._bowFeasible(node, d.vec, normal, R)) continue;
           this.scene.addHandle(
             [node.x, node.y, node.z],
             {
               nodeId: node.id, dir: d.vec, dirName: d.name, slope: isSlope,
-              bow: true, bowNormal: normal, bowRadius: R, bowDefault: i === defaultIdx,
+              bow: true, bowNormal: normal, bowRadius: R,
               arrowCompact: true,
               previewSpan: 0,
               previewColor,
             },
             "dir"
           );
-        });
+        }
         continue;
       }
       if (this._targetBelowGround(node, d.vec)) continue;
