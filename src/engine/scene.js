@@ -4362,22 +4362,19 @@ export class SceneManager {
         const gap = 1.2;
         const bw = Math.max(1.5, u.length() / n - gap);
         const L = w.length();
-        const r = (geometry().tubeRadius || 2.45) + 0.35;
-        // 布贴在哪一面：和板一样按 side 定，yAxis 指着那面就是 +1
-        const nrmS = panelNormal([xAxis.x, xAxis.y, xAxis.z], [zAxis.x, zAxis.y, zAxis.z],
-          [center.x, center.y, center.z], middle);
-        const top = yAxis.dot(new THREE.Vector3(nrmS[0], nrmS[1], nrmS[2])) * ((tx.side || 1) < 0 ? -1 : 1) >= 0 ? 1 : -1;
-        const sheet = this._cachedGeo(`rsheet:${bw.toFixed(1)}x${Math.round(L)}:${top}`, () => {
-          const g = new THREE.PlaneGeometry(bw, L);
+        // 和抓来的布面原件一个形状：布在两根管的轴线高度上平铺，两头各一整圈
+        // 套筒套在管子外面（原件的套筒半径 2.52，管子 2.45）
+        const r = (geometry().tubeRadius || 2.45) + 0.07;
+        const sheet = this._cachedGeo(`rsheet:${bw.toFixed(1)}x${Math.round(L)}`, () => {
+          const g = new THREE.PlaneGeometry(bw, Math.max(1, L - 2 * r + 0.2));
           g.rotateX(-Math.PI / 2);
-          g.translate(0, top * r, L / 2);
+          g.translate(0, 0, L / 2);
           return g;
         });
-        const wrap = this._cachedGeo(`rwrap:${bw.toFixed(1)}:${top}`, () => {
-          // 半个圆筒，轴沿条的宽度方向，弧在贴布那一面
-          const g = new THREE.CylinderGeometry(r, r, bw, 12, 1, true, 0, Math.PI);
+        const wrap = this._cachedGeo(`rwrap:${bw.toFixed(1)}`, () => {
+          // 整圈套筒，轴沿条的宽度方向（也就是管子的方向）
+          const g = new THREE.CylinderGeometry(r, r, bw, 16, 1, true);
           g.rotateZ(Math.PI / 2);
-          if (top < 0) g.rotateX(Math.PI);
           return g;
         });
         for (let i = 0; i < n; i++) {
