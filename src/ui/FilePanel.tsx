@@ -13,7 +13,8 @@ export default function FilePanel() {
   return (
     <div className="p-3">
       <div className="flex flex-col gap-1.5">
-        <button onClick={() => api.newTab()} className={btn}>{t('btn.new')}</button>
+        {/* 手机上这块面板盖满画布，新开的标签页被挡在后面，点完得有一句话 */}
+        <button onClick={() => { api.newTab(); api.notify(t('toast.newTab')) }} className={btn}>{t('btn.new')}</button>
         <button onClick={() => void api.saveCurrent()} className={btn}>{t('btn.save')}</button>
         <button onClick={() => fileRef.current?.click()} className={btn}>{t('btn.import')}</button>
         <button onClick={api.exportQdf} className={btn}>{t('btn.exportQdf')}</button>
