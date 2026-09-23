@@ -3332,12 +3332,14 @@ export class SceneManager {
   }
 
   // Geteilte Geometrien: ein Arm (beidseitig) und ein Strahl (einseitig).
-  _guideArmGeo() {
-    if (!this._guideArm) {
-      this._guideArm = new THREE.CylinderGeometry(GUIDE.r, GUIDE.r, GUIDE.half * 2, 6);
-      this._keepGeos.add(this._guideArm);
+  // 半截引导线：从接点往外（局部 +Y），只画还空着的方向
+  _guideRayGeo() {
+    if (!this._guideRay) {
+      this._guideRay = new THREE.CylinderGeometry(GUIDE.r, GUIDE.r, GUIDE.half, 6);
+      this._guideRay.translate(0, GUIDE.half / 2, 0);
+      this._keepGeos.add(this._guideRay);
     }
-    return this._guideArm;
+    return this._guideRay;
   }
 
   _guideBeamGeo() {
@@ -3365,37 +3367,37 @@ export class SceneManager {
   }
 
   /**
-   * Das Achsenkreuz an einem Knoten -- genau einmal je Ort. Mehrere Richtungs-
-   * handles am selben Punkt teilen sich dasselbe Kreuz.
+   * 接点上的引导线：每个还空着的方向一段，从接点往外。原来是整个十字，
+   * 占着的方向也画——直管把那半截盖住了看不出来，弯管拐走以后就从侧面露出来。
+   * 同一个点的几个方向手柄共用一组，同一方向只画一次。
    */
-  _addNodeGuide(origin) {
+  _addNodeGuide(origin, dirArr) {
     if (!this._guideAt) this._guideAt = new Map();
     // 0.1cm 就算同一个点：接头上的几个方向手柄本来就落在同一个坐标上
     const key = origin.map((v) => Math.round(v * 10)).join(",");
-    const seen = this._guideAt.get(key);
-    if (seen) return seen;
-    const h = GUIDE.half;
-    const group = new THREE.Group();
-    group.position.set(origin[0], origin[1], origin[2]);
-    group.userData = { kind: "guide", guideRoot: true };
-    const arms = [];
-    // 圆柱默认沿 +Y，X 轴那根绕 Z 转 90°，Z 轴那根绕 X 转 90°
-    for (const [axis, rx, rz] of [
-      ["x", 0, Math.PI / 2],
-      ["y", 0, 0],
-      ["z", Math.PI / 2, 0],
-    ]) {
-      const arm = new THREE.Mesh(this._guideArmGeo(), this._guideMaterial(axis, false));
-      arm.rotation.set(rx, 0, rz);
-      arm.renderOrder = 998;
-      // 引导线不接点击，点击照旧交给看不见的碰撞体
-      arm.raycast = () => {};
-      group.add(arm);
-      arms.push([axis, arm]);
+    let group = this._guideAt.get(key);
+    if (!group) {
+      group = new THREE.Group();
+      group.position.set(origin[0], origin[1], origin[2]);
+      group.userData = { kind: "guide", guideRoot: true, arms: [], dirs: new Set() };
+      this.handleGroup.add(group);
+      this._guideAt.set(key, group);
     }
-    group.userData.arms = arms;
-    this.handleGroup.add(group);
-    this._guideAt.set(key, group);
+    if (!dirArr) return group;
+    const dir = new THREE.Vector3(dirArr[0], dirArr[1], dirArr[2]);
+    if (dir.lengthSq() < 1e-8) return group;
+    dir.normalize();
+    const dirKey = [dir.x, dir.y, dir.z].map((v) => Math.round(v * 100)).join(",");
+    if (group.userData.dirs.has(dirKey)) return group;
+    group.userData.dirs.add(dirKey);
+    const axis = this._guideAxisOf([dir.x, dir.y, dir.z]);
+    const arm = new THREE.Mesh(this._guideRayGeo(), this._guideMaterial(axis, false));
+    arm.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+    arm.renderOrder = 998;
+    // 引导线不接点击，点击照旧交给看不见的碰撞体
+    arm.raycast = () => {};
+    group.add(arm);
+    group.userData.arms.push([axis, arm]);
     return group;
   }
 
@@ -4952,7 +4954,7 @@ export class SceneManager {
       guideAxis: this._guideAxisOf([dir.x, dir.y, dir.z]),
     }, userData);
 
-    this._addNodeGuide(origin);
+    this._addNodeGuide(origin, [dir.x, dir.y, dir.z]);
 
     // 指到这个方向时亮起来的那一条，从接点往外，比引导线略长也略粗
     const beam = new THREE.Mesh(
