@@ -3,6 +3,7 @@ import { useI18n } from '../i18n'
 import { colorLabel } from '../names'
 import { CLASSIC_COLOR_IDS, HOME_COLOR_IDS, COLOR_HEX, PALETTES } from '../engine/colors.js'
 import { FoldHeader } from './panelLayout'
+import { Collapse } from './MotionBits'
 
 const HEX = COLOR_HEX as Record<string, string>
 
@@ -13,8 +14,8 @@ function Swatch({ hex, selected, title, onClick }: {
   onClick: () => void
 }) {
   return (
-    <button title={title} onClick={onClick}
-      className={`w-7 h-7 rounded-md border-2 cursor-pointer transition-transform ${selected ? 'border-teal-600 scale-110' : 'border-gray-700'}`}
+    <button title={title} onClick={onClick} data-on={selected}
+      className={`m-swatch w-7 h-7 rounded-md border-2 cursor-pointer transition-transform ${selected ? 'border-teal-600 scale-110' : 'border-gray-700'}`}
       style={{ background: hex }} />
   )
 }
@@ -35,7 +36,7 @@ export default function SideToolbar({ open, onToggle }: { open: boolean; onToggl
         label={t('section.color')}
         title={open ? t('hint.hidePanel') : t('hint.showColor')}
       />
-      {open && (
+      <Collapse open={open}>
       <div className="p-3 overflow-y-auto min-h-0 scrollbar-thin">
       <div className="text-[10px] text-gray-500 mb-1">{t('section.classic')}</div>
       <div className="flex flex-wrap gap-1.5 mb-2">
@@ -43,8 +44,8 @@ export default function SideToolbar({ open, onToggle }: { open: boolean; onToggl
           <Swatch key={id} hex={HEX[id]} selected={api.color === id}
             title={nameOf(id)} onClick={() => api.setColor(id)} />
         ))}
-        <button title={t('hint.random')} onClick={() => api.setColor(RANDOM_COLOR)}
-          className={`w-7 h-7 rounded-md border-2 cursor-pointer ${api.color === RANDOM_COLOR ? 'border-teal-600 scale-110' : 'border-gray-700'}`}
+        <button title={t('hint.random')} onClick={() => api.setColor(RANDOM_COLOR)} data-on={api.color === RANDOM_COLOR}
+          className={`m-swatch w-7 h-7 rounded-md border-2 cursor-pointer ${api.color === RANDOM_COLOR ? 'border-teal-600 scale-110' : 'border-gray-700'}`}
           style={{ background: 'conic-gradient(#F23B3B, #FFD942, #2FCB5A, #2B8FF0, #F23B3B)' }} />
       </div>
 
@@ -81,7 +82,7 @@ export default function SideToolbar({ open, onToggle }: { open: boolean; onToggl
         </div>
       </div>
       </div>
-      )}
+      </Collapse>
     </div>
   )
 }

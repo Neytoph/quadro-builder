@@ -164,3 +164,120 @@ body.resizing-panels[data-resize-dir="move"] * {
 }
 .qb-delete-x::before { transform: translate(-50%, -50%) rotate(45deg); }
 .qb-delete-x::after { transform: translate(-50%, -50%) rotate(-45deg); }
+
+/*
+ * 界面动效（见 src/ui/motion.ts）。html 上有 data-motion 才生效；
+ * 系统开了「减少动态效果」时不加这个属性，下面一条都不走。
+ * 调子是偏长、带模糊：面板和镜头都是滑过去的，东西带着模糊浮上来。
+ * 关键帧只写 transform；Tailwind v4 的 -translate-x-1/2、scale-110 走的是
+ * 独立的 translate / scale 属性，两边叠加不打架。
+ */
+html[data-motion] {
+  --m-in: .42s; --m-out: .26s; --m-fold: .45s; --m-glide: .7s;
+  --m-ease: cubic-bezier(.16, 1, .3, 1); --m-pop: cubic-bezier(.16, 1, .3, 1); --m-glide-ease: cubic-bezier(.16, 1, .3, 1);
+  --m-dist: 16px; --m-scale: .97; --m-blur: 8px; --m-step: 30ms; --m-press: .95;
+}
+
+@keyframes m-in-y { from { opacity: 0; transform: translateY(calc(var(--m-dist) * -1)) scale(var(--m-scale)); filter: blur(var(--m-blur)); } }
+@keyframes m-out-y { to { opacity: 0; transform: translateY(calc(var(--m-dist) * -1)) scale(var(--m-scale)); filter: blur(var(--m-blur)); } }
+@keyframes m-in-up { from { opacity: 0; transform: translateY(var(--m-dist)) scale(var(--m-scale)); filter: blur(var(--m-blur)); } }
+@keyframes m-out-up { to { opacity: 0; transform: translateY(var(--m-dist)) scale(var(--m-scale)); filter: blur(var(--m-blur)); } }
+@keyframes m-in-x { from { opacity: 0; transform: translateX(calc(var(--m-dist) * 3)) scale(var(--m-scale)); filter: blur(var(--m-blur)); } }
+@keyframes m-out-x { to { opacity: 0; transform: translateX(calc(var(--m-dist) * 3)) scale(var(--m-scale)); filter: blur(var(--m-blur)); } }
+@keyframes m-swap-in { from { opacity: 0; transform: translateY(calc(var(--m-dist) * .6)); filter: blur(calc(var(--m-blur) * .5)); } }
+@keyframes m-fade-in { from { opacity: 0; } }
+@keyframes m-fade-out { to { opacity: 0; } }
+@keyframes m-tick-up { from { opacity: 0; transform: translateY(100%); } }
+@keyframes m-tick-down { from { opacity: 0; transform: translateY(-100%); } }
+
+/* 右侧抽屉：从右边滑进来，关的时候滑回去；换面板时内容重新进场 */
+html[data-motion] .m-dock { transform-origin: top right; animation: m-in-x var(--m-in) var(--m-pop) both; }
+html[data-motion] .m-dock.m-leave { animation: m-out-x var(--m-out) ease-in both; }
+html[data-motion] .m-swap { animation: m-swap-in var(--m-in) var(--m-ease) both; animation-delay: calc(var(--m-step) * 3); }
+
+/* 工具条下拉、装配顺序菜单：从按钮下面落出来，菜单项一个接一个 */
+html[data-motion] .m-pop { transform-origin: top left; animation: m-in-y var(--m-in) var(--m-pop) both; }
+html[data-motion] .m-pop.m-leave { animation: m-out-y var(--m-out) ease-in both; }
+html[data-motion] .m-pop:not(.m-leave) button {
+  animation: m-swap-in var(--m-in) var(--m-ease) both;
+  animation-delay: calc(var(--i, 0) * var(--m-step));
+}
+
+/* 提示条、确认框、进度框 */
+html[data-motion] .m-toast { animation: m-in-y var(--m-in) var(--m-pop) both; }
+html[data-motion] .m-toast.m-leave { animation: m-out-y var(--m-out) ease-in both; }
+html[data-motion] .m-backdrop { animation: m-fade-in var(--m-in) ease-out both; }
+html[data-motion] .m-backdrop.m-leave { animation: m-fade-out var(--m-out) ease-in both; }
+html[data-motion] .m-modal { animation: m-in-up var(--m-in) var(--m-pop) both; }
+html[data-motion] .m-backdrop.m-leave .m-modal { animation: m-out-up var(--m-out) ease-in both; }
+
+/* 新手引导：遮罩和光圈、卡片在步骤之间滑过去，卡片里的字换一遍 */
+html[data-motion] .m-onb { animation: m-fade-in var(--m-in) ease-out both; }
+html[data-motion] .m-spot {
+  transition: top var(--m-glide) var(--m-glide-ease), left var(--m-glide) var(--m-glide-ease),
+    width var(--m-glide) var(--m-glide-ease), height var(--m-glide) var(--m-glide-ease);
+}
+html[data-motion] .m-card {
+  animation: m-in-up var(--m-in) var(--m-pop) both;
+  transition: top var(--m-glide) var(--m-glide-ease), left var(--m-glide) var(--m-glide-ease);
+}
+html[data-motion] .m-card [aria-hidden] > div { transition: background-color var(--m-glide); }
+
+/* 当前工具底下那块会滑的色块；面板入口那排同理 */
+.m-tool-ind, .m-pill-ind {
+  position: absolute; left: 0; top: 0; z-index: 0; pointer-events: none; opacity: 0;
+  background: var(--color-teal-500);
+}
+.m-tool-ind { border-radius: var(--radius-xl); border: 1px solid var(--color-teal-400); }
+.m-pill-ind { border-radius: var(--radius-lg); }
+.m-tool-ind[data-tone=red] { background: var(--color-red-500); border-color: var(--color-red-400); }
+.m-tool-ind[data-ready], .m-pill-ind[data-ready] {
+  transition: transform var(--m-glide) var(--m-glide-ease), width var(--m-glide) var(--m-glide-ease),
+    height var(--m-glide) var(--m-glide-ease), background-color .2s, border-color .2s, opacity .2s;
+}
+html[data-motion] .m-tool, html[data-motion] .m-pill {
+  transition: color .2s, background-color .2s, border-color .2s, transform .22s var(--m-pop);
+}
+html[data-motion] .m-tool:active, html[data-motion] .m-pill:active { transform: scale(var(--m-press)); transition-duration: .08s; }
+/* 换到哪个工具，它的图标从下面浮上来，像被镜头拉近 */
+@keyframes m-icon-rise { from { opacity: .3; transform: translateY(5px) scale(.9); filter: blur(2px); } }
+html[data-motion] .m-tool[data-mode-on=true] > svg { animation: m-icon-rise .5s var(--m-ease); }
+
+/* 新开的文档标签 */
+html[data-motion] .m-tab { animation: m-in-y var(--m-in) var(--m-pop) both; }
+
+/* 左栏卡片展开收起：高度走 grid 行，里面的内容跟着淡入 */
+html[data-motion] .m-collapse { grid-template-rows: 0fr; transition: grid-template-rows var(--m-fold) var(--m-ease); }
+html[data-motion] .m-collapse[data-open=true] { grid-template-rows: 1fr; }
+html[data-motion] .m-collapse-in { opacity: 0; transform: translateY(-6px); transition: opacity var(--m-fold) ease, transform var(--m-fold) var(--m-ease); }
+html[data-motion] .m-collapse[data-open=true] > .m-collapse-in { opacity: 1; transform: none; }
+
+/* 换了工具，快捷键一行行进来 */
+html[data-motion] .m-rows > * { animation: m-swap-in var(--m-in) var(--m-ease) both; animation-delay: calc(var(--i, 0) * var(--m-step)); }
+
+/* 选颜色：选中的色块外面荡开一圈橙色 */
+@keyframes m-ring { from { box-shadow: 0 0 0 0 rgba(234, 88, 12, .55); } to { box-shadow: 0 0 0 10px rgba(234, 88, 12, 0); } }
+html[data-motion] .m-swatch[data-on=true] { animation: m-ring .7s ease-out; }
+html[data-motion] .m-swatch { transition: transform .22s var(--m-pop), scale .22s var(--m-pop), border-color .2s; }
+html[data-motion] .m-swatch:active { transform: scale(var(--m-press)); }
+
+/* 画布角上的三个方块 */
+html[data-motion] .m-tile {
+  transition-property: filter, opacity, box-shadow, transform, scale;
+  transition-duration: .25s; transition-timing-function: var(--m-pop);
+}
+html[data-motion] .m-tile:active { scale: var(--m-press); transition-duration: .08s; }
+
+/* 装配条：出现时从下面浮上来，步数跟着翻页方向滚 */
+html[data-motion] .m-asm { animation: m-in-up var(--m-in) var(--m-pop) both; }
+html[data-motion] .m-tick[data-dir=up] { animation: m-tick-up var(--m-in) var(--m-pop) both; }
+html[data-motion] .m-tick[data-dir=down] { animation: m-tick-down var(--m-in) var(--m-pop) both; }
+
+/* 三维画面准备好之前不露面，好了淡进来，带一点推近 */
+html[data-motion] .m-canvas { opacity: 0; transform: scale(1.04); transition: opacity .6s ease-out, transform 1s var(--m-ease); }
+html[data-motion] .m-canvas[data-ready=true] { opacity: 1; transform: none; }
+
+/* 浮动面板换位置（工具条挤到左栏、抽屉加宽）时滑过去；拖动手柄时不带过渡 */
+html[data-motion] body:not(.resizing-panels) :is([data-ui=left-stack], [data-ui=scene-buttons], [data-ui=toolbar-wrap], [data-ui=right-dock]) {
+  transition: top var(--m-glide) var(--m-glide-ease), left var(--m-glide) var(--m-glide-ease), width var(--m-glide) var(--m-glide-ease);
+}

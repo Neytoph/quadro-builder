@@ -283,6 +283,26 @@ const MAX_PITCH = Math.PI / 2 - POLE_GAP;
 const CUBE_PX = 80;
 const CUBE_MARGIN = 22;
 const CUBE_SNAP_MS = 320;   // Dauer des Kameraschwenks beim Klick
+
+// 动效（见 src/ui/motion.ts；系统开了「减少动态效果」时整套不走）。
+//   appear：新放上去的零件从上方落下来。from 是起始缩放，drop 是从多高落下来（cm）
+//   leave：删掉的零件留一个影子，一边往下掉一边淡出。to 是结束缩放，drop 是掉多深
+//   load：整座模型换进来（开文件、切标签）时按高度一层层长出来，spread 是最高那层晚多少毫秒
+//   batch：一次加了好几件（粘贴、镜像）时同样按高度错开，最多错开这么多毫秒
+//   cam：框住、开文件时镜头飞过去；开文件时从斜后方远处推进来
+//   cube：视角方块点一下的转身时长
+const EASE = {
+  outQuint: (k) => 1 - Math.pow(1 - k, 5),
+  inOutQuint: (k) => (k < 0.5 ? 16 * Math.pow(k, 5) : 1 - Math.pow(-2 * k + 2, 5) / 2),
+};
+const MOTION = {
+  appear: { dur: 560, from: 0.92, drop: 24, ease: EASE.outQuint },
+  leave: { dur: 340, to: 0.96, drop: -16 },
+  load: { dur: 620, spread: 1100 },
+  batch: 600,
+  cam: { dur: 900, ease: EASE.inOutQuint },
+  cube: 620,
+};
 // Ortho-Ausschnitt. 45°-Orbit: Silhouette bis |ux|+|uy|+|uz| ≈ 1,63;
 // darunter schneidet der Scissor die untere Spitze ab.
 const CUBE_FRUSTUM = 1.85;
@@ -481,6 +501,19 @@ export class SceneManager {
     this.scene.add(this.labelGroup);
     this.scene.add(this._hoverPartGroup);
     this.scene.add(this._roomGroup);
+    // 动效：删掉的零件在这里退场；_appearing 按零件记着还没长完的入场，
+    // 中途重画（点一下选中也会重画）时接着原来的进度走，不会一下跳到终点。
+    this._motion = false;
+    this._ghostGroup = new THREE.Group();
+    this._ghostGroup.name = "motion-ghosts";
+    this.scene.add(this._ghostGroup);
+    this._motionIndex = null;
+    this._motionCur = new Set();
+    this._motionLoad = true;
+    this._loadGate = true;
+    this._appearing = new Map();
+    this._leaving = [];
+    this._camFly = null;
 
     // Pick-Listen
     this.pickNodes = [];
@@ -546,11 +579,11 @@ export class SceneManager {
    * ueber den Rand zu ragen. Ohne Modell (oder bei leerem) gelten die alten
    * festen Werte.
    */
-  resetCamera(model = null) {
+  resetCamera(model = null, opts = {}) {
     const start = new THREE.Vector3(...this._defaultCam.pos);
     const heim = new THREE.Vector3(...this._defaultCam.target);
     const dir = start.clone().sub(heim).normalize();
-    this._frameAlong(model, dir);
+    this._frameAlong(model, dir, opts);
   }
 
   /**
@@ -626,6 +659,7 @@ export class SceneManager {
   setCameraPose(pose) {
     if (!pose) return;
     this._camAnim = null;
+    this._camFly = null;
     this._needsRender = true;
     if (pose.projection && pose.projection !== this._projection) this.setProjection(pose.projection);
     this.camera.position.fromArray(pose.pos);
@@ -641,6 +675,7 @@ export class SceneManager {
 
   _frameAlong(model, dir, opts = {}) {
     this._camAnim = null;
+    this._camFly = null;
     this._needsRender = true;
     const heim = new THREE.Vector3(...this._defaultCam.target);
     const pad = geometry().connectorSize / 2;
@@ -679,6 +714,34 @@ export class SceneManager {
       dist = (opts.margin || FIT_MARGIN) * noetig;
       if (!opts.silent) this._maxDistance = Math.max(this._maxDistance || 0, dist);
       if (opts.lookDown) target.y -= (b.max[1] - b.min[1]) * opts.lookDown;
+    }
+
+    // 动效开着：镜头飞过去。swoop（开文件）从斜后方远处推进来
+    if (opts.animate && this._motion && !opts.silent) {
+      const cam = MOTION.cam;
+      const fromTarget = this.controls ? this.controls.target.clone() : heim.clone();
+      let fromPos = this.camera.position.clone();
+      if (opts.swoop) {
+        const d = dir.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), -0.6);
+        d.y += 0.35;
+        fromPos = target.clone().addScaledVector(d.normalize(), dist * 1.9);
+        fromTarget.copy(target);
+      }
+      const fromOff = fromPos.sub(fromTarget);
+      const fromDir = fromOff.clone().normalize();
+      this._camFly = {
+        fromTarget,
+        toTarget: target.clone(),
+        fromDir,
+        turn: new THREE.Quaternion().setFromUnitVectors(fromDir, dir.clone().normalize()),
+        fromLen: fromOff.length(),
+        toLen: dist,
+        fromZoom: this.camera.zoom,
+        t0: this._loadGate ? Infinity : null,
+        dur: cam.dur,
+        ease: cam.ease,
+      };
+      return;
     }
 
     const prev = this.onCameraChange;
@@ -1056,6 +1119,7 @@ export class SceneManager {
     // Rechte Taste bleibt PAN -- mit der Maus. Am Mac-Trackpad gibt es keine
     // mittlere Taste; Querverschieben laeuft ueber ⌥-Ziehen / ⇧+Zwei-Finger.
     controls.touches = { ONE: null, TWO: THREE.TOUCH.DOLLY_PAN };
+    controls.addEventListener("start", () => { this._camFly = null; });
     controls.addEventListener("end", () => {
       if (!this.orbiting && !this.panning) this._reanchorTarget();
       this.onCameraChange();
@@ -3617,7 +3681,10 @@ export class SceneManager {
   // opts.assembly { done:Set, current:Set } : Aufbaumodus (fertig/aktuell/kuenftig).
   renderModel(model, selectedNodeId, opts = {}) {
     this._renderModel = model;   // 有的配件要回头看模型（软包滚筒套在哪根管上）
-    this._disposeGroup(this.buildGroup);
+    // 开着动效的时候旧零件先摘下来不释放：画完新的才知道哪些被删了，要给它们留影子。
+    const vorher = this._motion ? this.buildGroup.children.slice() : null;
+    if (vorher) for (const c of vorher) this.buildGroup.remove(c);
+    else this._disposeGroup(this.buildGroup);
     this._disposeLabels();
     this.pickNodes = [];
     this.pickTubes = [];
@@ -4526,6 +4593,8 @@ export class SceneManager {
     // Zoom-Grenze richtet sich nach der Modellgroesse.
     this._applyZoomLimits(model);
 
+    if (vorher) this._motionAfterRender(vorher, opts);
+
     // Der Szenegraph ist neu -> Schattenkarte einmal nachziehen.
     this._shadowsDirty();
     if (this._hoverPartId != null) this._rebuildHoverOverlay(this._hoverPartId, this._hoverPartExtra);
@@ -5222,6 +5291,8 @@ export class SceneManager {
    * lookAt von OrbitControls genau zur gesetzten Ausrichtung.
    */
   beginOrbit(clientX, clientY) {
+    // 人一上手转，飞到一半的镜头就让出来
+    this._camFly = null;
     this._orbitPivot = this._pointUnderCursor(clientX, clientY);
     return !!this._orbitPivot;
   }
@@ -5231,6 +5302,7 @@ export class SceneManager {
    * Fuer das Ziehen am Ansichtswuerfel: dort liegt der Zeiger neben der Szene.
    */
   beginOrbitAtTarget() {
+    this._camFly = null;
     this._orbitPivot = this.controls ? this.controls.target.clone() : null;
     return !!this._orbitPivot;
   }
@@ -5274,7 +5346,7 @@ export class SceneManager {
   get orbiting() { return !!this._orbitPivot; }
   get panning() { return !!this._panning; }
 
-  beginPan() { this._panning = true; }
+  beginPan() { this._camFly = null; this._panning = true; }
 
   endPan() {
     if (!this._panning) return;
@@ -5381,6 +5453,7 @@ export class SceneManager {
   }
 
   restoreCameraState(st) {
+    this._camFly = null;
     this._needsRender = true;
     if (!st || !this.controls || !Array.isArray(st.pos) || !Array.isArray(st.target)) return false;
     this.camera.position.fromArray(st.pos);
@@ -5775,6 +5848,329 @@ export class SceneManager {
       }
     });
     this._applyClip();
+  }
+
+  // --- 动效 ----------------------------------------------------------------
+  // 零件的入场和退场都不碰共用的材质和几何体：入场只改位置和缩放（实例化的
+  // 零件改它那一格实例矩阵），退场用摘下来的旧几何体配一份克隆的半透明材质。
+  // 选中、悬停之类的重画会中途打断入场，所以入场按零件记账，重画后接着走。
+
+  setMotion(on) {
+    this._finishMotion();
+    this._motion = !!on;
+    this._motionIndex = null;
+    this._motionCur = new Set();
+    this._motionLoad = true;
+  }
+
+  /**
+   * 页面第一次打开时，会话里的模型在画布露面之前就画好了；这时候放载入动画
+   * 等于没人看见。所以第一次载入的零件和镜头都停在起点，等界面说一声
+   * 「露面了」再一起开始。之后的载入（开文件、切标签）不再等。
+   */
+  releaseLoadGate() {
+    if (!this._loadGate) return;
+    this._loadGate = false;
+    for (const a of this._appearing.values()) if (a.t0 === Infinity) a.t0 = null;
+    if (this._camFly && this._camFly.t0 === Infinity) this._camFly.t0 = null;
+    this._needsRender = true;
+  }
+
+  /**
+   * 动画的时钟从「第一次真正画出来之后」开始走。新零件第一次上屏的那一帧
+   * 要编译着色器，慢的机器上这一帧能卡上一两秒；要是从创建那一刻算，
+   * 这一帧过完动画已经演完了，人只看见零件直接出现。
+   * t0 为 null 表示还没画过：这一帧先画，下一帧才开始计时。
+   * 返回 false 表示还没开始（按第 0 帧摆）。
+   */
+  _clockStart(a, now) {
+    if (a.t0 === Infinity) return false;
+    if (a.t0 === null) {
+      if (a.drawn) a.t0 = now;
+      else a.drawn = true;
+      return false;
+    }
+    return true;
+  }
+
+  /** 整座模型要换了（开文件、切标签）：下一次画按「载入」处理，不跟上一座比。 */
+  markModelReplaced() {
+    this._motionLoad = true;
+  }
+
+  /** 把画出来的东西按零件归拢：key 是 kind:id，值是它的全部碎片（管身、端盖、实例格子）。 */
+  _indexParts(children) {
+    const idx = new Map();
+    const put = (key, piece) => {
+      let rec = idx.get(key);
+      if (!rec) { rec = { id: piece.id, pieces: [] }; idx.set(key, rec); }
+      rec.pieces.push(piece);
+    };
+    const walk = (o, top, inherited) => {
+      const ud = o.userData || {};
+      if (o.isInstancedMesh && ud.instances) {
+        ud.instances.forEach((it, i) => {
+          if (it && it.id != null) put(it.kind + ":" + it.id, { obj: o, index: i, top, id: it.id });
+        });
+        return;
+      }
+      const own = ud.kind && ud.id != null ? { key: ud.kind + ":" + ud.id, id: ud.id } : inherited;
+      if (o.isMesh && own) put(own.key, { obj: o, index: -1, top, id: own.id });
+      for (const c of o.children) walk(c, top, own);
+    };
+    for (const c of children) walk(c, c, null);
+    return idx;
+  }
+
+  /** 碎片此刻的世界矩阵。 */
+  _pieceWorld(p, out) {
+    p.obj.updateWorldMatrix(true, false);
+    if (p.index >= 0) {
+      p.obj.getMatrixAt(p.index, out);
+      return out.premultiply(p.obj.matrixWorld);
+    }
+    return out.copy(p.obj.matrixWorld);
+  }
+
+  _piecesBox(pieces) {
+    const box = new THREE.Box3(), b = new THREE.Box3(), m = new THREE.Matrix4();
+    for (const p of pieces) {
+      const g = p.obj.geometry;
+      if (!g.boundingBox) g.computeBoundingBox();
+      box.union(b.copy(g.boundingBox).applyMatrix4(this._pieceWorld(p, m)));
+    }
+    return box;
+  }
+
+  /** 记下每块碎片的原始摆放，动画每一帧都从原始摆放算，不累积误差。 */
+  _bindPieces(pieces) {
+    return pieces.map((p) => {
+      if (p.index >= 0) {
+        p.obj.updateWorldMatrix(true, false);
+        const base = new THREE.Matrix4();
+        p.obj.getMatrixAt(p.index, base);
+        const P = p.obj.matrixWorld.clone();
+        return { obj: p.obj, index: p.index, base, P, Pinv: P.clone().invert() };
+      }
+      p.obj.updateMatrix();
+      p.obj.parent.updateWorldMatrix(true, false);
+      const P = p.obj.parent.matrixWorld.clone();
+      return { obj: p.obj, index: -1, base: p.obj.matrix.clone(), P, Pinv: P.clone().invert() };
+    });
+  }
+
+  /** 以 center 为中心缩放 s、整体抬高 dy（世界坐标），套到每块碎片上。 */
+  _posePieces(center, pieces, s, dy) {
+    const W = this._motionW || (this._motionW = new THREE.Matrix4());
+    const A = this._motionA || (this._motionA = new THREE.Matrix4());
+    const M = this._motionM || (this._motionM = new THREE.Matrix4());
+    W.makeTranslation(-center.x, -center.y, -center.z)
+      .premultiply(A.makeScale(s, s, s))
+      .premultiply(A.makeTranslation(center.x, center.y + dy, center.z));
+    for (const p of pieces) {
+      M.multiplyMatrices(W, p.P).premultiply(p.Pinv).multiply(p.base);
+      if (p.index >= 0) {
+        p.obj.setMatrixAt(p.index, M);
+        p.obj.instanceMatrix.needsUpdate = true;
+        // 包围球按第一帧（缩得很小）算出来会偏小，视锥裁剪会把长大的部分裁掉
+        p.obj.boundingSphere = null;
+      } else {
+        M.decompose(p.obj.position, p.obj.quaternion, p.obj.scale);
+      }
+    }
+  }
+
+  _motionAfterRender(old, opts) {
+    const idx = this._indexParts(this.buildGroup.children);
+    const prev = this._motionIndex;
+    const load = this._motionLoad || !prev;
+    this._motionLoad = false;
+    // 拖动、粘贴预览时每挪一格都重画一次，这时候不放动画，只记账
+    const quiet = !!opts.preview;
+    const cur = opts.assembly ? opts.assembly.current : null;
+    const now = performance.now();
+
+    const keep = new Set();
+    if (!load && !quiet) {
+      const gone = [];
+      for (const [key, rec] of prev) if (!idx.has(key)) gone.push(rec);
+      if (gone.length) this._spawnGhosts(gone, keep);
+    }
+    const tmp = new THREE.Group();
+    for (const c of old) if (!keep.has(c)) tmp.add(c);
+    this._disposeGroup(tmp);
+
+    // 没长完的接着长：进度照旧，碎片换成这一次新画的
+    const carried = new Map();
+    for (const [key, a] of this._appearing) {
+      const rec = idx.get(key);
+      if (rec) carried.set(key, { ...a, pieces: this._bindPieces(rec.pieces) });
+    }
+    this._appearing = carried;
+
+    // 新来的：模型里新增的零件，以及装配模式里刚轮到的这一步
+    const fresh = [];
+    if (!quiet) {
+      for (const [key, rec] of idx) {
+        if (this._appearing.has(key)) continue;
+        const neu = load || !prev.has(key)
+          || (cur && cur.has(rec.id) && !this._motionCur.has(rec.id));
+        if (neu) fresh.push([key, rec]);
+      }
+    }
+    if (fresh.length) {
+      const boxes = fresh.map(([, rec]) => this._piecesBox(rec.pieces));
+      let y0 = Infinity, y1 = -Infinity;
+      for (const b of boxes) { y0 = Math.min(y0, b.min.y); y1 = Math.max(y1, b.min.y); }
+      // 一次来好几件就从下往上错开，像一层层搭起来
+      const spread = fresh.length === 1 ? 0
+        : load ? MOTION.load.spread : Math.min(MOTION.batch, fresh.length * 40);
+      const dur = load ? MOTION.load.dur : MOTION.appear.dur;
+      fresh.forEach(([key, rec], i) => {
+        const b = boxes[i];
+        const h = y1 > y0 ? (b.min.y - y0) / (y1 - y0) : 0;
+        this._appearing.set(key, {
+          center: b.getCenter(new THREE.Vector3()),
+          pieces: this._bindPieces(rec.pieces),
+          // 页面还没露面时先摆在起点等着，露面了再开始（见 releaseLoadGate）；
+          // 其余的从第一次画出来之后开始计时（见 _clockStart）
+          t0: load && this._loadGate ? Infinity : null, delay: h * spread, dur,
+        });
+      });
+    }
+    // 立刻摆到第一帧，不然这一帧会先画出完整的零件再缩回去
+    for (const a of this._appearing.values()) this._poseAppear(a, now);
+    this._needsRender = true;
+    this._motionIndex = idx;
+    this._motionCur = cur ? new Set(cur) : new Set();
+  }
+
+  /** 返回 true 表示已经长完。 */
+  _poseAppear(a, now) {
+    const ap = MOTION.appear;
+    const k = a.t0 === null || a.t0 === Infinity ? 0 : Math.min(1, Math.max(0, (now - a.t0 - a.delay) / a.dur));
+    if (k >= 1) { this._posePieces(a.center, a.pieces, 1, 0); return true; }
+    const e = ap.ease(k);
+    this._posePieces(a.center, a.pieces, ap.from + (1 - ap.from) * e, ap.drop * (1 - e));
+    return false;
+  }
+
+  /** 删掉的零件：用摘下来的旧几何体配克隆的半透明材质，退场完再一起释放。 */
+  _spawnGhosts(recs, keep) {
+    const mats = new Map();
+    const cloneMat = (m) => {
+      let c = mats.get(m);
+      if (!c) {
+        c = m.clone();
+        c.transparent = true;
+        c.depthWrite = false;
+        c.userData.opacity0 = m.opacity;
+        mats.set(m, c);
+      }
+      return c;
+    };
+    const items = [];
+    const tops = new Set();
+    const b = new THREE.Box3();
+    for (const rec of recs) {
+      const meshes = [];
+      const box = new THREE.Box3();
+      for (const p of rec.pieces) {
+        const base = this._pieceWorld(p, new THREE.Matrix4());
+        const src = p.obj.material;
+        const g = new THREE.Mesh(p.obj.geometry, Array.isArray(src) ? src.map(cloneMat) : cloneMat(src));
+        g.matrixAutoUpdate = false;
+        g.matrix.copy(base);
+        g.raycast = () => {};
+        this._ghostGroup.add(g);
+        meshes.push({ g, base });
+        if (!p.obj.geometry.boundingBox) p.obj.geometry.computeBoundingBox();
+        box.union(b.copy(p.obj.geometry.boundingBox).applyMatrix4(base));
+        tops.add(p.top);
+        keep.add(p.top);
+      }
+      items.push({ center: box.getCenter(new THREE.Vector3()), meshes });
+    }
+    this._leaving.push({ items, mats: [...mats.values()], tops: [...tops], t0: null });
+  }
+
+  /** 返回 true 表示已经退完并释放。 */
+  _poseLeave(gh, now, force = false) {
+    const L = MOTION.leave;
+    const k = force ? 1 : gh.t0 === null ? 0 : Math.min(1, (now - gh.t0) / L.dur);
+    if (k >= 1) {
+      for (const it of gh.items) for (const m of it.meshes) this._ghostGroup.remove(m.g);
+      for (const m of gh.mats) m.dispose();
+      const tmp = new THREE.Group();
+      for (const t of gh.tops) tmp.add(t);
+      this._disposeGroup(tmp);
+      return true;
+    }
+    const s = 1 + (L.to - 1) * k * k;
+    for (const m of gh.mats) m.opacity = m.userData.opacity0 * (1 - k);
+    const dy = L.drop * k * k;
+    const W = this._motionW || (this._motionW = new THREE.Matrix4());
+    const A = this._motionA || (this._motionA = new THREE.Matrix4());
+    for (const it of gh.items) {
+      const c = it.center;
+      W.makeTranslation(-c.x, -c.y, -c.z)
+        .premultiply(A.makeScale(s, s, s))
+        .premultiply(A.makeTranslation(c.x, c.y + dy, c.z));
+      for (const m of it.meshes) {
+        m.g.matrix.multiplyMatrices(W, m.base);
+        m.g.matrixWorldNeedsUpdate = true;
+      }
+    }
+    return false;
+  }
+
+  _stepMotion() {
+    if (!this._appearing.size && !this._leaving.length) return false;
+    const now = performance.now();
+    for (const [key, a] of this._appearing) {
+      this._clockStart(a, now);
+      if (this._poseAppear(a, now)) this._appearing.delete(key);
+    }
+    this._leaving = this._leaving.filter(gh => { this._clockStart(gh, now); return !this._poseLeave(gh, now); });
+    this.renderer.shadowMap.needsUpdate = true;
+    return true;
+  }
+
+  /** 截图（缩略图、说明书）之前把所有动画直接放到终点。 */
+  _finishMotion() {
+    if (!this._motion) return;
+    for (const a of this._appearing.values()) this._posePieces(a.center, a.pieces, 1, 0);
+    this._appearing.clear();
+    for (const gh of this._leaving) this._poseLeave(gh, 0, true);
+    this._leaving = [];
+    this._shadowsDirty();
+  }
+
+  _stepCameraFly() {
+    const f = this._camFly;
+    if (!f) return false;
+    this._clockStart(f, performance.now());
+    const k = f.t0 === null || f.t0 === Infinity ? 0 : Math.min(1, (performance.now() - f.t0) / f.dur);
+    const e = f.ease(k);
+    // 绕着目标转过去：方向走球面插值、距离走直线，路上不会穿过模型
+    const q = new THREE.Quaternion().slerp(f.turn, e);
+    const off = f.fromDir.clone().applyQuaternion(q).multiplyScalar(f.fromLen + (f.toLen - f.fromLen) * e);
+    const target = new THREE.Vector3().lerpVectors(f.fromTarget, f.toTarget, e);
+    this.camera.position.copy(target).add(off);
+    this.camera.up.set(0, 1, 0);
+    this.camera.zoom = f.fromZoom + (1 - f.fromZoom) * e;
+    this.camera.lookAt(target);
+    this.camera.updateProjectionMatrix();
+    if (this.controls) {
+      this.controls.target.copy(target);
+      this.controls.update();
+    }
+    this._updateOrthoFrustum();
+    if (k >= 1) {
+      this._camFly = null;
+      this.onCameraChange();
+    }
+    return true;
   }
 
   _disposeGroup(group) {
@@ -6430,6 +6826,7 @@ export class SceneManager {
    * `preserveDrawingBuffer` ist aus, nach dem naechsten Bild waere er leer.
    */
   snapshot(opts = {}) {
+    this._finishMotion();
     const hideGrid = opts.hideGrid !== false;
     const hideLabels = opts.hideLabels !== false;
     const hideRoom = opts.hideRoom === true;
@@ -6707,7 +7104,7 @@ export class SceneManager {
   _stepCameraAnimation() {
     const a = this._camAnim;
     if (!a) return false;
-    const k = Math.min(1, (performance.now() - a.t0) / CUBE_SNAP_MS);
+    const k = Math.min(1, (performance.now() - a.t0) / (this._motion ? MOTION.cube : CUBE_SNAP_MS));
     // Weich anlaufen und auslaufen.
     const e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
     const v = new THREE.Vector3().copy(a.from).lerp(a.to, e);
@@ -6727,6 +7124,8 @@ export class SceneManager {
   _animate() {
     requestAnimationFrame(this._animate);
     if (this._stepCameraAnimation()) this._needsRender = true;
+    if (this._stepCameraFly()) this._needsRender = true;
+    if (this._stepMotion()) this._needsRender = true;
     // controls.update() liefert true, solange das Damping noch nachlaeuft.
     if (this.controls.update()) this._needsRender = true;
     if (this._updateTreeCamera()) this._needsRender = true;

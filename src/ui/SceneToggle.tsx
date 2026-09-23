@@ -13,7 +13,7 @@ const tileChrome = (_on: boolean, h: number): CSSProperties => ({
   border: TILE_EDGE,
 })
 
-const tileBtn = 'overflow-hidden rounded-[11px] p-0 border-0 cursor-pointer transition-[filter,opacity,box-shadow,transform] duration-200 hover:scale-[1.03] active:scale-95 flex items-center justify-center'
+const tileBtn = 'm-tile overflow-hidden rounded-[11px] p-0 border-0 cursor-pointer transition-[filter,opacity,box-shadow,transform] duration-200 hover:scale-[1.03] active:scale-95 flex items-center justify-center'
 
 /** 草地、框住、导出说明书：左栏右侧、与左栏顶对齐。 */
 export default function SceneToggle() {
@@ -27,6 +27,7 @@ export default function SceneToggle() {
   return (
     <div
       data-tour="scene-buttons"
+      data-ui="scene-buttons"
       className="fixed z-20 flex flex-row pointer-events-none"
       style={{ left: pos.sceneLeft, top: pos.sceneTop, width: clusterW, gap: SCENE_CLUSTER_GAP }}
     >

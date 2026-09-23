@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
+import { MOTION } from './motion'
 import { useEngine } from '../store/EngineContext'
 import { useI18n } from '../i18n'
 import { NARROW_MAX, TAB_BAR_H, usePanelLayout } from './panelLayout'
@@ -18,6 +19,28 @@ export default function ProjectTabs() {
   const { vw } = usePanelLayout()
   const narrow = vw <= NARROW_MAX
   const [editing, setEditing] = useState<string | null>(null)
+  const pillsRef = useRef<HTMLDivElement>(null)
+  const indRef = useRef<HTMLSpanElement>(null)
+
+  // 右边这排面板入口底下一块会滑的色块，跟着打开的那个走；全关了就淡掉、原地不动
+  useLayoutEffect(() => {
+    if (!MOTION) return
+    const box = pillsRef.current, ind = indRef.current
+    if (!box || !ind) return
+    const place = () => {
+      const on = box.querySelector<HTMLElement>('[data-pill-on="true"]')
+      if (!on) { ind.style.opacity = '0'; return }
+      ind.style.opacity = '1'
+      ind.style.transform = `translate(${on.offsetLeft}px, ${on.offsetTop}px)`
+      ind.style.width = `${on.offsetWidth}px`
+      ind.style.height = `${on.offsetHeight}px`
+      if (!ind.dataset.ready) requestAnimationFrame(() => { ind.dataset.ready = '1' })
+    }
+    place()
+    const ro = new ResizeObserver(place)
+    ro.observe(box)
+    return () => ro.disconnect()
+  })
 
   const close = (tabId: string, dirty: boolean) => {
     if (dirty && !window.confirm(t('confirm.closeTab'))) return
@@ -33,7 +56,7 @@ export default function ProjectTabs() {
       <div className="flex items-center gap-1 min-w-0 flex-1 overflow-x-auto scrollbar-thin">
       {api.tabs.map(tab => (
         <div key={tab.tabId}
-          className={`flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs shrink-0 ${tab.tabId === api.activeTabId ? 'bg-gray-800 border-teal-500 text-teal-700' : 'bg-transparent border-transparent text-gray-400 hover:text-gray-200 hover:bg-gray-900'}`}>
+          className={`m-tab flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs shrink-0 ${tab.tabId === api.activeTabId ? 'bg-gray-800 border-teal-500 text-teal-700' : 'bg-transparent border-transparent text-gray-400 hover:text-gray-200 hover:bg-gray-900'}`}>
           {editing === tab.tabId ? (
             <input autoFocus defaultValue={tab.name} className="bg-transparent w-24 outline-none"
               onBlur={e => { api.renameTab(tab.tabId, e.target.value); setEditing(null) }}
@@ -52,7 +75,8 @@ export default function ProjectTabs() {
       </div>
       )}
 
-      <div className={`flex items-center gap-1.5 ${narrow ? 'flex-1 overflow-x-auto scrollbar-thin' : 'shrink-0'}`}>
+      <div ref={pillsRef} className={`relative flex items-center gap-1.5 ${narrow ? 'flex-1 overflow-x-auto scrollbar-thin' : 'shrink-0'}`}>
+        {MOTION && <span ref={indRef} aria-hidden className="m-pill-ind" />}
         {GROUPS.map((group, i) => (
           <div key={i} className="flex items-center gap-0.5 shrink-0">
             {i > 0 && <span className="w-px h-4 bg-gray-700 mx-0.5" />}
@@ -65,9 +89,11 @@ export default function ProjectTabs() {
               const mark = issues == null ? '' : issues ? ` · ${issues}` : ' ✓'
               const tone = issues == null || on ? '' : issues ? ' text-amber-300' : ' text-teal-400'
               return (
-                <button key={item.id} data-tour={`dock-${item.id}`} onClick={() => toggle(item.id)}
-                  className={`text-xs px-2.5 min-h-8 rounded-lg cursor-pointer whitespace-nowrap ${
-                    on ? 'bg-teal-500 text-white font-semibold' : `text-gray-300 hover:text-teal-600 hover:bg-gray-900${tone}`
+                <button key={item.id} data-tour={`dock-${item.id}`} data-pill-on={on} onClick={() => toggle(item.id)}
+                  className={`m-pill relative z-[1] text-xs px-2.5 min-h-8 rounded-lg cursor-pointer whitespace-nowrap ${
+                    on
+                      ? (MOTION ? 'text-white font-semibold' : 'bg-teal-500 text-white font-semibold')
+                      : `text-gray-300 hover:text-teal-600 hover:bg-gray-900${tone}`
                   }`}>
                   {t(item.labelKey)}{mark}
                 </button>

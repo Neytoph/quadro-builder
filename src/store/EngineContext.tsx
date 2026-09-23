@@ -17,6 +17,7 @@ import { exportAssemblyPdf as runAssemblyPdf } from '../engine/assemblyManual.js
 import { ACCESSORY_IDS } from '../engine/accessoryPack.js'
 import { takeModelThumb, waitSceneReady } from '../engine/thumbShot.js'
 import { bomToCsv, bomToPngDataUrl, loadImage } from '../ui/bomExport'
+import { MOTION } from '../ui/motion'
 
 // 引擎来自 Vanilla JS，这里不跟它的推断类型较劲。
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -536,7 +537,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     e.builder.setUiState(tab.view || {})
     e.builder.setMode((tab.view?.mode as string) || 'select')
     if (tab.view?.camera) e.scene.restoreCameraState(tab.view.camera)
-    else e.scene.resetCamera(e.model)
+    else e.scene.resetCamera(e.model, { animate: true, swoop: true })
     e.builder.refresh()
     switching.current = false
     bump()
@@ -584,6 +585,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
           accessories: accessories(),
         })
         const scene = new SceneManager(host)
+        scene.setMotion(MOTION)
         scene.setTheme(false)
         // 默认开草地。没存过偏好（null）算开，只有显式关过（'0'）才关——
         // 原来写的是 === '1'，等于新用户第一次打开是一片空白网格。
@@ -644,6 +646,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
         }
         syncTabsRef.current()
         setReady(true)
+        // 画布这时才露面，第一次载入的动画从这一刻开始放
+        scene.releaseLoadGate()
         bumpRef.current()
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err))
@@ -1065,7 +1069,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       if (res && res.ok === false) throw new Error(res.reason || 'data')
       e2.builder.clearHistory?.()
       e2.builder.refresh()
-      e2.scene.resetCamera(e2.model)
+      e2.scene.resetCamera(e2.model, { animate: true, swoop: true })
       switching.current = false
       const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
       if (tab) {
@@ -1204,7 +1208,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       return false
     }
     e2.builder.refresh()
-    if (opts?.frame !== false) e2.scene.resetCamera(e2.model)
+    if (opts?.frame !== false) e2.scene.resetCamera(e2.model, { animate: true, swoop: true })
     const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
     if (tab) tab.dirty = true
     syncTabs()
@@ -1547,7 +1551,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     copy, paste, cancelPaste, selectAll, selectConnected,
     nudgePasteY: (steps) => { builder?.nudgePasteY?.(steps); bump() },
     setViewCubePad,
-    frame: () => { scene?.resetCamera?.(model); bump() },
+    frame: () => { scene?.resetCamera?.(model, { animate: true }); bump() },
     toggleGrass: () => {
       const next = !scene?._sceneOn
       track('builder.scene.grass', { on: next })
