@@ -1020,9 +1020,45 @@ export class Builder {
     const t = this.model.tubes.get(id);
     if (!t || t.arm || t.link || t.bow) return false;
     if (this.panelRail) return this.highlight ? this.highlight.has(id) : false;
-    if (lattice) return this._railPartners(id).length > 0;
-    const dims = this._panelDims();
-    return !!dims && this.model.panelPartners(id, dims).length > 0;
+    return this._freePartners(id, null, lattice).length > 0;
+  }
+
+  /**
+   * 还能和 railId 配成一块的对面管：只留中间还有空段的。`at` 给了（第一根管上点的
+   * 位置），就只看板会落的那一段；没给，任意一段空着就算。已经有板 / 布的地方不再亮。
+   */
+  _freePartners(railId, at = null, lattice = this.mode === "fitting" && RAIL_FITTINGS.has(this.fittingKind)) {
+    const kind = lattice ? this.fittingKind : null;
+    let partners;
+    if (lattice) partners = this._railPartners(railId);
+    else {
+      const dims = this._panelDims();
+      partners = dims ? this.model.panelPartners(railId, dims) : [];
+    }
+    return partners.filter((p) => {
+      if (at != null) {
+        const sec = this.model.panelSection(p, at);
+        return this.model.sectionFree(kind, railId, p.id, sec.t0, sec.len);
+      }
+      const count = Math.max(1, Math.floor((p.hi - p.lo + 0.5) / p.len));
+      for (let k = 0; k < count; k++) {
+        if (this.model.sectionFree(kind, railId, p.id, p.lo + k * p.len, p.len)) return true;
+      }
+      return false;
+    });
+  }
+
+  /**
+   * 面板或网 / 布面 / 玩具袋模式、还没选第一根管时：能当第一根的管（至少有一根能配的
+   * 对面管）。其他情况 null。
+   */
+  _firstRailCandidates() {
+    if (this.panelRail) return null;
+    const lattice = this.mode === "fitting" && RAIL_FITTINGS.has(this.fittingKind);
+    if (this.mode !== "panel" && !lattice) return null;
+    const ids = new Set();
+    for (const id of this.model.tubes.keys()) if (this._railUsable(id, lattice)) ids.add(id);
+    return ids.size ? ids : null;
   }
 
   /** Laesst sich an dieser Stelle ein Ziehen der Auswahl beginnen? */
@@ -1434,7 +1470,10 @@ export class Builder {
   /** Meldet unten links, was gerade gesetzt wurde. */
   _notePlaced(id, kind) {
     const name = this._partLabel(id, kind);
-    if (name) this.onNotice(t("notice_placed", name));
+    if (!name) return;
+    // 弯管放下去是默认弯法，告诉用户点它能换方向
+    const tube = kind === "tube" ? this.model.tubes.get(id) : null;
+    this.onNotice(t(tube && tube.bow ? "notice_bow_placed" : "notice_placed", name));
   }
 
   /**
@@ -1542,9 +1581,12 @@ export class Builder {
     const invalid = this._paste && !this._paste.valid && this._paste.sel
       ? new Set(this._paste.sel.keys())
       : (this._drag && this._drag.invalid ? new Set(this.selection.keys()) : null);
+    // 面板 / 布件两步点选的第一步：还没选第一根管时，能当第一根的管先亮出来，
+    // 其余零件退后；选了第一根，照旧只亮它（琥珀）和能配的对面管（绿）。
+    const firstRails = this._firstRailCandidates();
     this.scene.renderModel(this.model, this.selectedNodeId,
       { labelFor, slideNameFor, labelIds, soloId, soloLabel, assembly, suggest, reinforce,
-        selected, highlight: this.highlight, invalid,
+        selected, highlight: this.highlight || firstRails, invalid,
         focusId: this.panelRail ? this.panelRail.id : null });
     this._buildHandles();
     this.scene.requestRender();
@@ -1820,7 +1862,6 @@ export class Builder {
       ? 0
       : spacingFor(tube ? tube.length_cm : 35);
     const previewColor = this.color === RANDOM_COLOR ? null : this.color;
-    const bowInHand = isCurvedTube(this.tubeId);
     for (const d of dirs) {
       if (occupied.has(d.name)) continue;
       if (lagerArm && (lagerArm[0] * d.vec[0] + lagerArm[1] * d.vec[1] + lagerArm[2] * d.vec[2]) > 0.9) continue;
@@ -1828,36 +1869,8 @@ export class Builder {
       // Belegung muss ueber die Richtung geprueft werden -- sonst bietet sie den
       // Punkt auch dann noch an, wenn das Rohr schon steckt.
       if (c45Dir && this._armOccupied(node, d.vec)) continue;
-      const isCardDir = Math.max(Math.abs(d.vec[0]), Math.abs(d.vec[1]), Math.abs(d.vec[2])) > DIR_ALIGN_TOL;
-      // 弯管在手：一个方向给四根弧线手柄，四种弯法各一根，弧线画的就是点下去
-      // 之后弯管的走向。落到地下或目标接头已经连着的那几种不给。
-      if (bowInHand && isCardDir && !c45Dir) {
-        const R = gridSpacing();
-        const normals = this._bowNormalsFor(d.vec).filter((n) => this._bowFeasible(node, d.vec, n, R));
-        // 静止时一个方向只画默认那种弯法（和键盘放下去的一样），指到接头再
-        // 展开四种。默认那种会钻到地面以下（地面接头往下弯）就改成往上，
-        // 放不下就拿第一种顶上。
-        const ground = this.model._groundLevel ? this.model._groundLevel() : 0;
-        let def = this._bowNormal(d.vec);
-        if (node.y + R * (d.vec[1] + def[1]) < ground - 0.01 || node.y + R * def[1] < ground - 0.01) def = [0, 1, 0];
-        let defaultIdx = normals.findIndex((n) => n[0] === def[0] && n[1] === def[1] && n[2] === def[2]);
-        if (defaultIdx < 0) defaultIdx = 0;
-        normals.forEach((normal, i) => {
-          this.scene.addHandle(
-            [node.x, node.y, node.z],
-            {
-              nodeId: node.id, dir: d.vec, dirName: d.name, slope: isSlope,
-              bow: true, bowNormal: normal, bowRadius: R, bowDefault: i === defaultIdx,
-              arrowCompact: true,
-              previewSpan: 0,
-              previewColor,
-            },
-            "dir"
-          );
-        });
-        continue;
-      }
       if (this._targetBelowGround(node, d.vec)) continue;
+      const isCardDir = Math.max(Math.abs(d.vec[0]), Math.abs(d.vec[1]), Math.abs(d.vec[2])) > DIR_ALIGN_TOL;
       // Pfeile wachsen aus der Kupplung heraus (wie designer), nicht als
       // schwebende Kugel auf `gap`. Die Richtung bleibt die des freien Arms.
       this.scene.addHandle(
@@ -1871,35 +1884,6 @@ export class Builder {
         ((useDiag || c45Dir) && !isCardDir) ? "diag" : "dir"
       );
     }
-  }
-
-  /**
-   * 弯管从某个方向出发时的四种弯法：和出发方向垂直的四个世界轴向。
-   * 顺序固定（先竖直再水平），四根弧线的颜色和位置才每次一样。
-   */
-  _bowNormalsFor(dirVec) {
-    const ax = Math.abs(dirVec[0]), ay = Math.abs(dirVec[1]), az = Math.abs(dirVec[2]);
-    const main = ay >= ax && ay >= az ? 1 : ax >= az ? 0 : 2;
-    const out = [];
-    for (const axis of [1, 0, 2]) {
-      if (axis === main) continue;
-      for (const s of [-1, 1]) {
-        const n = [0, 0, 0];
-        n[axis] = s;
-        out.push(n);
-      }
-    }
-    return out;
-  }
-
-  /** 这一种弯法放得下吗：弧线最低点不在地下，目标接头也还没和这个接头连着。 */
-  _bowFeasible(node, dir, normal, R) {
-    const cy = node.y + normal[1] * R;
-    const ty = node.y + R * (dir[1] + normal[1]);
-    if (this.model.isBelowGround(ty) || this.model.isBelowGround(cy)) return false;
-    const hit = this.model.findNodeNear(
-      node.x + R * (dir[0] + normal[0]), ty, node.z + R * (dir[2] + normal[2]));
-    return !(hit && this.model.tubeBetween(node.id, hit.id));
   }
 
   _targetBelowGround(node, vec) {
@@ -4059,15 +4043,16 @@ export class Builder {
 
     if (this.panelRail) {
       if (id === this.panelRail.id) { this._clearPanelRail(); return; }
-      const partner = this._railPartners(this.panelRail.id).find((c) => c.id === id);
+      const partner = this._freePartners(this.panelRail.id, this.panelRail.at).find((c) => c.id === id);
       if (!partner) { this.onNotice(t("notice_panel_no_fit"), "warn"); return; }
       const sec = this.model.panelSection(partner, this.panelRail.at);
       this._placeRailFitting(this.panelRail.id, partner.id, sec.t0, sec.len);
       return;
     }
-    const partners = this._railPartners(id);
+    const at = this._alongTube(id, point);
+    const partners = this._freePartners(id, at);
     if (!partners.length) { this.onNotice(t("notice_textile_no_partner"), "warn"); return; }
-    this.panelRail = { id, at: this._alongTube(id, point) };
+    this.panelRail = { id, at };
     this.highlight = new Set([id, ...partners.map((c) => c.id)]);
     this.onNotice(t("notice_panel_pick_second", partners.length), "info");
     this.refresh();
@@ -4114,7 +4099,7 @@ export class Builder {
       let id = usable[0];
       if (this.panelRail) {
         const hit = usable.find((u) => u === this.panelRail.id
-          || this._railPartners(this.panelRail.id).some((c) => c.id === u));
+          || this._freePartners(this.panelRail.id, this.panelRail.at).some((c) => c.id === u));
         if (hit) id = hit;
       }
       return { id, point: { x: n.x, y: n.y, z: n.z }, pick };
@@ -4196,7 +4181,7 @@ export class Builder {
     // Zweiter Klick: passt das angeklickte Rohr als Gegenstueck?
     if (this.panelRail) {
       if (pick.data.id === this.panelRail.id) { this._clearPanelRail(); return; }
-      const partner = this.model.panelPartners(this.panelRail.id, dims)
+      const partner = this._freePartners(this.panelRail.id, this.panelRail.at)
         .find((c) => c.id === pick.data.id);
       if (!partner) { this.onNotice(t("notice_panel_no_fit"), "warn"); return; }
       const sec = this.model.panelSection(partner, this.panelRail.at);
@@ -4206,9 +4191,10 @@ export class Builder {
 
     // Erster Klick: Rohr merken -- es selbst (amber) und die Gegenrohre (gruen)
     // leuchten, die uebrigen treten zurueck.
-    const partners = this.model.panelPartners(pick.data.id, dims);
+    const at = this._alongTube(pick.data.id, pick.point);
+    const partners = this._freePartners(pick.data.id, at);
     if (!partners.length) { this.onNotice(t("notice_panel_no_partner"), "warn"); return; }
-    this.panelRail = { id: pick.data.id, at: this._alongTube(pick.data.id, pick.point) };
+    this.panelRail = { id: pick.data.id, at };
     this.highlight = new Set([pick.data.id, ...partners.map((c) => c.id)]);
     this.onNotice(t("notice_panel_pick_second", partners.length), "info");
     this.refresh();
@@ -4293,6 +4279,7 @@ export class Builder {
       this.recordHistory(() => { res = this.model.rotateBow(bow.id, 1, { pivot }); });
       if (res && res.ground) this.onNotice(t("notice_ground"), "warn");
       else if (res && res.duplicate) this.onNotice(t("notice_bow_blocked"));
+      else if (res && res.node) this.onNotice(t("notice_bow_turned"));
       this.refresh();
       return;
     }
@@ -4325,9 +4312,8 @@ export class Builder {
         // model.extend() braucht das nicht zu unterscheiden.
         const tube = getTube(this.tubeId);
         this.recordHistory(() => {
-          // 弧线手柄自带弯法；键盘步进和老式手柄还是按默认弯法来。
           res = isCurvedTube(this.tubeId)
-            ? this.model.extendBow(h.data.nodeId, h.data.dir, h.data.bowNormal || this._bowNormal(h.data.dir), tube.id, this.colorFor("tube", h.data.nodeId), gridSpacing())
+            ? this.model.extendBow(h.data.nodeId, h.data.dir, this._bowNormal(h.data.dir), tube.id, this.colorFor("tube", h.data.nodeId), gridSpacing())
             : this.model.extend(
                 h.data.nodeId, h.data.dir, tube.id, this.colorFor("tube", h.data.nodeId), tube.length_cm, spacingFor(tube.length_cm)
               );
