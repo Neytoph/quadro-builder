@@ -2088,6 +2088,28 @@ export class SceneManager {
     return this._materials[key];
   }
 
+  /**
+   * 布件的形状，照抓来的原件 textil2 剖出来的截面：一片布在两根管的轴线高度
+   * 上平铺（局部 y=0，沿 z 从一根管到另一根管），两头各一整圈套筒套在管子
+   * 外面（原件的套筒半径 2.52，管子 2.45）。along 是沿管方向的宽度，L 是两管
+   * 轴线的间距。套筒画在 z=0，另一头由调用方平移到 z=L。
+   */
+  _textileSheetGeos(along, L) {
+    const r = (geometry().tubeRadius || 2.45) + 0.07;
+    const sheet = this._cachedGeo(`tsheet:${along.toFixed(1)}x${Math.round(L)}`, () => {
+      const g = new THREE.PlaneGeometry(along, Math.max(1, L - 2 * r + 0.2));
+      g.rotateX(-Math.PI / 2);
+      g.translate(0, 0, L / 2);
+      return g;
+    });
+    const wrap = this._cachedGeo(`twrap:${along.toFixed(1)}`, () => {
+      const g = new THREE.CylinderGeometry(r, r, along, 16, 1, true);
+      g.rotateZ(Math.PI / 2);
+      return g;
+    });
+    return { sheet, wrap };
+  }
+
   /** 毡片：全哑光。 */
   _feltMaterial(hex) {
     const key = "felt:" + hex;
@@ -4362,21 +4384,7 @@ export class SceneManager {
         const gap = 1.2;
         const bw = Math.max(1.5, u.length() / n - gap);
         const L = w.length();
-        // 和抓来的布面原件一个形状：布在两根管的轴线高度上平铺，两头各一整圈
-        // 套筒套在管子外面（原件的套筒半径 2.52，管子 2.45）
-        const r = (geometry().tubeRadius || 2.45) + 0.07;
-        const sheet = this._cachedGeo(`rsheet:${bw.toFixed(1)}x${Math.round(L)}`, () => {
-          const g = new THREE.PlaneGeometry(bw, Math.max(1, L - 2 * r + 0.2));
-          g.rotateX(-Math.PI / 2);
-          g.translate(0, 0, L / 2);
-          return g;
-        });
-        const wrap = this._cachedGeo(`rwrap:${bw.toFixed(1)}`, () => {
-          // 整圈套筒，轴沿条的宽度方向（也就是管子的方向）
-          const g = new THREE.CylinderGeometry(r, r, bw, 16, 1, true);
-          g.rotateZ(Math.PI / 2);
-          return g;
-        });
+        const { sheet, wrap } = this._textileSheetGeos(bw, L);
         for (let i = 0; i < n; i++) {
           const pos = va.clone().addScaledVector(u, (i + 0.5) / n);
           const base = new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis).setPosition(pos);
@@ -4403,13 +4411,18 @@ export class SceneManager {
         }
         continue;
       }
-      const geo = new THREE.BoxGeometry(u.length(), 0.6, w.length());
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis));
-      mesh.position.copy(center);
-      mesh.userData = { kind: "textile", id: tx.id };
-      this.buildGroup.add(mesh);
-      if (st !== "future") this.pickTextiles.push(mesh);
+      // 没有原件的尺寸（比如 40×40）：照原件的形状自己画——布在轴线高度平铺，
+      // 两头各一整圈套筒套在管子外面。沿管方向两头各让出半个接头。
+      {
+        const L = w.length();
+        const along = Math.max(1, u.length() - geometry().connectorSize);
+        const { sheet, wrap } = this._textileSheetGeos(along, L);
+        const base = new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis)
+          .setPosition(va.clone().addScaledVector(u, 0.5));
+        this._batchAdd(sheet, mat, base, "textile", tx.id, this.pickTextiles);
+        this._batchAdd(wrap, mat, base, "textile", tx.id, this.pickTextiles);
+        this._batchAdd(wrap, mat, base.clone().multiply(new THREE.Matrix4().makeTranslation(0, 0, L)), "textile", tx.id, this.pickTextiles);
+      }
     }
 
     // Anbauteile: Raeder, Rollen, Kappen, Netze, Rundwand, Dach, Sonderkupplungen.
