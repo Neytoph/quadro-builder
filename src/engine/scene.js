@@ -188,6 +188,11 @@ const BALL_FILL = 2 / 3;
 const BALL_COLORS = [0xd83a2e, 0x2f9e44, 0x2b6fd6, 0xf2c12e];
 // 功能板里靠贴图表现的几种；其余（乐高、攀岩、篮球）是板上加小几何
 const FEATURE_TEXTURED = new Set(["honeycomb", "busy", "felt", "magnet", "sensory"]);
+// 板上小物件的配色：岩点、毡片、忙碌板上的玩具。跳过和板同色的那一种。
+const ACCENTS = [
+  ["red", 0xd83a2e], ["blue", 0x2b6fd6], ["yellow", 0xf2c12e], ["green", 0x2f9e44],
+  ["orange", 0xf07f1a], ["purple", 0x6a3fb5],
+];
 // 布兜、感官盆：方框里没有板面，画的是挂在框里的口袋 / 盆
 const FEATURE_OPEN = new Set(["pocket", "basin"]);
 // 彩虹带、彩虹桥的七色
@@ -2018,28 +2023,16 @@ export class SceneManager {
         }
       }
     } else if (feature === "busy") {
-      // 几样常见的忙碌板配件：转盘、开关排、拉链、齿轮
-      g.fillStyle = "rgba(0,0,0,0.42)";
-      g.strokeStyle = "rgba(0,0,0,0.42)";
-      g.lineWidth = 6;
-      g.beginPath(); g.arc(66, 66, 34, 0, Math.PI * 2); g.stroke();
-      g.beginPath(); g.arc(66, 66, 8, 0, Math.PI * 2); g.fill();
-      for (let i = 0; i < 4; i++) g.fillRect(150 + i * 24, 40, 12, 40);
-      g.fillRect(40, 150, 80, 12);
-      for (let i = 0; i < 6; i++) g.fillRect(44 + i * 13, 146, 6, 20);
-      g.beginPath();
-      for (let k = 0; k < 16; k++) {
-        const a = k * Math.PI / 8, r = k % 2 ? 40 : 30;
-        const px = 186 + r * Math.cos(a), py = 186 + r * Math.sin(a);
-        if (k === 0) g.moveTo(px, py); else g.lineTo(px, py);
+      // 忙碌板的底子是洞洞板：一格 2.5 厘米的小圆孔，玩具是板上的小几何
+      g.fillStyle = "rgba(0,0,0,0.3)";
+      for (let y = 8; y < 256; y += 16) for (let x = 8; x < 256; x += 16) {
+        g.beginPath(); g.arc(x, y, 2.2, 0, Math.PI * 2); g.fill();
       }
-      g.closePath(); g.stroke();
-      g.fillStyle = "rgba(255,255,255,0.9)";
-      g.beginPath(); g.arc(186, 186, 10, 0, Math.PI * 2); g.fill();
     } else if (feature === "felt") {
-      for (let i = 0; i < 5000; i++) {
-        g.fillStyle = `rgba(0,0,0,${0.04 + rnd() * 0.09})`;
-        g.fillRect(rnd() * 256, rnd() * 256, 1 + rnd() * 2, 1 + rnd() * 2);
+      // 毡面：极细的绒，远看就是素色哑光
+      for (let i = 0; i < 2200; i++) {
+        g.fillStyle = `rgba(0,0,0,${0.02 + rnd() * 0.04})`;
+        g.fillRect(rnd() * 256, rnd() * 256, 1, 1 + rnd() * 2);
       }
     } else if (feature === "magnet") {
       g.fillStyle = "rgba(0,0,0,0.22)";
@@ -2080,6 +2073,7 @@ export class SceneManager {
         map: this._featureTexture(feature),
         roughness: feature === "felt" ? 1 : feature === "magnet" ? 0.32 : 0.72,
         metalness: feature === "magnet" ? 0.55 : 0,
+        side: THREE.DoubleSide,
       });
     }
     return this._materials[key];
@@ -2091,6 +2085,22 @@ export class SceneManager {
       this._materials[key] = new THREE.MeshStandardMaterial({ color: hex, roughness: 0.55, metalness: 0.05 });
     }
     return this._materials[key];
+  }
+
+  /** 毡片：全哑光。 */
+  _feltMaterial(hex) {
+    const key = "felt:" + hex;
+    if (!this._materials[key]) {
+      this._materials[key] = new THREE.MeshStandardMaterial({ color: hex, roughness: 1, metalness: 0 });
+    }
+    return this._materials[key];
+  }
+
+  /** 板上小物件用的几种颜色，避开板自己的颜色。 */
+  _accentsFor(colorId) {
+    const own = String(colorId || "");
+    const out = ACCENTS.filter(([name]) => name !== own).map(([, hex]) => hex);
+    return out.length ? out : ACCENTS.map(([, hex]) => hex);
   }
 
   /**
@@ -2114,28 +2124,52 @@ export class SceneManager {
         }
       }
     } else if (feature === "climbing") {
-      // 五个岩点，扁扁的椭球，各转一个角度
+      // 三个大块彩色岩点（像市面上的板：素板配两三个岩点），各转一个角度，
+      // 颜色避开板自己的颜色
       const geo = this._cachedGeo("feat:hold", () => {
-        const g = new THREE.SphereGeometry(3.2, 12, 8);
-        g.scale(1.35, 0.62, 1);
+        const g = new THREE.SphereGeometry(1, 16, 12);
+        g.scale(5.6, 2.6, 4.4);
+        // 底面削平，贴着板
+        const pos = g.attributes.position;
+        for (let i = 0; i < pos.count; i++) if (pos.getY(i) < 0) pos.setY(i, pos.getY(i) * 0.15);
+        g.computeVertexNormals();
         return g;
       });
-      const mat = this._accentMaterial(0x3b4d78);
-      const spots = [[-10, -9, 0.4], [8, -12, 1.9], [-3, 2, 3.1], [11, 6, 0.9], [-11, 12, 2.4]];
-      for (const [x, z, a] of spots) {
-        place(geo, mat, x, face + top * 1.4, z, new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), a));
-      }
-    } else if (feature === "basketball") {
-      // 篮筐：圈面水平，从板面伸出去；板本身就是篮板
-      const geo = this._cachedGeo("feat:hoop", () => new THREE.TorusGeometry(7.5, 0.8, 8, 28));
-      const mat = this._accentMaterial(0xe8642c);
-      const rot = new THREE.Matrix4().extractRotation(basis);
-      const upLocal = new THREE.Vector3(0, 1, 0).applyMatrix4(new THREE.Matrix4().copy(rot).invert()).normalize();
-      // 圈的轴（几何的 z）对准世界的上
-      const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), upLocal);
-      const out = new THREE.Vector3(0, top, 0).multiplyScalar(thickness / 2 + 8.3);
-      const lift = upLocal.clone().multiplyScalar(5);
-      place(geo, mat, out.x + lift.x, out.y + lift.y, out.z + lift.z, q);
+      const hues = this._accentsFor(color);
+      const spots = [[-9, -8, 0.5], [9, -1, 2.2], [-3, 10, 3.9]];
+      spots.forEach(([x, z, a], i) => {
+        const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), a);
+        if (top < 0) q.premultiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI));
+        place(geo, this._accentMaterial(hues[i % hues.length]), x, face, z, q);
+      });
+    } else if (feature === "felt") {
+      // 毡板上贴的彩色毡片：圆、方、三角、圈，各一种颜色，薄薄一层
+      const hues = this._accentsFor(color);
+      const th = 0.5;
+      const pieces = [
+        [this._cachedGeo("feat:felt:disc", () => new THREE.CylinderGeometry(5, 5, th, 24)), -10, -9, 0],
+        [this._cachedGeo("feat:felt:square", () => new THREE.BoxGeometry(9, th, 9)), 9, -9, 0.3],
+        [this._cachedGeo("feat:felt:tri", () => new THREE.CylinderGeometry(6, 6, th, 3)), -9, 9, 0.2],
+        [this._cachedGeo("feat:felt:ring", () => { const g = new THREE.TorusGeometry(4, 1.6, 6, 24); g.rotateX(Math.PI / 2); g.scale(1, th / 1.6 * 0.6, 1); return g; }), 9, 9, 0],
+      ];
+      pieces.forEach(([geo, x, z, a], i) => {
+        const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), a);
+        place(geo, this._feltMaterial(hues[i % hues.length]), x, face + top * th / 2, z, q);
+      });
+    } else if (feature === "busy") {
+      // 洞洞板上挂的几样玩具：方块、转盘、圈、横杆，各一种颜色
+      const hues = this._accentsFor(color);
+      const cube = this._cachedGeo("feat:busy:cube", () => new THREE.BoxGeometry(6, 5, 6));
+      const dial = this._cachedGeo("feat:busy:dial", () => new THREE.CylinderGeometry(5, 5, 1.6, 24));
+      const knob = this._cachedGeo("feat:busy:knob", () => new THREE.CylinderGeometry(1.2, 1.2, 2.4, 10));
+      const ring = this._cachedGeo("feat:busy:ring", () => { const g = new THREE.TorusGeometry(3.6, 1, 8, 24); g.rotateX(Math.PI / 2); return g; });
+      const bar = this._cachedGeo("feat:busy:bar", () => new THREE.BoxGeometry(12, 2, 2.4));
+      place(cube, this._accentMaterial(hues[0]), -10, face + top * 2.5, -9);
+      place(dial, this._accentMaterial(hues[1]), 9, face + top * 0.8, -8);
+      place(knob, this._accentMaterial(hues[3 % hues.length]), 11.5, face + top * 2.6, -8);
+      place(ring, this._accentMaterial(hues[2]), -9, face + top * 1, 9);
+      place(bar, this._accentMaterial(hues[3 % hues.length]), 8, face + top * 1, 9,
+        new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), 0.25));
     } else if (feature === "pocket" || feature === "basin") {
       // 挂在方框里的口袋（深、软）或盆（浅、硬）：口沿和板面齐平，往框里面吊
       const pocket = feature === "pocket";
@@ -2154,24 +2188,6 @@ export class SceneManager {
     }
   }
 
-  /** 彩虹带：七色竖条，铺满一块布件。 */
-  _rainbowMaterial() {
-    if (this._materials["rainbow"]) return this._materials["rainbow"];
-    const cv = document.createElement("canvas");
-    cv.width = 256; cv.height = 32;
-    const g = cv.getContext("2d");
-    const n = RAINBOW.length;
-    for (let i = 0; i < n; i++) {
-      g.fillStyle = "#" + RAINBOW[i].toString(16).padStart(6, "0");
-      g.fillRect(Math.floor(i * 256 / n), 0, Math.ceil(256 / n) + 1, 32);
-    }
-    const tex = new THREE.CanvasTexture(cv);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    this._materials["rainbow"] = new THREE.MeshStandardMaterial({
-      map: tex, roughness: 0.85, metalness: 0, side: THREE.DoubleSide,
-    });
-    return this._materials["rainbow"];
-  }
 
 
   /** Wasser ist nur Dekoration: nicht mitfaerben, sonst wirkt die Auswahl wie ein oranger Kasten. */
@@ -4338,6 +4354,21 @@ export class SceneManager {
         continue;
       }
       const plain = st === "future" || (asm && st === "done");
+      if (tx.variant === "rainbow") {
+        // 彩虹带：一根根扁扁的软包条并排铺满，条与条之间留一指宽的缝
+        const n = Math.max(2, Math.round(u.length() / 6));
+        const gap = 1.2;
+        const bw = Math.max(1.5, u.length() / n - gap);
+        const bar = this._cachedGeo(`rbar:${bw.toFixed(1)}x${Math.round(w.length())}`,
+          () => new THREE.BoxGeometry(bw, 3, Math.max(4, w.length() - 6)));
+        for (let i = 0; i < n; i++) {
+          const pos = va.clone().addScaledVector(u, (i + 0.5) / n).addScaledVector(w, 0.5);
+          const m4 = new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis).setPosition(pos);
+          const rm = plain ? mat : matFor(tx.id, this._feltMaterial(RAINBOW[i % RAINBOW.length]));
+          this._batchAdd(bar, rm, m4, "textile", tx.id, this.pickTextiles);
+        }
+        continue;
+      }
       if (tx.variant === "bridge") {
         // 彩虹桥：一排软包横杠，每 10 厘米一根，七色轮着来
         const n = Math.max(2, Math.round(u.length() / 10));
@@ -4355,7 +4386,7 @@ export class SceneManager {
         continue;
       }
       const geo = new THREE.BoxGeometry(u.length(), 0.6, w.length());
-      const mesh = new THREE.Mesh(geo, tx.variant === "rainbow" && !plain ? matFor(tx.id, this._rainbowMaterial()) : mat);
+      const mesh = new THREE.Mesh(geo, mat);
       mesh.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis));
       mesh.position.copy(center);
       mesh.userData = { kind: "textile", id: tx.id };
@@ -5576,6 +5607,30 @@ export class SceneManager {
     );
     const data = this._hitData(hit);
     return data ? { object: hit.object, data, point: hit.point, distance: hit.distance, instanceId: hit.instanceId } : null;
+  }
+
+  /**
+   * 指针下面由近到远的所有件（同一个件只留最近的一次）。选择模式靠它在
+   * 同一位置再点一次时选到后面那一件。切面切掉的部分不算。
+   */
+  pickAllForDelete(clientX, clientY) {
+    this._setMouse(clientX, clientY);
+    const objects = [...this.pickNodes, ...this.pickTubes, ...this.pickPanels, ...this.pickClamps,
+      ...this.pickTextiles, ...this.pickSlides, ...this.pickFittings, ...this.pickReinforce];
+    const hits = this._raycaster.intersectObjects(objects, false);
+    const plane = this._clipPlane;
+    const out = [];
+    const seen = new Set();
+    for (const h of hits) {
+      if (plane && plane.distanceToPoint(h.point) < 0) continue;
+      const data = this._hitData(h);
+      if (!data || data.id == null) continue;
+      const key = data.kind + ":" + data.id;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ object: h.object, data, point: h.point, distance: h.distance, instanceId: h.instanceId });
+    }
+    return out;
   }
 
   // --- Auswahl-Rechteck (Cursor-Modus) ------------------------------------

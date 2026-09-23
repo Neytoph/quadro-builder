@@ -109,7 +109,7 @@ const HOLE_SUFFIX = " (hole)";
 // Acrylglasplatte: gleicher Kniff, Name "<farbe> (acrylic)".
 const ACRYLIC_SUFFIX = " (acrylic)";
 // 功能板（兼容件）：名字「<farbe> (<feature>)」，feature 见 qdfexport.js FEATURE_KEYS。
-const FEATURE_SUFFIX_RE = / \((lego|basketball|honeycomb|busy|felt|magnet|climbing|sensory|pocket|basin|rainbow|bridge)\)$/;
+const FEATURE_SUFFIX_RE = / \((lego|honeycomb|busy|felt|magnet|climbing|sensory|pocket|basin|rainbow|bridge)\)$/;
 const FALLBACK_COLOR = "blue";
 
 // So weit sitzt die Kupplung, die eine Lagerkupplung traegt, von deren Punkt

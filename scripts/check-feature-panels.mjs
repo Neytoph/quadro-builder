@@ -24,7 +24,7 @@ await loadCatalog()
 
 let n = 0
 const ok = (cond, msg) => { assert.ok(cond, msg); n++ }
-const FEATURES = ['lego', 'basketball', 'honeycomb', 'busy', 'felt', 'magnet', 'climbing']
+const FEATURES = ['lego', 'honeycomb', 'busy', 'felt', 'magnet', 'climbing']
 
 // 1. 零件表：七种都在，40×40，标了 feature 和 compat
 for (const f of FEATURES) {
@@ -86,18 +86,18 @@ for (const f of FEATURES) {
   ok([...back.panels.values()].every((p) => p.panelId === 'panel_40x40'), '普通板导入还是普通板')
 }
 
-// 给浏览器测试留一座：一个平台七块板换成七种功能板？平台只有一块——用金字塔那种多板的
+// 给浏览器测试留一座：六块并排的地板，各放一种功能板
 if (process.env.E2E_OUT) {
   const m = new BuildModel()
-  // 七块并排的地板：8 个接头一排两行，7 块板
+  const K = FEATURES.length
   const row0 = [], row1 = []
-  for (let i = 0; i < 8; i++) { row0.push(m.addNode(i * 40, 0, 0)); row1.push(m.addNode(i * 40, 0, 40)) }
-  for (let i = 0; i < 8; i++) m.addTube(row0[i].id, row1[i].id, 'T35', 'blue', 35)
-  for (let i = 0; i < 7; i++) { m.addTube(row0[i].id, row0[i + 1].id, 'T35', 'blue', 35); m.addTube(row1[i].id, row1[i + 1].id, 'T35', 'blue', 35) }
-  const colors = ['red', 'green', 'blue', 'yellow', 'red', 'green', 'blue']
+  for (let i = 0; i <= K; i++) { row0.push(m.addNode(i * 40, 0, 0)); row1.push(m.addNode(i * 40, 0, 40)) }
+  for (let i = 0; i <= K; i++) m.addTube(row0[i].id, row1[i].id, 'T35', 'blue', 35)
+  for (let i = 0; i < K; i++) { m.addTube(row0[i].id, row0[i + 1].id, 'T35', 'blue', 35); m.addTube(row1[i].id, row1[i + 1].id, 'T35', 'blue', 35) }
+  const colors = ['red', 'blue', 'yellow', 'yellow', 'green', 'yellow']
   const rails = [...m.tubes.values()].filter((t) => { const a = m.nodes.get(t.a), b = m.nodes.get(t.b); return a.z !== b.z })
   rails.sort((p, q) => m.nodes.get(p.a).x - m.nodes.get(q.a).x)
-  for (let i = 0; i < 7; i++) {
+  for (let i = 0; i < K; i++) {
     const added = m.addPanel(rails[i].id, rails[i + 1].id, 0, 40, 'panel_40x40_' + FEATURES[i], colors[i], 1)
     ok(!!added, `第 ${i} 块功能板放上了`)
   }

@@ -631,21 +631,6 @@
       "url": ""
     },
     {
-      "id": "panel_40x40_basketball",
-      "code": "",
-      "name": "Korbplatte 40 x 40 cm",
-      "name_en": "Basketball panel 40 x 40 cm",
-      "w": 40,
-      "h": 40,
-      "feature": "basketball",
-      "compat": true,
-      "price": 0,
-      "buildable": true,
-      "colored": true,
-      "note": "兼容件：国产功能板，不是 QUADRO 原厂件。尺寸同 panel_40x40；导出 .qdf 时用材质名「<color> (basketball)」标记，官方软件里显示为普通板，我们导入时按材质名认回来。价格未知，留 0。",
-      "url": ""
-    },
-    {
       "id": "panel_40x40_honeycomb",
       "code": "",
       "name": "Wabenplatte 40 x 40 cm",

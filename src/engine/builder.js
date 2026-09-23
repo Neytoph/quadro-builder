@@ -3247,7 +3247,17 @@ export class Builder {
 
   _pickSelect(x, y) {
     const clampHit = this.scene.pickClamp(x, y);
-    const allHit = this.scene.pickForDelete(x, y);
+    const hits = this.scene.pickAllForDelete ? this.scene.pickAllForDelete(x, y) : [];
+    let allHit = hits.length ? hits[0] : this.scene.pickForDelete(x, y);
+    // 同一个位置、隔一会儿再点一次：选它后面那一件。密闭的盒子里底板被侧板
+    // 挡着，点不到，就靠这个一层层往里选。快的两下还是选整块，不冲突。
+    const last = this._selectClick;
+    if (hits.length > 1 && last && Math.hypot(x - last.x, y - last.y) < CLICK_TOLERANCE
+        && performance.now() - last.t >= SELECT_BLOCK_MS) {
+      const cur = this.selection.size === 1 ? [...this.selection.keys()][0] : null;
+      const idx = cur != null ? hits.findIndex((h) => h.data && h.data.id === cur) : -1;
+      if (idx >= 0) allHit = hits[(idx + 1) % hits.length];
+    }
     if (clampHit && (!allHit || allHit.data.kind === "clamp"
         || clampHit.distance <= allHit.distance + 6))
       return clampHit;

@@ -74,7 +74,7 @@ const MATERIALS = [
 // 功能板（兼容件）：同一个办法，材质名「<color> (<feature>)」，从 27 号起每种
 // 五个颜色。官方软件按颜色画一块普通板，我们导入时按名字认回来。顺序固定，
 // 编号才不会因为加了一种就全变。
-const FEATURE_KEYS = ["lego", "basketball", "honeycomb", "busy", "felt", "magnet", "climbing", "sensory", "pocket", "basin", "rainbow", "bridge"];
+const FEATURE_KEYS = ["lego", "honeycomb", "busy", "felt", "magnet", "climbing", "sensory", "pocket", "basin", "rainbow", "bridge"];
 const FEATURE_RGB = { red: "1.,0.,0.", green: "0.,0.4941,0.0941", blue: "0.,0.,1.", yellow: "1.,1.,0.", black: "0.,0.,0." };
 const FEATURE_MAT = {};
 {
