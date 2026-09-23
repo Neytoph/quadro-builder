@@ -151,15 +151,14 @@ const BY_KIND: Record<string, string> = {
 
 /**
  * 零件图标：有渲染图（public/parts/<id>.png，scripts/shoot-part-icons.mjs 出的）就用图，
- * 垫一块白色小卡片（写死白色：主题把 gray 色阶反过来映射了），黑色接头也看得清；没图退回 SVG。
+ * 透明底直接摆在菜单上；加一圈淡白光晕，选中行的橙底上红色零件也分得出来。没图退回 SVG。
  */
 export function PartImg({ id, svg, size = 18 }: { id?: string | null; svg: string; size?: number }) {
   if (id && PART_IMAGES.has(id)) {
     return (
-      <span className="shrink-0 inline-flex items-center justify-center rounded-md"
-        style={{ width: size, height: size, background: '#fff', boxShadow: 'inset 0 0 0 1px rgba(0,0,0,.08)' }}>
+      <span className="shrink-0 inline-flex items-center justify-center" style={{ width: size, height: size }}>
         <img src={`${import.meta.env.BASE_URL}parts/${id}.png`} alt="" draggable={false}
-          loading="lazy" style={{ width: size - 2, height: size - 2 }} />
+          loading="lazy" style={{ width: size, height: size, filter: 'drop-shadow(0 0 1.2px rgba(255,255,255,.95))' }} />
       </span>
     )
   }
