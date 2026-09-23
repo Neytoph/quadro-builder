@@ -4951,17 +4951,18 @@ export class SceneManager {
       guideAxis: this._guideAxisOf([dir.x, dir.y, dir.z]),
     }, userData);
 
+    this._addNodeGuide(origin);
+
     // 弯管手柄：直棍换成四分之一圆弧，弧线的走向就是点下去之后弯管的走向。
-    // 接头上的十字不画了，弧线本身就是引导线：静止时和原来的引导线一个样
-    // （按轴分色、半透明细线）常显，指到接头再亮。弧线在世界坐标里画，组不
-    // 旋转；碰撞体也沿弧线走，指到弧线的哪一段都算。
+    // 弧线在世界坐标里画，组不旋转；碰撞体也沿弧线走，指到弧线的哪一段都算。
     if (userData.bow && userData.bowNormal) {
       const R = Number(userData.bowRadius) || 40;
       const arc = new THREE.Mesh(
-        this._bowArcGeo(dirArr, userData.bowNormal, R, GUIDE.r, "arc"),
-        this._guideMaterial(group.userData.guideAxis, false),
+        this._bowArcGeo(dirArr, userData.bowNormal, R, GUIDE.beamR, "arc"),
+        this._guideMaterial(group.userData.guideAxis, true),
       );
       arc.renderOrder = 1000;
+      arc.visible = false;
       arc.raycast = () => {};
       const hit = new THREE.Mesh(
         this._bowArcGeo(dirArr, userData.bowNormal, R, GUIDE.hitR, "hit"),
@@ -4978,7 +4979,6 @@ export class SceneManager {
       return group;
     }
     group.quaternion.copy(quat);
-    this._addNodeGuide(origin);
 
     // 指到这个方向时亮起来的那一条，从接点往外，比引导线略长也略粗
     const beam = new THREE.Mesh(
@@ -5014,11 +5014,6 @@ export class SceneManager {
     const beam = group.userData.beamMesh;
     if (!beam) return;
     const hot = tone === "hot" || tone === "focus";
-    // 弧线常显：静止半透明，指到接头变实。没有十字要跟着亮。
-    if (group.userData.bowArc) {
-      beam.material = this._guideMaterial(group.userData.guideAxis, hot);
-      return;
-    }
     beam.material = this._guideMaterial(group.userData.guideAxis, true);
     beam.visible = hot;
     if (group.userData.guideOrigin) this._lightNodeGuide(group.userData.guideOrigin, hot);
