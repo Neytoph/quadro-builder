@@ -103,6 +103,16 @@ export default function Onboarding() {
     setPane(null)
   }
 
+  // 引导开着的时候人离开了页面（关掉、刷新、跳走），也算看过。
+  // 只在走完、跳过、按 Esc 的时候才记的话，看到一半就走的人下次进来引导又从头弹一遍，
+  // 第一步还把右边的模型库打开——每次进来都得先把它关掉。想再看一遍，文件面板里有重看引导的入口。
+  // 不在引导一出现就记：启动的时候这个组件会挂上不止一次，第一次一记，第二次就不弹了
+  useEffect(() => {
+    if (!open) return
+    window.addEventListener('pagehide', markDone)
+    return () => window.removeEventListener('pagehide', markDone)
+  }, [open])
+
   useEffect(() => {
     const replay = () => { track('builder.onboard.replay'); setI(0); setOpen(true) }
     window.addEventListener(ONBOARDING_EVENT, replay)
