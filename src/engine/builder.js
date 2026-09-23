@@ -2280,12 +2280,9 @@ export class Builder {
       }
       return;
     }
-    if (RAIL_FITTINGS.has(this.fittingKind)) {
-      for (const m of this.model.railFittingMounts(this.fittingKind)) {
-        this.scene.addPanelHandle(m.corners, { railMount: m });
-      }
-      return;
-    }
+    // 布件、网、袋：和板一样先点一根管再点对面那根，不出候选面。彩虹带这种
+    // 有方向的件，方向就由这两根管定；候选面说不清朝向，叠在一起还挡点。
+    if (RAIL_FITTINGS.has(this.fittingKind)) return;
     if (ROOF_KINDS.has(this.fittingKind)) {
       // Beide Dachschraegen leuchten -- ein Klick auf eine legt das Tuch auf.
       for (const m of this.model.roofMounts(this.fittingKind)) {

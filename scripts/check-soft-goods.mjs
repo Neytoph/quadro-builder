@@ -32,7 +32,7 @@ function fakeScene(handles) {
   const base = {
     renderer: { domElement: el }, container: el,
     addHandle: (pos, data, kind) => { handles.push({ pos, data, kind }); return {} },
-    addPanelHandle: () => ({}),
+    addPanelHandle: (corners, data) => { handles.push({ corners, data, kind: 'face' }); return {} },
     clearHandles: () => { handles.length = 0 },
     pickHandle: () => (handles.length ? { data: handles[0].data } : null),
     pickForDelete: () => null,
@@ -87,6 +87,9 @@ for (const v of ['rainbow', 'bridge']) {
   b.setFitting('textil2', 'textile_' + v)
   ok(b.fittingKind === 'textil2' && b.fittingPart === 'textile_' + v, '选中了具体的件')
   b.mode = 'fitting'
+  // 布件不出候选面：和板一样先点一根管再点对面那根
+  b._buildHandles()
+  ok(!handles.some((h) => h.kind === 'face'), '布件模式不该有候选面')
   b._placeRailFitting(rails[0].id, rails[1].id, 0, 40)
   const tx = [...m.textiles.values()][0]
   ok(tx && tx.variant === v, `放下去的布件带 ${v} 标记`)
