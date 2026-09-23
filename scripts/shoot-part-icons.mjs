@@ -17,8 +17,9 @@ fs.mkdirSync(OUT, { recursive: true })
 const qdfs = fs.readdirSync(QDF_DIR).filter(f => f.endsWith('.qdf')).sort()
 const SIZE = 256   // 渲染尺寸；存盘时缩到 OUT_SIZE，边缘更干净
 const OUT_SIZE = 128
+const TUBE_FRAME = 20   // 管子取景半径（cm）：映射后最长的 75 cm 管正好撑满
 
-const browser = await chromium.launch()
+const browser = await chromium.launch(process.env.PW_CHANNEL ? { channel: process.env.PW_CHANNEL } : {})
 const ctx = await browser.newContext({ viewport: { width: 1000, height: 800 }, locale: 'zh-CN', deviceScaleFactor: 1 })
 await ctx.addInitScript(() => { localStorage.setItem('quadro.builder.onboarded.v2', '1') })
 const page = await ctx.newPage()
@@ -90,7 +91,7 @@ console.log('零件种类', items.length)
 const index = []
 for (const f of fs.readdirSync(OUT)) if (f.endsWith('.png')) fs.unlinkSync(path.join(OUT, f))
 for (const it of items) {
-  const res = await page.evaluate(async ({ it, SIZE, OUT_SIZE }) => { try {
+  const res = await page.evaluate(async ({ it, SIZE, OUT_SIZE, TUBE_FRAME }) => { try {
     const api = await import('/src/engine-api.ts')
     const { scene, model, builder } = window.__quadroDev
     const three = performance.getEntriesByType('resource').map(e => e.name).find(n => /\/deps\/three\.js/.test(n))
@@ -259,7 +260,30 @@ for (const it of items) {
     }
     const bz = new THREE.Vector3().crossVectors(ax, ny).normalize()
     const center = box.getCenter(new THREE.Vector3())
-    const radius = box.getBoundingSphere(new THREE.Sphere()).radius
+    let radius = box.getBoundingSphere(new THREE.Sphere()).radius
+    // 管子统一粗细：取景距离一律按 TUBE_FRAME 算；长度沿管轴按 6 + 0.45 × 真长 映射，
+    // 长短次序不变、差距收窄（10 → 10.5，35 → 21.75，75 → 39.75），短管不至于只剩一个点。弯管不动。
+    if (g === 'tubes') {
+      const m = /^T(\d+)$/.exec(it.rid)
+      const len = m ? Number(m[1]) : ({ TS1: 15, TS2: 15, TS3: 15, TS4: 35, TS5: 35, TS6: 35 })[it.rid]
+      if (len) {
+        const s = (6 + 0.45 * len) / len
+        const S = new THREE.Matrix4().set(
+          1 + (s - 1) * ax.x * ax.x, (s - 1) * ax.x * ax.y, (s - 1) * ax.x * ax.z, 0,
+          (s - 1) * ax.y * ax.x, 1 + (s - 1) * ax.y * ax.y, (s - 1) * ax.y * ax.z, 0,
+          (s - 1) * ax.z * ax.x, (s - 1) * ax.z * ax.y, 1 + (s - 1) * ax.z * ax.z, 0,
+          0, 0, 0, 1)
+        const T = new THREE.Matrix4().makeTranslation(center.x, center.y, center.z)
+        const Ti = new THREE.Matrix4().makeTranslation(-center.x, -center.y, -center.z)
+        const bg = scene.buildGroup, keepAuto = bg.matrixAutoUpdate, keepM = bg.matrix.clone()
+        bg.updateMatrix()
+        bg.matrixAutoUpdate = false
+        bg.matrix.copy(T.multiply(S).multiply(Ti).multiply(bg.matrix))
+        bg.updateMatrixWorld(true)
+        restore.push(() => { bg.matrix.copy(keepM); bg.matrixAutoUpdate = keepAuto; bg.updateMatrixWorld(true) })
+      }
+      radius = TUBE_FRAME
+    }
     const fov = 28
     const cam = new THREE.PerspectiveCamera(fov, 1, 0.1, 100000)
     const dir = new THREE.Vector3().addScaledVector(ax, 1).addScaledVector(ny, 0.85).addScaledVector(bz, 1.35).normalize()
@@ -281,7 +305,7 @@ for (const it of items) {
     const url = small.toDataURL('image/png')
     restore.forEach(f => f())
     return { url, size: box.getSize(new THREE.Vector3()).toArray().map(v => Math.round(v)) }
-  } catch (e) { return { err: String(e && e.message || e).slice(0, 200) } } }, { it, SIZE, OUT_SIZE })
+  } catch (e) { return { err: String(e && e.message || e).slice(0, 200) } } }, { it, SIZE, OUT_SIZE, TUBE_FRAME })
   if (res.err) { console.log('跳过', it.key, res.err); continue }
   const file = it.rid + '.png'
   fs.writeFileSync(path.join(OUT, file), Buffer.from(res.url.split(',')[1], 'base64'))
