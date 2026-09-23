@@ -22,14 +22,17 @@ function Toast() {
   const [toast, leaving] = usePresence(live)
   useEffect(() => {
     if (!live) return
-    const id = window.setTimeout(dismissToast, 2800)
+    // 警告和出错往往是一整句要读完的话，多留一会儿
+    const id = window.setTimeout(dismissToast, live.kind === 'ok' ? 2800 : 6000)
     return () => window.clearTimeout(id)
   }, [live, dismissToast])
   if (!toast) return null
   const tone = toast.kind === 'err' ? 'bg-red-800' : toast.kind === 'warn' ? 'bg-amber-800' : 'bg-teal-800'
   return (
-    // key 跟着消息走：连着两条提示时，第二条重新演一遍入场
-    <div key={toast.message} className={`m-toast fixed top-[9.5rem] left-1/2 -translate-x-1/2 ${tone} text-white text-sm px-4 py-2 rounded-lg shadow-lg z-40 ${leaving ? 'm-leave' : ''}`}>
+    // key 跟着消息走：连着两条提示时，第二条重新演一遍入场。
+    // 压在顶栏、右侧面板和下拉菜单上面：手机上右侧面板盖满画布，
+    // 在「文件」里点保存，提示要浮在面板上才看得见。确认框（z-75）仍在它上面。
+    <div key={toast.message} className={`m-toast fixed top-[9.5rem] left-1/2 -translate-x-1/2 w-max max-w-[calc(100vw-2rem)] text-center ${tone} text-white text-sm px-4 py-2 rounded-lg shadow-lg z-[70] pointer-events-none ${leaving ? 'm-leave' : ''}`}>
       {toast.message}
     </div>
   )

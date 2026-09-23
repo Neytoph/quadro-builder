@@ -13,13 +13,17 @@ import type {
   SyncEvent, SyncOptions,
 } from './types'
 
-const CURSOR_KEY = 'quadro.sync.rev'
-
-function readCursor(): number {
-  try { return Number(localStorage.getItem(CURSOR_KEY)) || 0 } catch { return 0 }
-}
-function writeCursor(rev: number): void {
-  try { localStorage.setItem(CURSOR_KEY, String(rev)) } catch { /* 隐私模式下忽略 */ }
+/**
+ * 拉取游标：本地记录里最大的 rev。
+ *
+ * 游标跟文档放在同一个 IndexedDB 里算出来，两者同生同灭。浏览器单独清掉
+ * IndexedDB 时，游标跟着归零，下一轮把服务器上的整份重新拉回来。
+ * 服务端每次改动都给这个用户的 rev 加一，拉下来的记录全部落进本地，
+ * 所以本地最大的 rev 之前的改动都已经在本地。
+ */
+async function readCursor(): Promise<number> {
+  const all = (await docs.allRecords()) as DocRecord[]
+  return all.reduce((max, d) => Math.max(max, d.rev || 0), 0)
 }
 
 /** 402 = 配额用尽。带上服务端给的用量信息，UI 好提示。 */
@@ -126,9 +130,9 @@ export function createSync(opts: SyncOptions = {}) {
 
   /** 拉取服务端变更。跳过仍为 dirty 的记录，它们下一轮由 push 处理。 */
   async function pull(): Promise<void> {
-    const since = readCursor()
+    const since = await readCursor()
     const { rev, items } = await call<PullResponse>(`/models?since=${since}`)
-    if (!items.length) { writeCursor(rev); return }
+    if (!items.length) return
 
     const local = new Map(
       ((await docs.allRecords()) as DocRecord[]).map((d) => [d.id, d]))
@@ -138,7 +142,6 @@ export function createSync(opts: SyncOptions = {}) {
       await docs.putRemoteDoc(item)
       n++
     }
-    writeCursor(rev)
     emit({ type: 'pulled', count: n, rev })
   }
 
@@ -207,7 +210,7 @@ export function createSync(opts: SyncOptions = {}) {
       await pull()
       await pushInventory()
       await pullInventory()
-      emit({ type: 'idle', rev: readCursor() })
+      emit({ type: 'idle', rev: await readCursor() })
     } catch (error) {
       emit({ type: 'error', error })
     }

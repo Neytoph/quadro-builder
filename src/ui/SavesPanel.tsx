@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useEngine } from '../store/EngineContext'
 import { useI18n } from '../i18n'
 import { useDock } from './dock'
+import { syncConfigured } from '../sync/bootstrap'
 
 /**
  * 「发到社区」摆不摆得出来，要两个都成立：
@@ -32,7 +33,9 @@ export default function SavesPanel() {
   const api = useEngine()
   const { t, lang } = useI18n()
   const { setPane } = useDock()
-  const [docs, setDocs] = useState<Array<{ id: string; name: string; updatedAt: number }>>([])
+  const [docs, setDocs] = useState<Array<{ id: string; name: string; updatedAt: number; local: boolean }>>([])
+  // 没接同步的部署没有云端，每一座都在本机，标出来没有意义
+  const cloud = syncConfigured()
   const write = useCommunityWrite()
   const [sending, setSending] = useState('')
 
@@ -64,7 +67,10 @@ export default function SavesPanel() {
         <div key={d.id} className="flex flex-col gap-1.5 rounded-xl border border-gray-800 px-3 py-2 mb-2">
           <div className="min-w-0">
             <div className="text-sm text-gray-100 truncate">{d.name}</div>
-            <div className="text-[10px] text-gray-500">{new Date(d.updatedAt).toLocaleString(lang === 'zh' ? 'zh-CN' : lang)}</div>
+            <div className="text-[10px] text-gray-500">
+              {new Date(d.updatedAt).toLocaleString(lang === 'zh' ? 'zh-CN' : lang)}
+              {cloud && d.local && <span className="ml-1.5 text-amber-700">· {t('saves.localOnly')}</span>}
+            </div>
           </div>
           <div className="flex gap-2">
             <button onClick={() => { void api.openDoc(d.id); setPane('bom') }} className="text-xs text-teal-300 hover:text-teal-100 cursor-pointer">{t('saves.open')}</button>

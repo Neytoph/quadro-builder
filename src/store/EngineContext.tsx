@@ -186,7 +186,8 @@ interface EngineApi {
   renameTab: (tabId: string, name: string) => void
   saveCurrent: (name?: string) => Promise<void>
   openDoc: (docId: string) => Promise<void>
-  listDocs: () => Promise<Array<{ id: string; name: string; updatedAt: number }>>
+  /** `local`：还没传到服务器过（rev 为 0），只在这台设备上。 */
+  listDocs: () => Promise<Array<{ id: string; name: string; updatedAt: number; local: boolean }>>
   removeDoc: (docId: string) => Promise<void>
   renameDoc: (docId: string, name: string) => Promise<void>
   pushDoc: (docId: string) => Promise<boolean>
@@ -1561,7 +1562,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     },
     grassOn: !!scene?._sceneOn,
     highlight, highlightIds, safety, setInv, newTab, closeTab, activateTab, renameTab, saveCurrent, openDoc,
-    listDocs: async () => (await docs.listDocs()).map((d: AnyRec) => ({ id: String(d.id), name: String(d.name), updatedAt: Number(d.updatedAt || 0) })),
+    listDocs: async () => (await docs.listDocs()).map((d: AnyRec) => ({ id: String(d.id), name: String(d.name), updatedAt: Number(d.updatedAt || 0), local: !Number(d.rev) })),
     removeDoc: async (id) => { await docs.removeDoc(id); bump() },
     renameDoc: async (id, name) => { await docs.renameDoc(id, name); bump() },
     pushDoc,
