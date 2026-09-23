@@ -2092,7 +2092,7 @@ export class SceneManager {
   _feltMaterial(hex) {
     const key = "felt:" + hex;
     if (!this._materials[key]) {
-      this._materials[key] = new THREE.MeshStandardMaterial({ color: hex, roughness: 1, metalness: 0 });
+      this._materials[key] = new THREE.MeshStandardMaterial({ color: hex, roughness: 1, metalness: 0, side: THREE.DoubleSide });
     }
     return this._materials[key];
   }
@@ -4356,17 +4356,37 @@ export class SceneManager {
       }
       const plain = st === "future" || (asm && st === "done");
       if (tx.variant === "rainbow") {
-        // 彩虹带：一根根扁扁的软包条并排铺满，条与条之间留一指宽的缝
+        // 彩虹带：和布面一样是两头包在管子上的薄片，只是切成七色的细条并排，
+        // 条与条之间留一指宽的缝。每条 = 中间一片平布 + 两头各一个半圆包着管。
         const n = Math.max(2, Math.round(u.length() / 6));
         const gap = 1.2;
         const bw = Math.max(1.5, u.length() / n - gap);
-        const bar = this._cachedGeo(`rbar:${bw.toFixed(1)}x${Math.round(w.length())}`,
-          () => new THREE.BoxGeometry(bw, 3, Math.max(4, w.length() - 6)));
+        const L = w.length();
+        const r = (geometry().tubeRadius || 2.45) + 0.35;
+        // 布贴在哪一面：和板一样按 side 定，yAxis 指着那面就是 +1
+        const nrmS = panelNormal([xAxis.x, xAxis.y, xAxis.z], [zAxis.x, zAxis.y, zAxis.z],
+          [center.x, center.y, center.z], middle);
+        const top = yAxis.dot(new THREE.Vector3(nrmS[0], nrmS[1], nrmS[2])) * ((tx.side || 1) < 0 ? -1 : 1) >= 0 ? 1 : -1;
+        const sheet = this._cachedGeo(`rsheet:${bw.toFixed(1)}x${Math.round(L)}:${top}`, () => {
+          const g = new THREE.PlaneGeometry(bw, L);
+          g.rotateX(-Math.PI / 2);
+          g.translate(0, top * r, L / 2);
+          return g;
+        });
+        const wrap = this._cachedGeo(`rwrap:${bw.toFixed(1)}:${top}`, () => {
+          // 半个圆筒，轴沿条的宽度方向，弧在贴布那一面
+          const g = new THREE.CylinderGeometry(r, r, bw, 12, 1, true, 0, Math.PI);
+          g.rotateZ(Math.PI / 2);
+          if (top < 0) g.rotateX(Math.PI);
+          return g;
+        });
         for (let i = 0; i < n; i++) {
-          const pos = va.clone().addScaledVector(u, (i + 0.5) / n).addScaledVector(w, 0.5);
-          const m4 = new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis).setPosition(pos);
+          const pos = va.clone().addScaledVector(u, (i + 0.5) / n);
+          const base = new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis).setPosition(pos);
           const rm = plain ? mat : matFor(tx.id, this._feltMaterial(RAINBOW[i % RAINBOW.length]));
-          this._batchAdd(bar, rm, m4, "textile", tx.id, this.pickTextiles);
+          this._batchAdd(sheet, rm, base, "textile", tx.id, this.pickTextiles);
+          this._batchAdd(wrap, rm, base, "textile", tx.id, this.pickTextiles);
+          this._batchAdd(wrap, rm, base.clone().multiply(new THREE.Matrix4().makeTranslation(0, 0, L)), "textile", tx.id, this.pickTextiles);
         }
         continue;
       }
