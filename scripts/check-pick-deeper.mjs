@@ -88,4 +88,31 @@ ok(sel().length > 1 || sel()[0] !== undefined, '快的两下走整块选择')
 ok(!(sel().length === 1 && sel()[0] !== before && sel()[0] !== front), '双击没有被当成往里选')
 
 performance.now = realNow
+
+// 6. 放板：几块候选面叠在一起，点到圆点算圆点那块；没点到圆点看离哪块中心近
+{
+  const { preferPanelCell } = await import('../src/engine/pickcell.js')
+  const cell = (id, pos, dot) => ({ object: { userData: { panelCell: true, panelDot: !!dot, cellId: id }, position: pos } })
+  const toScreen = (p) => [p.x, p.y]          // 测试里屏幕坐标就用 x,y
+  const frontQuad = cell('front', { x: 100, y: 100 })     // 最前面那块，中心在上面
+  const bottomQuad = cell('bottom', { x: 100, y: 300 })   // 底下那格，中心在下面
+  // 点在底格中心附近：虽然射线先碰到前面那块，也该算底格
+  let got = preferPanelCell([frontQuad, bottomQuad], 104, 290, toScreen)
+  ok(got.object.userData.cellId === 'bottom', '点在底格附近该算底格')
+  // 点在前面那块中心附近：算前面
+  got = preferPanelCell([frontQuad, bottomQuad], 100, 110, toScreen)
+  ok(got.object.userData.cellId === 'front', '点在前面那块附近算前面')
+  // 点到了底格的圆点：不管远近都算底格
+  const bottomDot = cell('bottom', { x: 100, y: 300 }, true)
+  got = preferPanelCell([frontQuad, bottomDot, bottomQuad], 100, 100, toScreen)
+  ok(got.object.userData.cellId === 'bottom' && got.object.userData.panelDot, '点到圆点算圆点那块')
+  // 只有一块或者不是候选面：还是最近的
+  got = preferPanelCell([frontQuad], 500, 500, toScreen)
+  ok(got === frontQuad, '只有一块就是它')
+  const arrow = { object: { userData: { kind: 'handle', arrowRoot: true }, position: { x: 0, y: 0 } } }
+  got = preferPanelCell([arrow, bottomQuad], 100, 300, toScreen)
+  ok(got === arrow, '不是候选面的手柄照旧取最近的')
+  ok(preferPanelCell([], 0, 0, toScreen) === null, '没命中就是 null')
+}
+
 console.log(`往里选检查通过，${n} 项断言`)

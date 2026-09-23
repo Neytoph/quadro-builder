@@ -605,6 +605,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
         builder.onNotice = ((msg: string, kind?: string) => notifyRef.current(String(msg), kind === 'warn' ? 'warn' : 'ok')) as E
         scene.onMeshesReady = () => builder.refresh()
         eng.current = { scene, model, builder }
+        // 开发模式下把引擎挂到 window 上，浏览器测试脚本靠它摆相机、查手柄
+        if (import.meta.env.DEV) (window as unknown as { __quadroDev?: unknown }).__quadroDev = eng.current
 
         await docs.migrateOldDrafts()
         const session = await docs.loadSession()

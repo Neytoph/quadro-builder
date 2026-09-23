@@ -11,6 +11,7 @@ import { reinforcementProfiles } from "./qdfexport.js";
 import { loadConnectorMeshes, loadSlideMeshes, loadTubeMeshes, loadFittingMeshes,
   loadSurfaceMeshes } from "./meshes.js";
 import { CONNECTOR_ARM_BITS } from "./qdfimport.js";
+import { preferPanelCell } from "./pickcell.js";
 import { shadeHex, hexRgba, DEFAULT_TUNE, DEFAULT_GRADE, gradeHex, displayHex } from "./colorTune.js";
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -5531,7 +5532,17 @@ export class SceneManager {
   get clipping() { return !!this._clipPlane; }
 
   pickHandle(clientX, clientY) {
-    const hit = this.raycastObjects(clientX, clientY, this.handleMeshes.filter((h) => h.visible));
+    this._setMouse(clientX, clientY);
+    const all = this._raycaster.intersectObjects(this.handleMeshes.filter((h) => h.visible), false);
+    const plane = this._clipPlane;
+    const hits = plane ? all.filter((h) => plane.distanceToPoint(h.point) >= 0) : all;
+    // 候选面叠在一起时不认最前面那块，认指针对着的那块（见 pickcell.js）
+    const r = this.renderer.domElement.getBoundingClientRect();
+    const toScreen = (pos) => {
+      const p = pos.clone().project(this.camera);
+      return [(p.x + 1) / 2 * r.width + r.left, (1 - p.y) / 2 * r.height + r.top];
+    };
+    const hit = preferPanelCell(hits, clientX, clientY, toScreen);
     // Verdeckte Ankerpunkte gelten nicht: liegt ein Bauteil deutlich davor,
     // sieht man den Punkt nicht und darf dort auch nichts setzen -- sonst baut
     // man durch das Modell hindurch. HANDLE_CLEAR Zentimeter Spiel, weil viele
