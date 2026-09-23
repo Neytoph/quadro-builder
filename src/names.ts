@@ -3,6 +3,7 @@ import type { Lang } from './i18n'
 
 /** 零件显示名。三种语言都走这里，缺了才会退回 parts.json 的德/英名。 */
 export const PART_ZH: Record<string, string> = {
+  swing: '秋千（兼容件）', gym_rings: '吊环（兼容件）',
   '6way': '空间6通',
   '5way': '空间5通',
   '4way': '空间4通',
@@ -111,6 +112,7 @@ export const PART_ZH: Record<string, string> = {
 }
 
 export const PART_EN: Record<string, string> = {
+  swing: 'Swing (compatible)', gym_rings: 'Gym rings (compatible)',
   '6way': 'Space 6-way',
   '5way': 'Space 5-way',
   '4way': 'Space 4-way',
@@ -219,6 +221,7 @@ export const PART_EN: Record<string, string> = {
 }
 
 export const PART_DE: Record<string, string> = {
+  swing: 'Schaukel (kompatibel)', gym_rings: 'Turnringe (kompatibel)',
   '6way': 'Raum 6-Wege',
   '5way': 'Raum 5-Wege',
   '4way': 'Raum 4-Wege',

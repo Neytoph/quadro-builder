@@ -6,6 +6,7 @@ import { CONN_KIND_ORDER, connKindLabel, labelOf } from '../names'
 import { ACC_CAT_ICON, CONN_CAT_ICON, Svg16, TOOL_ICON, partIcon, tubeIcon } from './icons'
 import { UI_ESCAPE_EVENT } from './events'
 import { NARROW_MAX, toolbarTop, usePanelLayout } from './panelLayout'
+import { ACCESSORY_PACK, ACCESSORY_IDS } from '../engine/accessoryPack.js'
 
 const TUBE_HOTKEY: Record<string, string> = { T15: '1', T25: '2', T35: '3', T10: '4', T20: '5', T75: '6' }
 
@@ -358,6 +359,16 @@ export default function TopToolbar() {
       </ToolDrop>
 
       <div className="w-px bg-gray-700 mx-0.5 self-stretch" />
+
+      <ToolDrop
+        open={open === 'accessories'}
+        active={open === 'accessories' || (api.mode === 'fitting' && ACCESSORY_IDS.has(api.fittingKind))}
+        onClick={() => toggle('accessories')}
+        menu={<>{ACCESSORY_PACK.map(part => <button key={part.id} onClick={() => { api.setFitting(part.id, part.id); close() }} className={dropItem(api.mode === 'fitting' && api.fittingKind === part.id)}><Svg16 inner={TOOL_ICON.textile} size={18} /><span>{labelOf(part.id, part.name)}</span></button>)}</>}
+      >
+        <Svg16 inner={TOOL_ICON.textile} />
+        <span className="leading-none whitespace-nowrap">{t('tool.accessories')}</span>
+      </ToolDrop>
 
       <button className={btn(api.mode === 'reinforce')} title={t('tool.reinforceHint')} onClick={() => { api.startReinforce(); close() }}>
         <Svg16 inner={TOOL_ICON.reinforce} />{t('tool.reinforce')}
