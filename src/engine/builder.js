@@ -1025,6 +1025,19 @@ export class Builder {
     return !!dims && this.model.panelPartners(id, dims).length > 0;
   }
 
+  /**
+   * 面板或网 / 布面 / 玩具袋模式、还没选第一根管时：能当第一根的管（至少有一根能配的
+   * 对面管）。其他情况 null。
+   */
+  _firstRailCandidates() {
+    if (this.panelRail) return null;
+    const lattice = this.mode === "fitting" && RAIL_FITTINGS.has(this.fittingKind);
+    if (this.mode !== "panel" && !lattice) return null;
+    const ids = new Set();
+    for (const id of this.model.tubes.keys()) if (this._railUsable(id, lattice)) ids.add(id);
+    return ids.size ? ids : null;
+  }
+
   /** Laesst sich an dieser Stelle ein Ziehen der Auswahl beginnen? */
   _isMoveHandle(id) {
     return this.mode === "select" && this.selection.size > 0 && this.selection.has(id);
@@ -1542,9 +1555,12 @@ export class Builder {
     const invalid = this._paste && !this._paste.valid && this._paste.sel
       ? new Set(this._paste.sel.keys())
       : (this._drag && this._drag.invalid ? new Set(this.selection.keys()) : null);
+    // 面板 / 布件两步点选的第一步：还没选第一根管时，能当第一根的管先亮出来，
+    // 其余零件退后；选了第一根，照旧只亮它（琥珀）和能配的对面管（绿）。
+    const firstRails = this._firstRailCandidates();
     this.scene.renderModel(this.model, this.selectedNodeId,
       { labelFor, slideNameFor, labelIds, soloId, soloLabel, assembly, suggest, reinforce,
-        selected, highlight: this.highlight, invalid,
+        selected, highlight: this.highlight || firstRails, invalid,
         focusId: this.panelRail ? this.panelRail.id : null });
     this._buildHandles();
     this.scene.requestRender();
