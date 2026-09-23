@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom'
 import { useEngine } from '../store/EngineContext'
 import { useI18n } from '../i18n'
 import { UI_ESCAPE_EVENT } from './events'
+import { usePresence } from './motion'
+import type { CSSProperties } from 'react'
 
 const ORDER_I18N: Record<string, string> = {
   'y+': 'assembly.orderYp',
@@ -23,12 +25,14 @@ function OrderMenu({
   orders,
   onPick,
   onClose,
+  leaving,
 }: {
   anchor: HTMLElement | null
   value: string
   orders: string[]
   onPick: (id: string) => void
   onClose: () => void
+  leaving: boolean
 }) {
   const { t } = useI18n()
   const ref = useRef<HTMLDivElement>(null)
@@ -75,12 +79,13 @@ function OrderMenu({
   return createPortal(
     <div
       ref={ref}
-      className="fixed z-[60] min-w-[12rem] w-max max-w-[18rem] bg-gray-900 border border-gray-700 rounded-xl shadow-2xl p-1.5"
+      className={`m-pop fixed z-[60] min-w-[12rem] w-max max-w-[18rem] bg-gray-900 border border-gray-700 rounded-xl shadow-2xl p-1.5 ${leaving ? 'm-leave pointer-events-none' : ''}`}
       style={pos}
     >
-      {orders.map(order => (
+      {orders.map((order, i) => (
         <button
           key={order}
+          style={{ '--i': i } as CSSProperties}
           type="button"
           onClick={() => { onPick(order); onClose() }}
           className={dropItem(order === value)}
@@ -98,13 +103,18 @@ export default function AssemblyBar() {
   const { t } = useI18n()
   const orderBtn = useRef<HTMLButtonElement>(null)
   const [orderOpen, setOrderOpen] = useState(false)
+  const [orderShown, orderLeaving] = usePresence(orderOpen ? true : null)
+  // 步数往前翻数字往上走，往回翻往下走
+  const lastStep = useRef(api.assembly.step)
+  const stepDir = api.assembly.step >= lastStep.current ? 'up' : 'down'
+  useEffect(() => { lastStep.current = api.assembly.step }, [api.assembly.step])
   const totals = api.bom?.totals
   const hasParts = !!totals && (totals.tubes + totals.connectors + totals.panels + totals.other) > 0
   if (!hasParts && !api.assembly.active) return null
 
   if (!api.assembly.active) {
     return (
-      <div data-tour="assembly" className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40">
+      <div data-tour="assembly" className="m-asm fixed bottom-4 left-1/2 -translate-x-1/2 z-40">
         <button onClick={() => api.setAssembly(true)}
           className="bg-gray-900/90 backdrop-blur border border-gray-700 hover:border-teal-400 text-gray-50 text-sm rounded-full shadow-lg px-4 py-2 cursor-pointer">
           {t('assembly.toggle')}
@@ -115,10 +125,12 @@ export default function AssemblyBar() {
   const n = api.assembly.max + 1
 
   return (
-    <div data-tour="assembly" className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1 bg-gray-900/95 backdrop-blur border border-teal-500/50 rounded-full p-1 shadow-lg">
+    <div data-tour="assembly" className="m-asm fixed bottom-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1 bg-gray-900/95 backdrop-blur border border-teal-500/50 rounded-full p-1 shadow-lg">
       <button disabled={api.assembly.step <= 0} onClick={() => api.stepAssembly(-1)}
         className="w-8 h-8 rounded-full text-gray-50 hover:bg-gray-700 disabled:opacity-30 cursor-pointer" title={`${t('assembly.prev')} [`}>◀</button>
-      <div className="px-2.5 text-sm font-semibold text-teal-700 tabular-nums whitespace-nowrap">{t('assembly.step', { k: api.assembly.step + 1, n })}</div>
+      <div className="px-2.5 text-sm font-semibold text-teal-700 tabular-nums whitespace-nowrap overflow-hidden">
+        <span key={api.assembly.step} className="m-tick inline-block" data-dir={stepDir}>{t('assembly.step', { k: api.assembly.step + 1, n })}</span>
+      </div>
       <button disabled={api.assembly.step >= api.assembly.max} onClick={() => api.stepAssembly(1)}
         className="w-8 h-8 rounded-full text-gray-50 hover:bg-gray-700 disabled:opacity-30 cursor-pointer" title={`${t('assembly.next')} ]`}>▶</button>
       <div className="w-px h-5 bg-gray-700 mx-0.5" />
@@ -135,8 +147,9 @@ export default function AssemblyBar() {
         {t(ORDER_I18N[api.assembly.order] || api.assembly.order)}
         <span className="ml-1 opacity-60">▾</span>
       </button>
-      {orderOpen && (
+      {orderShown && (
         <OrderMenu
+          leaving={orderLeaving}
           anchor={orderBtn.current}
           value={api.assembly.order}
           orders={api.assemblyOrders}

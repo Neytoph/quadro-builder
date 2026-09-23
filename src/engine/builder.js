@@ -1266,6 +1266,7 @@ export class Builder {
   modelReplaced() {
     this.selection.clear();
     this.selectedNodeId = null;
+    this.scene.markModelReplaced();
   }
 
   /**
@@ -1589,7 +1590,8 @@ export class Builder {
     this.scene.renderModel(this.model, this.selectedNodeId,
       { labelFor, slideNameFor, labelIds, soloId, soloLabel, assembly, suggest, reinforce,
         selected, highlight: this.highlight || firstRails, invalid,
-        focusId: this.panelRail ? this.panelRail.id : null });
+        focusId: this.panelRail ? this.panelRail.id : null,
+        preview: !!(this._paste || this._drag || this._clampDrag || this._clampSlide) });
     this._buildHandles();
     this.scene.requestRender();
     // Waehrend einer Vorschau (Ziehen, Kopie am Zeiger) bleibt die Oberflaeche

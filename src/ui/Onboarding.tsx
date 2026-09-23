@@ -172,15 +172,16 @@ export default function Onboarding() {
   const card = placeCard(hole, step.prefer, cardH)
 
   return (
-    <div className="fixed inset-0 z-[80] pointer-events-none" role="dialog" aria-modal="true" aria-labelledby="onboard-title">
+    <div className="m-onb fixed inset-0 z-[80] pointer-events-none" role="dialog" aria-modal="true" aria-labelledby="onboard-title">
       {spot ? (
         <>
-          <div className="absolute bg-black/50 pointer-events-auto" style={{ top: 0, left: 0, right: 0, height: Math.max(0, spot.top) }} />
-          <div className="absolute bg-black/50 pointer-events-auto" style={{ top: spot.top + spot.height, left: 0, right: 0, bottom: 0 }} />
-          <div className="absolute bg-black/50 pointer-events-auto" style={{ top: spot.top, left: 0, width: Math.max(0, spot.left), height: spot.height }} />
-          <div className="absolute bg-black/50 pointer-events-auto" style={{ top: spot.top, left: spot.left + spot.width, right: 0, height: spot.height }} />
+          {/* 这五块在步骤之间滑过去（m-spot），四块遮罩和光圈用同一条曲线，接缝不会裂开 */}
+          <div className="m-spot absolute bg-black/50 pointer-events-auto" style={{ top: 0, left: 0, right: 0, height: Math.max(0, spot.top) }} />
+          <div className="m-spot absolute bg-black/50 pointer-events-auto" style={{ top: spot.top + spot.height, left: 0, right: 0, bottom: 0 }} />
+          <div className="m-spot absolute bg-black/50 pointer-events-auto" style={{ top: spot.top, left: 0, width: Math.max(0, spot.left), height: spot.height }} />
+          <div className="m-spot absolute bg-black/50 pointer-events-auto" style={{ top: spot.top, left: spot.left + spot.width, right: 0, height: spot.height }} />
           <div
-            className="absolute rounded-2xl pointer-events-none shadow-[0_0_0_2px_#2dd4bf,0_0_0_6px_rgba(45,212,191,0.28)]"
+            className="m-spot absolute rounded-2xl pointer-events-none shadow-[0_0_0_2px_#2dd4bf,0_0_0_6px_rgba(45,212,191,0.28)]"
             style={spot}
           />
         </>
@@ -190,7 +191,7 @@ export default function Onboarding() {
 
       <div
         ref={cardRef}
-        className="absolute w-[min(21.25rem,calc(100vw-1.5rem))] bg-gray-900 text-gray-100 rounded-2xl border border-gray-700 shadow-2xl p-4 pointer-events-auto"
+        className="m-card absolute w-[min(21.25rem,calc(100vw-1.5rem))] bg-gray-900 text-gray-100 rounded-2xl border border-gray-700 shadow-2xl p-4 pointer-events-auto"
         style={{ top: card.top, left: card.left }}
         onClick={e => e.stopPropagation()}
       >
@@ -202,12 +203,14 @@ export default function Onboarding() {
             {t('onboard.skip')}
           </button>
         </div>
-        <div id="onboard-title" className="text-base font-semibold mb-1.5">{t(step.title)}</div>
-        <p className="text-sm text-gray-300 leading-relaxed">{t(step.body)}</p>
-        {step.hint && (
-          <p className="text-[12px] text-teal-300/90 leading-relaxed mt-2">{t(step.hint)}</p>
-        )}
-        <p className="text-[11px] text-gray-500 mt-2">{t('onboard.try')}</p>
+        <div key={i} className="m-swap">
+          <div id="onboard-title" className="text-base font-semibold mb-1.5">{t(step.title)}</div>
+          <p className="text-sm text-gray-300 leading-relaxed">{t(step.body)}</p>
+          {step.hint && (
+            <p className="text-[12px] text-teal-300/90 leading-relaxed mt-2">{t(step.hint)}</p>
+          )}
+          <p className="text-[11px] text-gray-500 mt-2">{t('onboard.try')}</p>
+        </div>
         <div className="flex items-center gap-2 mt-4">
           <div className="flex-1 flex gap-1" aria-hidden="true">
             {STEPS.map((_, k) => (

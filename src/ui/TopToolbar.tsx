@@ -10,12 +10,19 @@ const ICON = 32
 import { UI_ESCAPE_EVENT } from './events'
 import { NARROW_MAX, toolbarTop, usePanelLayout } from './panelLayout'
 import { ACCESSORY_PACK, ACCESSORY_IDS } from '../engine/accessoryPack.js'
+import { MOTION, usePresence } from './motion'
 
 const TUBE_HOTKEY: Record<string, string> = { T15: '1', T25: '2', T35: '3', T10: '4', T20: '5', T75: '6' }
 
-const btn = (active: boolean, tone: 'teal' | 'red' = 'teal') =>
-  `flex flex-col items-center justify-center gap-0.5 min-w-[3.4rem] h-12 px-2 rounded-xl border text-[11px] cursor-pointer transition-colors ${
-    active
+// active 是「当前工具」，open 是「下拉开着」。动效开着的时候两者分开画：
+// 当前工具的底色由一块会滑动的色块垫着（见 TopToolbar 里的 m-tool-ind），
+// 下拉开着只描边，免得两块实心底色同时亮、滑块不知道该去哪。
+const btn = (active: boolean, tone: 'teal' | 'red' = 'teal', open = false) => {
+  const base = 'm-tool relative z-[1] flex flex-col items-center justify-center gap-0.5 min-w-[3.4rem] h-12 px-2 rounded-xl border text-[11px] cursor-pointer transition-colors'
+  if (MOTION && active) return `${base} text-white border-transparent font-semibold`
+  if (MOTION && open) return `${base} bg-teal-100 text-teal-700 border-teal-400`
+  return `${base} ${
+    active || open
       ? (tone === 'red'
         ? 'bg-red-500 text-white border-red-400 font-semibold'
         : 'bg-teal-500 text-white border-teal-400 font-semibold')
@@ -23,15 +30,20 @@ const btn = (active: boolean, tone: 'teal' | 'red' = 'teal') =>
         ? 'bg-gray-900/70 text-gray-200 border-gray-700 hover:border-red-400'
         : 'bg-gray-900/70 text-gray-200 border-gray-700 hover:border-teal-400')
   }`
+}
 
 const dropItem = (on: boolean) =>
   `flex items-center gap-2 w-full text-xs rounded-lg px-2 py-1.5 text-left cursor-pointer ${
     on ? 'bg-teal-500 text-white font-semibold' : 'text-gray-50 hover:bg-gray-700'
   }`
 
-function Pop({ anchor, children }: { anchor: HTMLElement | null; children: ReactNode }) {
+function Pop({ anchor, leaving, children }: { anchor: HTMLElement | null; leaving: boolean; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState({ top: 0, left: 0 })
+  useLayoutEffect(() => {
+    // 菜单项按顺序一个接一个进来（错开多少由 CSS 按版本定）
+    ref.current?.querySelectorAll<HTMLElement>('button').forEach((b, i) => b.style.setProperty('--i', String(Math.min(i, 12))))
+  }, [])
   useLayoutEffect(() => {
     const el = ref.current
     if (!anchor || !el) return
@@ -53,7 +65,7 @@ function Pop({ anchor, children }: { anchor: HTMLElement | null; children: React
   return createPortal(
     <div
       ref={ref}
-      className="fixed z-[60] pointer-events-auto bg-gray-800 border border-gray-600 rounded-xl shadow-2xl p-2 min-w-[16rem] w-max max-w-[22rem]"
+      className={`m-pop fixed z-[60] pointer-events-auto bg-gray-800 border border-gray-600 rounded-xl shadow-2xl p-2 min-w-[16rem] w-max max-w-[22rem] ${leaving ? 'm-leave pointer-events-none' : ''}`}
       style={pos}
     >
       {children}
@@ -80,10 +92,11 @@ function ToolDrop({
   tour?: string
 }) {
   const ref = useRef<HTMLButtonElement>(null)
+  const [shown, leaving] = usePresence(open ? true : null)
   return (
     <>
-      <button ref={ref} type="button" title={title} data-tour={tour} className={btn(active)} onClick={onClick}>{children}</button>
-      {open && <Pop anchor={ref.current}>{menu}</Pop>}
+      <button ref={ref} type="button" title={title} data-tour={tour} data-mode-on={active} className={btn(active, 'teal', open)} onClick={onClick}>{children}</button>
+      {shown && <Pop anchor={ref.current} leaving={leaving}>{menu}</Pop>}
     </>
   )
 }
@@ -124,10 +137,31 @@ export default function TopToolbar() {
   const toggle = (k: string) => setOpen(o => (o === k ? null : k))
   const close = () => setOpen(null)
 
+  const indRef = useRef<HTMLSpanElement>(null)
+  // 当前工具底下那块滑块：挪到亮着的那颗按钮底下。按钮上的字会变长变短
+  // （管子长度、板子尺寸），所以每次渲染和工具条尺寸一变都重新量。
+  const placeInd = () => {
+    const bar = barRef.current, ind = indRef.current
+    if (!bar || !ind) return
+    const on = bar.querySelector<HTMLElement>('[data-mode-on="true"]')
+    if (!on) { ind.style.opacity = '0'; return }
+    ind.style.opacity = '1'
+    ind.style.transform = `translate(${on.offsetLeft}px, ${on.offsetTop}px)`
+    ind.style.width = `${on.offsetWidth}px`
+    ind.style.height = `${on.offsetHeight}px`
+    ind.dataset.tone = on.dataset.tone || 'teal'
+    // 第一次摆好之前不带过渡，不然一打开就看见它从左上角滑过来
+    if (!ind.dataset.ready) requestAnimationFrame(() => { ind.dataset.ready = '1' })
+  }
+  useLayoutEffect(() => { if (MOTION) placeInd() })
+
   useLayoutEffect(() => {
     const el = barRef.current
     if (!el) return
-    const update = () => setToolbarW(el.scrollWidth)
+    const update = () => {
+      setToolbarW(el.scrollWidth)
+      if (MOTION) placeInd()
+    }
     update()
     const ro = new ResizeObserver(update)
     ro.observe(el)
@@ -173,10 +207,12 @@ export default function TopToolbar() {
 
   return (
     <div
+      data-ui="toolbar-wrap"
       className={`fixed z-50 flex flex-col items-stretch gap-1.5 pointer-events-none ${narrow ? 'left-2 right-2' : 'left-1/2 -translate-x-1/2 items-center'}`}
       style={{ top: toolbarTop(left, vw) }}
     >
-      <div ref={barRef} data-tour="toolbar" className="flex items-stretch gap-1 bg-gray-950/90 backdrop-blur border border-gray-800 rounded-2xl p-1 shadow-xl pointer-events-auto max-w-[calc(100vw-1rem)] overflow-x-auto scrollbar-thin">
+      <div ref={barRef} data-tour="toolbar" className="relative flex items-stretch gap-1 bg-gray-950/90 backdrop-blur border border-gray-800 rounded-2xl p-1 shadow-xl pointer-events-auto max-w-[calc(100vw-1rem)] overflow-x-auto scrollbar-thin">
+      {MOTION && <span ref={indRef} aria-hidden className="m-tool-ind" />}
       <button disabled={!api.canUndo} onClick={api.undo} title={t('hint.undo')}
         className="flex items-center justify-center min-w-[2.5rem] h-12 px-2 rounded-xl text-gray-200 hover:bg-gray-800 disabled:opacity-30 cursor-pointer disabled:cursor-default">
         <Svg16 inner={TOOL_ICON.undo} />
@@ -187,10 +223,10 @@ export default function TopToolbar() {
       </button>
       <div className="w-px bg-gray-700 mx-0.5 self-stretch" />
 
-      <button className={btn(api.mode === 'select')} onClick={() => { api.setMode('select'); close() }}>
+      <button className={btn(api.mode === 'select')} data-mode-on={api.mode === 'select'} onClick={() => { api.setMode('select'); close() }}>
         <Svg16 inner={TOOL_ICON.select} />{t('tool.select')}
       </button>
-      <button className={btn(api.mode === 'delete', 'red')} title={t('tool.deleteHint')}
+      <button className={btn(api.mode === 'delete', 'red')} data-mode-on={api.mode === 'delete'} data-tone="red" title={t('tool.deleteHint')}
         onClick={() => { api.setMode(api.mode === 'delete' ? 'select' : 'delete'); close() }}>
         <Svg16 inner={TOOL_ICON.delete} />{t('tool.delete')}
       </button>
@@ -198,7 +234,7 @@ export default function TopToolbar() {
       <ToolDrop
         tour="tool-tubes"
         open={open === 'tubes'}
-        active={open === 'tubes' || (api.mode === 'add' && !api.placingConnector)}
+        active={api.mode === 'add' && !api.placingConnector}
         onClick={() => { api.setMode('add'); toggle('tubes') }}
         menu={(
           <>
@@ -226,7 +262,7 @@ export default function TopToolbar() {
 
       <ToolDrop
         open={open === 'panels'}
-        active={open === 'panels' || api.mode === 'panel'}
+        active={api.mode === 'panel'}
         onClick={() => { api.setMode('panel'); toggle('panels') }}
         menu={(
           <>
@@ -256,7 +292,7 @@ export default function TopToolbar() {
 
       <ToolDrop
         open={open === 'conn'}
-        active={open === 'conn' || api.mode === 'c45' || api.mode === 'clamp' || !!api.placingConnector || (api.mode === 'fitting' && JOINT_FITTING.has(api.fittingKind))}
+        active={api.mode === 'c45' || api.mode === 'clamp' || !!api.placingConnector || (api.mode === 'fitting' && JOINT_FITTING.has(api.fittingKind))}
         onClick={() => toggle('conn')}
         menu={(
           <div className="max-h-[80vh] overflow-y-auto pr-0.5 scrollbar-thin">
@@ -287,7 +323,7 @@ export default function TopToolbar() {
 
       <ToolDrop
         open={open === 'wheels'}
-        active={open === 'wheels' || (api.mode === 'fitting' && WHEEL_QDF.has(api.fittingKind))}
+        active={api.mode === 'fitting' && WHEEL_QDF.has(api.fittingKind)}
         onClick={() => toggle('wheels')}
         menu={wheels.map(a => (
           <button key={a.id} onClick={() => { if (a.qdf) api.setFitting(a.qdf); close() }}
@@ -302,7 +338,7 @@ export default function TopToolbar() {
       </ToolDrop>
       <ToolDrop
         open={open === 'textiles'}
-        active={open === 'textiles' || (api.mode === 'fitting' && TEXTIL_QDF.has(api.fittingKind))}
+        active={api.mode === 'fitting' && TEXTIL_QDF.has(api.fittingKind)}
         onClick={() => toggle('textiles')}
         menu={(
           <>
@@ -328,7 +364,7 @@ export default function TopToolbar() {
       </ToolDrop>
       <ToolDrop
         open={open === 'pools'}
-        active={open === 'pools' || api.poolLinerId != null && (api.mode === 'fitting' || api.pasting)}
+        active={api.poolLinerId != null && (api.mode === 'fitting' || api.pasting)}
         onClick={() => toggle('pools')}
         menu={pools.map(a => (
           <button key={a.id} onClick={() => { api.startPool(a.id); close() }}
@@ -343,7 +379,7 @@ export default function TopToolbar() {
       </ToolDrop>
       <ToolDrop
         open={open === 'slides'}
-        active={open === 'slides' || api.mode === 'slide'}
+        active={api.mode === 'slide'}
         onClick={() => toggle('slides')}
         menu={(
           <>
@@ -365,7 +401,7 @@ export default function TopToolbar() {
 
       <ToolDrop
         open={open === 'accessories'}
-        active={open === 'accessories' || (api.mode === 'fitting' && ACCESSORY_IDS.has(api.fittingKind))}
+        active={api.mode === 'fitting' && ACCESSORY_IDS.has(api.fittingKind)}
         onClick={() => toggle('accessories')}
         menu={<>{ACCESSORY_PACK.map(part => <button key={part.id} onClick={() => { api.setFitting(part.id, part.id); close() }} className={dropItem(api.mode === 'fitting' && api.fittingKind === part.id)}><Svg16 inner={TOOL_ICON.textile} size={18} /><span>{labelOf(part.id, part.name)}</span></button>)}</>}
       >
@@ -373,7 +409,7 @@ export default function TopToolbar() {
         <span className="leading-none whitespace-nowrap">{t('tool.accessories')}</span>
       </ToolDrop>
 
-      <button className={btn(api.mode === 'reinforce')} title={t('tool.reinforceHint')} onClick={() => { api.startReinforce(); close() }}>
+      <button className={btn(api.mode === 'reinforce')} data-mode-on={api.mode === 'reinforce'} title={t('tool.reinforceHint')} onClick={() => { api.startReinforce(); close() }}>
         <Svg16 inner={TOOL_ICON.reinforce} />{t('tool.reinforce')}
       </button>
       </div>

@@ -15,18 +15,21 @@ import SceneToggle from './ui/SceneToggle'
 import { PanelLayoutProvider } from './ui/panelLayout'
 import { UI_ESCAPE_EVENT } from './ui/events'
 import { DockProvider, useDock } from './ui/dock'
+import { usePresence } from './ui/motion'
 
 function Toast() {
-  const { toast, dismissToast } = useEngine()
+  const { toast: live, dismissToast } = useEngine()
+  const [toast, leaving] = usePresence(live)
   useEffect(() => {
-    if (!toast) return
+    if (!live) return
     const id = window.setTimeout(dismissToast, 2800)
     return () => window.clearTimeout(id)
-  }, [toast, dismissToast])
+  }, [live, dismissToast])
   if (!toast) return null
   const tone = toast.kind === 'err' ? 'bg-red-800' : toast.kind === 'warn' ? 'bg-amber-800' : 'bg-teal-800'
   return (
-    <div className={`fixed top-[9.5rem] left-1/2 -translate-x-1/2 ${tone} text-white text-sm px-4 py-2 rounded-lg shadow-lg z-40`}>
+    // key 跟着消息走：连着两条提示时，第二条重新演一遍入场
+    <div key={toast.message} className={`m-toast fixed top-[9.5rem] left-1/2 -translate-x-1/2 ${tone} text-white text-sm px-4 py-2 rounded-lg shadow-lg z-40 ${leaving ? 'm-leave' : ''}`}>
       {toast.message}
     </div>
   )
@@ -35,6 +38,7 @@ function Toast() {
 function ManualConfirm() {
   const { exportManualConfirm, cancelExportManual, confirmExportManual } = useEngine()
   const { t } = useI18n()
+  const [shown, leaving] = usePresence(exportManualConfirm ? true : null)
 
   useEffect(() => {
     if (!exportManualConfirm) return
@@ -43,17 +47,17 @@ function ManualConfirm() {
     return () => window.removeEventListener(UI_ESCAPE_EVENT, onEsc)
   }, [exportManualConfirm, cancelExportManual])
 
-  if (!exportManualConfirm) return null
+  if (!shown) return null
   return (
     <div
-      className="fixed inset-0 z-[75] flex items-center justify-center bg-black/45 p-4"
+      className={`m-backdrop fixed inset-0 z-[75] flex items-center justify-center bg-black/45 p-4 ${leaving ? 'm-leave pointer-events-none' : ''}`}
       onClick={cancelExportManual}
     >
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="manual-confirm-title"
-        className="w-full max-w-sm bg-gray-900 text-gray-100 rounded-2xl border border-gray-700 shadow-2xl p-5"
+        className="m-modal w-full max-w-sm bg-gray-900 text-gray-100 rounded-2xl border border-gray-700 shadow-2xl p-5"
         onClick={e => e.stopPropagation()}
       >
         <div id="manual-confirm-title" className="text-base font-semibold">{t('confirm.exportManualTitle')}</div>
@@ -85,8 +89,8 @@ function ManualProgress() {
   const { t } = useI18n()
   if (!exportingManual) return null
   return (
-    <div className="fixed inset-0 z-[80] bg-black/45 flex items-center justify-center">
-      <div className="bg-gray-900 border border-gray-700 rounded-xl px-6 py-4 text-gray-100 text-sm shadow-xl tabular-nums">
+    <div className="m-backdrop fixed inset-0 z-[80] bg-black/45 flex items-center justify-center">
+      <div className="m-modal bg-gray-900 border border-gray-700 rounded-xl px-6 py-4 text-gray-100 text-sm shadow-xl tabular-nums">
         {t('manual.progress', { k: exportingManual.page, n: exportingManual.total })}
       </div>
     </div>

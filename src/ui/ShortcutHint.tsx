@@ -1,6 +1,8 @@
 import { useEngine } from '../store/EngineContext'
 import { useI18n } from '../i18n'
+import type { CSSProperties } from 'react'
 import { FoldHeader } from './panelLayout'
+import { Collapse } from './MotionBits'
 
 type Row = { chord: string; action: string }
 
@@ -138,11 +140,12 @@ export default function ShortcutHint({ open, onToggle }: { open: boolean; onTogg
           </span>
         )}
       />
-      {open && (
+      <Collapse open={open}>
       <div className="px-2.5 pb-2.5 pt-0.5 overflow-y-auto min-h-0 scrollbar-thin">
-        <div className="flex flex-col gap-1">
-          {rows.map(row => (
-            <div key={row.chord + row.action} className="flex items-start gap-2">
+        {/* 换了工具，这一组快捷键整组换掉，一行行重新进来 */}
+        <div key={mode + (api.placingConnector ? ':conn' : '')} className="m-rows flex flex-col gap-1">
+          {rows.map((row, i) => (
+            <div key={row.chord + row.action} className="flex items-start gap-2" style={{ '--i': i } as CSSProperties}>
               <Kbd text={row.chord} />
               <span className="text-[11px] text-gray-300 leading-snug pt-px">{row.action}</span>
             </div>
@@ -155,7 +158,7 @@ export default function ShortcutHint({ open, onToggle }: { open: boolean; onTogg
           </div>
         </div>
       </div>
-      )}
+      </Collapse>
     </div>
   )
 }

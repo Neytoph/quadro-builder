@@ -39,7 +39,7 @@ export default function CanvasHost() {
       onDragLeave={onDragLeave}
       onDrop={onDrop}
     >
-      <div id="canvas-host" ref={hostRef} className="absolute inset-0" tabIndex={0} />
+      <div id="canvas-host" ref={hostRef} className="m-canvas absolute inset-0" data-ready={ready} tabIndex={0} />
       {!ready && !error && (
         <div className="absolute inset-0 flex items-center justify-center text-gray-400 text-sm">Loading…</div>
       )}
