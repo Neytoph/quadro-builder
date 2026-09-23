@@ -108,6 +108,8 @@ const COLOR_BY_NAME = {
 const HOLE_SUFFIX = " (hole)";
 // Acrylglasplatte: gleicher Kniff, Name "<farbe> (acrylic)".
 const ACRYLIC_SUFFIX = " (acrylic)";
+// 功能板（兼容件）：名字「<farbe> (<feature>)」，feature 见 qdfexport.js FEATURE_KEYS。
+const FEATURE_SUFFIX_RE = / \((lego|honeycomb|busy|felt|magnet|climbing|sensory|pocket|basin|rainbow|bridge)\)$/;
 const FALLBACK_COLOR = "blue";
 
 // So weit sitzt die Kupplung, die eine Lagerkupplung traegt, von deren Punkt
@@ -296,6 +298,7 @@ export function parseQDF(text, opts = {}) {
   const materials = new Map(); // id -> colorId
   const holeMaterials = new Set(); // Material-Nummern, die eine Lochplatte kennzeichnen
   const acrylicMaterials = new Set(); // dito fuer die Acrylglasplatte
+  const featureMaterials = new Map(); // Material-Nummer -> feature (功能板)
   const nodes = [];            // { id, x, y, z }
   const tubes = [];            // { id, a, b, tubeId, color, length }
   const panels = [];           // { id, nodes:[4 ids], panelId, color }
@@ -316,10 +319,12 @@ export function parseQDF(text, opts = {}) {
   const panelByDims = new Map();
   let holePanelId = null;
   let acrylicPanelId = null;
+  const featurePanelIds = new Map();   // feature -> panelId（功能板同样不进尺寸表）
   for (const pa of opts.panels || []) {
     if (pa.w == null || pa.h == null) continue;
     if (pa.holes) { if (!holePanelId) holePanelId = pa.id; continue; }
     if (pa.acrylic) { if (!acrylicPanelId) acrylicPanelId = pa.id; continue; }
+    if (pa.feature) { if (!featurePanelIds.has(pa.feature)) featurePanelIds.set(pa.feature, pa.id); continue; }
     const a = Math.round(pa.w), b = Math.round(pa.h);
     panelByDims.set(Math.min(a, b) + "x" + Math.max(a, b), pa.id);
   }
@@ -469,6 +474,10 @@ export function parseQDF(text, opts = {}) {
       } else if (typeof colorName === "string" && colorName.endsWith(ACRYLIC_SUFFIX)) {
         if (id != null) acrylicMaterials.add(id);
         colorName = colorName.slice(0, -ACRYLIC_SUFFIX.length);
+      } else if (typeof colorName === "string" && FEATURE_SUFFIX_RE.test(colorName)) {
+        const feature = colorName.match(FEATURE_SUFFIX_RE)[1];
+        if (id != null) featureMaterials.set(id, feature);
+        colorName = colorName.replace(FEATURE_SUFFIX_RE, "");
       }
       if (id != null) materials.set(id, COLOR_BY_NAME[colorName] || FALLBACK_COLOR);
     } else if (p.name === "connector3" || p.name === "connector45_2") {
@@ -799,11 +808,13 @@ export function parseQDF(text, opts = {}) {
       const matNr = typeof p.rest[0] === "number" ? p.rest[0] : null;
       // Lochplatte? Dann nicht ueber das Mass suchen -- das Lochraster steht im
       // Material (siehe HOLE_SUFFIX), die Groesse ist dieselbe wie bei der vollen.
+      const featureId = matNr != null && featureMaterials.has(matNr)
+        ? featurePanelIds.get(featureMaterials.get(matNr)) : null;
       const panelId = (matNr != null && holeMaterials.has(matNr) && holePanelId)
         ? holePanelId
         : (matNr != null && acrylicMaterials.has(matNr) && acrylicPanelId)
           ? acrylicPanelId
-          : panelIdForDims(dimW + conn, dimH + conn);
+          : featureId || panelIdForDims(dimW + conn, dimH + conn);
       if (!panelId) { skipped[p.name] = (skipped[p.name] || 0) + 1; continue; }
       const nodesFound = findPanelCorners(q, cx, cy, cz, (dimW + padW + conn) / 2, (dimH + padH + conn) / 2);
       if (!nodesFound) { skipped[p.name] = (skipped[p.name] || 0) + 1; continue; }
@@ -832,10 +843,12 @@ export function parseQDF(text, opts = {}) {
       const nodesFound = findPanelCorners(q, cx, cy, cz, wGrid / 2, hGrid / 2);
       if (!nodesFound) { skipped[p.name] = (skipped[p.name] || 0) + 1; continue; }
       const mat = typeof p.rest[0] === "number" ? p.rest[0] : null;
+      const variant = mat != null && featureMaterials.has(mat) ? featureMaterials.get(mat) : null;
       textiles.push({
         id: "x" + seq++, nodes: nodesFound.map((n) => n.id),
         w: Math.round(Math.min(wGrid, hGrid)), h: Math.round(Math.max(wGrid, hGrid)),
         color: materials.get(mat) || FALLBACK_COLOR, side: sideFromQuat(q, nodesFound),
+        ...(variant === "rainbow" || variant === "bridge" ? { variant } : {}),
       });
 
     } else if (p.name === "pool2" || p.name === "pool-small2") {

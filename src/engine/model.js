@@ -850,6 +850,10 @@ export class BuildModel {
     this._prunePanels();
     this._pruneClamps();
     this._pruneOrphanedC45Bodies();
+    // 套在这根管上的软包跟着走
+    for (const f of [...this.fittings.values()]) {
+      if (f.kind === "sleeve" && f.tube === id) this.fittings.delete(f.id);
+    }
   }
 
   /**
@@ -4182,6 +4186,11 @@ export class BuildModel {
     }
     for (const f of frag.fittings || []) {
       const rec = versetzt(f, "f", "fittings");
+      // 软包滚筒记着管子的 id，片段里的管换了新 id；管没一起带过来就丢掉
+      if (rec.kind === "sleeve") {
+        rec.tube = rec.tube ? neu.get(rec.tube) || null : null;
+        if (!rec.tube) continue;
+      }
       this.fittings.set(rec.id, rec);
     }
     // 片段里的组换上新 id 再登记
@@ -5429,10 +5438,14 @@ export class BuildModel {
    * ein dadurch verwaister Knoten wird entfernt.
    *
    * Liefert { node } oder { ground:true } / { duplicate:true }.
+   *
+   * steps < 0 转另一个方向（Q 键）；pivot 指定绕哪一头转（默认 a 头），
+   * 传 b 头就先把两头对调——弯管两头本来就没有先后。
    */
-  rotateBow(id) {
+  rotateBow(id, steps = 1, { pivot } = {}) {
     const t = this.tubes.get(id);
     if (!t || !t.bow || !t.bowCenter) return null;
+    if (pivot != null && pivot === t.b) { const tmp = t.a; t.a = t.b; t.b = tmp; }
     const a = this.nodes.get(t.a), b = this.nodes.get(t.b);
     if (!a || !b) return null;
     const c = { x: t.bowCenter[0], y: t.bowCenter[1], z: t.bowCenter[2] };
@@ -5446,9 +5459,11 @@ export class BuildModel {
     // genommen -- sonst liesse sich ein Bogen ueber dem Boden gar nicht mehr
     // bewegen, weil ausgerechnet der naechste Schritt nach unten zeigt.
     const perp = cross(t0, n);
-    const steps = [perp, [-n[0], -n[1], -n[2]], [-perp[0], -perp[1], -perp[2]]];
+    const back = [-n[0], -n[1], -n[2]];
+    const anti = [-perp[0], -perp[1], -perp[2]];
+    const order = steps < 0 ? [anti, back, perp] : [perp, back, anti];
     let blocked = null;
-    for (const n2 of steps) {
+    for (const n2 of order) {
       const target = {
         x: round(a.x + R * (t0[0] + n2[0])),
         y: round(a.y + R * (t0[1] + n2[1])),
@@ -5613,6 +5628,7 @@ export class BuildModel {
       textiles: [...this.textiles.values()].map((t) => {
         const o = { id: t.id, a: t.a, b: t.b, t0: round(t.t0), len: round(t.len), w: t.w, h: t.h, color: t.color };
         if ((t.side || 1) < 0) o.side = -1;
+        if (t.variant) o.variant = t.variant;   // 彩虹带 / 彩虹桥
         return o;
       }),
       fittings: [...this.fittings.values()].map((f) => {
@@ -5624,6 +5640,8 @@ export class BuildModel {
         if (f.d != null) o.d = f.d;
         if (f.mask != null) o.mask = f.mask;
         if (f.rest) o.rest = f.rest;
+        if (f.balls) o.balls = true;      // 泳池里倒了海洋球
+        if (f.tube) o.tube = f.tube;      // 软包滚筒套在哪根管上
         return o;
       }),
       slides: [...this.slides.values()].map((s) => {
@@ -5721,6 +5739,7 @@ export class BuildModel {
       const rec = this._panelRecord(t);
       if (!rec) continue;
       rec.w = t.w; rec.h = t.h;
+      if (t.variant) rec.variant = t.variant;
       this.textiles.set(t.id, rec);
       maxSeq = Math.max(maxSeq, parseSeq(t.id));
     }
@@ -5735,6 +5754,8 @@ export class BuildModel {
         w: f.w, h: f.h, d: f.d, mask: f.mask,
         // Felder aus der Datei, die wir nur durchreichen (Flexikupplung & Co.)
         rest: f.rest || null,
+        balls: !!f.balls,
+        tube: f.tube || null,
       });
       maxSeq = Math.max(maxSeq, parseSeq(f.id));
     }

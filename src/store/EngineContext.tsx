@@ -110,6 +110,7 @@ interface EngineApi {
   panelId: string
   slideKind: string
   fittingKind: string
+  fittingPart: string | null
   poolLinerId: string | null
   clampPart: string
   canUndo: boolean
@@ -142,7 +143,7 @@ interface EngineApi {
   setTube: (id: string) => void
   setPanel: (id: string) => void
   setSlide: (kind: string) => void
-  setFitting: (kind: string) => void
+  setFitting: (kind: string, partId?: string) => void
   setClamp: (id: string) => void
   startPool: (id: string) => void
   startC45: () => void
@@ -213,10 +214,10 @@ interface EngineApi {
   catalog: {
     tubes: Array<{ id: string; length_cm: number; name?: string }>
     curved: Array<{ id: string; name?: string }>
-    panels: Array<{ id: string; w?: number; h?: number; name?: string; holes?: number; acrylic?: boolean }>
+    panels: Array<{ id: string; w?: number; h?: number; name?: string; holes?: number; acrylic?: boolean; feature?: string; compat?: boolean }>
     colors: Array<{ id: string; hex: string; name?: string; name_en?: string }>
     connectors: Array<{ id: string; kind: string; qdf?: string; name?: string }>
-    accessories: Array<{ id: string; qdf?: string; name?: string }>
+    accessories: Array<{ id: string; qdf?: string; name?: string; variant?: string; compat?: boolean }>
   }
   applyColorTune: (tune: { scene: Record<string, unknown>; frame: Record<string, string>; grade?: Record<string, number> }) => void
   startThumbBatch: () => void
@@ -604,6 +605,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
         builder.onNotice = ((msg: string, kind?: string) => notifyRef.current(String(msg), kind === 'warn' ? 'warn' : 'ok')) as E
         scene.onMeshesReady = () => builder.refresh()
         eng.current = { scene, model, builder }
+        // 开发模式下把引擎挂到 window 上，浏览器测试脚本靠它摆相机、查手柄
+        if (import.meta.env.DEV) (window as unknown as { __quadroDev?: unknown }).__quadroDev = eng.current
 
         await docs.migrateOldDrafts()
         const session = await docs.loadSession()
@@ -772,10 +775,10 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     builder?.setMode('slide')
     bump()
   }, [builder, bump, clearBomHighlight])
-  const setFitting = useCallback((kind: string) => {
-    pickPart('fittings', kind)
+  const setFitting = useCallback((kind: string, partId?: string) => {
+    pickPart('fittings', partId || kind)
     clearBomHighlight()
-    builder?.setFitting(kind)
+    builder?.setFitting(kind, partId)
     builder?.setMode('fitting')
     bump()
   }, [builder, bump, clearBomHighlight])
@@ -1493,6 +1496,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     panelId: (builder?.panelId as string) || '',
     slideKind: (builder?.slideKind as string) || 'slide-new2',
     fittingKind: (builder?.fittingKind as string) || 'multi-wheel2',
+    fittingPart: (builder?.fittingPart as string) || null,
     poolLinerId: (builder?.poolLinerId as string) || null,
     clampPart: (builder?.clampPart as string) || 'double_tube',
     canUndo: !!builder?.canUndo?.(),

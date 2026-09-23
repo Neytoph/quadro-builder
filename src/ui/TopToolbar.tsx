@@ -87,7 +87,7 @@ function ToolDrop({
 const REGULAR_JOINT = new Set(['6way', '5way', '4way', '3way', 'cross', 't', 'straight', 'elbow'])
 const JOINT_FITTING = new Set(['hole_1', 'hole_2', 'hole_t', 'flexi_bolt', 'flexi_hinge', 'bearing-clamp'])
 const WHEEL_QDF = new Set(['multi-wheel2', 'floating-wheel2', 'casters2', 'steering-lock2', 'hub-cap2', 'bearing2', 'adapter2'])
-const TEXTIL_QDF = new Set(['textil2', 'textil-round2', 'roof2', 'roof-large2', 'lattice2', 'bag2'])
+const TEXTIL_QDF = new Set(['textil2', 'textil-round2', 'roof2', 'roof-large2', 'lattice2', 'bag2', 'sleeve'])
 
 function pickJoint(id: string, api: ReturnType<typeof useEngine>) {
   if (id === 'diagonal') { api.startC45(); return }
@@ -138,7 +138,8 @@ export default function TopToolbar() {
 
   const wheels = api.catalog.accessories.filter(a => a.qdf && ['multi-wheel2', 'floating-wheel2', 'casters2', 'steering-lock2', 'hub-cap2', 'bearing2', 'adapter2'].includes(a.qdf))
   const textiles = api.catalog.accessories.filter(a => a.qdf && ['textil2', 'textil-round2', 'roof2', 'roof-large2', 'lattice2', 'bag2'].includes(a.qdf))
-  const pools = api.catalog.accessories.filter(a => a.id.startsWith('pool_liner'))
+  // 四种内衬，末尾跟着海洋球（往现成的泳池里倒）
+  const pools = api.catalog.accessories.filter(a => a.id.startsWith('pool_liner') || a.id === 'balls')
   const slides = [
     { id: 'slide-new2', part: 'slide_integral' },
     { id: 'slide2', part: 'slide_module' },
@@ -150,16 +151,21 @@ export default function TopToolbar() {
   const tubeMark = tubeCurved ? t('hint.curved') : (tubeDef ? String(tubeDef.length_cm) : '')
   const panelDef = api.catalog.panels.find(p => p.id === api.panelId)
   // 洞洞板和透明窗板与 40×40 同尺寸，尺寸后面带一个词区分
-  const panelLabel = (p: { w?: number; h?: number; holes?: number; acrylic?: boolean }) => {
+  type PanelLike = { w?: number; h?: number; holes?: number; acrylic?: boolean; feature?: string; compat?: boolean }
+  const panelLabel = (p: PanelLike) => {
     if (!p.w || !p.h) return ''
-    const variant = p.holes ? t('panel.hole') : p.acrylic ? t('panel.acrylic') : ''
+    const variant = p.holes ? t('panel.hole') : p.acrylic ? t('panel.acrylic') : p.feature ? t('panel.' + p.feature) : ''
     return `${p.w}×${p.h}${variant ? ` · ${variant}` : ''}`
   }
   // 顶栏按钮位置窄：特殊板只显示那个词，普通板显示尺寸
   const panelMark = !panelDef ? ''
     : panelDef.holes ? t('panel.hole')
     : panelDef.acrylic ? t('panel.acrylic')
+    : (panelDef as PanelLike).feature ? t('panel.' + (panelDef as PanelLike).feature)
     : panelLabel(panelDef)
+  // 下拉分两组：原厂在前，功能板（兼容件）在后
+  const officialPanels = api.catalog.panels.filter(p => !(p as PanelLike).compat)
+  const compatPanels = api.catalog.panels.filter(p => (p as PanelLike).compat)
 
   return (
     <div
@@ -220,7 +226,17 @@ export default function TopToolbar() {
         onClick={() => { api.setMode('panel'); toggle('panels') }}
         menu={(
           <>
-            {api.catalog.panels.map(p => (
+            {officialPanels.map(p => (
+              <button key={p.id} onClick={() => { api.setPanel(p.id); close() }}
+                className={dropItem(api.panelId === p.id)}>
+                <Svg16 inner={partIcon(p.id, 'panels')} size={18} />
+                <span className="whitespace-nowrap">{panelLabel(p) || labelOf(p.id, p.name)}</span>
+              </button>
+            ))}
+            {compatPanels.length > 0 && (
+              <div className="mt-1 pt-1 border-t border-gray-700 px-2 pb-0.5 text-[10px] text-gray-400 whitespace-nowrap">{t('panel.compat')}</div>
+            )}
+            {compatPanels.map(p => (
               <button key={p.id} onClick={() => { api.setPanel(p.id); close() }}
                 className={dropItem(api.panelId === p.id)}>
                 <Svg16 inner={partIcon(p.id, 'panels')} size={18} />
@@ -284,13 +300,24 @@ export default function TopToolbar() {
         open={open === 'textiles'}
         active={open === 'textiles' || (api.mode === 'fitting' && TEXTIL_QDF.has(api.fittingKind))}
         onClick={() => toggle('textiles')}
-        menu={textiles.map(a => (
-          <button key={a.id} onClick={() => { if (a.qdf) api.setFitting(a.qdf); close() }}
-            className={dropItem(!!a.qdf && api.fittingKind === a.qdf && api.mode === 'fitting')}>
-            <Svg16 inner={(a.qdf && ACC_CAT_ICON[a.qdf]) || TOOL_ICON.textile} size={18} />
-            <span className="whitespace-nowrap">{labelOf(a.id, a.name)}</span>
-          </button>
-        ))}
+        menu={(
+          <>
+            {textiles.map(a => (
+              <button key={a.id} onClick={() => { if (a.qdf) api.setFitting(a.qdf, a.variant ? a.id : undefined); close() }}
+                className={dropItem(!!a.qdf && api.fittingKind === a.qdf && api.mode === 'fitting'
+                  && (a.variant ? api.fittingPart === a.id : !api.fittingPart))}>
+                <Svg16 inner={(a.qdf && ACC_CAT_ICON[a.qdf]) || TOOL_ICON.textile} size={18} />
+                <span className="whitespace-nowrap">{labelOf(a.id, a.name)}</span>
+              </button>
+            ))}
+            {/* 软包滚筒：套在管子上，不是布件，但归在这一栏最顺手 */}
+            <button key="sleeve" onClick={() => { api.setFitting('sleeve', 'sleeve'); close() }}
+              className={dropItem(api.fittingKind === 'sleeve' && api.mode === 'fitting')}>
+              <Svg16 inner={TOOL_ICON.textile} size={18} />
+              <span className="whitespace-nowrap">{labelOf('sleeve')}</span>
+            </button>
+          </>
+        )}
       >
         <Svg16 inner={TOOL_ICON.textile} />
         <span className="leading-none">{t('tool.textiles')}</span>

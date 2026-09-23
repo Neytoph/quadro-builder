@@ -633,6 +633,20 @@ export function computeScrews(model) {
   return rows;
 }
 
+/**
+ * 一个泳池要几袋海洋球（一袋 500 个）。内空 = 外框去掉内衬的缩进和皮厚，
+ * 铺到池深的三分之二；一颗球直径 6 厘米，随意堆放约占 180 立方厘米。
+ * 口径和场景里画球的一致（scene.js `_poolBalls`）。
+ */
+export function ballBagsFor(f) {
+  const w = Math.abs(f.w || 0), h = Math.abs(f.h || 0), d = Math.abs(f.d || 0);
+  if (!w || !h || !d) return 0;
+  const inset = 2.5, skin = 2;
+  const wIn = w - 2 * inset - 2 * skin, dIn = d - 2 * inset - 2 * skin, fill = (h - inset) * 2 / 3;
+  if (wIn <= 0 || dIn <= 0 || fill <= 0) return 0;
+  return Math.max(1, Math.ceil(wIn * dIn * fill / 180 / 500));
+}
+
 export function computeBOM(model) {
   // --- Rohre nach Typ + Farbe ---
   const tubeMap = new Map();
@@ -717,16 +731,18 @@ export function computeBOM(model) {
   const textileDef = getPartById("textile");
   const textileMap = new Map();
   for (const tx of (model.textiles ? model.textiles.values() : [])) {
-    const key = tx.w + "x" + tx.h + "|" + tx.color;
-    if (!textileMap.has(key)) textileMap.set(key, { w: tx.w, h: tx.h, color: tx.color, count: 0 });
+    const key = tx.w + "x" + tx.h + "|" + tx.color + "|" + (tx.variant || "");
+    if (!textileMap.has(key)) textileMap.set(key, { w: tx.w, h: tx.h, color: tx.color, variant: tx.variant || "", count: 0 });
     textileMap.get(key).count++;
   }
   const textiles = [...textileMap.values()].map((r) => {
-    const base = textileDef ? partName(textileDef) : "textile";
+    // 彩虹带、彩虹桥有自己的目录条目（兼容件），普通布件用 textile
+    const def = (r.variant && getPartById("textile_" + r.variant)) || textileDef;
+    const base = def ? partName(def) : "textile";
     const size = r.w && r.h ? ` ${r.w}×${r.h} cm` : "";
     return {
-      key: r.w + "x" + r.h + "|" + r.color,
-      id: (textileDef && textileDef.id) || "textile",
+      key: r.w + "x" + r.h + "|" + r.color + "|" + r.variant,
+      id: (def && def.id) || "textile",
       kind: "textil2",
       w: r.w, h: r.h,
       name: `${base}${size}`,
@@ -758,6 +774,11 @@ export function computeBOM(model) {
     const def = poolLinerFor(span(0, 1), span(0, 3));
     if (def) poolLiners.set(def.id, (poolLiners.get(def.id) || 0) + 1);
   }
+  // 海洋球：按池子的内空算袋数，一袋 500 个。
+  let ballBags = 0;
+  for (const f of (model.fittings ? model.fittings.values() : [])) {
+    if (POOL_KINDS.has(f.kind) && f.balls) ballBags += ballBagsFor(f);
+  }
 
   // --- Anbauteile (Raeder, Rollen, Netze, Sonderkupplungen) --------------
   // Gezaehlt wird nach Katalogteil, nicht nach QDF-Art: ein- und dreiarmige
@@ -770,6 +791,16 @@ export function computeBOM(model) {
     // wird dafuer nichts -- es steht deshalb weder in der Stueckliste noch in
     // der Aufbau-Liste.
     if (f.kind === "open-connector2") continue;
+    // 软包滚筒按管长分行：35 的和 75 的是两种东西
+    if (f.kind === "sleeve") {
+      const tb = model.tubes.get(f.tube);
+      const a = tb && model.nodes.get(tb.a), b = tb && model.nodes.get(tb.b);
+      const len = a && b ? Math.round(Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z) - geometry().connectorSize) : 0;
+      const skey = "sleeve|" + len;
+      if (!fitMap.has(skey)) fitMap.set(skey, { def: getPartById("sleeve"), kind: "sleeve", count: 0, len });
+      fitMap.get(skey).count++;
+      continue;
+    }
     const def = partForFitting(f.kind, f.mask);
     const key = def ? def.id : f.kind;
     if (!fitMap.has(key)) fitMap.set(key, { def, kind: f.kind, count: 0 });
@@ -780,6 +811,7 @@ export function computeBOM(model) {
   for (const [id, count] of poolLiners) {
     fitMap.set(id, { def: getPartById(id), kind: "pool2", count });
   }
+  if (ballBags) fitMap.set("balls", { def: getPartById("balls"), kind: "balls", count: ballBags });
   // Die Acrylglasscheibe wird nicht gesetzt, sie steckt in jeder Rahmenplatte:
   // eine Scheibe je Acrylglasplatte, gerechnet aus den Platten.
   let acrylicSheets = 0;
@@ -792,7 +824,7 @@ export function computeBOM(model) {
   }
   const fittings = [...fitMap.entries()].map(([key, r]) => ({
     key, id: key, kind: r.kind,
-    name: r.def ? partName(r.def) : (partName(getPartById(key)) || r.kind),
+    name: (r.def ? partName(r.def) : (partName(getPartById(key)) || r.kind)) + (r.len ? ` ${r.len} cm` : ""),
     code: (r.def && r.def.code) || "",
     count: r.count,
     price: (r.def && r.def.price) || 0,
