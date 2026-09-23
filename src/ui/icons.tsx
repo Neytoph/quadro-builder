@@ -1,3 +1,5 @@
+import { PART_IMAGES } from './partImages'
+
 /** 16×16 图标。inner 是静态 SVG（来自 vokako 工具栏）。 */
 export function Svg16({ inner, size = 18 }: { inner: string; size?: number }) {
   return <svg viewBox="0 0 16 16" width={size} height={size} fill="none" dangerouslySetInnerHTML={{ __html: inner }} />
@@ -145,6 +147,27 @@ const BY_KIND: Record<string, string> = {
   fittings: TOOL_ICON.wheel,
   reinforcements: TOOL_ICON.reinforce,
   screws: SCREW_ICON,
+}
+
+/**
+ * 零件图标：有渲染图（public/parts/<id>.png，scripts/shoot-part-icons.mjs 出的）就用图，
+ * 透明底直接摆在菜单上；加一圈淡白光晕，选中行的橙底上红色零件也分得出来。没图退回 SVG。
+ */
+export function PartImg({ id, svg, size = 18 }: { id?: string | null; svg: string; size?: number }) {
+  if (id && PART_IMAGES.has(id)) {
+    return (
+      <span className="shrink-0 inline-flex items-center justify-center" style={{ width: size, height: size }}>
+        <img src={`${import.meta.env.BASE_URL}parts/${id}.png`} alt="" draggable={false}
+          loading="lazy" style={{ width: size, height: size, filter: 'drop-shadow(0 0 1.2px rgba(255,255,255,.95))' }} />
+      </span>
+    )
+  }
+  // 没图的也占同样大的格子，和有图的行文字对齐
+  return (
+    <span className="shrink-0 inline-flex items-center justify-center" style={{ width: size, height: size }}>
+      <Svg16 inner={svg} size={Math.min(size, 18)} />
+    </span>
+  )
 }
 
 /** 零件清单 / 库存行用的图标：优先零件 id，其次分类。 */

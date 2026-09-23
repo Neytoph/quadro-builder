@@ -3,7 +3,7 @@ import { useEngine, type Inventory, type InvRow } from '../store/EngineContext'
 import { useI18n } from '../i18n'
 import { labelOf } from '../names'
 import { inventoryCatalog, INV_SECTIONS, INV_SECTION_TITLE, type InvCatalogItem, type InvGroup, type InvSection } from '../data/inventoryCatalog'
-import { Svg16, partIcon } from './icons'
+import { PartImg, partIcon } from './icons'
 import { bumpCount, track } from '../analytics/track'
 
 const COLOR_ONLY = new Set(['tubes', 'panels', 'screws'])
@@ -12,7 +12,7 @@ function RowIcon({ id, kind }: { id: string; kind: string }) {
   if (COLOR_ONLY.has(kind)) return null
   return (
     <span className="shrink-0 text-gray-300 inline-flex">
-      <Svg16 inner={partIcon(id, kind)} size={16} />
+      <PartImg id={id} svg={partIcon(id, kind)} size={18} />
     </span>
   )
 }
