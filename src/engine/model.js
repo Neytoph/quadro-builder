@@ -2185,6 +2185,17 @@ export class BuildModel {
     return out;
   }
 
+  /**
+   * 两根承重管之间这一段还空着吗？kind 为 null 按面板算（面板和布面都不许叠），
+   * 网 / 布面 / 玩具袋用自己的占位规则，和 railFittingMounts 出绿格子是同一套。
+   */
+  sectionFree(kind, aId, bId, t0, len) {
+    if (!kind) return !this.panelAt(aId, bId, t0, len);
+    if (this._railFittingTaken(kind, aId, bId, t0, len)) return false;
+    const cor = this.panelCorners({ a: aId, b: bId, t0, len });
+    return !!cor && !this._railFaceTaken(kind, cor) && this._openingFree(cor);
+  }
+
   _railFaceKey(cor) {
     return cor.map((c) => c.map((v) => Math.round(v)).join(",")).sort().join(";");
   }
@@ -4127,7 +4138,8 @@ export class BuildModel {
     return {
       anchor,
       nodes: nodes.map(rel),
-      tubes: tubes.map(t => t.bowCenter ? { ...t, bowCenter: relPunkt(t.bowCenter) } : t),
+      // 弯管圆心和节点一样换成相对锚点，插入时再加上落点
+      tubes: tubes.map((t) => (t.bowCenter ? { ...t, bowCenter: relPunkt(t.bowCenter) } : t)),
       panels,
       textiles,
       groups,
@@ -4184,7 +4196,11 @@ export class BuildModel {
       const id = this._id("t");
       neu.set(t.id, id);
       out.tubes.push(id);
-      this.tubes.set(id, { ...t, id, a, b, ...(t.bowCenter ? { bowCenter: punktVersetzt(t.bowCenter) } : {}) });
+      const rec = { ...t, id, a, b };
+      // 弯管圆心和读进来的管自带的位置，跟节点一样挪到粘贴的地方
+      if (t.bowCenter) rec.bowCenter = punktVersetzt(t.bowCenter);
+      if (t.geom && t.geom.p0) rec.geom = { ...t.geom, p0: punktVersetzt(t.geom.p0) };
+      this.tubes.set(id, rec);
     }
     // Klemm-Kupplungen zeigen auf ihr Rohr -- der Verweis muss mitwandern.
     for (const id of out.nodes) {
@@ -4357,9 +4373,15 @@ export class BuildModel {
    */
   _moveTubeGeom(movedIds, delta = null) {
     for (const t of this.tubes.values()) {
-      if (!t.geom) continue;
       const ba = movedIds.has(t.a), bb = movedIds.has(t.b);
       if (!ba && !bb) continue;
+      // 弯管的圆心跟着两头一起平移，不然还按旧圆心画弧，弯管就歪成一截短管。
+      // 转和镜像各自改圆心（rotateSelection / mirrorSelection），这里只管平移。
+      if (t.bow && t.bowCenter && ba && bb && delta) {
+        t.bowCenter = [round(t.bowCenter[0] + delta[0]), round(t.bowCenter[1] + delta[1]),
+          round(t.bowCenter[2] + delta[2])];
+      }
+      if (!t.geom) continue;
       if (ba && bb && delta) {
         t.geom = { ...t.geom, p0: [round(t.geom.p0[0] + delta[0]),
           round(t.geom.p0[1] + delta[1]), round(t.geom.p0[2] + delta[2])] };
