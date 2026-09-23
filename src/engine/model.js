@@ -2171,6 +2171,17 @@ export class BuildModel {
     return out;
   }
 
+  /**
+   * 两根承重管之间这一段还空着吗？kind 为 null 按面板算（面板和布面都不许叠），
+   * 网 / 布面 / 玩具袋用自己的占位规则，和 railFittingMounts 出绿格子是同一套。
+   */
+  sectionFree(kind, aId, bId, t0, len) {
+    if (!kind) return !this.panelAt(aId, bId, t0, len);
+    if (this._railFittingTaken(kind, aId, bId, t0, len)) return false;
+    const cor = this.panelCorners({ a: aId, b: bId, t0, len });
+    return !!cor && !this._railFaceTaken(kind, cor) && this._openingFree(cor);
+  }
+
   _railFaceKey(cor) {
     return cor.map((c) => c.map((v) => Math.round(v)).join(",")).sort().join(";");
   }

@@ -1020,9 +1020,32 @@ export class Builder {
     const t = this.model.tubes.get(id);
     if (!t || t.arm || t.link || t.bow) return false;
     if (this.panelRail) return this.highlight ? this.highlight.has(id) : false;
-    if (lattice) return this._railPartners(id).length > 0;
-    const dims = this._panelDims();
-    return !!dims && this.model.panelPartners(id, dims).length > 0;
+    return this._freePartners(id, null, lattice).length > 0;
+  }
+
+  /**
+   * 还能和 railId 配成一块的对面管：只留中间还有空段的。`at` 给了（第一根管上点的
+   * 位置），就只看板会落的那一段；没给，任意一段空着就算。已经有板 / 布的地方不再亮。
+   */
+  _freePartners(railId, at = null, lattice = this.mode === "fitting" && RAIL_FITTINGS.has(this.fittingKind)) {
+    const kind = lattice ? this.fittingKind : null;
+    let partners;
+    if (lattice) partners = this._railPartners(railId);
+    else {
+      const dims = this._panelDims();
+      partners = dims ? this.model.panelPartners(railId, dims) : [];
+    }
+    return partners.filter((p) => {
+      if (at != null) {
+        const sec = this.model.panelSection(p, at);
+        return this.model.sectionFree(kind, railId, p.id, sec.t0, sec.len);
+      }
+      const count = Math.max(1, Math.floor((p.hi - p.lo + 0.5) / p.len));
+      for (let k = 0; k < count; k++) {
+        if (this.model.sectionFree(kind, railId, p.id, p.lo + k * p.len, p.len)) return true;
+      }
+      return false;
+    });
   }
 
   /**
@@ -4017,15 +4040,16 @@ export class Builder {
 
     if (this.panelRail) {
       if (id === this.panelRail.id) { this._clearPanelRail(); return; }
-      const partner = this._railPartners(this.panelRail.id).find((c) => c.id === id);
+      const partner = this._freePartners(this.panelRail.id, this.panelRail.at).find((c) => c.id === id);
       if (!partner) { this.onNotice(t("notice_panel_no_fit"), "warn"); return; }
       const sec = this.model.panelSection(partner, this.panelRail.at);
       this._placeRailFitting(this.panelRail.id, partner.id, sec.t0, sec.len);
       return;
     }
-    const partners = this._railPartners(id);
+    const at = this._alongTube(id, point);
+    const partners = this._freePartners(id, at);
     if (!partners.length) { this.onNotice(t("notice_textile_no_partner"), "warn"); return; }
-    this.panelRail = { id, at: this._alongTube(id, point) };
+    this.panelRail = { id, at };
     this.highlight = new Set([id, ...partners.map((c) => c.id)]);
     this.onNotice(t("notice_panel_pick_second", partners.length), "info");
     this.refresh();
@@ -4072,7 +4096,7 @@ export class Builder {
       let id = usable[0];
       if (this.panelRail) {
         const hit = usable.find((u) => u === this.panelRail.id
-          || this._railPartners(this.panelRail.id).some((c) => c.id === u));
+          || this._freePartners(this.panelRail.id, this.panelRail.at).some((c) => c.id === u));
         if (hit) id = hit;
       }
       return { id, point: { x: n.x, y: n.y, z: n.z }, pick };
@@ -4154,7 +4178,7 @@ export class Builder {
     // Zweiter Klick: passt das angeklickte Rohr als Gegenstueck?
     if (this.panelRail) {
       if (pick.data.id === this.panelRail.id) { this._clearPanelRail(); return; }
-      const partner = this.model.panelPartners(this.panelRail.id, dims)
+      const partner = this._freePartners(this.panelRail.id, this.panelRail.at)
         .find((c) => c.id === pick.data.id);
       if (!partner) { this.onNotice(t("notice_panel_no_fit"), "warn"); return; }
       const sec = this.model.panelSection(partner, this.panelRail.at);
@@ -4164,9 +4188,10 @@ export class Builder {
 
     // Erster Klick: Rohr merken -- es selbst (amber) und die Gegenrohre (gruen)
     // leuchten, die uebrigen treten zurueck.
-    const partners = this.model.panelPartners(pick.data.id, dims);
+    const at = this._alongTube(pick.data.id, pick.point);
+    const partners = this._freePartners(pick.data.id, at);
     if (!partners.length) { this.onNotice(t("notice_panel_no_partner"), "warn"); return; }
-    this.panelRail = { id: pick.data.id, at: this._alongTube(pick.data.id, pick.point) };
+    this.panelRail = { id: pick.data.id, at };
     this.highlight = new Set([pick.data.id, ...partners.map((c) => c.id)]);
     this.onNotice(t("notice_panel_pick_second", partners.length), "info");
     this.refresh();
