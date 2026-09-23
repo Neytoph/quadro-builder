@@ -3,7 +3,10 @@ import { createPortal } from 'react-dom'
 import { useEngine } from '../store/EngineContext'
 import { useI18n } from '../i18n'
 import { CONN_KIND_ORDER, connKindLabel, labelOf } from '../names'
-import { ACC_CAT_ICON, CONN_CAT_ICON, Svg16, TOOL_ICON, partIcon, tubeIcon } from './icons'
+import { ACC_CAT_ICON, CONN_CAT_ICON, PartImg, Svg16, TOOL_ICON, partIcon, tubeIcon } from './icons'
+
+/** 下拉菜单里零件图的边长（px）。渲染图太小看不出形状。 */
+const ICON = 32
 import { UI_ESCAPE_EVENT } from './events'
 import { NARROW_MAX, toolbarTop, usePanelLayout } from './panelLayout'
 
@@ -202,14 +205,14 @@ export default function TopToolbar() {
               <button key={tube.id} onClick={() => { api.setTube(tube.id); close() }}
                 title={TUBE_HOTKEY[tube.id] ? t('hint.tubeKey', { n: tube.length_cm, k: TUBE_HOTKEY[tube.id] }) : undefined}
                 className={dropItem(api.tubeId === tube.id)}>
-                <Svg16 inner={tubeIcon(tube.id, tube.length_cm)} size={18} />
+                <PartImg id={tube.id} svg={tubeIcon(tube.id, tube.length_cm)} size={ICON} />
                 <span className="whitespace-nowrap">{t('hint.tubeName', { n: tube.length_cm })}</span>
               </button>
             ))}
             {api.catalog.curved.map(c => (
               <button key={c.id} onClick={() => { api.setTube(c.id); close() }}
                 className={dropItem(api.tubeId === c.id)}>
-                <Svg16 inner={tubeIcon(c.id)} size={18} />
+                <PartImg id={c.id} svg={tubeIcon(c.id)} size={ICON} />
                 <span className="whitespace-nowrap">{t('hint.curved')}</span>
               </button>
             ))}
@@ -229,7 +232,7 @@ export default function TopToolbar() {
             {officialPanels.map(p => (
               <button key={p.id} onClick={() => { api.setPanel(p.id); close() }}
                 className={dropItem(api.panelId === p.id)}>
-                <Svg16 inner={partIcon(p.id, 'panels')} size={18} />
+                <PartImg id={p.id} svg={partIcon(p.id, 'panels')} size={ICON} />
                 <span className="whitespace-nowrap">{panelLabel(p) || labelOf(p.id, p.name)}</span>
               </button>
             ))}
@@ -239,7 +242,7 @@ export default function TopToolbar() {
             {compatPanels.map(p => (
               <button key={p.id} onClick={() => { api.setPanel(p.id); close() }}
                 className={dropItem(api.panelId === p.id)}>
-                <Svg16 inner={partIcon(p.id, 'panels')} size={18} />
+                <PartImg id={p.id} svg={partIcon(p.id, 'panels')} size={ICON} />
                 <span className="whitespace-nowrap">{panelLabel(p) || labelOf(p.id, p.name)}</span>
               </button>
             ))}
@@ -265,7 +268,7 @@ export default function TopToolbar() {
                   {items.map(c => (
                     <button key={c.id} onClick={() => { pickJoint(c.id, api); close() }}
                       className={dropItem(jointActive(c.id, api))}>
-                      <Svg16 inner={CONN_CAT_ICON[c.id] ?? CONN_CAT_ICON['6way']} size={18} />
+                      <PartImg id={c.id} svg={CONN_CAT_ICON[c.id] ?? CONN_CAT_ICON['6way']} size={ICON} />
                       <span className="whitespace-nowrap">{labelOf(c.id, c.name)}</span>
                     </button>
                   ))}
@@ -288,7 +291,7 @@ export default function TopToolbar() {
         menu={wheels.map(a => (
           <button key={a.id} onClick={() => { if (a.qdf) api.setFitting(a.qdf); close() }}
             className={dropItem(!!a.qdf && api.fittingKind === a.qdf && api.mode === 'fitting')}>
-            <Svg16 inner={(a.qdf && ACC_CAT_ICON[a.qdf]) || TOOL_ICON.wheel} size={18} />
+            <PartImg id={a.id} svg={(a.qdf && ACC_CAT_ICON[a.qdf]) || TOOL_ICON.wheel} size={ICON} />
             <span className="whitespace-nowrap">{labelOf(a.id, a.name)}</span>
           </button>
         ))}
@@ -306,14 +309,14 @@ export default function TopToolbar() {
               <button key={a.id} onClick={() => { if (a.qdf) api.setFitting(a.qdf, a.variant ? a.id : undefined); close() }}
                 className={dropItem(!!a.qdf && api.fittingKind === a.qdf && api.mode === 'fitting'
                   && (a.variant ? api.fittingPart === a.id : !api.fittingPart))}>
-                <Svg16 inner={(a.qdf && ACC_CAT_ICON[a.qdf]) || TOOL_ICON.textile} size={18} />
+                <PartImg id={a.id} svg={(a.qdf && ACC_CAT_ICON[a.qdf]) || TOOL_ICON.textile} size={ICON} />
                 <span className="whitespace-nowrap">{labelOf(a.id, a.name)}</span>
               </button>
             ))}
             {/* 软包滚筒：套在管子上，不是布件，但归在这一栏最顺手 */}
             <button key="sleeve" onClick={() => { api.setFitting('sleeve', 'sleeve'); close() }}
               className={dropItem(api.fittingKind === 'sleeve' && api.mode === 'fitting')}>
-              <Svg16 inner={TOOL_ICON.textile} size={18} />
+              <PartImg id="sleeve" svg={TOOL_ICON.textile} size={ICON} />
               <span className="whitespace-nowrap">{labelOf('sleeve')}</span>
             </button>
           </>
@@ -329,7 +332,7 @@ export default function TopToolbar() {
         menu={pools.map(a => (
           <button key={a.id} onClick={() => { api.startPool(a.id); close() }}
             className={dropItem(api.poolLinerId === a.id && (api.mode === 'fitting' || api.pasting))}>
-            <Svg16 inner={TOOL_ICON.pool} size={18} />
+            <PartImg id={a.id} svg={TOOL_ICON.pool} size={ICON} />
             <span className="whitespace-nowrap">{labelOf(a.id, a.name)}</span>
           </button>
         ))}
@@ -346,7 +349,7 @@ export default function TopToolbar() {
             {slides.map(s => (
               <button key={s.id} onClick={() => { api.setSlide(s.id); close() }}
                 className={dropItem(api.slideKind === s.id && api.mode === 'slide')}>
-                <Svg16 inner={TOOL_ICON.slide} size={18} />
+                <PartImg id={s.part} svg={TOOL_ICON.slide} size={ICON} />
                 <span className="whitespace-nowrap">{labelOf(s.part)}</span>
               </button>
             ))}

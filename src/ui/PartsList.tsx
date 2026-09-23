@@ -3,7 +3,7 @@ import { useI18n } from '../i18n'
 import { formatCatalogPrice } from '../money'
 import { colorLabel, labelOf } from '../names'
 import { colorHex } from '../engine-api'
-import { Svg16, partIcon } from './icons'
+import { PartImg, partIcon } from './icons'
 
 const COLOR_ONLY = new Set(['tubes', 'panels', 'screws'])
 
@@ -11,7 +11,7 @@ function RowIcon({ id, kind }: { id?: string; kind?: string }) {
   if (kind && COLOR_ONLY.has(kind)) return null
   return (
     <span className="shrink-0 text-gray-300 inline-flex">
-      <Svg16 inner={partIcon(id, kind)} size={16} />
+      <PartImg id={id} svg={partIcon(id, kind)} size={22} />
     </span>
   )
 }
