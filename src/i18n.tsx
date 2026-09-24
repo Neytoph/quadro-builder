@@ -1267,7 +1267,8 @@ const de: Dict = {
 
 const dicts: Record<Lang, Dict> = { zh, en, de }
 
-function detect(): Lang {
+/** 打开时用哪种语言：用户选过的优先，没选过按浏览器语言。 */
+export function detect(): Lang {
   const stored = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(ENGINE_KEY)
   if (isLang(stored)) return stored
   const nav = (navigator.language || '').toLowerCase()
