@@ -4,9 +4,12 @@ import {
   BuildModel, Builder, SceneManager, loadCatalog, computeBOM, compareInventory, connectorsForNode, computeSafety,
   parseQDF, parseDesign, designEntry, buildQDF, buildableTubes, buildableCurvedTubes, buildablePanels, tubeColors, allConnectors, accessories,
   panels, geometry, RANDOM_COLOR, BUILD_ORDERS, docs, storage, setLang as setEngineLang, t as engineT,
+  computeBuildPlan, partsOfModel,
 } from '../engine-api'
 import { useI18n } from '../i18n'
-import { syncNow } from '../sync/bootstrap'
+import { syncNow, syncProbe, syncStarted } from '../sync/bootstrap'
+import { bootEntry, VIEW_ONLY, type ResumeExport } from '../entry'
+import { publishSharePage, sharePagesEnabled, stampFor, type ExportKind, type Stamp } from '../sharePage'
 import { geometricPreset, jsonToFragment } from '../data/presets'
 import pyramidQdf from '../data/A0128.qdf?raw'
 import { clearSharePayload, decodeShare, peekSharePayload, shareUrl } from '../share'
@@ -17,6 +20,7 @@ import { exportAssemblyPdf as runAssemblyPdf } from '../engine/assemblyManual.js
 import { ACCESSORY_IDS } from '../engine/accessoryPack.js'
 import { takeModelThumb, waitSceneReady } from '../engine/thumbShot.js'
 import { bomToCsv, bomToPngDataUrl, loadImage } from '../ui/bomExport'
+import { shareImageDataUrl } from '../ui/shareImage'
 import { MOTION } from '../ui/motion'
 
 // 引擎来自 Vanilla JS，这里不跟它的推断类型较劲。
@@ -210,9 +214,9 @@ interface EngineApi {
   roomOverflow: { w: number; d: number; h: number }
   loadPreset: (key: string) => void
   setViewCubePad: (right: number, bottom: number, size?: number) => void
-  exportPng: () => void
+  exportPng: () => Promise<void>
   /** 料表存成表格文件 */
-  exportBomCsv: () => void
+  exportBomCsv: () => Promise<void>
   /** 料表存成一张图，发群里直接能看 */
   exportBomPng: () => Promise<void>
   exportAssemblyPdf: () => Promise<void>
@@ -221,6 +225,12 @@ interface EngineApi {
   exportManualConfirm: boolean
   exportingManual: { page: number; total: number } | null
   shareCurrent: () => Promise<void>
+  /**
+   * 导出文件要先有账号（部署设了 VITE_REGISTER_URL 时）。register：还没登录，问要不要
+   * 去注册；resume：注册完回来了，问要不要接着导出。
+   */
+  accountAsk: { kind: ResumeExport; phase: 'register' | 'resume' } | null
+  answerAccount: (go: boolean) => void
   catalog: {
     tubes: Array<{ id: string; length_cm: number; name?: string }>
     curved: Array<{ id: string; name?: string }>
@@ -381,6 +391,18 @@ function loadRoom(): RoomSettings {
   return { ...DEFAULT_ROOM }
 }
 
+/** 按 ?src= 取来的造型文件：Builder 的 JSON（可能包在 {design} 里），否则当 .qdf 解。 */
+function designFromText(text: string): unknown {
+  const trimmed = text.trim()
+  if (trimmed.startsWith('{')) {
+    const data = JSON.parse(trimmed) as AnyRec
+    return 'design' in data ? data.design : data
+  }
+  const data = parseDesign(text)
+  if (!data) throw new Error('qdf')
+  return data
+}
+
 function download(name: string, text: string, type: string) {
   const a = document.createElement('a')
   a.href = URL.createObjectURL(new Blob([text], { type }))
@@ -497,6 +519,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const [exportManualConfirm, setExportManualConfirm] = useState(false)
   const exportingManualRef = useRef(false)
   const [nameAsk, setNameAsk] = useState<NameAsk | null>(null)
+  const [accountAsk, setAccountAsk] = useState<EngineApi['accountAsk']>(null)
   const nameAskRef = useRef<NameAsk | null>(null)
   const [catalog, setCatalog] = useState<EngineApi['catalog']>({
     tubes: [], curved: [], panels: [], colors: [], connectors: [], accessories: [],
@@ -507,26 +530,33 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     setToast({ message, kind })
   }, [])
 
-  const persistSession = useCallback(() => {
+  /** 把标签页记进本机，下次打开接着来。只看模式不记：它嵌在别的页面里，不能盖掉这个人自己的标签页。 */
+  const saveSessionNow = useCallback(() => {
+    if (VIEW_ONLY) return Promise.resolve()
     if (sessionTimer.current) window.clearTimeout(sessionTimer.current)
-    sessionTimer.current = window.setTimeout(() => {
-      const e = eng.current
-      const active = tabsRef.current.find(x => x.tabId === activeRef.current)
-      if (e && active) {
-        const json = e.model.toJSON()
-        if (modelPartCount(json) > 0 || modelPartCount(active.model) === 0) {
-          active.model = json
-        }
-        active.view = { ...(e.builder.uiState() as AnyRec), camera: e.scene.cameraState() }
+    sessionTimer.current = null
+    const e = eng.current
+    const active = tabsRef.current.find(x => x.tabId === activeRef.current)
+    if (e && active) {
+      const json = e.model.toJSON()
+      if (modelPartCount(json) > 0 || modelPartCount(active.model) === 0) {
+        active.model = json
       }
-      docs.saveSession({
-        tabs: tabsRef.current.map(tb => ({
-          tabId: tb.tabId, docId: tb.docId, name: tb.name, dirty: tb.dirty, model: tb.model, view: tb.view,
-        })),
-        activeTabId: activeRef.current,
-      })
-    }, 400)
+      active.view = { ...(e.builder.uiState() as AnyRec), camera: e.scene.cameraState() }
+    }
+    return docs.saveSession({
+      tabs: tabsRef.current.map(tb => ({
+        tabId: tb.tabId, docId: tb.docId, name: tb.name, dirty: tb.dirty, model: tb.model, view: tb.view,
+      })),
+      activeTabId: activeRef.current,
+    }) as Promise<void>
   }, [])
+
+  const persistSession = useCallback(() => {
+    if (VIEW_ONLY) return
+    if (sessionTimer.current) window.clearTimeout(sessionTimer.current)
+    sessionTimer.current = window.setTimeout(() => { void saveSessionNow() }, 400)
+  }, [saveSessionNow])
 
   const syncTabs = useCallback(() => {
     setTabs(tabsRef.current.map(({ tabId, docId, name, dirty }) => ({ tabId, docId, name, dirty })))
@@ -639,8 +669,9 @@ export function EngineProvider({ children }: { children: ReactNode }) {
         // 开发模式下把引擎挂到 window 上，浏览器测试脚本靠它摆相机、查手柄
         if (import.meta.env.DEV) (window as unknown as { __quadroDev?: unknown }).__quadroDev = eng.current
 
-        await docs.migrateOldDrafts()
-        const session = await docs.loadSession()
+        // 只看模式只放这一座，不读这台设备上记着的标签页
+        if (!VIEW_ONLY) await docs.migrateOldDrafts()
+        const session = VIEW_ONLY ? null : await docs.loadSession()
         if (dead) return
         if (session?.tabs?.length) {
           const mapped = session.tabs.map((tb: AnyRec) => ({
@@ -1179,19 +1210,24 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const exportQdf = useCallback(() => {
     const e2 = eng.current
     if (!e2) return
+    if (needAccount('qdf')) return
     const out = buildQDF(e2.model, { camera: e2.scene.cameraForQdf?.() }) as { text?: string } | string
     track('builder.export.qdf')
     download(`${activeName()}.qdf`, typeof out === 'string' ? out : (out.text || ''), 'text/plain')
     if ([...e2.model.fittings.values()].some((f: AnyRec) => ACCESSORY_IDS.has(f.kind))) notify(t('toast.exportedQdfNoAccessories'), 'warn')
     else notify(t(qdfWillMapColors(e2.model) ? 'toast.exportedQdfMapped' : 'toast.exported'))
+    // needAccount 每次渲染重建，只在回调里调用，不进依赖表
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notify, t])
 
   const exportJson = useCallback(() => {
     const e2 = eng.current
     if (!e2) return
+    if (needAccount('json')) return
     track('builder.export.json')
     download(`${activeName()}.json`, JSON.stringify(e2.model.toJSON(), null, 2), 'application/json')
     notify(t('toast.exported'))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notify, t])
 
   function activeName() {
@@ -1327,16 +1363,80 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     notify(t('toast.preset', { name: t(`preset.${key}`) }))
   }, [applyModelJson, notify, t])
 
-  const exportPng = useCallback(() => {
+  /**
+   * 导出文件要先有账号：部署设了注册页、这个人又还没登录，就弹框问要不要去注册，
+   * 返回 true 表示这次导出先停下。开源本地版不设注册页，永远放行。
+   */
+  function needAccount(kind: ResumeExport) {
+    if (!import.meta.env.VITE_REGISTER_URL || syncStarted()) return false
+    track('builder.export.gate', { kind })
+    setAccountAsk({ kind, phase: 'register' })
+    return true
+  }
+
+  /** 成品图：空背景、3/4 视角，和模型库封面同一条截图通路，截完复位。 */
+  async function coverShot(): Promise<string | null> {
+    const e2 = eng.current
+    if (!e2) return null
+    startThumbBatch()
+    try {
+      await waitSceneReady(e2.scene)
+      const url = await takeModelThumb(e2.scene, e2.model)
+      return typeof url === 'string' && url.startsWith('data:image') ? url : null
+    } finally {
+      endThumbBatch()
+    }
+  }
+
+  /**
+   * 导出前把这一座存成方案页，拿到印在文件上的网址和二维码。部署没接方案页就是 null。
+   * 存不上就抛错：印一个打不开的二维码没有意义，这次导出跟着停下。
+   */
+  async function makeStamp(kind: ExportKind, cover: string): Promise<Stamp | null> {
+    if (!sharePagesEnabled()) return null
+    const e2 = eng.current
+    const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
+    if (!e2 || !tab) throw new Error('no design')
+    const b = e2.model.bounds(geometry().connectorSize / 2) as { size: number[] }
+    const url = await publishSharePage({
+      key: tab.docId || tab.tabId,
+      title: tab.name,
+      model: e2.model.toJSON(),
+      parts: partsOfModel(e2.model) as Record<string, Record<string, number>>,
+      size: [Math.round(b.size[0]), Math.round(b.size[2]), Math.round(b.size[1])],
+      steps: (computeBuildPlan(e2.model, e2.builder.assemblyOrder || 'y+') as { steps: unknown[] }).steps.length,
+      cover,
+    })
+    return stampFor(url, kind)
+  }
+
+  const exportPng = useCallback(async () => {
     const e2 = eng.current
     if (!e2) return
-    const url = e2.scene.snapshot?.() as string | null
-    if (!url) { notify(t('toast.pngFailed'), 'err'); return }
+    if (needAccount('shareimg')) return
+    const shot = e2.scene.snapshot?.() as string | null
+    if (!shot) { notify(t('toast.pngFailed'), 'err'); return }
+    let stamp: Stamp | null = null
+    if (sharePagesEnabled()) {
+      if (modelPartCount(e2.model.toJSON()) === 0) { notify(t('toast.manualEmpty'), 'warn'); return }
+      const cover = await coverShot()
+      if (!cover) { notify(t('toast.pngFailed'), 'err'); return }
+      try {
+        stamp = await makeStamp('shareimg', cover)
+      } catch {
+        notify(t('toast.stampFailed'), 'err')
+        return
+      }
+    }
+    const url = stamp ? await shareImageDataUrl(shot, activeName(), stamp, t) : shot
+    track('builder.export.png', { stamp: !!stamp })
     const a = document.createElement('a')
     a.href = url
     a.download = `${activeName()}.png`
     a.click()
     notify(t('toast.pngSaved'))
+    // needAccount、coverShot、makeStamp 每次渲染重建，只在回调里调用，不进依赖表
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notify, t])
 
   /** 料表导出用到的几样东西，回调里取当下的值。 */
@@ -1349,10 +1449,22 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     t,
   })
 
-  const exportBomCsv = useCallback(() => {
+  const exportBomCsv = useCallback(async () => {
     if (!bomRef.current) { notify(t('toast.manualEmpty'), 'warn'); return }
-    track('builder.export.bom.csv')
-    download(`${activeName()} ${t('bomx.file')}.csv`, bomToCsv(bomExportInput()), 'text/csv;charset=utf-8')
+    if (needAccount('bom')) return
+    let stamp: Stamp | null = null
+    if (sharePagesEnabled()) {
+      const cover = await coverShot()
+      if (!cover) { notify(t('toast.pngFailed'), 'err'); return }
+      try {
+        stamp = await makeStamp('bom', cover)
+      } catch {
+        notify(t('toast.stampFailed'), 'err')
+        return
+      }
+    }
+    track('builder.export.bom.csv', { stamp: !!stamp })
+    download(`${activeName()} ${t('bomx.file')}.csv`, bomToCsv({ ...bomExportInput(), stamp }), 'text/csv;charset=utf-8')
     notify(t('toast.exported'))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notify, t])
@@ -1360,19 +1472,22 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const exportBomPng = useCallback(async () => {
     const e2 = eng.current
     if (!e2 || !bomRef.current) { notify(t('toast.manualEmpty'), 'warn'); return }
-    // 抬头那张缩略图走模型库封面同一条截图通路（空背景，截完复位）；
-    // 截不出来也照样出表
-    let thumb: HTMLImageElement | null = null
-    startThumbBatch()
+    if (needAccount('bompng')) return
+    // 抬头那张缩略图走模型库封面同一条截图通路（空背景，截完复位），
+    // 方案页的封面也用它
+    const cover = await coverShot()
+    if (!cover) { notify(t('toast.pngFailed'), 'err'); return }
+    let stamp: Stamp | null = null
     try {
-      const url = await takeModelThumb(e2.scene, e2.model)
-      if (typeof url === 'string') thumb = await loadImage(url)
-    } catch { /* ignore */ } finally {
-      endThumbBatch()
+      stamp = await makeStamp('bom', cover)
+    } catch {
+      notify(t('toast.stampFailed'), 'err')
+      return
     }
-    const data = bomToPngDataUrl(bomExportInput(), thumb)
+    const thumb = await loadImage(cover)
+    const data = bomToPngDataUrl({ ...bomExportInput(), stamp }, thumb)
     if (!data) { notify(t('toast.manualEmpty'), 'warn'); return }
-    track('builder.export.bom.png')
+    track('builder.export.bom.png', { stamp: !!stamp })
     const a = document.createElement('a')
     a.href = data
     a.download = `${activeName()} ${t('bomx.file')}.png`
@@ -1391,8 +1506,10 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       notify(t('toast.manualEmpty'), 'warn')
       return
     }
+    if (needAccount('manual')) return
     track('builder.export.manual.ask', { parts: modelPartCount(e2.model.toJSON()) })
     setExportManualConfirm(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notify, t])
 
   const confirmExportManual = useCallback(async () => {
@@ -1406,8 +1523,21 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     setExportManualConfirm(false)
     track('builder.export.manual.go')
     exportingManualRef.current = true
-    switching.current = true
     setExportingManual({ page: 0, total: 1 })
+    let stamp: Stamp | null = null
+    if (sharePagesEnabled()) {
+      const cover = await coverShot()
+      try {
+        if (!cover) throw new Error('cover')
+        stamp = await makeStamp('manual', cover)
+      } catch {
+        exportingManualRef.current = false
+        setExportingManual(null)
+        notify(t('toast.stampFailed'), 'err')
+        return
+      }
+    }
+    switching.current = true
     const locale = lang === 'zh' ? 'zh-CN' : lang === 'de' ? 'de-DE' : 'en-US'
     const b = e2.model.bounds?.(2.5) as { size: number[] } | null
     const sizeLine = b
@@ -1425,6 +1555,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
         bom: bomNow,
         filename: `${fileBase}-${t('manual.fileSuffix')}.pdf`,
         onProgress: (p: { page: number; total: number }) => setExportingManual(p),
+        stamp: stamp && { ...stamp, hint: t('stamp.hint') },
         copy: {
           product: t('app.title'),
           coverTitle: t('manual.coverTitle'),
@@ -1463,6 +1594,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       setExportingManual(null)
       bump()
     }
+    // coverShot、makeStamp 每次渲染重建，只在回调里调用，不进依赖表
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bump, lang, notify, snapshotActive, t])
 
   const shareCurrent = useCallback(async () => {
@@ -1479,23 +1612,96 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     }
   }, [notify, t])
 
+  /**
+   * 「复制到我的账号」：当前这一座存成一份新的存档。登录了就跟着同步进账号；
+   * 还没登录的只存在这台设备上，登录以后同步会把它带上去。
+   */
+  const copyToAccount = useCallback(async () => {
+    const e2 = eng.current
+    const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
+    if (!e2 || !tab) return
+    const data = e2.model.toJSON()
+    const saved = await docs.saveDoc({ docId: null, name: await freeDocName(tab.name), data })
+    tab.docId = saved.id
+    tab.name = saved.name
+    tab.dirty = false
+    tab.model = data
+    syncTabs()
+    track('builder.design.copy', { ...modelShape(data) })
+    if (await syncProbe() && await pushDoc(saved.id)) notify(t('toast.copiedToAccount', { name: saved.name }))
+    else notify(t('toast.copiedLocal', { name: saved.name }), 'warn')
+  }, [freeDocName, notify, pushDoc, syncTabs, t])
+
+  // 地址上带着一座进来的：#s= 分享链接，或者 ?src= 造型文件（方案页、帖子、官方造型页）。
+  // 打开它；带了 &copy=1 的再存一份到自己的存档里。
+  const entryOpened = useRef(false)
   useEffect(() => {
-    if (!ready) return
+    if (!ready || entryOpened.current) return
+    const ent = bootEntry()
     const payload = peekSharePayload()
-    if (!payload) return
-    let dead = false
+    if (!payload && !ent.src) return
+    entryOpened.current = true
     void (async () => {
-      const data = await decodeShare(payload)
-      if (dead) return
-      clearSharePayload()
+      let data: unknown = null
+      if (payload) {
+        data = await decodeShare(payload)
+        clearSharePayload()
+      } else {
+        const res = await fetch(ent.src as string, { credentials: 'include' })
+        if (!res.ok) { notify(t('toast.srcFailed'), 'err'); return }
+        try { data = designFromText(await res.text()) } catch { data = null }
+      }
       if (!data) { notify(t('toast.shareInvalid'), 'err'); return }
       const e2 = eng.current
       if (!e2) return
       if (modelPartCount(e2.model.toJSON()) > 0) newTab()
-      if (!applyModelJson(data, { undoable: false })) notify(t('toast.shareInvalid'), 'err')
+      if (!applyModelJson(data, { undoable: false })) { notify(t('toast.shareInvalid'), 'err'); return }
+      const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
+      if (tab && ent.name) {
+        tab.name = ent.name
+        syncTabs()
+      }
+      track('builder.design.open', { from: payload ? 'share' : 'src', view: VIEW_ONLY, copy: ent.copy })
+      if (ent.copy && !VIEW_ONLY) await copyToAccount()
     })()
-    return () => { dead = true }
-  }, [ready, applyModelJson, newTab, notify, t])
+  }, [ready, applyModelJson, copyToAccount, newTab, notify, syncTabs, t])
+
+  // 注册完从注册页回来（?export=）：确认登录上了，问一句要不要接着导出。
+  // 下载要由一次点击触发，浏览器才不会拦，所以不直接开始。
+  const resumed = useRef(false)
+  useEffect(() => {
+    if (!ready || resumed.current || VIEW_ONLY) return
+    const kind = bootEntry().resume
+    if (!kind) return
+    resumed.current = true
+    void syncProbe().then(ok => { if (ok) setAccountAsk({ kind, phase: 'resume' }) })
+  }, [ready])
+
+  const exporters = useRef<Record<ResumeExport, () => void>>({} as Record<ResumeExport, () => void>)
+  exporters.current = {
+    manual: () => { void exportAssemblyPdf() },
+    bom: () => { void exportBomCsv() },
+    bompng: () => { void exportBomPng() },
+    shareimg: () => { void exportPng() },
+    qdf: () => exportQdf(),
+    json: () => exportJson(),
+  }
+
+  const answerAccount = useCallback((go: boolean) => {
+    const ask = accountAsk
+    setAccountAsk(null)
+    if (!go || !ask) return
+    if (ask.phase === 'resume') {
+      exporters.current[ask.kind]()
+      return
+    }
+    // 去注册之前把标签页记下，注册完回来还是这一座
+    track('builder.export.register', { kind: ask.kind })
+    const next = `${location.pathname}?export=${ask.kind}`
+    void saveSessionNow().then(() => {
+      location.href = `${import.meta.env.VITE_REGISTER_URL}?next=${encodeURIComponent(next)}`
+    })
+  }, [accountAsk, saveSessionNow])
 
   const setViewCubePad = useCallback((right: number, bottom: number, size?: number) => {
     eng.current?.scene?.setViewCubePad?.(right, bottom, size)
@@ -1602,6 +1808,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     tabs, activeTabId, bom, inventory,
     invRows: cmp.rows, feasible: cmp.feasible, sizeCm, room, setRoom, roomOverflow,
     loadPreset, placeModule, exportPng, exportBomCsv, exportBomPng, exportAssemblyPdf, confirmExportManual, cancelExportManual, exportManualConfirm, exportingManual, shareCurrent,
+    accountAsk, answerAccount,
     assembly: {
       step: builder?.assemblyStep ?? 0,
       max: Math.max(0, (builder?.buildPlan?.steps?.length ?? 1) - 1),

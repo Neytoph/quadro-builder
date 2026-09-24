@@ -2,6 +2,7 @@ import type { BomView, BomRow, InvRow } from '../store/EngineContext'
 import { colorHex } from '../engine-api'
 import { colorLabel, labelOf } from '../names'
 import { formatCatalogPrice } from '../money'
+import { drawQr, type Stamp } from '../sharePage'
 
 type Lang = 'zh' | 'en' | 'de'
 type T = (key: string, vars?: Record<string, string | number>) => string
@@ -53,10 +54,12 @@ export interface BomExportInput {
   invRows: InvRow[]
   lang: Lang
   t: T
+  /** 方案页的网址和二维码（部署接了方案页才有，见 src/sharePage.ts） */
+  stamp?: Stamp | null
 }
 
 /** 料表 CSV。带 BOM 头，Excel 和 Numbers 双击就能开。 */
-export function bomToCsv({ bom, name, sizeCm, invRows, lang, t }: BomExportInput): string {
+export function bomToCsv({ bom, name, sizeCm, invRows, lang, t, stamp }: BomExportInput): string {
   const stock = new Map<string, InvRow>()
   for (const r of invRows) if (r.key) stock.set(r.key, r)
   const withStock = stock.size > 0
@@ -86,6 +89,7 @@ export function bomToCsv({ bom, name, sizeCm, invRows, lang, t }: BomExportInput
   if (sizeCm) lines.push([t('side.size'), `${sizeCm[0]} × ${sizeCm[1]} × ${sizeCm[2]} cm`].map(csvCell).join(','))
   lines.push([t('bomx.design'), name].map(csvCell).join(','))
   lines.push([t('bomx.date'), new Date().toLocaleDateString()].map(csvCell).join(','))
+  if (stamp) lines.push([t('stamp.page'), stamp.url].map(csvCell).join(','))
   return '﻿' + lines.join('\r\n') + '\r\n'
 }
 
@@ -117,7 +121,7 @@ function layout(sections: BomSection[]) {
 
 /** 料表图片：白底 PNG，发群里直接能看。thumb 是模型缩略图的 dataURL，可空。 */
 export function bomToPngDataUrl(input: BomExportInput, thumb: HTMLImageElement | null): string | null {
-  const { bom, name, sizeCm, lang, t } = input
+  const { bom, name, sizeCm, lang, t, stamp } = input
   const sections = bomSections(bom, t)
   if (!sections.length) return null
   const plan = layout(sections)
@@ -149,16 +153,25 @@ export function bomToPngDataUrl(input: BomExportInput, thumb: HTMLImageElement |
     ctx.restore()
     textLeft = PAD + w + 24
   }
+  // 右上角：方案页的二维码，扫码的人能转动看 3D、一步一步看手册
+  let textRight = W - PAD
+  if (stamp) {
+    const qr = HEAD_H - PAD + 4
+    drawQr(ctx, stamp.url, W - PAD - qr, PAD - 16, qr)
+    textRight = W - PAD - qr - 20
+  }
+  const textW = textRight - textLeft
   ctx.fillStyle = '#111827'
   ctx.font = font(30, '600')
-  ctx.fillText(name, textLeft, PAD + 22)
+  ctx.fillText(name, textLeft, PAD + 22, textW)
   ctx.fillStyle = '#6b7280'
   ctx.font = font(15)
   const sub: string[] = [t('bomx.title')]
   if (sizeCm) sub.push(`${sizeCm[0]} × ${sizeCm[1]} × ${sizeCm[2]} cm`)
-  ctx.fillText(sub.join('  ·  '), textLeft, PAD + 50)
+  ctx.fillText(sub.join('  ·  '), textLeft, PAD + 50, textW)
   const parts = bom.totals.tubes + bom.totals.connectors + bom.totals.panels + bom.totals.other
-  ctx.fillText(`${t('bomx.total')} ${parts}  ·  ${t('side.price')} ${formatCatalogPrice(bom.totals.price, lang)}`, textLeft, PAD + 74)
+  ctx.fillText(`${t('bomx.total')} ${parts}  ·  ${t('side.price')} ${formatCatalogPrice(bom.totals.price, lang)}`, textLeft, PAD + 74, textW)
+  if (stamp) ctx.fillText(t('stamp.hint'), textLeft, PAD + 98, textW)
 
   ctx.strokeStyle = '#e5e7eb'
   ctx.lineWidth = 1
@@ -215,8 +228,11 @@ export function bomToPngDataUrl(input: BomExportInput, thumb: HTMLImageElement |
   ctx.fillStyle = '#9ca3af'
   ctx.font = font(13)
   ctx.fillText(`${t('bomx.date')} ${new Date().toLocaleDateString()}`, PAD, height - 26)
-  const site = 'xiaomaifang.com'
-  ctx.fillText(site, W - PAD - ctx.measureText(site).width, height - 26)
+  if (stamp) {
+    ctx.fillStyle = '#ea580c'
+    ctx.font = font(13, '600')
+    ctx.fillText(stamp.host, W - PAD - ctx.measureText(stamp.host).width, height - 26)
+  }
   return canvas.toDataURL('image/png')
 }
 
