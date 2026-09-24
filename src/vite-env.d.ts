@@ -14,6 +14,18 @@ interface ImportMetaEnv {
    * 开源本地版不设——它没有社区可发。
    */
   readonly VITE_COMMUNITY_WRITE?: string
+  /**
+   * 托管版的方案页接口，例如 '/quadro/shares'。设了之后，导出安装手册、料表、
+   * 分享图时先把这一座存成一个方案页，文件的每一页角上印它的网址和二维码。
+   * 契约见 src/sharePage.ts。开源本地版不设，导出的文件不带网址。
+   */
+  readonly VITE_SHARE_API?: string
+  /**
+   * 托管版的注册页，例如 '/register'。设了之后，导出文件和保存到账号要先有账号：
+   * 没登录的人点导出，先去这个地址注册，带着 ?next= 回到 Builder 接着导出。
+   * 开源本地版不设，导出不拦。
+   */
+  readonly VITE_REGISTER_URL?: string
 }
 interface ImportMeta {
   readonly env: ImportMetaEnv

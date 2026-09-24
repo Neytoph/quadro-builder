@@ -19,6 +19,19 @@ let started = false
 let live: ReturnType<typeof createSync> | null = null
 // 等着同步跑起来的界面（「发到社区」只给后端认得出的人）
 const waiting = new Set<() => void>()
+// 启动时那一次探测的结果：true 认得出这个人，false 没登录，null 说不准或没接同步。
+let probeDone: (ok: boolean | null) => void = () => {}
+const probed = new Promise<boolean | null>((resolve) => { probeDone = resolve })
+
+/**
+ * 等启动时那一次探测出结果。「复制到我的账号」「注册完回来接着导出」
+ * 要先知道这个人登录了没有，才能决定存进账号还是先去注册。
+ * 没接同步的部署立刻得到 null。
+ */
+export function syncProbe(): Promise<boolean | null> {
+  if (!import.meta.env.VITE_SYNC_BASE) return Promise.resolve(null)
+  return probed
+}
 
 /**
  * 立刻跑一轮同步，等它跑完。
@@ -105,6 +118,7 @@ export function startSyncIfConfigured(
   // 登录后切回来，那时候不该还要求他刷新页面。
   void (async () => {
     const ok = await authenticated(baseUrl)
+    probeDone(ok)
     if (ok) {
       try { sessionStorage.removeItem(GATE_KEY) } catch { /* 隐私模式 */ }
       begin()
