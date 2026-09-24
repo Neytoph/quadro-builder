@@ -245,6 +245,15 @@ interface EngineApi {
   startThumbBatch: () => void
   endThumbBatch: () => void
   captureThumb: (job: { kind: 'official' | 'preset'; id: string }) => Promise<string | null>
+  /**
+   * 共享方案、交付查看：把一份外面打开的文档换进来当唯一的标签页。
+   * readOnly 只能看；idTag 见 BuildModel.idTag。
+   */
+  attachDoc: (o: { local: LocalDoc; name: string; readOnly: boolean; idTag: string }) => void
+  setReadOnly: (on: boolean) => void
+  readOnly: boolean
+  /** 引擎本体（共享界面要投影坐标、取点、给零件上色） */
+  engine: () => { scene: E; model: E; builder: E } | null
 }
 
 const Ctx = createContext<EngineApi | null>(null)
@@ -1029,6 +1038,26 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     applyTab(tab)
     syncTabs()
   }, [applyTab, snapshotActive, syncTabs])
+
+  const attachDoc = useCallback((o: { local: LocalDoc; name: string; readOnly: boolean; idTag: string }) => {
+    const old = tabsRef.current
+    const tab: Tab = { tabId: docs.newTabId(), docId: null, name: o.name, dirty: false, view: {}, local: o.local, idTag: o.idTag, readOnly: o.readOnly }
+    tabsRef.current = [tab]
+    activeRef.current = tab.tabId
+    applyTab(tab)
+    for (const tb of old) if (tb.local !== o.local) tb.local.history.destroy()
+    syncTabs()
+  }, [applyTab, syncTabs])
+
+  const setReadOnly = useCallback((on: boolean) => {
+    const e2 = eng.current
+    const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
+    if (!e2 || !tab) return
+    tab.readOnly = on
+    e2.builder.setReadOnly(on)
+    e2.builder.refresh()
+    bump()
+  }, [bump])
 
   const closeTab = useCallback((tabId: string) => {
     const closing = tabsRef.current.find(x => x.tabId === tabId)
@@ -1974,6 +2003,9 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     catalog,
     applyColorTune,
     startThumbBatch, endThumbBatch, captureThumb,
+    attachDoc, setReadOnly,
+    readOnly: !!builder?.readOnly,
+    engine: () => eng.current,
   }
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>

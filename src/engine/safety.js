@@ -376,6 +376,77 @@ export function computeSafety(model, opts = {}) {
   return { findings: out, height };
 }
 
+/**
+ * 最大跨度（cm）：沿同一条直线连着的水平管上，相邻两个支撑点之间最远的距离。
+ * 支撑点是落地的接头，或者有管往下接的接头。只挂在别的横梁上、自己没有支撑点的
+ * 那一段不算跨度。
+ */
+function maxSpanOf(model, ground) {
+  const horiz = realTubes(model).map((t) => ({ t, g: dirOf(model, t) })).filter((r) => r.g && isHorizontal(r.g.dir));
+  const supported = (n) => {
+    if (n.y - ground <= GROUND_EPS) return true;
+    for (const id of model.incidentTubeIds(n.id)) {
+      const t = model.tubes.get(id);
+      if (!t || t.arm || t.link) continue;
+      const o = model.nodes.get(t.a === n.id ? t.b : t.a);
+      if (o && o.y < n.y - EPS) return true;
+    }
+    return false;
+  };
+  // 按方向分组，每组里用并查集把首尾相接的管连成一条直线
+  const byLine = new Map();
+  for (const { g } of horiz) {
+    const d = g.dir[0] < -1e-6 || (Math.abs(g.dir[0]) < 1e-6 && g.dir[2] < 0) ? g.dir.map((v) => -v) : g.dir;
+    const key = d.map((v) => Math.round(v * 100)).join(",");
+    if (!byLine.has(key)) byLine.set(key, { dir: d, pairs: [] });
+    byLine.get(key).pairs.push([g.a, g.b]);
+  }
+  let best = 0;
+  for (const { dir, pairs } of byLine.values()) {
+    const parent = new Map();
+    const find = (id) => { while (parent.get(id) !== id) id = parent.get(id); return id; };
+    for (const [a, b] of pairs) {
+      if (!parent.has(a.id)) parent.set(a.id, a.id);
+      if (!parent.has(b.id)) parent.set(b.id, b.id);
+      parent.set(find(a.id), find(b.id));
+    }
+    const runs = new Map();
+    for (const [a, b] of pairs) {
+      const r = find(a.id);
+      if (!runs.has(r)) runs.set(r, new Map());
+      runs.get(r).set(a.id, a).set(b.id, b);
+    }
+    for (const nodes of runs.values()) {
+      const along = [...nodes.values()].filter(supported)
+        .map((n) => n.x * dir[0] + n.y * dir[1] + n.z * dir[2]).sort((p, q) => p - q);
+      for (let i = 1; i < along.length; i++) best = Math.max(best, along[i] - along[i - 1]);
+    }
+  }
+  return Math.round(best);
+}
+
+/**
+ * 交付页的客观量：最高站立面离地高度（cm）、最大跨度（cm）、有没有围挡、占地面积（m²）。
+ * 围挡：有 60 cm 以上的站立面，而且它们的外沿都有护栏（横管或者立着的板、布、网）。
+ * 只陈述引擎算出来的数，不做安全背书。
+ */
+export function computeMetrics(model) {
+  if (!model || !model.nodes.size) return { maxDeckHeight: 0, maxSpan: 0, hasGuard: false, footprint: 0 };
+  const ground = groundOf(model);
+  const decks = decksOf(model);
+  const covers = coversOf(model);
+  const out = [];
+  ruleRailing(model, decks, ground, covers, out);
+  const high = decks.some((d) => d.y - ground >= RAIL_MIN_Y);
+  const b = model.bounds(2.5);
+  return {
+    maxDeckHeight: standingHeight(model, decks, ground),
+    maxSpan: maxSpanOf(model, ground),
+    hasGuard: high && !out.length,
+    footprint: b ? Math.round(b.size[0] * b.size[2] / 100) / 100 : 0,
+  };
+}
+
 export const SAFETY_RULE_IDS = [
   "open_end", "deck_edges", "entrapment", "level_gap", "fall_height",
   "anchoring", "tipping", "clear_zone", "floating", "railing",

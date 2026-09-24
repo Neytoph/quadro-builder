@@ -3722,6 +3722,8 @@ export class SceneManager {
     // Eingefuegte Teile an einer belegten Stelle: Rot geht allem vor -- es sagt,
     // dass der Klick hier nichts absetzt.
     const invalid = opts.invalid && opts.invalid.size ? opts.invalid : null;
+    // 按零件上色（id -> 颜色）：共享方案里别人选中的零件、版本对照里增减的零件
+    const tints = opts.tints && opts.tints.size ? opts.tints : null;
     const matFor = (id, base) => {
       if (invalid && id != null && invalid.has(id)) return this._invalidMaterial(base);
       if (focusId != null && id === focusId) return this._focusMaterial(base);
@@ -3730,7 +3732,12 @@ export class SceneManager {
       }
       if (marked) {
         if (id != null && marked.has(id)) return this._selectedMaterial(base);
-        return dimOthers ? this._dimmedMaterial(base) : base;
+        if (dimOthers) return this._dimmedMaterial(base);
+      }
+      if (tints && id != null && tints.has(id)) {
+        const color = tints.get(id);
+        const emissive = new THREE.Color(color).multiplyScalar(0.3);
+        return this._tintMaterial(base, "tint:" + color + ":", color, emissive);
       }
       return base;
     };
@@ -5603,6 +5610,35 @@ export class SceneManager {
     );
     const data = this._hitData(hit);
     return data ? { object: hit.object, data, point: hit.point, distance: hit.distance, instanceId: hit.instanceId } : null;
+  }
+
+  /**
+   * 位置评论落在哪：指针下最近的零件和它表面上的那一点；没点到零件就取地面上的点。
+   * 返回 { partId, point:[x,y,z] }，地面也没点到（朝天上点）是 null。
+   */
+  pickPoint(clientX, clientY) {
+    const hit = this.pickForDelete(clientX, clientY);
+    if (hit && hit.data && hit.data.id != null) {
+      return { partId: String(hit.data.id), point: [hit.point.x, hit.point.y, hit.point.z] };
+    }
+    this._setMouse(clientX, clientY);
+    const ground = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    const p = new THREE.Vector3();
+    if (!this._raycaster.ray.intersectPlane(ground, p)) return null;
+    return { partId: null, point: [p.x, p.y, p.z] };
+  }
+
+  /** 镜头飞到一个点（点开一条位置评论）：朝向不变，把点周围 radius 厘米框进画面。 */
+  flyToPoint(point, radius = 70) {
+    const target = this.controls ? this.controls.target : new THREE.Vector3(...this._defaultCam.target);
+    const dir = this.camera.position.clone().sub(target).normalize();
+    const r = radius;
+    const bounds = {
+      min: [point[0] - r, point[1] - r, point[2] - r],
+      max: [point[0] + r, point[1] + r, point[2] + r],
+      size: [2 * r, 2 * r, 2 * r],
+    };
+    this._frameAlong(null, dir, { bounds, animate: true });
   }
 
   // Wie pickBuild, aber inkl. Rutschen/Dächer (nur fuers Loeschen relevant; im

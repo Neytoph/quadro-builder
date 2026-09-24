@@ -123,6 +123,8 @@ export class Builder {
     this.readOnly = false;
     // 外壳借模型去截缩略图、封面：这段时间模型里放的是别的东西
     this.held = false;
+    // 按零件上色（id -> 颜色）：共享方案里别人选中的零件
+    this.tints = null;
 
     this._down = null;
     this._clampDrag = null;
@@ -1630,7 +1632,7 @@ export class Builder {
     const firstRails = this._firstRailCandidates();
     this.scene.renderModel(this.model, this.selectedNodeId,
       { labelFor, slideNameFor, labelIds, soloId, soloLabel, assembly, suggest, reinforce,
-        selected, highlight: this.highlight || firstRails, invalid,
+        selected, highlight: this.highlight || firstRails, invalid, tints: this.tints,
         focusId: this.panelRail ? this.panelRail.id : null,
         preview: !!(this._paste || this._drag || this._clampDrag || this._clampSlide) });
     this._buildHandles();

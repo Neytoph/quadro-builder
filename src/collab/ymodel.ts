@@ -53,11 +53,18 @@ function seqOf(id: string): number {
   return m ? parseInt(m[1], 10) : 0
 }
 
-/** JSON 值相等（字段值都是 JSON，按序列化比较；对象键的顺序由引擎的 toJSON 固定）。 */
-function same(a: Json, b: Json): boolean {
+/** JSON 值相等，对象不看键的顺序。 */
+export function sameJson(a: Json, b: Json): boolean {
   if (a === b) return true
   if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false
-  return JSON.stringify(a) === JSON.stringify(b)
+  if (Array.isArray(a) !== Array.isArray(b)) return false
+  if (Array.isArray(a)) {
+    const bb = b as Json[]
+    return a.length === bb.length && a.every((v, i) => sameJson(v, bb[i]))
+  }
+  const ka = Object.keys(a as Rec)
+  const kb = Object.keys(b as Rec)
+  return ka.length === kb.length && ka.every(k => k in (b as Rec) && sameJson((a as Rec)[k], (b as Rec)[k]))
 }
 
 /** 造型 JSON 摊成 partId -> 带 `$type` 的记录。id 重复就地报错：两件零件不能共用一条记录。 */
@@ -87,8 +94,8 @@ function writePart(parts: Y.Map<Y.Map<Json>>, id: string, next: Rec, prev: Rec |
     return
   }
   for (const [k, v] of Object.entries(next)) {
-    if (prev && k in prev && same(prev[k], v) && ymap.has(k)) continue
-    if (!prev && same(ymap.get(k), v)) continue
+    if (prev && k in prev && sameJson(prev[k], v) && ymap.has(k)) continue
+    if (!prev && sameJson(ymap.get(k), v)) continue
     ymap.set(k, v)
   }
   const from = prev || Object.fromEntries(ymap.entries())
@@ -108,7 +115,7 @@ export function applyDelta(doc: Y.Doc, before: ModelJSON, after: ModelJSON, orig
   doc.transact(() => {
     for (const [id, rec] of b) {
       const prev = a.get(id) || null
-      if (prev && prev[TYPE_KEY] === rec[TYPE_KEY] && same(prev, rec) && parts.has(id)) continue
+      if (prev && prev[TYPE_KEY] === rec[TYPE_KEY] && sameJson(prev, rec) && parts.has(id)) continue
       writePart(parts, id, rec, prev && prev[TYPE_KEY] === rec[TYPE_KEY] ? prev : null)
     }
     for (const id of a.keys()) {
