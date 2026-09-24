@@ -147,9 +147,13 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
   }
   const res = await fetch(`${apiBase()}${path}`, init)
   const text = await res.text()
-  const json = text ? JSON.parse(text) as Record<string, unknown> : {}
-  if (!res.ok) throw new ApiError(res.status, String(json.error || `${method} ${path} → ${res.status}`), String(json.code || ''))
-  return json as T
+  const isJson = (res.headers.get('Content-Type') || '').includes('json')
+  if (!res.ok) {
+    // 出错时的说明：约定的是 JSON 的 error；网关、代理出的错可能只有一行文字
+    const body = isJson && text ? JSON.parse(text) as Record<string, unknown> : { error: text.trim() }
+    throw new ApiError(res.status, String(body.error || `${method} ${path} → ${res.status}`), String(body.code || ''))
+  }
+  return (text ? JSON.parse(text) : {}) as T
 }
 
 const enc = encodeURIComponent

@@ -144,7 +144,9 @@ export function CollabProvider({ children }: { children: ReactNode }) {
   const [joinAsk, setJoinAsk] = useState<JoinAsk | null>(null)
   const nudgeSeen = useRef(new Map<number, number>())
 
-  const report = useCallback((err: unknown) => { api.notify(errText(err), 'err') }, [api])
+  // 引擎那边这几样是稳定的，下面的回调和副作用只依赖它们，不依赖每次渲染都换新的 api
+  const { notify, tabLocal, setTabAccess, openPlanTab, saveCurrent, convertToPlan, engine, tick } = api
+  const report = useCallback((err: unknown) => { notify(errText(err), 'err') }, [notify])
 
   const activeTab = api.tabs.find(x => x.tabId === api.activeTabId) || null
   const activePlanId = activeTab?.planId || null
@@ -171,19 +173,19 @@ export function CollabProvider({ children }: { children: ReactNode }) {
       if (sessions.current.has(planId) || loading.current.has(planId)) continue
       loading.current.add(planId)
       collabApi.plan(planId).then((plan) => {
-        const local = api.tabLocal(tabId)
+        const local = tabLocal(tabId)
         if (!local) return
         const s = new PlanSession(plan, local)
         sessions.current.set(planId, s)
         setReadAt(r => ({ ...r, [planId]: plan.me?.lastReadAt || 0 }))
         s.subscribe(bump)
-        api.setTabAccess(tabId, { readOnly: !s.canEdit, idTag: s.idTag })
+        setTabAccess(tabId, { readOnly: !s.canEdit, idTag: s.idTag })
         bump()
       }).catch((err) => {
         setErrors(e => ({ ...e, [planId]: errText(err) }))
       }).finally(() => { loading.current.delete(planId) })
     }
-  }, [enabled, api, api.ready, api.tabs, bump])
+  }, [enabled, api.ready, api.tabs, tabLocal, setTabAccess, bump])
 
   useEffect(() => () => { for (const s of sessions.current.values()) s.destroy() }, [])
 
@@ -191,10 +193,10 @@ export function CollabProvider({ children }: { children: ReactNode }) {
   const canEdit = !!session && canEditRole(session.plan.myRole)
   useEffect(() => {
     if (!session || !activeTab) return
-    api.setTabAccess(activeTab.tabId, { readOnly: !canEdit, idTag: session.idTag })
+    setTabAccess(activeTab.tabId, { readOnly: !canEdit, idTag: session.idTag })
     // 只跟角色走
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, canEdit, activeTab?.tabId])
+  }, [session, canEdit, activeTab?.tabId, setTabAccess])
 
   // 地址栏跟着当前标签页：共享方案显示它的地址，刷新以后还是这个方案
   useEffect(() => {
@@ -250,9 +252,9 @@ export function CollabProvider({ children }: { children: ReactNode }) {
   const joinAsGuest = useCallback(() => {
     if (!joinAsk) return
     dropParam('invite')
-    api.openPlanTab(joinAsk.plan.id, joinAsk.plan.name)
+    openPlanTab(joinAsk.plan.id, joinAsk.plan.name)
     setJoinAsk(null)
-  }, [joinAsk, api])
+  }, [joinAsk, openPlanTab])
 
   // 我参与的方案：「我的设计」里开启过共享的那几份打开方案标签页；留言引用复制件
   useEffect(() => {
@@ -308,10 +310,10 @@ export function CollabProvider({ children }: { children: ReactNode }) {
   // 自己选中的零件放进在线状态
   useEffect(() => {
     if (!session) return
-    const b = api.engine()?.builder
+    const b = engine()?.builder
     if (!b) return
     session.setSelection([...(b.selection as Map<string, string>).keys()].map(String))
-  }, [session, api, api.tick])
+  }, [session, engine, tick])
 
   const peers = session ? session.peers() : []
   const members = session?.plan.members || []
@@ -370,7 +372,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
     buildCompare(compare.ids[0], compare.ids[1]).catch(report)
     // 只跟文档变化走
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [api.tick])
+  }, [tick])
 
   const openCompare = useCallback((a: string, b: string) => {
     if (!session) return
@@ -443,13 +445,13 @@ export function CollabProvider({ children }: { children: ReactNode }) {
   const partGone = useCallback((th: Thread) => {
     const pid = th.anchor?.partId
     if (!pid) return false
-    const m = api.engine()?.model
+    const m = engine()?.model
     if (!m) return false
     return !(m.nodes.has(pid) || m.tubes.has(pid) || m.panels.has(pid) || m.clamps.has(pid)
       || m.textiles.has(pid) || m.fittings.has(pid) || m.slides.has(pid))
     // tick：零件增删以后重新算
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [api, api.tick])
+  }, [engine, tick])
 
   const pinOrder = useMemo(() => {
     const ids = threads.filter(th => th.kind === 'pin').map(th => th.id).sort((a, b) => a - b)
@@ -459,8 +461,8 @@ export function CollabProvider({ children }: { children: ReactNode }) {
 
   const focusThread = useCallback((th: Thread) => {
     setActiveThread(th.id)
-    if (th.anchor) api.engine()?.scene.flyToPoint(th.anchor.point)
-  }, [api])
+    if (th.anchor) engine()?.scene.flyToPoint(th.anchor.point)
+  }, [engine])
 
   // —— 版本、成员、复制、交付 ——
   const saveVersion = useCallback(async (name: string) => {
@@ -495,8 +497,8 @@ export function CollabProvider({ children }: { children: ReactNode }) {
 
   const openPlan = useCallback(async (planId: string) => {
     const p = await collabApi.plan(planId)
-    api.openPlanTab(p.id, p.name)
-  }, [api])
+    openPlanTab(p.id, p.name)
+  }, [openPlanTab])
 
   const fork = useCallback(async (versionId: number | null) => {
     if (!session) return
@@ -531,13 +533,13 @@ export function CollabProvider({ children }: { children: ReactNode }) {
     const tab = activeTab
     if (!tab || tab.planId) return
     // 先存一下：方案的 id 就是这份存档的 id
-    const saved = await api.saveCurrent()
+    const saved = await saveCurrent()
     if (!saved) return
     const body = exportOf(saved.data, saved.name)
     await collabApi.createPlan({ id: saved.docId, name: saved.name, data: body.data, qdf: body.qdf, parts: body.parts })
-    api.convertToPlan(tab.tabId, saved.docId, saved.name)
+    convertToPlan(tab.tabId, saved.docId, saved.name)
     setMyPlans(list => [...list, { id: saved.docId, name: saved.name, role: 'owner' }])
-  }, [activeTab, api])
+  }, [activeTab, saveCurrent, convertToPlan])
 
   const planOfDoc = useCallback((docId: string) => myPlans.some(p => p.id === docId), [myPlans])
 

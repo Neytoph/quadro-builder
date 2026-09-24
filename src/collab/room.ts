@@ -1,5 +1,5 @@
 // 房间边界的几何：画出来的点整理成约定里的 room（见 api.ts 的 Room）。
-// 画的时候用的是场景的地面坐标（x 向右、z 向前，单位厘米），存的时候平移到外框左上角。
+// 平面图上 x 向右、z 向下，单位厘米；存的时候转成顺时针，平移到外框左上角。
 
 import type { Opening, Room } from './api'
 
@@ -82,11 +82,4 @@ export function roomFromDrawing(pts: Pt[], openings: Opening[], h: number, fallb
     outline,
     openings: ops.map(o => ({ kind: o.kind, edge: o.edge, from: Math.round(Math.min(o.from, o.to)), to: Math.round(Math.max(o.from, o.to)) })),
   }
-}
-
-/** 存着的 room 摆回场景：外框中心放在原点，和画布里房间方框的摆法一致。 */
-export function drawingFromRoom(room: Room): { pts: Pt[]; openings: Opening[] } {
-  if (!room.outline || room.outline.length < 3) return { pts: [], openings: [] }
-  const pts = room.outline.map(([x, z]) => [x - room.w / 2, z - room.d / 2] as Pt)
-  return { pts, openings: (room.openings || []).map(o => ({ ...o })) }
 }

@@ -50,7 +50,7 @@ export function EnableShareModal({ onClose }: { onClose: () => void }) {
         <p className="s">{t('collab.enable.body')}</p>
         <div className="cb-radio">
           {ROLES.map(r => (
-            <label key={r} className={`static ${r === 'owner' ? 'on' : ''}`}><i /><span><b>{t(r === 'owner' ? 'collab.enable.you' : `collab.role.${r}`)}</b><br /><span>{t(`collab.roleCan.${r}`)}</span></span><span /></label>
+            <label key={r} className={`info ${r === 'owner' ? 'on' : ''}`}><i /><span><b>{t(r === 'owner' ? 'collab.enable.you' : `collab.role.${r}`)}</b><br /><span>{t(`collab.roleCan.${r}`)}</span></span><span /></label>
           ))}
         </div>
         <p className="s" style={{ margin: '12px 0 0', fontSize: 12 }}>{t('collab.enable.offline')}</p>
@@ -78,9 +78,10 @@ export function ShareModal({ onClose }: { onClose: () => void }) {
   const online = new Set(collab.peers.map(p => p.user?.userId).filter(Boolean))
 
   useEffect(() => {
+    // 打开时把成员再取一遍（刚有人用邀请链接加入），生成一条邀请链接
+    collab.session?.refresh().catch(collab.report)
     if (!me || collab.role === 'guest') return
     collab.inviteUrl().then(setInvite).catch(collab.report)
-    // 打开时生成一次
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -125,7 +126,7 @@ export function ShareModal({ onClose }: { onClose: () => void }) {
                   <span>{sub}</span>
                 </div>
                 {fixed
-                  ? <span className="cb-role fixed">{t(`collab.role.${m.role}`)}</span>
+                  ? <span className="cb-role lock">{t(`collab.role.${m.role}`)}</span>
                   : <button type="button" className="cb-role" onClick={() => setMenu(menu === m.userId ? null : m.userId)} data-ui="member-role">{t(`collab.role.${m.role}`)}<ChevronDown /></button>}
                 {menu === m.userId && (
                   <div className="cb-menu" data-ui="member-menu">
@@ -208,11 +209,12 @@ export function DeliverModal({ onClose }: { onClose: () => void }) {
   const chosen = own.find(v => v.id === pick) || null
   const old = own.find(v => v.delivered && v.id !== pick) || null
 
+  const { metricsOf, report } = collab
   useEffect(() => {
     if (pick == null) return
     setMetrics(null)
-    collab.metricsOf(pick).then(setMetrics).catch(collab.report)
-  }, [collab, pick])
+    metricsOf(pick).then(setMetrics).catch(report)
+  }, [metricsOf, report, pick])
 
   const url = token ? `${location.origin}/deliver.html?t=${encodeURIComponent(token)}&src=${encodeURIComponent(`delivery:${token}`)}` : ''
 

@@ -232,7 +232,8 @@
 .cb-mem .t b { font-size: 13px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .cb-mem .t > span { font-size: 11.5px; color: var(--cb-ink3); }
 .cb-role { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 9px; border: 1.5px solid #F1E4D6; background: #fff; font-weight: 700; font-size: 12px; color: var(--cb-ink2); white-space: nowrap; cursor: pointer; }
-.cb-role.fixed { border-style: dashed; color: var(--cb-ink3); cursor: default; }
+/* 角色固定不能改（创建人、需求单里接单的设计师）。类名别用 fixed：和 Tailwind 的定位类撞 */
+.cb-role.lock { border-style: dashed; color: var(--cb-ink3); cursor: default; }
 .cb-role svg { width: 13px; height: 13px; }
 .cb-menu { position: absolute; right: 12px; top: calc(100% - 4px); z-index: 3; min-width: 196px; padding: 5px; border-radius: 12px; background: #fff; border: 1.5px solid #E0B892; box-shadow: 0 14px 34px -16px rgba(31, 36, 48, .5); }
 .cb-menu button { display: grid; width: 100%; text-align: left; border: 0; background: none; padding: 7px 9px; border-radius: 8px; font: inherit; cursor: pointer; }
@@ -244,7 +245,7 @@
 .cb-menu button.del b { color: var(--cb-red); }
 .cb-radio { display: grid; gap: 6px; }
 .cb-radio label { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 9px 12px; border-radius: 12px; border: 1.5px solid #F1E4D6; background: #fff; cursor: pointer; }
-.cb-radio label.static { cursor: default; }
+.cb-radio label.info { cursor: default; }
 .cb-radio label i { width: 16px; height: 16px; border-radius: 50%; border: 2px solid #E0D3C4; background: #fff; }
 .cb-radio label.on { border-color: var(--cb-o); background: #FFFBF7; }
 .cb-radio label.on i { border-color: var(--cb-o); background: var(--cb-o); box-shadow: inset 0 0 0 3px #fff; }

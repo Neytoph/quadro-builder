@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { drawingFromRoom, edgeLength, nearestEdge, pointOnEdge, roomFromDrawing, signedArea, type Pt } from './room'
+import { edgeLength, nearestEdge, pointOnEdge, roomFromDrawing, signedArea, type Pt } from './room'
 
 // L 形房间，场景坐标，顺时针（x 右、z 下）
 const L: Pt[] = [[-160, -130], [160, -130], [160, 130], [-100, 130], [-100, 92], [-160, 92]]
@@ -29,10 +29,9 @@ describe('房间边界', () => {
     expect(b).toEqual([156, 0])
   })
 
-  it('摆回场景再整理一遍，结果不变', () => {
+  it('存下的轮廓拿回来接着画，再整理一遍结果不变', () => {
     const room = roomFromDrawing(L, [{ kind: 'door', edge: 4, from: 0, to: 38 }], 250, { w: 0, d: 0 })
-    const back = drawingFromRoom(room)
-    expect(roomFromDrawing(back.pts, back.openings, 250, { w: 0, d: 0 })).toEqual(room)
+    expect(roomFromDrawing(room.outline!, room.openings!, 250, { w: 0, d: 0 })).toEqual(room)
   })
 
   it('没画轮廓只有宽深高', () => {

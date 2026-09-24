@@ -101,6 +101,8 @@ export class PlanSession {
   private editSeq = 0
   // 每个在线的端上一次看到的修改序号
   private editSeen = new Map<number, number>()
+  // 已经为哪些不在名单上的人重取过成员
+  private askedMembers = new Set<number>()
   /**
    * 别人刚做的修改，按人攒着：停手 1.2 秒以后亮出来，亮 3 秒收走。
    * 界面画底部那一条「林木木 加了 4 件、挪了 2 件」。
@@ -161,7 +163,15 @@ export class PlanSession {
       if (clientId === aw.clientID) return
       const edit = state.edit as ({ n: number } & EditSummary) | undefined
       const user = state.user as PeerUser | null | undefined
-      if (!edit || !user) return
+      // 在线的人里有成员名单上没有的：刚用邀请链接加入，把方案和成员再取一遍
+      if (user && !this.plan.members.some(m => m.userId === user.userId) && !this.askedMembers.has(user.userId)) {
+        this.askedMembers.add(user.userId)
+        // 没取到（断网）下次再取，出错照样抛出去
+        this.refresh().catch((err) => { this.askedMembers.delete(user.userId); throw err })
+      }
+      // 第一次看到还没改过东西的端：从 0 数起
+      if (!edit) { if (!this.editSeen.has(clientId)) this.editSeen.set(clientId, 0); return }
+      if (!user) return
       const seen = this.editSeen.get(clientId)
       this.editSeen.set(clientId, edit.n)
       // 第一次看到这个端：是它连上前的旧修改，不算

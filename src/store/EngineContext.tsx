@@ -1139,6 +1139,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
 
   /** 标签页的文档（共享方案要连上服务器） */
   const tabLocal = useCallback((tabId: string) => tabsRef.current.find(x => x.tabId === tabId)?.local || null, [])
+  const engine = useCallback(() => eng.current, [])
 
   const closeTab = useCallback((tabId: string) => {
     const closing = tabsRef.current.find(x => x.tabId === tabId)
@@ -2098,7 +2099,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     startThumbBatch, endThumbBatch, captureThumb,
     attachDoc, openPlanTab, convertToPlan, setTabAccess, tabLocal,
     readOnly: !!builder?.readOnly,
-    engine: () => eng.current,
+    engine,
   }
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>

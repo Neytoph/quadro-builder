@@ -42,13 +42,14 @@ export default function PlanOverlays() {
   const items = useRef(new Map<string, { el: HTMLElement; pts: () => P3[]; box: boolean }>())
   const [fork, setFork] = useState(false)
   const s = collab.session
+  const { engine } = api
 
   // 每一帧：图钉摆到那一点，选中框框住那几件零件；转到背后、出了画面的藏起来
   useEffect(() => {
     let raf = 0
     const tick = () => {
       raf = requestAnimationFrame(tick)
-      const e = api.engine()
+      const e = engine()
       const host = document.getElementById('canvas-host')
       if (!e || !host) return
       const r = host.getBoundingClientRect()
@@ -71,7 +72,7 @@ export default function PlanOverlays() {
     }
     tick()
     return () => cancelAnimationFrame(raf)
-  }, [api])
+  }, [engine])
 
   const track = (key: string, pts: () => P3[], box = false) => (el: HTMLElement | null) => {
     if (el) items.current.set(key, { el, pts, box })
@@ -79,12 +80,13 @@ export default function PlanOverlays() {
   }
 
   // 放图钉：Esc 退出
+  const { placingPin, pinDraft, setPlacingPin, setPinDraft } = collab
   useEffect(() => {
-    if (!collab.placingPin && !collab.pinDraft) return
-    const off = () => { collab.setPlacingPin(false); collab.setPinDraft(null) }
+    if (!placingPin && !pinDraft) return
+    const off = () => { setPlacingPin(false); setPinDraft(null) }
     window.addEventListener(UI_ESCAPE_EVENT, off)
     return () => window.removeEventListener(UI_ESCAPE_EVENT, off)
-  }, [collab])
+  }, [placingPin, pinDraft, setPlacingPin, setPinDraft])
 
   const place = (ev: React.PointerEvent) => {
     const e = api.engine()
@@ -213,8 +215,8 @@ function useBubbleSide(ref: React.RefObject<HTMLDivElement | null>) {
 
 /** 零件删掉了：它在哪一版被谁删掉，名字从还有它的那一版里取。 */
 function useGoneNote(th: Thread, gone: boolean) {
-  const collab = useCollab()
-  const api = useEngine()
+  const { versions, versionModel, plan, report } = useCollab()
+  const { engine } = useEngine()
   const { t } = useI18n()
   const [note, setNote] = useState<{ label: string; text: string } | null>(null)
   useEffect(() => {
@@ -222,26 +224,26 @@ function useGoneNote(th: Thread, gone: boolean) {
     if (!gone || !pid) { setNote(null); return }
     let dead = false
     void (async () => {
-      const own = collab.versions.filter(v => v.kind !== 'reference').sort((a, b) => a.createdAt - b.createdAt)
-      const builder = api.engine()?.builder
+      const own = versions.filter(v => v.kind !== 'reference').sort((a, b) => a.createdAt - b.createdAt)
+      const builder = engine()?.builder
       let label = ''
       let text = t('collab.pin.partGone')
       let had = false
       for (const v of own) {
         const m = new BuildModel()
-        m.loadJSON(await collab.versionModel(String(v.id)))
+        m.loadJSON(await versionModel(String(v.id)))
         const name = builder ? partLabel(builder, m, pid) : null
         if (name) { label = name; had = true; continue }
         if (had) {
-          const who = collab.plan?.members.find(x => x.userId === v.createdBy)?.name || ''
+          const who = plan?.members.find(x => x.userId === v.createdBy)?.name || ''
           text = t('collab.pin.goneIn', { who, version: v.name, part: label })
           break
         }
       }
       if (!dead) setNote({ label, text })
-    })().catch(collab.report)
+    })().catch(report)
     return () => { dead = true }
-  }, [gone, th.anchor?.partId, collab, api, t])
+  }, [gone, th.anchor?.partId, versions, versionModel, plan, report, engine, t])
   return note
 }
 
@@ -259,7 +261,8 @@ function Bubble({ th, gone }: { th: Thread; gone: boolean }) {
   const member = collab.role !== 'guest'
   // 气泡里的新回复标「新」，看过就不标：打开就记已读
   const [seen] = useState(() => collab.isUnread)
-  useEffect(() => { if (th.posts.some(collab.isUnread)) collab.markRead().catch(collab.report) }, [th.id, collab])
+  const { isUnread, markRead, report } = collab
+  useEffect(() => { if (th.posts.some(isUnread)) markRead().catch(report) }, [th.posts, isUnread, markRead, report])
 
   return (
     <div ref={ref} className={`cb-bubble ${left ? 'left' : ''}`} data-ui="pin-bubble" onPointerDown={ev => ev.stopPropagation()}>
