@@ -16,6 +16,12 @@ const GROUPS: (typeof DOCK_PILLS)[] = [
 
 // 当前标签页是共享方案：「我的库存」和「安全」之间多一组「评论 / 版本」
 const PLAN_GROUPS: (typeof DOCK_PILLS)[] = [...GROUPS.slice(0, 3), PLAN_PILLS, GROUPS[3]]
+// 没登录的访客：只留看的格子
+const VISITOR_GROUPS: (typeof DOCK_PILLS)[] = [
+  DOCK_PILLS.filter(p => p.id === 'advisor' || p.id === 'bom'),
+  PLAN_PILLS,
+  GROUPS[3],
+]
 
 export default function ProjectTabs() {
   const api = useEngine()
@@ -87,7 +93,7 @@ export default function ProjectTabs() {
 
       <div ref={pillsRef} className={`relative flex items-center gap-1.5 ${narrow ? 'flex-1 overflow-x-auto scrollbar-thin' : 'shrink-0'}`}>
         {MOTION && <span ref={indRef} aria-hidden className="m-pill-ind" />}
-        {(planMode ? PLAN_GROUPS : GROUPS).map((group, i) => (
+        {(planMode ? (collab.plan && !collab.plan.me ? VISITOR_GROUPS : PLAN_GROUPS) : GROUPS).map((group, i) => (
           <div key={i} className="flex items-center gap-0.5 shrink-0">
             {i > 0 && <span className="w-px h-4 bg-gray-700 mx-0.5" />}
             {group.map(item => {
