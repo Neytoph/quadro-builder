@@ -1331,7 +1331,8 @@ const de: Dict = {
 
 const dicts: Record<Lang, Dict> = { zh, en, de }
 
-function detect(): Lang {
+/** 打开时用哪种语言：网址里带了的优先，其次是用户选过的，都没有按浏览器语言。 */
+export function detect(): Lang {
   // 嵌在别的页面里（只看模式）或从别的页面跳过来，跟着那一页的语言
   const fromUrl = bootEntry().lang
   if (fromUrl) return fromUrl

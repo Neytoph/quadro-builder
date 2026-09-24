@@ -318,6 +318,11 @@ function modelPartCount(model: unknown) {
   return n(rec.tubes) + n(rec.panels) + n(rec.slides) + n(rec.fittings)
 }
 
+// 「搭完一座」的门槛：最小的官方造型是 20 件管和板（不算连接件，口径同
+// modelPartCount）。用户亲手改出来的一座到了这个规模，就算搭出了一座完整的架子。
+// 后台来源看板（小麦坊 gateway/internal/store/sources.go）用同一个数判断老数据。
+const BUILT_MIN_PARTS = 20
+
 // 选件打点。连着选同一个不重复发——工具条的下拉每打开一次就会把当前件
 // 再点一遍，不去重的话一次正经搭建能刷出几十条一模一样的记录。
 let lastPick = ''
@@ -494,6 +499,9 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const invRowsRef = useRef<InvRow[]>([])
   const langRef = useRef<'zh' | 'en' | 'de'>('zh')
   const switching = useRef(false)
+  // 整座换进来（官方造型、导入文件）的那一下不算用户在搭，见 markDirty 里的「搭完一座」
+  const loadingModel = useRef(false)
+  const builtTabs = useRef(new Set<string>())
   const clipboard = useRef<unknown>(null)
   const sessionTimer = useRef<number | null>(null)
   const highlightKey = useRef<string | null>(null)
@@ -564,6 +572,16 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       syncTabs()
     } else {
       persistSession()
+    }
+    // 每个标签页只记一次，打开官方造型、导入文件那一下不算：那是换进来的，
+    // 在它上面接着改一步才算用户自己搭出来的。
+    const e2 = eng.current
+    if (tab && e2 && !loadingModel.current && !builtTabs.current.has(tab.tabId)) {
+      const parts = modelPartCount(e2.model.toJSON())
+      if (parts >= BUILT_MIN_PARTS) {
+        builtTabs.current.add(tab.tabId)
+        track('builder.design.built', { parts })
+      }
     }
     bump()
   }, [bump, persistSession, syncTabs])
@@ -1303,6 +1321,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       const res = e2.model.loadJSON(data)
       if (res && res.ok === false) throw new Error(String(res.reason || 'data'))
     }
+    loadingModel.current = true
     try {
       if (opts?.undoable) e2.builder.recordHistory(run)
       else {
@@ -1311,6 +1330,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       }
     } catch {
       return false
+    } finally {
+      loadingModel.current = false
     }
     e2.builder.refresh()
     if (opts?.frame !== false) e2.scene.resetCamera(e2.model, { animate: true, swoop: true })
