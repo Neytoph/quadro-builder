@@ -2,7 +2,7 @@
 // 运行：先起开发服务 npx vite --port 5230 --strictPort，再 node scripts/e2e-single.mjs
 // 截图存到 SHOTS（默认 ../qb-shots）。
 import { chromium } from '@playwright/test'
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import assert from 'node:assert/strict'
 
@@ -112,6 +112,34 @@ await page.waitForTimeout(800)
 c = await count(page)
 check('保存后又接的一根刷新后还在', c.tubes === built + 1)
 check('标签页名字是存档名', await page.getByText('攀爬架测试').first().isVisible())
+// 开源本地版（没设 VITE_SYNC_BASE）：共享相关的界面一样都不出现
+check('开源本地版没有「共享」按钮', !(await page.locator('.cb-cluster, [data-ui=share-enable], [data-ui=plan-share]').count()))
+check('开源本地版顶栏没有「评论」「版本」', !(await page.getByRole('button', { name: /^评论|^版本$/ }).count()))
+await page.close()
+
+// 批量导入 .qdf：?import=qdf 打开就是导入框，每个文件存成一座造型
+page = await open(ctx)
+await page.goto(BASE + '?import=qdf')
+await page.waitForFunction(() => window.__quadroDev?.model)
+await page.locator('[data-ui=batch-import]').waitFor()
+const qdf = readFileSync(fileURLToPath(new URL('../src/data/A0128.qdf', import.meta.url)))
+await page.locator('[data-ui=batch-import] input[type=file]').setInputFiles([
+  { name: 'A0128.qdf', mimeType: 'text/plain', buffer: qdf },
+  { name: 'kaputt.qdf', mimeType: 'text/plain', buffer: Buffer.from('<nothing/>') },
+])
+await page.locator('[data-ui=batch-row]').nth(1).waitFor()
+check('导入了一座、一个文件读不了', await page.locator('[data-ui=batch-row][data-ok=true]').count() === 1 && await page.locator('[data-ui=batch-row][data-ok=false]').count() === 1)
+check('导入结果带缩略图', await page.locator('[data-ui=batch-row][data-ok=true] img').count() === 1)
+check('开源本地版没有「发到广场」', !(await page.locator('[data-ui=batch-publish]').count()))
+await page.screenshot({ path: SHOTS + 'single-4-batch-import.png' })
+const docs = await page.evaluate(() => new Promise((resolve) => {
+  const req = indexedDB.open('quadro.library.v1')
+  req.onsuccess = () => {
+    const all = req.result.transaction('docs', 'readonly').objectStore('docs').getAll()
+    all.onsuccess = () => resolve(all.result.map((d) => d.name))
+  }
+}))
+check('导入的那一座进了「我的设计」', docs.includes('A0128'))
 await page.close()
 await ctx.close()
 

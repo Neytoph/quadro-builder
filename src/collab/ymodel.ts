@@ -125,6 +125,34 @@ export function applyDelta(doc: Y.Doc, before: ModelJSON, after: ModelJSON, orig
     const format = after.format ?? FORMAT_VERSION
     if (meta.get('format') !== format) meta.set('format', format)
   }, origin)
+  return summarize(a, b)
+}
+
+/** 一次修改的大概：加了几件、删了几件、挪了几件、改了几件（颜色之类）。 */
+export interface EditSummary {
+  added: number
+  removed: number
+  moved: number
+  changed: number
+}
+
+// 这些字段变了算「挪了」：位置、朝向、挂在哪
+const PLACE_KEYS = new Set(['x', 'y', 'z', 'a', 'b', 't0', 'len', 'quat', 'geom', 'dir', 'off', 'hook', 'foot', 'bowCenter', 'clampOn', 'bearingOn', 'tube'])
+
+export function summarize(a: Map<string, Rec>, b: Map<string, Rec>): EditSummary {
+  const out: EditSummary = { added: 0, removed: 0, moved: 0, changed: 0 }
+  for (const [id, rec] of b) {
+    const prev = a.get(id)
+    if (!prev) { out.added++; continue }
+    if (sameJson(prev, rec)) continue
+    const keys = new Set([...Object.keys(prev), ...Object.keys(rec)])
+    let moved = false
+    for (const k of keys) if (!sameJson(prev[k], rec[k]) && PLACE_KEYS.has(k)) moved = true
+    if (moved) out.moved++
+    else out.changed++
+  }
+  for (const id of a.keys()) if (!b.has(id)) out.removed++
+  return out
 }
 
 /** 把几件零件（带 `$type` 的记录）按原样写回文档。 */

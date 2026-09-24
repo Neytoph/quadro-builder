@@ -1,22 +1,23 @@
 import { useEffect, useRef, useState } from 'react'
 import { useI18n } from '../../i18n'
-import { useEngine } from '../../store/EngineContext'
-import { useCollab } from '../CollabContext'
-import type { Post, Thread } from '../api'
-import { Composer, PostView } from './Posts'
+import { mediaUrl, type Post, type Thread } from '../api'
+import { isDesigner, useCollab } from '../CollabContext'
+import { day, Face, when } from './bits'
+import { Compose, RefCard } from './Compose'
+
+type Filter = 'open' | 'done' | 'all'
 
 /**
- * 评论侧栏：位置评论和留言区两栏。打开时记下「上次读到哪儿」，这一次看到的红点
- * 一直留到关上侧栏，同时告诉服务端已读，顶栏的数字随即消失。
+ * 评论和留言（右侧抽屉）：两栏「位置评论」「留言」，各带未读数。位置评论按图钉号排，
+ * 默认只看没解决的；点一条镜头飞过去、在图钉旁边打开讨论。留言区第一条是需求单，
+ * 上次看到的地方一条红线。打开时记下「读到哪儿」，这一次的红点留到关上抽屉。
  */
 export default function CommentsPane() {
   const collab = useCollab()
-  const api = useEngine()
   const { t } = useI18n()
   const [tab, setTab] = useState<'pins' | 'chat'>(collab.unread.chat && !collab.unread.pins ? 'chat' : 'pins')
-  const [showResolved, setShowResolved] = useState(false)
+  const [filter, setFilter] = useState<Filter>('open')
   const seen = useRef<(p: Post) => boolean>(collab.isUnread)
-  const isMember = collab.role !== 'guest'
 
   useEffect(() => {
     collab.refreshThreads().catch(collab.report)
@@ -25,101 +26,125 @@ export default function CommentsPane() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const pins = collab.threads.filter(th => th.kind === 'pin' && (showResolved || !th.resolved))
-  const resolvedCount = collab.threads.filter(th => th.kind === 'pin' && th.resolved).length
+  const allPins = collab.threads.filter(th => th.kind === 'pin').sort((a, b) => collab.pinNumber(a) - collab.pinNumber(b))
+  const open = allPins.filter(th => !th.resolved)
+  const done = allPins.filter(th => th.resolved)
   const chat = collab.threads.find(th => th.kind === 'chat') || null
   const unreadIn = (th: Thread) => th.posts.filter(p => seen.current(p)).length
+  const pinUnread = allPins.reduce((s, th) => s + unreadIn(th), 0)
+  const chatUnread = chat ? unreadIn(chat) : 0
 
   return (
-    <div className="flex flex-col" data-ui="comments-pane">
-      <div className="flex gap-1 p-2 border-b border-gray-800 sticky top-[49px] z-10 bg-teal-50">
-        {(['pins', 'chat'] as const).map(k => {
-          const n = k === 'pins'
-            ? collab.threads.filter(th => th.kind === 'pin').reduce((s, th) => s + unreadIn(th), 0)
-            : (chat ? unreadIn(chat) : 0)
-          return (
-            <button key={k} onClick={() => setTab(k)} data-ui={`comments-tab-${k}`}
-              className={`relative flex-1 text-sm rounded-lg py-2 cursor-pointer ${tab === k ? 'bg-teal-500 text-white font-semibold' : 'text-gray-300 hover:bg-gray-800'}`}>
-              {t(k === 'pins' ? 'collab.tab.pins' : 'collab.tab.chat')}
-              {n > 0 && <span className="absolute top-1.5 right-2 min-w-4 h-4 px-1 rounded-full bg-red-500 text-white text-[10px] leading-4">{n}</span>}
-            </button>
-          )
-        })}
+    <div className="cb-pane" data-ui="comments-pane">
+      <div className="cb-tabs">
+        <button type="button" className={tab === 'pins' ? 'on' : ''} onClick={() => setTab('pins')} data-ui="comments-tab-pins">
+          {t('collab.tab.pins')}{pinUnread > 0 && <b className="cb-n">{pinUnread}</b>}
+        </button>
+        <button type="button" className={tab === 'chat' ? 'on' : ''} onClick={() => setTab('chat')} data-ui="comments-tab-chat">
+          {t('collab.tab.chat')}{chatUnread > 0 && <b className="cb-n">{chatUnread}</b>}
+        </button>
       </div>
 
       {tab === 'pins' && (
-        <div className="p-3 flex flex-col gap-2">
-          {isMember && (
-            <button onClick={() => { collab.setPlacingPin(true); api.notify(t('collab.pin.placeHint')) }}
-              className="qb-btn qb-btn-sm self-start" data-ui="pin-start">{t('collab.pin.add')}</button>
-          )}
-          {!pins.length && <div className="text-xs text-gray-500 py-4 text-center">{t('collab.pin.empty')}</div>}
-          {pins.map(th => <PinThread key={th.id} th={th} unread={p => seen.current(p)} />)}
-          {resolvedCount > 0 && (
-            <button onClick={() => setShowResolved(v => !v)} className="text-xs text-gray-400 hover:text-teal-600 cursor-pointer self-start">
-              {t(showResolved ? 'collab.pin.hideResolved' : 'collab.pin.showResolved', { n: resolvedCount })}
-            </button>
-          )}
-        </div>
+        <>
+          <div className="cb-filter">
+            <button type="button" className={filter === 'open' ? 'on' : ''} onClick={() => setFilter('open')}>{t('collab.filter.open', { n: open.length })}</button>
+            <button type="button" className={filter === 'done' ? 'on' : ''} onClick={() => setFilter('done')}>{t('collab.filter.done', { n: done.length })}</button>
+            <button type="button" className={filter === 'all' ? 'on' : ''} onClick={() => setFilter('all')}>{t('collab.filter.all', { n: allPins.length })}</button>
+          </div>
+          <div className="cb-list">
+            {filter !== 'done' && open.map(th => <PinItem key={th.id} th={th} unread={unreadIn(th)} />)}
+            {filter === 'all' && done.length > 0 && <div className="cb-sechead">{t('collab.pin.resolved')}</div>}
+            {filter !== 'open' && done.map(th => <PinItem key={th.id} th={th} unread={unreadIn(th)} />)}
+            {!allPins.length && <div className="cb-empty">{t(collab.role === 'guest' ? 'collab.pin.emptyGuest' : 'collab.pin.empty')}</div>}
+            {allPins.length > 0 && filter === 'open' && !open.length && <div className="cb-empty">{t('collab.pin.allDone')}</div>}
+          </div>
+        </>
       )}
 
-      {tab === 'chat' && (
-        <div className="p-3 flex flex-col gap-2" data-ui="chat">
-          <div className="text-[11px] text-gray-400">{t('collab.chat.hint')}</div>
-          <div className="flex flex-col divide-y divide-gray-800">
-            {(chat?.posts || []).map(p => <PostView key={p.id} p={p} unread={seen.current(p)} />)}
-          </div>
-          {!chat?.posts.length && <div className="text-xs text-gray-500 py-4 text-center">{t('collab.chat.empty')}</div>}
-          {isMember && chat && (
-            <Composer placeholder={t('collab.chat.placeholder')} withRefs
-              onSend={(body, files, refs) => collab.reply(chat.id, body, files, refs)} />
-          )}
-        </div>
-      )}
+      {tab === 'chat' && <Chat chat={chat} seen={seen.current} />}
     </div>
   )
 }
 
-function PinThread({ th, unread }: { th: Thread; unread: (p: Post) => boolean }) {
+function PinItem({ th, unread }: { th: Thread; unread: number }) {
   const collab = useCollab()
-  const api = useEngine()
-  const { t } = useI18n()
-  const open = collab.activeThread === th.id
+  const { t, lang } = useI18n()
   const first = th.posts[0]
   const gone = collab.partGone(th)
-  const n = th.posts.filter(unread).length
-  const isMember = collab.role !== 'guest'
+  const replies = th.posts.length - 1
+  const meta = [
+    first?.name, first ? day(first.createdAt, lang) : '',
+    replies > 0 ? t('collab.pin.replies', { n: replies }) : !th.anchor?.partId ? t('collab.pin.space') : '',
+    unread > 0 ? t('collab.pin.newN', { n: unread }) : '',
+  ].filter(Boolean).join(' · ')
+  return (
+    <button type="button" data-ui="pin-thread" data-thread={th.id}
+      className={`cb-item ${th.resolved ? 'done' : ''} ${gone ? 'gone' : ''} ${unread ? 'unread' : ''} ${collab.activeThread === th.id ? 'on' : ''}`}
+      onClick={() => collab.focusThread(th)}>
+      <span className="pn"><b>{collab.pinNumber(th)}</b></span>
+      <div>
+        <p>{first?.body || t('collab.pin.photoOnly')}</p>
+        <div className="mt">
+          {gone && <span className="gtag">{t('collab.pin.partGone')}</span>}
+          {th.resolved && <span className="dtag">{t('collab.pin.resolved')}</span>}
+          {meta}
+        </div>
+      </div>
+    </button>
+  )
+}
+
+function Chat({ chat, seen }: { chat: Thread | null; seen: (p: Post) => boolean }) {
+  const collab = useCollab()
+  const { t, lang } = useI18n()
+  const me = collab.plan?.me
+  const posts = chat?.posts || []
+  const firstNew = posts.findIndex(seen)
+  const newCount = posts.filter(seen).length
+  const end = useRef<HTMLDivElement>(null)
+  useEffect(() => { end.current?.scrollIntoView({ block: 'end' }) }, [posts.length])
 
   return (
-    <div data-ui="pin-thread" data-thread={th.id}
-      className={`rounded-xl border px-3 py-2 ${open ? 'border-teal-500 bg-gray-900' : 'border-gray-800'} ${th.resolved ? 'opacity-70' : ''}`}>
-      <button className="w-full text-left cursor-pointer" onClick={() => (open ? collab.setActiveThread(null) : collab.focusThread(th))}>
-        <div className="flex items-center gap-1.5 text-[11px] text-gray-400">
-          <span className="w-5 h-5 rounded-full bg-orange-500 text-white text-[10px] font-bold inline-flex items-center justify-center">{collab.pinNumber(th)}</span>
-          <span className="text-gray-200 font-medium truncate">{first?.name}</span>
-          {th.resolved && <span className="rounded bg-gray-800 px-1">{t('collab.pin.resolved')}</span>}
-          {gone && <span className="rounded bg-amber-100 text-amber-800 px-1" data-ui="pin-gone">{t('collab.pin.partGone')}</span>}
-          {n > 0 && <span className="ml-auto min-w-4 h-4 px-1 rounded-full bg-red-500 text-white text-[10px] leading-4 text-center">{n}</span>}
-        </div>
-        {!open && <div className="text-sm text-gray-100 line-clamp-2 mt-0.5">{first?.body}</div>}
-        {!open && th.posts.length > 1 && <div className="text-[11px] text-gray-400 mt-0.5">{t('collab.pin.replies', { n: th.posts.length - 1 })}</div>}
-      </button>
-      {open && (
-        <div className="mt-1">
-          <div className="flex flex-col divide-y divide-gray-800">
-            {th.posts.map(p => <PostView key={p.id} p={p} unread={unread(p)} />)}
-          </div>
-          {isMember && (
-            <div className="mt-2 flex flex-col gap-2">
-              <Composer placeholder={t('collab.pin.reply')} onSend={(body, files) => collab.reply(th.id, body, files, [])} />
-              <button onClick={() => { void collab.resolve(th.id, !th.resolved).catch(err => api.notify(String(err instanceof Error ? err.message : err), 'err')) }}
-                className="text-xs text-gray-400 hover:text-teal-600 cursor-pointer self-start" data-ui="pin-resolve">
-                {t(th.resolved ? 'collab.pin.reopen' : 'collab.pin.resolve')}
-              </button>
+    <>
+      <div className="cb-chat" data-ui="chat">
+        {!posts.length && <div className="cb-empty">{t('collab.chat.empty')}</div>}
+        {posts.map((p, i) => {
+          const mine = !!me && p.userId === me.userId
+          // 需求单建的方案：第一条是后端按需求单排好的文字
+          const brief = i === 0 && collab.plan?.briefId != null
+          return (
+            <div key={p.id} style={{ display: 'contents' }}>
+              {i === firstNew && <div className="cb-unread-line">{t('collab.chat.newLine', { n: newCount })}</div>}
+              <div className={`cb-msg ${mine ? 'me' : ''}`} data-ui="post">
+                <Face name={p.name} avatar={p.avatar} color={collab.colorOf(p.userId)} />
+                <div>
+                  <div className="who">
+                    {mine ? <><small>{when(p.createdAt, lang)}</small> {p.name}</> : <>{p.name}
+                      {isDesigner(collab.plan, p.userId) && <span className="role">{t('collab.designer')}</span>}
+                      <small>{when(p.createdAt, lang)}{brief ? ` · ${t('collab.chat.brief')}` : ''}</small></>}
+                  </div>
+                  {brief ? <div className="cb-briefmsg">{p.body}</div> : (
+                    <div className="txt">
+                      {p.body}
+                      {p.photos.length > 0 && <div className="pics">{p.photos.map(src => <a key={src} href={mediaUrl(src)} target="_blank" rel="noreferrer"><img src={mediaUrl(src)} alt="" /></a>)}</div>}
+                      {p.refs.map((r, j) => <RefCard key={j} r={r} />)}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
-          )}
-        </div>
+          )
+        })}
+        <div ref={end} />
+      </div>
+      {chat && collab.role !== 'guest' && (
+        <Compose placeholder={t('collab.chat.placeholder')} sendLabel={t('collab.send')} withRefs
+          send={(body, files, refs) => collab.reply(chat.id, body, files, refs)} />
       )}
-    </div>
+      {collab.role === 'guest' && !collab.plan?.me && (
+        <div className="cb-login-reply"><a className="qb-btn qb-btn-sm no-underline" href={collab.loginUrl()}>{t('collab.readOnly.login')}</a></div>
+      )}
+    </>
   )
 }

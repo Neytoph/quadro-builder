@@ -9,6 +9,8 @@ import { ACCESSORY_PACK, ACCESSORY_IDS } from '../engine/accessoryPack.js'
 import { MOTION, usePresence } from './motion'
 import { Pop } from './Pop'
 import StatusTip from './StatusTip'
+import { MessageSquarePlus } from 'lucide-react'
+import { useCollab } from '../collab/CollabContext'
 
 /** 下拉菜单里零件图的边长（px）。渲染图太小看不出形状。 */
 const ICON = 44
@@ -95,6 +97,10 @@ function jointActive(id: string, api: ReturnType<typeof useEngine>) {
 
 export default function TopToolbar() {
   const api = useEngine()
+  const collab = useCollab()
+  // 共享方案的成员能放评论图钉；评论者只能用「选择」和「评论」
+  const commenting = collab.mode === 'plan' && collab.role !== 'guest'
+  const locked = collab.mode === 'plan' && !collab.canEdit
   const { t } = useI18n()
   const { vw, left, setToolbarW } = usePanelLayout()
   const narrow = vw <= NARROW_MAX
@@ -183,22 +189,28 @@ export default function TopToolbar() {
     >
       <div ref={barRef} data-tour="toolbar" className="qb-card relative flex items-stretch gap-0.5 p-1 pointer-events-auto max-w-[calc(100vw-1rem)] overflow-x-auto scrollbar-none">
       {MOTION && <span ref={indRef} aria-hidden className="m-tool-ind" />}
+      {/* 共享方案里的评论者：只有「选择」和「评论」能用，其余灰掉 */}
+      <div className={`contents ${locked ? 'qb-locked' : ''}`}>
       <button disabled={!api.canUndo} onClick={api.undo} title={t('hint.undo')} className={plain}>
         <Svg16 inner={TOOL_ICON.undo} />
       </button>
       <button disabled={!api.canRedo} onClick={api.redo} title={t('hint.redo')} className={plain}>
         <Svg16 inner={TOOL_ICON.redo} />
       </button>
+      </div>
       {sep}
 
-      <button className="m-tool qb-tool" data-mode-on={api.mode === 'select'} onClick={() => { api.setMode('select'); close() }}>
+      <button className="m-tool qb-tool" data-mode-on={api.mode === 'select' && !collab.placingPin} onClick={() => { api.setMode('select'); collab.setPlacingPin(false); close() }}>
         <Svg16 inner={TOOL_ICON.select} />{t('tool.select')}
       </button>
+      <div className={`contents ${locked ? 'qb-locked' : ''}`}>
       <button className="m-tool qb-tool" data-mode-on={api.mode === 'delete'} data-tone="red" title={t('tool.deleteHint')}
         onClick={() => { api.setMode(api.mode === 'delete' ? 'select' : 'delete'); close() }}>
         <Svg16 inner={TOOL_ICON.delete} />{t('tool.delete')}
       </button>
+      </div>
       {sep}
+      <div className={`contents ${locked ? 'qb-locked' : ''}`}>
 
       <ToolDrop
         tour="tool-tubes"
@@ -364,6 +376,15 @@ export default function TopToolbar() {
       <button className="m-tool qb-tool" data-mode-on={api.mode === 'reinforce'} title={t('tool.reinforceHint')} onClick={() => { api.startReinforce(); close() }}>
         <Svg16 inner={TOOL_ICON.reinforce} />{t('tool.reinforce')}
       </button>
+      </div>
+      {commenting && <>
+        {sep}
+        {/* 共享方案：放一颗图钉写位置评论（快捷键 C） */}
+        <button className="m-tool qb-tool" data-mode-on={collab.placingPin} title={t('collab.pin.toolHint')} data-ui="tool-comment"
+          onClick={() => { api.setMode('select'); collab.setPinDraft(null); collab.setPlacingPin(!collab.placingPin); close() }}>
+          <MessageSquarePlus size={16} strokeWidth={2} />{t('collab.pin.tool')}
+        </button>
+      </>}
       </div>
     </div>
     {/* 工具提示跟工具条那一层并排，自己按屏幕定位：那一层带着 transform，里面的 fixed 会以它为准 */}

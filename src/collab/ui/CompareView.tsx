@@ -1,30 +1,31 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
+import { ChevronDown } from 'lucide-react'
 import { useI18n } from '../../i18n'
 import { BuildModel, SceneManager } from '../../engine-api'
 import { MOTION } from '../../ui/motion'
 import { DIFF_COLORS, useCollab } from '../CollabContext'
 import type { ModelJSON } from '../ymodel'
+import { day } from './bits'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type E = any
 
-/** 一边的画面：自己的场景和模型，按零件上色。 */
-function useSide(host: React.RefObject<HTMLDivElement | null>, json: ModelJSON | null, tints: Map<string, string>) {
+/** 一边的画面：自己的场景和模型；上了色的零件突出，其余退后。 */
+function useSide(host: React.RefObject<HTMLDivElement | null>, json: ModelJSON, tints: Map<string, string>) {
   const ref = useRef<{ scene: E; model: E } | null>(null)
   useEffect(() => {
-    if (!host.current) return
+    if (!host.current) throw new Error('compare: no host')
     const scene = new SceneManager(host.current)
     scene.setMotion(MOTION)
     scene.setTheme(false)
     scene.setScene(false)
     scene.releaseLoadGate()
-    const model = new BuildModel()
-    ref.current = { scene, model }
+    ref.current = { scene, model: new BuildModel() }
     return () => { scene.dispose(); ref.current = null }
   }, [host])
   useEffect(() => {
     const s = ref.current
-    if (!s || !json) return
+    if (!s) return
     const res = s.model.loadJSON(json)
     if (!res.ok) throw new Error(`compare: model does not load (${res.reason})`)
     const draw = () => { s.scene.renderModel(s.model, null, { tints, dimUntinted: true }); s.scene.requestRender() }
@@ -35,33 +36,28 @@ function useSide(host: React.RefObject<HTMLDivElement | null>, json: ModelJSON |
 }
 
 /**
- * 版本对照：左右两个画面，镜头一起转。左边是旧的，删掉的零件标红；右边是新的，
- * 加上的标绿；两边都有但挪过、换过颜色的标橙。底下列出料表里数量变了的行。
+ * 版本对照：顶上一条选两版和图例；下面左右两个画面，镜头一起转，左边旧版里去掉的零件
+ * 标红，右边新版里加上的标绿（挪过位置的零件两边都标）；底部料表差异，只列变了的。
  */
 export default function CompareView() {
   const collab = useCollab()
-  const { t } = useI18n()
-  const cmp = collab.compare
+  const { t, lang } = useI18n()
+  const cmp = collab.compare!
   const leftHost = useRef<HTMLDivElement>(null)
   const rightHost = useRef<HTMLDivElement>(null)
 
-  const leftTints = new Map<string, string>()
-  const rightTints = new Map<string, string>()
-  if (cmp) {
-    for (const id of cmp.diff.removed) leftTints.set(id, DIFF_COLORS.removed)
-    for (const id of cmp.diff.added) rightTints.set(id, DIFF_COLORS.added)
-    for (const id of cmp.diff.changed) { leftTints.set(id, DIFF_COLORS.changed); rightTints.set(id, DIFF_COLORS.changed) }
-  }
-  const tintKey = cmp ? `${[...cmp.diff.removed].join()}|${[...cmp.diff.added].join()}|${[...cmp.diff.changed].join()}` : ''
-  const lt = useRef(leftTints)
-  const rt = useRef(rightTints)
-  const lastKey = useRef('')
-  if (lastKey.current !== tintKey) { lt.current = leftTints; rt.current = rightTints; lastKey.current = tintKey }
+  const { lt, rt, removed, added } = useMemo(() => {
+    const lt = new Map<string, string>(), rt = new Map<string, string>()
+    for (const id of cmp.diff.removed) lt.set(id, DIFF_COLORS.removed)
+    for (const id of cmp.diff.added) rt.set(id, DIFF_COLORS.added)
+    for (const id of cmp.diff.changed) { lt.set(id, DIFF_COLORS.removed); rt.set(id, DIFF_COLORS.added) }
+    return { lt, rt, removed: lt.size, added: rt.size }
+  }, [cmp])
 
-  const left = useSide(leftHost, cmp?.left || null, lt.current)
-  const right = useSide(rightHost, cmp?.right || null, rt.current)
+  const left = useSide(leftHost, cmp.left, lt)
+  const right = useSide(rightHost, cmp.right, rt)
 
-  // 两边镜头同步：谁动了就把谁的镜头给另一边
+  // 两边都有了尺寸再框：按大的那一座框住；之后谁动了就把谁的镜头给另一边
   const framed = useRef(false)
   useEffect(() => {
     let raf = 0
@@ -70,12 +66,11 @@ export default function CompareView() {
       raf = requestAnimationFrame(tick)
       const a = left.current, b = right.current
       if (!a || !b) return
-      // 两边画布都有了尺寸再框：按大的那一座框住，另一边照抄
-      if (!framed.current && cmp && leftHost.current?.clientWidth && rightHost.current?.clientWidth) {
+      if (!framed.current && leftHost.current?.clientWidth && rightHost.current?.clientWidth) {
         framed.current = true
         a.scene.onResize()
         b.scene.onResize()
-        const size = (m: E) => { const bb = m.bounds(2.5); return bb ? bb.size[0] * bb.size[1] * bb.size[2] + bb.size[0] + bb.size[2] : 0 }
+        const size = (m: E) => { const bb = m.bounds(2.5); return bb ? bb.size[0] + bb.size[1] + bb.size[2] : 0 }
         const big = size(a.model) > size(b.model) ? a : b
         big.scene.resetCamera(big.model, { animate: false })
         const pose = big.scene.getCameraPose()
@@ -90,57 +85,76 @@ export default function CompareView() {
     }
     tick()
     return () => cancelAnimationFrame(raf)
-  }, [left, right, cmp])
+  }, [left, right])
 
-  if (!cmp) return null
-  const counts = { added: cmp.diff.added.size, removed: cmp.diff.removed.size, changed: cmp.diff.changed.size }
+  // 两个下拉：现在、各版本、参考方案
+  const options = [
+    { id: 'current', name: t('collab.version.now'), at: null as number | null },
+    ...collab.versions.filter(v => v.kind !== 'reference').sort((a, b) => b.createdAt - a.createdAt).map(v => ({ id: String(v.id), name: v.name, at: v.createdAt })),
+    ...collab.versions.filter(v => v.kind === 'reference').map(v => ({ id: String(v.id), name: t('collab.version.reference'), at: v.createdAt })),
+  ]
+  for (const id of cmp.ids) if (!options.some(o => o.id === id)) options.push({ id, name: cmp.names[cmp.ids.indexOf(id)], at: null })
+  const count = (json: ModelJSON) => ['tubes', 'panels', 'slides', 'fittings'].reduce((s, k) => s + ((json[k] as unknown[] | undefined)?.length || 0), 0)
+
+  const Select = ({ side }: { side: 0 | 1 }) => {
+    const id = cmp.ids[side]
+    const o = options.find(x => x.id === id)
+    return (
+      <span className="cb-vsel" data-ui={`compare-pick-${side}`}>
+        {cmp.names[side]}{o?.at ? <small>{day(o.at, lang)}</small> : null}<ChevronDown />
+        <select value={id} aria-label={cmp.names[side]} onChange={e => {
+          const ids: [string, string] = side === 0 ? [e.target.value, cmp.ids[1]] : [cmp.ids[0], e.target.value]
+          collab.openCompare(ids[0], ids[1])
+        }}>
+          {options.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
+        </select>
+      </span>
+    )
+  }
 
   return (
-    <div className="fixed inset-0 z-[60] flex flex-col bg-gray-950" data-ui="compare-view">
-      <div className="flex items-center gap-3 px-3 h-12 border-b border-gray-800 shrink-0">
-        <div className="text-sm font-semibold text-gray-100">{t('collab.compare.title')}</div>
-        <div className="flex items-center gap-3 text-xs text-gray-300">
-          <span className="flex items-center gap-1"><i className="w-2.5 h-2.5 rounded-full" style={{ background: DIFF_COLORS.added }} />{t('collab.compare.added', { n: counts.added })}</span>
-          <span className="flex items-center gap-1"><i className="w-2.5 h-2.5 rounded-full" style={{ background: DIFF_COLORS.removed }} />{t('collab.compare.removed', { n: counts.removed })}</span>
-          <span className="flex items-center gap-1"><i className="w-2.5 h-2.5 rounded-full" style={{ background: DIFF_COLORS.changed }} />{t('collab.compare.changed', { n: counts.changed })}</span>
-        </div>
-        <span className="flex-1" />
-        <button onClick={collab.closeCompare} className="qb-btn qb-btn-ghost qb-btn-sm" data-ui="compare-close">{t('collab.compare.close')}</button>
+    <div className="cb-compare" data-ui="compare-view">
+      <div className="cb-cmpbar qb-card">
+        <Select side={0} />
+        <span className="cb-legend">→</span>
+        <Select side={1} />
+        <span className="cb-legend"><i className="r" />{t('collab.compare.removed', { n: removed })}</span>
+        <span className="cb-legend"><i className="a" />{t('collab.compare.added', { n: added })}</span>
+        <button type="button" className="qb-btn qb-btn-ghost qb-btn-sm sp" onClick={collab.closeCompare} data-ui="compare-close">{t('collab.compare.close')}</button>
       </div>
-      <div className="flex-1 min-h-0 grid grid-cols-2 gap-px bg-gray-800">
+      <div className="cb-panes">
         {[{ host: leftHost, name: cmp.names[0], side: 'left' }, { host: rightHost, name: cmp.names[1], side: 'right' }].map(s => (
-          <div key={s.side} className="relative bg-gray-950 min-w-0 min-h-0 overflow-hidden">
-            <div ref={s.host} className="qb-compare-host absolute inset-0" data-ui={`compare-${s.side}`} />
-            <div className="qb-card absolute top-2 left-2 px-2.5 py-1 text-xs text-gray-100 pointer-events-none">{s.name}</div>
+          <div key={s.side} className="cb-cpane">
+            <div ref={s.host} className="host" data-ui={`compare-${s.side}`} />
+            <span className="lb">{s.name}</span>
+            <span className="sync">{t('collab.compare.synced')}</span>
           </div>
         ))}
       </div>
-      <div className="shrink-0 max-h-[34vh] overflow-y-auto border-t border-gray-800 bg-gray-950 px-3 py-2" data-ui="compare-bom">
-        <div className="text-xs font-semibold text-gray-200 mb-1.5">{t('collab.compare.bom')}</div>
-        {!cmp.bom.length && <div className="text-xs text-gray-400">{t('collab.compare.bomSame')}</div>}
-        {cmp.bom.length > 0 && (
-          <table className="w-full text-xs">
-            <thead><tr className="text-gray-400 text-left">
-              <th className="font-normal py-1">{t('collab.compare.part')}</th>
-              <th className="font-normal py-1 text-right">{cmp.names[0]}</th>
-              <th className="font-normal py-1 text-right">{cmp.names[1]}</th>
-              <th className="font-normal py-1 text-right">{t('collab.compare.delta')}</th>
-            </tr></thead>
-            <tbody>
-              {cmp.bom.map(r => {
-                const d = r.right - r.left
-                return (
-                  <tr key={r.key} className="border-t border-gray-800 text-gray-100">
-                    <td className="py-1">{r.name}{r.color ? <span className="text-gray-400"> · {r.color}</span> : null}</td>
-                    <td className="py-1 text-right qb-num">{r.left}</td>
-                    <td className="py-1 text-right qb-num">{r.right}</td>
-                    <td className="py-1 text-right qb-num font-semibold" style={{ color: d > 0 ? DIFF_COLORS.added : DIFF_COLORS.removed }}>{d > 0 ? `+${d}` : d}</td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        )}
+      <div className="cb-diff qb-card" data-ui="compare-bom">
+        <div className="dh"><b>{t('collab.compare.bom')}</b>
+          <span>{t('collab.compare.totals', { a: cmp.names[0], n: count(cmp.left), b: cmp.names[1], m: count(cmp.right) })}</span></div>
+        <div className="tb">
+          {!cmp.bom.length && <div className="cb-hint" style={{ padding: 0 }}>{t('collab.compare.bomSame')}</div>}
+          {cmp.bom.length > 0 && (
+            <table>
+              <thead><tr><th>{t('collab.compare.part')}</th><th>{cmp.names[0]}</th><th>{cmp.names[1]}</th><th>{t('collab.compare.delta')}</th></tr></thead>
+              <tbody>
+                {cmp.bom.map(r => {
+                  const d = r.right - r.left
+                  return (
+                    <tr key={r.key}>
+                      <td>{r.name}{r.color ? ` · ${r.color}` : ''}</td>
+                      <td>{r.left}</td>
+                      <td>{r.right}</td>
+                      <td className={d > 0 ? 'a' : 'r'}>{d > 0 ? `+${d}` : `−${-d}`}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
       </div>
     </div>
   )

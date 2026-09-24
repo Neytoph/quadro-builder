@@ -11,14 +11,15 @@
 //
 // 共享方案（托管版设了 VITE_SYNC_BASE 才认）：
 //
-//	?plan=<id>                     打开共享方案，按自己的角色决定能不能编辑
+//	?plan=<id>                     在标签页里打开共享方案，按自己的角色决定能不能编辑
 //	&invite=<token>                成员邀请：登录后加入成为评论者
 //	&compare=<版本 id>,<版本 id>    版本对照，版本 id 可以写 current
 //	?delivery=<token>              交付页里嵌入的只读查看
 //	?import=qdf                    打开后直接进入批量导入 .qdf
 //	?room=brief:<id>               画房间边界，画完写回需求单
 //
-// 除了只看模式和共享方案这几个，参数读完就从地址栏去掉：刷新一下不该再打开一遍、再存一份。
+// 除了只看模式，参数读完就从地址栏去掉：刷新一下不该再打开一遍、再存一份。
+// 当前标签页是共享方案时，地址栏由 CollabProvider 写成这个方案的地址。
 
 export type ResumeExport = 'manual' | 'bom' | 'bompng' | 'shareimg' | 'qdf' | 'json'
 
@@ -91,10 +92,10 @@ export function bootEntry(): Entry {
 export const VIEW_ONLY = bootEntry().view
 
 /**
- * 只放一座、不读也不写这台设备上的标签页的打开方式：只看、共享方案、交付查看、画房间。
- * 它们都不是这个人自己的标签页，不能盖掉。
+ * 只放一座、不读也不写这台设备上的标签页的打开方式：只看、交付查看、画房间。
+ * 它们都不是这个人自己的标签页，不能盖掉。共享方案是标签页里的一个，照常读写。
  */
-export const SESSIONLESS = VIEW_ONLY || !!bootEntry().plan || !!bootEntry().delivery || !!bootEntry().roomBrief
+export const SESSIONLESS = VIEW_ONLY || !!bootEntry().delivery || !!bootEntry().roomBrief
 
 /**
  * 来源标记记进 cookie qh_src，注册时网关写进用户的注册来源。规则和站点的 track.js

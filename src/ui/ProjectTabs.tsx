@@ -5,7 +5,7 @@ import { useI18n } from '../i18n'
 import { NARROW_MAX, TAB_BAR_H, usePanelLayout } from './panelLayout'
 import { DOCK_PILLS, PLAN_PILLS, useDock } from './dock'
 import { useCollab } from '../collab/CollabContext'
-import PlanBar from '../collab/ui/PlanBar'
+import ShareCluster from '../collab/ui/ShareCluster'
 
 const GROUPS: (typeof DOCK_PILLS)[] = [
   DOCK_PILLS.filter(p => p.id === 'file' || p.id === 'saves'),
@@ -14,14 +14,8 @@ const GROUPS: (typeof DOCK_PILLS)[] = [
   DOCK_PILLS.filter(p => p.id === 'safety'),
 ]
 
-// 共享方案里只有这一座：没有「我的设计」和模型库（换进来的造型会盖掉方案），
-// 多出评论、版本、成员
-const PLAN_GROUPS: (typeof DOCK_PILLS)[] = [
-  PLAN_PILLS,
-  DOCK_PILLS.filter(p => p.id === 'file'),
-  DOCK_PILLS.filter(p => p.id === 'advisor' || p.id === 'bom' || p.id === 'inventory'),
-  DOCK_PILLS.filter(p => p.id === 'safety'),
-]
+// 当前标签页是共享方案：「我的库存」和「安全」之间多一组「评论 / 版本」
+const PLAN_GROUPS: (typeof DOCK_PILLS)[] = [...GROUPS.slice(0, 3), PLAN_PILLS, GROUPS[3]]
 
 export default function ProjectTabs() {
   const api = useEngine()
@@ -68,8 +62,7 @@ export default function ProjectTabs() {
       <a href="/" title={t('nav.home')} className="shrink-0 flex items-center justify-center w-8 h-8 rounded-[9px] overflow-hidden">
         <img src={`${import.meta.env.BASE_URL}favicon.svg`} alt="" width={32} height={32} draggable={false} />
       </a>
-      {planMode && <PlanBar narrow={narrow} />}
-      {!narrow && !planMode && (
+      {!narrow && (
       <div className="flex items-center gap-1 min-w-0 flex-1 overflow-x-auto scrollbar-thin">
       {api.tabs.map(tab => (
         <div key={tab.tabId}
@@ -104,7 +97,7 @@ export default function ProjectTabs() {
                 ? api.safety.findings.filter(f => f.level !== 'info').length
                 : null
               const unread = item.id === 'comments' ? collab.unread.pins + collab.unread.chat : 0
-              const mark = unread ? ` · ${unread}` : issues == null ? '' : issues ? ` · ${issues}` : ' ✓'
+              const mark = issues == null ? '' : issues ? ` · ${issues}` : ' ✓'
               const tone = issues == null || on ? '' : issues ? ' text-amber-300' : ' text-teal-400'
               return (
                 <button key={item.id} data-tour={`dock-${item.id}`} data-pill-on={on} onClick={() => toggle(item.id)}
@@ -114,13 +107,14 @@ export default function ProjectTabs() {
                       : `text-gray-300 hover:text-teal-600 hover:bg-gray-900${tone}`
                   }`}>
                   {t(item.labelKey)}{mark}
-                  {unread > 0 && !on && <span data-unread className="absolute top-1 right-1 w-2 h-2 rounded-full bg-red-500" />}
+                  {unread > 0 && <b className="cb-n" data-unread>{unread}</b>}
                 </button>
               )
             })}
           </div>
         ))}
       </div>
+      <ShareCluster />
     </div>
   )
 }

@@ -38,6 +38,11 @@ export interface VersionInfo {
   name: string
   createdBy: number
   createdAt: number
+  /** 普通版本是空的；需求单建方案时参考方案存成的那一条是 reference（没有 Yjs 状态，只有 data） */
+  kind: '' | 'reference'
+  partsCount: number
+  /** 这一版有没有还在用的交付页 */
+  delivered: boolean
 }
 
 export interface Version extends VersionInfo {

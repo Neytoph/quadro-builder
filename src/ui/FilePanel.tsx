@@ -4,14 +4,6 @@ import { LANGS, useI18n } from '../i18n'
 import { ONBOARDING_EVENT } from './Onboarding'
 import { useCollab } from '../collab/CollabContext'
 import BatchImport from '../collab/ui/BatchImport'
-import { onSyncStart, syncStarted } from '../sync/bootstrap'
-
-/** 同步跑起来了，也就是后端认得出这个人。 */
-function useSignedIn() {
-  const [on, setOn] = useState(syncStarted)
-  useEffect(() => (on ? undefined : onSyncStart(() => setOn(true))), [on])
-  return on
-}
 
 const btn = 'text-sm rounded-lg border border-gray-700 bg-gray-800 hover:border-teal-400 px-3 py-2.5 text-left cursor-pointer leading-snug'
 
@@ -21,30 +13,18 @@ export default function FilePanel() {
   const { t, lang, setLang } = useI18n()
   const fileRef = useRef<HTMLInputElement>(null)
   const [batch, setBatch] = useState(false)
-  // 共享方案里只有这一座，新建、保存、导入这些对自己标签页的操作不出现
-  const own = collab.mode === 'off'
-  // 开启共享：托管版、登录了、是自己的标签页
-  const signedIn = useSignedIn()
-  const canShare = own && collab.enabled && signedIn
+  // 共享方案随改随同步，没有「保存」；「另存为」存一份到自己的设计里
+  const plan = collab.mode === 'plan'
 
   return (
     <div className="p-3">
       <div className="flex flex-col gap-1.5">
-        {canShare && (
-          <button onClick={() => { void collab.enableSharing().catch(err => api.notify(String(err instanceof Error ? err.message : err), 'err')) }}
-            className={`${btn} border-orange-400`} data-ui="enable-sharing">
-            <div>{t('collab.enable')}</div>
-            <div className="text-[11px] text-gray-400">{t('collab.enableHint')}</div>
-          </button>
-        )}
-        {own && <>
         {/* 手机上这块面板盖满画布，新开的标签页被挡在后面，点完得有一句话 */}
         <button onClick={() => { api.newTab(); api.notify(t('toast.newTab')) }} className={btn}>{t('btn.new')}</button>
-        <button onClick={() => void api.saveCurrent()} className={btn}>{t('btn.save')}</button>
+        {!plan && <button onClick={() => void api.saveCurrent()} className={btn}>{t('btn.save')}</button>}
         <button onClick={() => void api.saveCurrentAs()} className={btn}>{t('btn.saveAs')}</button>
         <button onClick={() => fileRef.current?.click()} className={btn}>{t('btn.import')}</button>
         <button onClick={() => setBatch(true)} className={btn} data-ui="batch-open">{t('batch.open')}</button>
-        </>}
         <button onClick={api.exportQdf} className={btn}>{t('btn.exportQdf')}</button>
         <button onClick={api.exportJson} className={btn}>{t('btn.exportJson')}</button>
         <button onClick={api.exportPng} className={btn}>{t('btn.exportPng')}</button>
@@ -53,7 +33,7 @@ export default function FilePanel() {
           disabled={!!api.exportingManual}
           className={`${btn} disabled:opacity-40 disabled:cursor-not-allowed`}
         >{t('btn.exportManual')}</button>
-        {own && <button onClick={() => void api.shareCurrent()} className={btn}>{t('btn.share')}</button>}
+        <button onClick={() => void api.shareCurrent()} className={btn}>{t('btn.share')}</button>
         <button onClick={() => window.dispatchEvent(new Event(ONBOARDING_EVENT))} className={btn}>{t('onboard.replay')}</button>
         <input ref={fileRef} type="file" accept=".qdf,.json,application/json" hidden
           onChange={e => { const f = e.target.files?.[0]; if (f) void api.importFile(f); e.target.value = '' }} />

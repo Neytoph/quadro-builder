@@ -18,7 +18,8 @@ import { DockProvider, useDock } from './ui/dock'
 import { usePresence } from './ui/motion'
 import { bootEntry, fullBuilderUrl, VIEW_ONLY } from './entry'
 import { CollabProvider, useCollab } from './collab/CollabContext'
-import CollabScreens from './collab/ui/CollabScreens'
+import './collab/collab.css'
+import { JoinModal } from './collab/ui/Modals'
 import PlanOverlays from './collab/ui/PlanOverlays'
 import CompareView from './collab/ui/CompareView'
 import BatchImport from './collab/ui/BatchImport'
@@ -220,12 +221,11 @@ function ViewShell() {
       {!delivery && <a href={fullBuilderUrl()} target="_top" className="qb-btn qb-btn-sm fixed top-3 left-3 z-40 no-underline">{t('view.open')} ↗</a>}
       <ViewBar />
       <Toast />
-      <CollabScreens />
     </div>
   )
 }
 
-/** 画房间边界：只有画面和画图的面板。 */
+/** 画房间边界：一张俯视的平面图和左边的面板（三维画面在底下，不用）。 */
 function RoomShell() {
   const collab = useCollab()
   return (
@@ -233,7 +233,6 @@ function RoomShell() {
       <CanvasHost />
       {collab.room && <RoomEditor />}
       <Toast />
-      <CollabScreens />
     </div>
   )
 }
@@ -302,6 +301,14 @@ function AppInner() {
       if (meta && (e.key === 'a' || e.key === 'A')) { e.preventDefault(); api.selectAll(); return }
       if (meta && (e.key === 'g' || e.key === 'G')) { e.preventDefault(); e.shiftKey ? api.ungroup() : api.group(); return }
       if (meta) return
+      // 共享方案的成员：C 放一颗评论图钉
+      if ((e.key === 'c' || e.key === 'C') && collab.mode === 'plan' && collab.role !== 'guest') {
+        e.preventDefault()
+        api.setMode('select')
+        collab.setPinDraft(null)
+        collab.setPlacingPin(!collab.placingPin)
+        return
+      }
       if ((e.key === 'm' || e.key === 'M') && (api.selectionCount || api.pasting)) {
         e.preventDefault()
         api.mirror(e.shiftKey ? 'fb' : 'lr')
@@ -369,22 +376,23 @@ function AppInner() {
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [api, handleEsc])
+  }, [api, collab, handleEsc])
 
-  // 共享方案里只能看的人（评论者、访客）：没有搭建工具条和颜色栏
+  // 共享方案里只能看的人没有颜色栏；访客连工具条也没有，评论者的工具条只剩「选择」「评论」
   const viewer = collab.mode === 'plan' && !collab.canEdit
+  const visitor = viewer && collab.role === 'guest'
   return (
     <div className="app-viewport w-screen flex bg-gray-950 overflow-hidden">
       <CanvasHost />
       <SceneToggle />
       <ProjectTabs />
-      {!viewer && <TopToolbar />}
-      {!viewer && <LeftStack />}
+      {!visitor && !collab.compare && <TopToolbar />}
+      {!viewer && !collab.compare && <LeftStack />}
       <RightDock />
-      <AssemblyBar />
-      {collab.mode === 'plan' && <PlanOverlays />}
-      {collab.compare && <CompareView />}
-      <CollabScreens />
+      {!collab.compare && <AssemblyBar />}
+      {collab.mode === 'plan' && !collab.compare && <PlanOverlays />}
+      {collab.mode === 'plan' && collab.compare && <CompareView key={collab.session?.id} />}
+      <JoinModal />
       <Toast />
       <ManualConfirm />
       <AccountDialog />

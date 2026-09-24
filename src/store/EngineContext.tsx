@@ -55,11 +55,15 @@ export interface SafetyResult {
   height: number
 }
 
+export type ThumbJob = { kind: 'official' | 'preset'; id: string } | { kind: 'model'; data: unknown }
+
 export interface TabInfo {
   tabId: string
   docId: string | null
   name: string
   dirty: boolean
+  /** 共享方案的标签页：方案 id。它的文档经 WebSocket 同步，不用保存 */
+  planId: string | null
 }
 
 export interface BomRow {
@@ -245,13 +249,17 @@ interface EngineApi {
   applyColorTune: (tune: { scene: Record<string, unknown>; frame: Record<string, string>; grade?: Record<string, number> }) => void
   startThumbBatch: () => void
   endThumbBatch: () => void
-  captureThumb: (job: { kind: 'official' | 'preset'; id: string }) => Promise<string | null>
-  /**
-   * 共享方案、交付查看：把一份外面打开的文档换进来当唯一的标签页。
-   * readOnly 只能看；idTag 见 BuildModel.idTag。
-   */
-  attachDoc: (o: { local: LocalDoc; name: string; readOnly: boolean; idTag: string }) => void
-  setReadOnly: (on: boolean) => void
+  /** 截一张缩略图：官方造型、起步造型，或者一份造型 JSON（批量导入的结果） */
+  captureThumb: (job: ThumbJob) => Promise<string | null>
+  /** 交付查看：把一份外面取来的文档换进来当唯一的标签页，只能看。 */
+  attachDoc: (o: { local: LocalDoc; name: string; readOnly: boolean }) => void
+  /** 打开共享方案的标签页（已开着就切过去），返回标签页 id */
+  openPlanTab: (planId: string, name: string) => string
+  /** 自己的造型开启共享：标签页原地变成共享方案 */
+  convertToPlan: (tabId: string, planId: string, name: string) => void
+  /** 共享方案标签页的权限：能不能改、新建零件 id 的本端标记（见 BuildModel.idTag） */
+  setTabAccess: (tabId: string, o: { readOnly: boolean; idTag: string }) => void
+  tabLocal: (tabId: string) => LocalDoc | null
   readOnly: boolean
   /** 引擎本体（共享界面要投影坐标、取点、给零件上色） */
   engine: () => { scene: E; model: E; builder: E } | null
@@ -405,7 +413,16 @@ function replaceTabModel(tab: Tab, json: ModelJSON) {
 function makeTab(seed: ModelJSON, name: string, docId: string | null): Tab {
   const tabId = docs.newTabId()
   const local = SESSIONLESS ? memoryDoc(seed) : createTabDoc(tabId, seed)
-  return { tabId, docId, name, dirty: false, view: {}, local }
+  return { tabId, docId, name, dirty: false, planId: null, view: {}, local }
+}
+
+/**
+ * 共享方案的标签页：文档先空着，连上服务器以后拿到方案的内容（服务器上还没有就由
+ * 编辑者用方案的 data 生成）。
+ */
+function makePlanTab(planId: string, name: string): Tab {
+  const tabId = docs.newTabId()
+  return { tabId, docId: null, name, dirty: false, planId, view: {}, local: createTabDoc(tabId, null) }
 }
 
 function tabParts(tab: Tab) {
@@ -414,7 +431,7 @@ function tabParts(tab: Tab) {
 
 /** 空的「未命名」标签页不留；全空的话留第一个。返回留下的和去掉的。 */
 function pruneSessionTabs(tabs: Tab[]) {
-  const keep = tabs.filter(tb => tb.docId || tabParts(tb) > 0 || !isUntitledName(tb.name))
+  const keep = tabs.filter(tb => tb.planId || tb.docId || tabParts(tb) > 0 || !isUntitledName(tb.name))
   if (keep.length) return { keep, gone: tabs.filter(tb => !keep.includes(tb)) }
   const first = tabs[0]
   return first ? { keep: [{ ...first, dirty: false }], gone: tabs.slice(1) } : { keep: tabs, gone: [] }
@@ -615,7 +632,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     }
     return docs.saveSession({
       tabs: tabsRef.current.map(tb => ({
-        tabId: tb.tabId, docId: tb.docId, name: tb.name, dirty: tb.dirty, view: tb.view,
+        tabId: tb.tabId, docId: tb.docId, name: tb.name, dirty: tb.dirty, planId: tb.planId, view: tb.view,
       })),
       activeTabId: activeRef.current,
     }) as Promise<void>
@@ -628,7 +645,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   }, [saveSessionNow])
 
   const syncTabs = useCallback(() => {
-    setTabs(tabsRef.current.map(({ tabId, docId, name, dirty }) => ({ tabId, docId, name, dirty })))
+    setTabs(tabsRef.current.map(({ tabId, docId, name, dirty, planId }) => ({ tabId, docId, name, dirty, planId })))
     setActiveTabId(activeRef.current)
     persistSession()
   }, [persistSession])
@@ -636,7 +653,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const markDirty = useCallback(() => {
     if (switching.current) return
     const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
-    if (tab && !tab.dirty) {
+    // 共享方案随改随同步，没有「没保存」这回事
+    if (tab && !tab.dirty && !tab.planId) {
       tab.dirty = true
       syncTabs()
     } else {
@@ -748,8 +766,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
         // 开发模式下把引擎挂到 window 上，浏览器测试脚本靠它摆相机、查手柄
         if (import.meta.env.DEV) (window as unknown as { __quadroDev?: unknown }).__quadroDev = eng.current
 
-        // 只看、共享方案、交付、画房间：只放这一座，不读这台设备上记着的标签页。
-        // 共享方案和交付由 CollabProvider 连上以后 attachDoc 换进来。
+        // 只看、交付、画房间：只放这一座，不读这台设备上记着的标签页。
+        // 交付由 CollabProvider 取到以后 attachDoc 换进来。
         if (!SESSIONLESS) await docs.migrateOldDrafts()
         const session = SESSIONLESS ? null : await docs.loadSession()
         if (dead) return
@@ -766,6 +784,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
               docId: (tb.docId as string) || null,
               name: String(tb.name || t('tab.untitled')),
               dirty: !!tb.dirty,
+              planId: (tb.planId as string) || null,
               view: (tb.view as AnyRec) || {},
               local,
             })
@@ -1040,9 +1059,9 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     syncTabs()
   }, [applyTab, snapshotActive, syncTabs])
 
-  const attachDoc = useCallback((o: { local: LocalDoc; name: string; readOnly: boolean; idTag: string }) => {
+  const attachDoc = useCallback((o: { local: LocalDoc; name: string; readOnly: boolean }) => {
     const old = tabsRef.current
-    const tab: Tab = { tabId: docs.newTabId(), docId: null, name: o.name, dirty: false, view: {}, local: o.local, idTag: o.idTag, readOnly: o.readOnly }
+    const tab: Tab = { tabId: docs.newTabId(), docId: null, name: o.name, dirty: false, planId: null, view: {}, local: o.local, readOnly: o.readOnly }
     tabsRef.current = [tab]
     activeRef.current = tab.tabId
     applyTab(tab)
@@ -1050,15 +1069,76 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     syncTabs()
   }, [applyTab, syncTabs])
 
-  const setReadOnly = useCallback((on: boolean) => {
+  /**
+   * 要整座换掉的时候（导入文件、打开分享链接）用的标签页：当前页是自己的就用它，
+   * 是共享方案就新开一页——换掉方案里的造型等于替所有人改了。
+   */
+  const ownActiveTab = useCallback((): Tab | null => {
+    const active = tabsRef.current.find(x => x.tabId === activeRef.current)
+    if (!active || !active.planId) return active || null
+    snapshotActive()
+    const tab = makeTab(EMPTY_MODEL, t('tab.untitled'), null)
+    tabsRef.current = [...tabsRef.current, tab]
+    activeRef.current = tab.tabId
+    applyTab(tab)
+    syncTabs()
+    return tab
+  }, [applyTab, snapshotActive, syncTabs, t])
+
+  /** 打开共享方案：已经有这个方案的标签页就切过去，没有就新开一个。 */
+  const openPlanTab = useCallback((planId: string, name: string) => {
+    const existing = tabsRef.current.find(x => x.planId === planId)
+    if (existing) {
+      if (name && existing.name !== name) existing.name = name
+      if (existing.tabId !== activeRef.current) {
+        snapshotActive()
+        activeRef.current = existing.tabId
+        applyTab(existing)
+      }
+      syncTabs()
+      return existing.tabId
+    }
+    snapshotActive()
+    const tab = makePlanTab(planId, name)
+    // 刚打开的空白「未命名」页让给方案，不多留一个空标签
+    const active = tabsRef.current.find(x => x.tabId === activeRef.current)
+    const reuse = active && !active.planId && !active.docId && !active.dirty && tabParts(active) === 0 && isUntitledName(active.name)
+    tabsRef.current = reuse
+      ? tabsRef.current.map(x => (x === active ? tab : x))
+      : [...tabsRef.current, tab]
+    if (reuse && active) void dropTabDoc(active.tabId, active.local)
+    activeRef.current = tab.tabId
+    applyTab(tab)
+    syncTabs()
+    return tab.tabId
+  }, [applyTab, snapshotActive, syncTabs])
+
+  /** 自己的造型开启共享：这个标签页原地变成共享方案，文档不换。 */
+  const convertToPlan = useCallback((tabId: string, planId: string, name: string) => {
+    const tab = tabsRef.current.find(x => x.tabId === tabId)
+    if (!tab) throw new Error(`convertToPlan: no tab ${tabId}`)
+    tab.planId = planId
+    tab.name = name
+    tab.dirty = false
+    syncTabs()
+  }, [syncTabs])
+
+  /** 共享方案标签页的权限：能不能改、新建零件 id 的本端标记。 */
+  const setTabAccess = useCallback((tabId: string, o: { readOnly: boolean; idTag: string }) => {
+    const tab = tabsRef.current.find(x => x.tabId === tabId)
+    if (!tab) return
+    tab.readOnly = o.readOnly
+    tab.idTag = o.idTag
     const e2 = eng.current
-    const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
-    if (!e2 || !tab) return
-    tab.readOnly = on
-    e2.builder.setReadOnly(on)
+    if (!e2 || tabId !== activeRef.current) return
+    e2.builder.setReadOnly(o.readOnly)
+    e2.model.idTag = o.idTag
     e2.builder.refresh()
     bump()
   }, [bump])
+
+  /** 标签页的文档（共享方案要连上服务器） */
+  const tabLocal = useCallback((tabId: string) => tabsRef.current.find(x => x.tabId === tabId)?.local || null, [])
 
   const closeTab = useCallback((tabId: string) => {
     const closing = tabsRef.current.find(x => x.tabId === tabId)
@@ -1112,6 +1192,10 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const e2 = eng.current
     const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
     if (!e2 || !tab) return null
+    if (tab.planId) {
+      notify(t('collab.autoSynced'))
+      return null
+    }
     let saveName = name || tab.name
     if (!name && !tab.docId && isUntitledName(tab.name)) {
       const typed = await askName(t('saves.saveTitle'), t('saves.saveOk'), '')
@@ -1156,9 +1240,12 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     if (typed == null) return
     const data = exportTab(tab)
     const saved = await docs.saveDoc({ docId: null, name: typed.trim() || t('tab.untitled'), data })
-    tab.docId = saved.id
-    tab.name = saved.name
-    tab.dirty = false
+    // 共享方案另存一份到「我的设计」：标签页还是那个方案
+    if (!tab.planId) {
+      tab.docId = saved.id
+      tab.name = saved.name
+      tab.dirty = false
+    }
     syncTabs()
     track('builder.design.saveAs', { ...modelShape(data) })
     notify(t('toast.saved', { name: saved.name }))
@@ -1265,7 +1352,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       notify(t('lib.loadFailed'), 'err')
       return
     }
-    const reuse = !!active && !active.docId && !active.dirty && modelPartCount(e2.model.toJSON()) === 0
+    // 共享方案的标签页不让给别的造型
+    const reuse = !!active && !active.planId && !active.docId && !active.dirty && modelPartCount(e2.model.toJSON()) === 0
     if (reuse && active) {
       active.name = name
       active.dirty = false
@@ -1302,7 +1390,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       }
       const json = normalizeModel(data)
       if (!json) throw new Error('data')
-      const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
+      const tab = ownActiveTab()
       if (!tab) return
       switching.current = true
       e2.builder.modelReplaced()
@@ -1440,7 +1528,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       const res = e2.model.loadJSON(data)
       if (res && res.ok === false) throw new Error(String(res.reason || 'data'))
     }
-    const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
+    const tab = opts?.undoable ? tabsRef.current.find(x => x.tabId === activeRef.current) : ownActiveTab()
     if (!tab) return false
     loadingModel.current = true
     try {
@@ -1776,6 +1864,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       const e2 = eng.current
       if (!e2) return
       if (modelPartCount(e2.model.toJSON()) > 0) newTab()
+      // 当前是共享方案的标签页时 applyModelJson 自己会新开一个
       if (!applyModelJson(data, { undoable: false })) { notify(t('toast.shareInvalid'), 'err'); return }
       const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
       if (tab && ent.name) {
@@ -1874,12 +1963,14 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     bump()
   }, [bump])
 
-  const captureThumb = useCallback(async (job: { kind: 'official' | 'preset'; id: string }) => {
+  const captureThumb = useCallback(async (job: ThumbJob) => {
     const e = eng.current
     if (!e) return null
     let data: unknown = null
     try {
-      if (job.kind === 'official') {
+      if (job.kind === 'model') {
+        data = job.data
+      } else if (job.kind === 'official') {
         const text = await fetchOfficialQdf(job.id)
         data = parseDesign(text)
       } else if (job.id === 'pyramid') {
@@ -2005,7 +2096,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     catalog,
     applyColorTune,
     startThumbBatch, endThumbBatch, captureThumb,
-    attachDoc, setReadOnly,
+    attachDoc, openPlanTab, convertToPlan, setTabAccess, tabLocal,
     readOnly: !!builder?.readOnly,
     engine: () => eng.current,
   }

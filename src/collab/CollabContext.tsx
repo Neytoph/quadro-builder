@@ -1,23 +1,25 @@
-// 共享方案在界面这一层的状态和动作：打开方案、邀请加入、在线的人、评论和留言、
-// 版本、对照、复制、交付，还有交付查看和画房间两种打开方式。
+// 共享方案在界面这一层的状态和动作。
 //
-// 开源本地版（不设 VITE_SYNC_BASE）mode 永远是 off，这里什么都不做，界面也不出现。
+// 共享方案是标签页里的一个：标签页带着方案 id，文档存在本机。这里给每个方案标签页
+// 连一条 WebSocket（PlanSession），当前标签页是方案时，评论、版本、成员、对照都跟着它。
+// 另有两种只放一座的打开方式：交付查看（?delivery=）和画房间边界（?room=brief:）。
+//
+// 开源本地版（不设 VITE_SYNC_BASE）什么都不做，界面也不出现。
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useEngine } from '../store/EngineContext'
 import { bootEntry, dropParam } from '../entry'
 import { computeMetrics, BuildModel } from '../engine-api'
 import { useI18n } from '../i18n'
-import { collabApi, collabEnabled, type Anchor, type Member, type Metrics, type Opening, type Plan, type Post, type Ref, type Role, type Room, type Thread, type VersionInfo } from './api'
-import { canEditRole, docFromBase64, exportOf, PlanSession, peerColor, type Peer } from './planSession'
+import { ApiError, collabApi, collabEnabled, type Anchor, type Metrics, type Plan, type Post, type Ref, type Role, type Room, type Thread, type VersionInfo } from './api'
+import { canEditRole, docFromBase64, exportOf, memberColor, PlanSession, type Peer } from './planSession'
 import { memoryDoc } from './localDocs'
 import { docToJSON, type ModelJSON } from './ymodel'
 import { diffBom, diffModels, type BomDiffRow, type ModelDiff } from './compare'
 
 export type CollabMode = 'off' | 'plan' | 'delivery' | 'room'
-export type CollabStatus = 'loading' | 'needLogin' | 'ready' | 'error'
 
-/** 版本对照：左右两边的造型、名字、差异。 */
+/** 版本对照：左右两边是哪两版、造型、差异。 */
 export interface CompareState {
   ids: [string, string]
   names: [string, string]
@@ -35,25 +37,31 @@ export interface DeliveryState {
 export interface RoomState {
   briefId: string
   room: Room
+  title: string
 }
 
-/** 对照和选中标记用的颜色 */
-export const DIFF_COLORS = { added: '#2f9e44', removed: '#e03131', changed: '#f08c00' }
+/** 打开邀请链接时还没登录：先看看，或者去登录 */
+export interface JoinAsk {
+  plan: Plan
+  invite: string
+}
+
+export const DIFF_COLORS = { added: '#1FA85A', removed: '#E11D48' }
 
 interface CollabApi {
   enabled: boolean
   mode: CollabMode
-  status: CollabStatus
+  /** 当前方案标签页打不开的原因 */
   error: string | null
-  /** 界面跟着刷新的计数 */
   rev: number
   session: PlanSession | null
   plan: Plan | null
   role: Role
   canEdit: boolean
   canDeliver: boolean
-  members: Member[]
   peers: Peer[]
+  /** 成员的颜色：按加入顺序 */
+  colorOf: (userId: number) => string
   threads: Thread[]
   versions: VersionInfo[]
   isUnread: (p: Post) => boolean
@@ -61,7 +69,7 @@ interface CollabApi {
   markRead: () => Promise<void>
   refreshThreads: () => Promise<void>
   refreshVersions: () => Promise<void>
-  /** 位置评论：下一次点画布取一个点 */
+  /** 放图钉的工具开着 */
   placingPin: boolean
   setPlacingPin: (on: boolean) => void
   pinDraft: Anchor | null
@@ -69,18 +77,16 @@ interface CollabApi {
   addPin: (anchor: Anchor, body: string, files: File[]) => Promise<void>
   reply: (tid: number, body: string, files: File[], refs: Ref[]) => Promise<void>
   resolve: (tid: number, resolved: boolean) => Promise<void>
-  /** 零件已经不在了的评论 */
   partGone: (t: Thread) => boolean
-  /** 位置评论的编号：按发表先后从 1 数 */
   pinNumber: (t: Thread) => number
-  /** 我名下的其他造型（复制出来的那几份），留言时可以引用 */
-  myForks: Array<{ id: string; name: string }>
+  /** 我名下的其他共享方案（复制出去改的那几份），留言时可以引用 */
+  myPlans: Array<{ id: string; name: string; role: Role }>
   focusThread: (t: Thread) => void
   activeThread: number | null
   setActiveThread: (id: number | null) => void
   saveVersion: (name: string) => Promise<{ id: number }>
   inviteUrl: () => Promise<string>
-  shareUrl: () => string
+  viewUrl: () => string
   setRole: (userId: number, role: Role) => Promise<void>
   removeMember: (userId: number) => Promise<void>
   fork: (versionId: number | null) => Promise<void>
@@ -89,39 +95,42 @@ interface CollabApi {
   compare: CompareState | null
   openCompare: (a: string, b: string) => void
   closeCompare: () => void
+  /** 某一版的造型（对照、查零件删在哪一版） */
+  versionModel: (id: string) => Promise<ModelJSON>
   delivery: DeliveryState | null
   room: RoomState | null
   saveRoom: (room: Room) => Promise<void>
-  /** 自己的造型开启共享：成为一个共享方案，转到方案地址 */
+  /** 自己的造型开启共享：当前标签页原地变成共享方案 */
   enableSharing: () => Promise<void>
+  /** 打开「我的设计」里的一份：开启过共享的，打开方案标签页 */
+  planOfDoc: (docId: string) => boolean
+  openPlan: (planId: string) => Promise<void>
+  joinAsk: JoinAsk | null
+  joinAsGuest: () => void
   loginUrl: () => string
   report: (err: unknown) => void
 }
 
 const Ctx = createContext<CollabApi | null>(null)
 
-function modeOf(): CollabMode {
-  if (!collabEnabled()) return 'off'
-  const e = bootEntry()
-  if (e.plan) return 'plan'
-  if (e.delivery) return 'delivery'
-  if (e.roomBrief) return 'room'
-  return 'off'
-}
-
 function planUrl(id: string, extra: Record<string, string> = {}) {
   const q = new URLSearchParams({ plan: id, ...extra })
   return `${location.pathname}?${q.toString()}`
 }
 
+function errText(err: unknown) {
+  return err instanceof Error ? err.message : String(err)
+}
+
 export function CollabProvider({ children }: { children: ReactNode }) {
   const api = useEngine()
   const { t } = useI18n()
-  const mode = useMemo(modeOf, [])
-  const [status, setStatus] = useState<CollabStatus>(mode === 'off' ? 'ready' : 'loading')
-  const [error, setError] = useState<string | null>(null)
+  const enabled = collabEnabled()
+  const entry = useMemo(() => bootEntry(), [])
   const [rev, setRev] = useState(0)
-  const [session, setSession] = useState<PlanSession | null>(null)
+  const bump = useCallback(() => setRev(n => n + 1), [])
+  const sessions = useRef(new Map<string, PlanSession>())
+  const [errors, setErrors] = useState<Record<string, string>>({})
   const [threads, setThreads] = useState<Thread[]>([])
   const [versions, setVersions] = useState<VersionInfo[]>([])
   const [placingPin, setPlacingPin] = useState(false)
@@ -130,128 +139,157 @@ export function CollabProvider({ children }: { children: ReactNode }) {
   const [compare, setCompare] = useState<CompareState | null>(null)
   const [delivery, setDelivery] = useState<DeliveryState | null>(null)
   const [room, setRoom] = useState<RoomState | null>(null)
-  const [readAt, setReadAt] = useState(0)
+  const [readAt, setReadAt] = useState<Record<string, number>>({})
+  const [myPlans, setMyPlans] = useState<Array<{ id: string; name: string; role: Role }>>([])
+  const [joinAsk, setJoinAsk] = useState<JoinAsk | null>(null)
   const nudgeSeen = useRef(new Map<number, number>())
-  const bump = useCallback(() => setRev(n => n + 1), [])
 
-  const fail = useCallback((err: unknown) => {
-    setError(err instanceof Error ? err.message : String(err))
-    setStatus('error')
-  }, [])
+  const report = useCallback((err: unknown) => { api.notify(errText(err), 'err') }, [api])
 
-  /** 打开以后的操作出错（断网时取评论之类）：提示出来，方案照常能用 */
-  const report = useCallback((err: unknown) => {
-    api.notify(err instanceof Error ? err.message : String(err), 'err')
-  }, [api])
+  const activeTab = api.tabs.find(x => x.tabId === api.activeTabId) || null
+  const activePlanId = activeTab?.planId || null
+  const session = activePlanId ? sessions.current.get(activePlanId) || null : null
+  // rev 随每个连接的变化走，让下面读 session 的地方跟着刷新
+  void rev
 
+  const mode: CollabMode = !enabled ? 'off'
+    : entry.delivery ? 'delivery'
+      : entry.roomBrief ? 'room'
+        : activePlanId ? 'plan' : 'off'
+
+  // —— 每个方案标签页一条连接；标签页关了就断开 ——
+  const loading = useRef(new Set<string>())
+  useEffect(() => {
+    if (!enabled || !api.ready) return
+    const wanted = new Map(api.tabs.filter(x => x.planId).map(x => [x.planId as string, x.tabId]))
+    for (const [planId, s] of sessions.current) {
+      if (wanted.has(planId)) continue
+      s.destroy()
+      sessions.current.delete(planId)
+    }
+    for (const [planId, tabId] of wanted) {
+      if (sessions.current.has(planId) || loading.current.has(planId)) continue
+      loading.current.add(planId)
+      collabApi.plan(planId).then((plan) => {
+        const local = api.tabLocal(tabId)
+        if (!local) return
+        const s = new PlanSession(plan, local)
+        sessions.current.set(planId, s)
+        setReadAt(r => ({ ...r, [planId]: plan.me?.lastReadAt || 0 }))
+        s.subscribe(bump)
+        api.setTabAccess(tabId, { readOnly: !s.canEdit, idTag: s.idTag })
+        bump()
+      }).catch((err) => {
+        setErrors(e => ({ ...e, [planId]: errText(err) }))
+      }).finally(() => { loading.current.delete(planId) })
+    }
+  }, [enabled, api, api.ready, api.tabs, bump])
+
+  useEffect(() => () => { for (const s of sessions.current.values()) s.destroy() }, [])
+
+  // 角色变了（重连后取到新的方案信息）：能不能编辑跟着变
+  const canEdit = !!session && canEditRole(session.plan.myRole)
+  useEffect(() => {
+    if (!session || !activeTab) return
+    api.setTabAccess(activeTab.tabId, { readOnly: !canEdit, idTag: session.idTag })
+    // 只跟角色走
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session, canEdit, activeTab?.tabId])
+
+  // 地址栏跟着当前标签页：共享方案显示它的地址，刷新以后还是这个方案
+  useEffect(() => {
+    if (!enabled || !api.ready || mode === 'delivery' || mode === 'room') return
+    const q = new URLSearchParams(location.search)
+    if (activePlanId) {
+      if (q.get('plan') === activePlanId) return
+      history.replaceState(null, '', planUrl(activePlanId))
+    } else if (q.has('plan') || q.has('compare')) {
+      dropParam('plan')
+      dropParam('compare')
+    }
+  }, [enabled, api.ready, activePlanId, mode])
+
+  // —— 打开：地址上带着方案（邀请、分享链接），交付查看，画房间 ——
+  const opened = useRef(false)
+  useEffect(() => {
+    if (!enabled || !api.ready || opened.current) return
+    opened.current = true
+    void (async () => {
+      try {
+        if (entry.delivery) {
+          const d = await collabApi.delivery(entry.delivery)
+          const m = new BuildModel()
+          if (!m.loadJSON(d.data).ok) throw new Error(t('collab.badModel'))
+          api.attachDoc({ local: memoryDoc(m.toJSON() as ModelJSON), name: String(d.planName || ''), readOnly: true })
+          setDelivery({ token: entry.delivery, supersededBy: d.supersededBy })
+          return
+        }
+        if (entry.roomBrief) {
+          const b = await collabApi.brief(entry.roomBrief)
+          setRoom({ briefId: entry.roomBrief, room: b.room || { w: 300, d: 400, h: 240 }, title: String(b.region || '') })
+          return
+        }
+        if (!entry.plan) return
+        const plan = await collabApi.plan(entry.plan)
+        if (entry.invite) {
+          if (!plan.me) { setJoinAsk({ plan, invite: entry.invite }); return }
+          await collabApi.join(entry.invite)
+          dropParam('invite')
+          api.notify(t('collab.join.joined'))
+        }
+        api.openPlanTab(plan.id, plan.name)
+      } catch (err) {
+        if (entry.plan) setErrors(e => ({ ...e, [entry.plan as string]: errText(err) }))
+        else report(err)
+      }
+    })()
+    // 只在引擎就绪时打开一次
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, api.ready])
+
+  const joinAsGuest = useCallback(() => {
+    if (!joinAsk) return
+    dropParam('invite')
+    api.openPlanTab(joinAsk.plan.id, joinAsk.plan.name)
+    setJoinAsk(null)
+  }, [joinAsk, api])
+
+  // 我参与的方案：「我的设计」里开启过共享的那几份打开方案标签页；留言引用复制件
+  useEffect(() => {
+    if (!enabled || !api.ready) return
+    collabApi.mine().then(list => setMyPlans(list.map(p => ({ id: p.id, name: p.name, role: p.role }))))
+      // 没登录：没有「我参与的方案」
+      .catch(err => { if (err instanceof ApiError && err.status === 401) setMyPlans([]); else report(err) })
+  }, [enabled, api.ready, activePlanId, report])
+
+  // —— 当前方案的评论和版本 ——
   const refreshThreads = useCallback(async () => {
-    const id = bootEntry().plan
-    if (!id) return
-    setThreads(await collabApi.threads(id))
-  }, [])
+    if (!activePlanId) return
+    setThreads(await collabApi.threads(activePlanId))
+  }, [activePlanId])
 
   const refreshVersions = useCallback(async () => {
-    const id = bootEntry().plan
-    if (!id) return
-    setVersions(await collabApi.versions(id))
-  }, [])
+    if (!activePlanId) return
+    setVersions(await collabApi.versions(activePlanId))
+  }, [activePlanId])
+
+  useEffect(() => {
+    setThreads([])
+    setVersions([])
+    setActiveThread(null)
+    setPinDraft(null)
+    setPlacingPin(false)
+    setCompare(null)
+    if (!activePlanId) return
+    Promise.all([refreshThreads(), refreshVersions()]).catch(report)
+  }, [activePlanId, refreshThreads, refreshVersions, report])
 
   /** 告诉在线的其他人评论、版本有变化，让他们重新取一遍 */
   const nudge = useCallback(() => {
     if (!session) return
     const aw = session.provider.awareness
-    const n = Number(aw.getLocalState()?.nudge || 0) + 1
-    aw.setLocalStateField('nudge', n)
+    aw.setLocalStateField('nudge', Number(aw.getLocalState()?.nudge || 0) + 1)
   }, [session])
-
-  // —— 打开 ——
-  useEffect(() => {
-    if (!api.ready || mode === 'off') return
-    const e = bootEntry()
-    let dead = false
-    let opened: PlanSession | null = null
-    void (async () => {
-      try {
-        if (mode === 'plan') {
-          const id = e.plan as string
-          if (e.invite) {
-            const peek = await collabApi.plan(id)
-            if (!peek.me) { if (!dead) setStatus('needLogin'); return }
-            await collabApi.join(e.invite)
-            dropParam('invite')
-          }
-          const s = await PlanSession.open(id)
-          if (dead) { s.destroy(); return }
-          opened = s
-          setReadAt(s.plan.me?.lastReadAt || 0)
-          api.attachDoc({ local: s.local, name: s.name, readOnly: !s.canEdit, idTag: s.idTag })
-          s.subscribe(bump)
-          setSession(s)
-          const [th, vs] = await Promise.all([collabApi.threads(id), collabApi.versions(id)])
-          if (dead) return
-          setThreads(th)
-          setVersions(vs)
-          setStatus('ready')
-        } else if (mode === 'delivery') {
-          const token = e.delivery as string
-          const d = await collabApi.delivery(token)
-          if (dead) return
-          const m = new BuildModel()
-          if (!m.loadJSON(d.data).ok) throw new Error(t('collab.badModel'))
-          api.attachDoc({ local: memoryDoc(m.toJSON() as ModelJSON), name: String(d.planName || ''), readOnly: true, idTag: '' })
-          setDelivery({ token, supersededBy: d.supersededBy })
-          setStatus('ready')
-        } else if (mode === 'room') {
-          const id = e.roomBrief as string
-          const b = await collabApi.brief(id)
-          if (dead) return
-          setRoom({ briefId: id, room: b.room || { w: 300, d: 400, h: 240 } })
-          setStatus('ready')
-        }
-      } catch (err) {
-        if (!dead) fail(err)
-      }
-    })()
-    return () => {
-      dead = true
-      opened?.destroy()
-    }
-    // 只在引擎就绪时打开一次
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [api.ready, mode])
-
-  // 角色变了（重连后取到新的方案信息）：能不能编辑跟着变
-  const canEdit = !!session && canEditRole(session.plan.myRole)
-  useEffect(() => {
-    if (!session) return
-    if (api.readOnly === !canEdit) return
-    api.setReadOnly(!canEdit)
-  }, [session, canEdit, api])
-
-  // 自己选中的零件放进在线状态
-  useEffect(() => {
-    if (!session) return
-    const b = api.engine()?.builder
-    if (!b) return
-    session.setSelection([...(b.selection as Map<string, string>).keys()].map(String))
-  }, [session, api, api.tick])
-
-  // 别人选中的零件在画面上按他的颜色标出来；别人发了评论、存了版本就重新取
-  const peers = session ? session.peers() : []
-  const tintKey = peers.map(p => `${p.user?.userId}:${p.selection.join(',')}`).join('|')
-  useEffect(() => {
-    const b = api.engine()?.builder
-    if (!b || !session || compare) return
-    const tints = new Map<string, string>()
-    for (const p of session.peers()) {
-      const color = p.user?.color || peerColor(p.clientId)
-      for (const id of p.selection) tints.set(id, color)
-    }
-    b.tints = tints.size ? tints : null
-    b.refresh()
-    // tintKey 概括了所有人的选中
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tintKey, session, compare])
 
   useEffect(() => {
     if (!session) return
@@ -267,36 +305,69 @@ export function CollabProvider({ children }: { children: ReactNode }) {
     if (changed) Promise.all([refreshThreads(), refreshVersions()]).catch(report)
   }, [rev, session, refreshThreads, refreshVersions, report])
 
+  // 自己选中的零件放进在线状态
+  useEffect(() => {
+    if (!session) return
+    const b = api.engine()?.builder
+    if (!b) return
+    session.setSelection([...(b.selection as Map<string, string>).keys()].map(String))
+  }, [session, api, api.tick])
+
+  const peers = session ? session.peers() : []
+  const members = session?.plan.members || []
+  const colorOf = useCallback((userId: number) => memberColor(members, userId), [members])
+
   // —— 对照 ——
-  const loadSide = useCallback(async (id: string): Promise<{ json: ModelJSON; name: string }> => {
-    if (!session) throw new Error('no plan')
-    if (id === 'current') return { json: session.toJSON(), name: t('collab.current') }
-    // 评论者复制出去改的那一份：用它交上来的 data
-    if (id.startsWith('fork:')) {
-      const p = await collabApi.plan(id.slice('fork:'.length))
+  const fetchVersionModel = useCallback(async (planId: string, id: string): Promise<ModelJSON> => {
+    const load = (data: unknown) => {
       const m = new BuildModel()
-      if (!p.data || !m.loadJSON(p.data).ok) throw new Error(t('collab.badModel'))
-      return { json: m.toJSON() as ModelJSON, name: p.name }
+      if (!data || !m.loadJSON(data).ok) throw new Error(t('collab.badModel'))
+      return m.toJSON() as ModelJSON
     }
-    const v = await collabApi.version(session.id, id)
-    return { json: docToJSON(docFromBase64(v.state)), name: v.name }
-  }, [session, t])
+    // 评论者复制出去改的那一份：用它交上来的 data
+    if (id.startsWith('fork:')) return load((await collabApi.plan(id.slice('fork:'.length))).data)
+    const v = await collabApi.version(planId, id)
+    // 参考方案那一条没有 Yjs 状态，只有 data
+    return v.state ? docToJSON(docFromBase64(v.state)) : load(v.data)
+  }, [t])
+
+  // 存下的版本不会再变，取过一次就记着；复制件还会改，每次重取
+  const versionCache = useRef(new Map<string, ModelJSON>())
+  const versionModel = useCallback(async (id: string): Promise<ModelJSON> => {
+    if (!session) throw new Error('no plan')
+    if (id === 'current') return session.toJSON()
+    const key = `${session.id}:${id}`
+    const hit = versionCache.current.get(key)
+    if (hit) return hit
+    const json = await fetchVersionModel(session.id, id)
+    if (!id.startsWith('fork:')) versionCache.current.set(key, json)
+    return json
+  }, [session, fetchVersionModel])
+
+  const nameOfSide = useCallback(async (id: string) => {
+    if (id === 'current') return t('collab.version.now')
+    if (id.startsWith('fork:')) return myPlans.find(p => `fork:${p.id}` === id)?.name || (await collabApi.plan(id.slice(5))).name
+    return versions.find(v => String(v.id) === id)?.name || id
+  }, [t, myPlans, versions])
 
   const buildCompare = useCallback(async (a: string, b: string) => {
-    const [l, r] = await Promise.all([loadSide(a), loadSide(b)])
-    setCompare({ ids: [a, b], names: [l.name, r.name], left: l.json, right: r.json, diff: diffModels(l.json, r.json), bom: diffBom(l.json, r.json) })
-  }, [loadSide])
+    const [l, r, ln, rn] = await Promise.all([versionModel(a), versionModel(b), nameOfSide(a), nameOfSide(b)])
+    setCompare({ ids: [a, b], names: [ln, rn], left: l, right: r, diff: diffModels(l, r), bom: diffBom(l, r) })
+  }, [versionModel, nameOfSide])
 
+  // 地址上带着 compare：方案连上、版本列表到了以后打开
+  const entryCompare = useRef(entry.compare)
   useEffect(() => {
-    const cmp = bootEntry().compare
-    if (!session || !cmp || compare) return
-    void buildCompare(cmp[0], cmp[1]).catch(fail)
-  }, [session, compare, buildCompare, fail])
+    const cmp = entryCompare.current
+    if (!session || !cmp || session.id !== entry.plan || !session.synced) return
+    entryCompare.current = null
+    buildCompare(cmp[0], cmp[1]).catch(report)
+  }, [session, rev, versions, buildCompare, report, entry.plan])
 
   // 对照「当前」一边时，别人改了跟着更新
   useEffect(() => {
-    if (!compare || !session || !compare.ids.includes('current')) return
-    void buildCompare(compare.ids[0], compare.ids[1]).catch(fail)
+    if (!compare || !compare.ids.includes('current')) return
+    buildCompare(compare.ids[0], compare.ids[1]).catch(report)
     // 只跟文档变化走
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [api.tick])
@@ -304,8 +375,8 @@ export function CollabProvider({ children }: { children: ReactNode }) {
   const openCompare = useCallback((a: string, b: string) => {
     if (!session) return
     history.replaceState(null, '', planUrl(session.id, { compare: `${a},${b}` }))
-    void buildCompare(a, b).catch(fail)
-  }, [session, buildCompare, fail])
+    buildCompare(a, b).catch(report)
+  }, [session, buildCompare, report])
 
   const closeCompare = useCallback(() => {
     dropParam('compare')
@@ -314,7 +385,8 @@ export function CollabProvider({ children }: { children: ReactNode }) {
 
   // —— 评论 ——
   const me = session?.plan.me || null
-  const isUnread = useCallback((p: Post) => !!me && p.userId !== me.userId && p.createdAt > readAt, [me, readAt])
+  const seenAt = activePlanId ? readAt[activePlanId] || 0 : 0
+  const isUnread = useCallback((p: Post) => !!me && p.userId !== me.userId && p.createdAt > seenAt, [me, seenAt])
   const unread = useMemo(() => {
     let pins = 0, chat = 0
     for (const th of threads) {
@@ -328,7 +400,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
   const markRead = useCallback(async () => {
     if (!session || !me) return
     await collabApi.read(session.id)
-    setReadAt(Date.now())
+    setReadAt(r => ({ ...r, [session.id]: Date.now() }))
   }, [session, me])
 
   const upload = useCallback(async (files: File[]) => {
@@ -339,16 +411,18 @@ export function CollabProvider({ children }: { children: ReactNode }) {
   }, [session])
 
   // 写评论时所在的版本：最近存的那一版
-  const currentVersionId = versions.length
-    ? versions.reduce((a, b) => (b.createdAt > a.createdAt ? b : a)).id
-    : null
+  const currentVersionId = useMemo(() => {
+    const own = versions.filter(v => v.kind !== 'reference')
+    return own.length ? own.reduce((a, b) => (b.createdAt > a.createdAt ? b : a)).id : null
+  }, [versions])
 
   const addPin = useCallback(async (anchor: Anchor, body: string, files: File[]) => {
     if (!session) return
     const photos = await upload(files)
-    await collabApi.newThread(session.id, { anchor, versionId: currentVersionId, body, photos, refs: [] })
+    const { id } = await collabApi.newThread(session.id, { anchor, versionId: currentVersionId, body, photos, refs: [] })
     setPinDraft(null)
     await refreshThreads()
+    setActiveThread(id)
     nudge()
   }, [session, upload, currentVersionId, refreshThreads, nudge])
 
@@ -383,12 +457,6 @@ export function CollabProvider({ children }: { children: ReactNode }) {
   }, [threads])
   const pinNumber = useCallback((th: Thread) => pinOrder.get(th.id) || 0, [pinOrder])
 
-  const [myForks, setMyForks] = useState<Array<{ id: string; name: string }>>([])
-  useEffect(() => {
-    if (!session?.plan.me) return
-    collabApi.mine().then(list => setMyForks(list.filter(p => p.role === 'owner' && p.id !== session.id).map(p => ({ id: p.id, name: p.name })))).catch(report)
-  }, [session, report])
-
   const focusThread = useCallback((th: Thread) => {
     setActiveThread(th.id)
     if (th.anchor) api.engine()?.scene.flyToPoint(th.anchor.point)
@@ -408,7 +476,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
     return (await collabApi.invite(session.id)).url
   }, [session])
 
-  const shareUrl = useCallback(() => {
+  const viewUrl = useCallback(() => {
     if (!session) return ''
     return `${location.origin}${planUrl(session.id, { src: `plan:${session.id}` })}`
   }, [session])
@@ -425,26 +493,31 @@ export function CollabProvider({ children }: { children: ReactNode }) {
     await session.refresh()
   }, [session])
 
+  const openPlan = useCallback(async (planId: string) => {
+    const p = await collabApi.plan(planId)
+    api.openPlanTab(p.id, p.name)
+  }, [api])
+
   const fork = useCallback(async (versionId: number | null) => {
     if (!session) return
     const { planId } = await collabApi.fork(session.id, versionId)
-    location.href = planUrl(planId)
-  }, [session])
+    await openPlan(planId)
+  }, [session, openPlan])
 
   const metricsOf = useCallback(async (versionId: number) => {
-    if (!session) throw new Error('no plan')
-    const v = await collabApi.version(session.id, versionId)
     const m = new BuildModel()
-    if (!m.loadJSON(docToJSON(docFromBase64(v.state))).ok) throw new Error(t('collab.badModel'))
+    if (!m.loadJSON(await versionModel(String(versionId))).ok) throw new Error(t('collab.badModel'))
     return computeMetrics(m) as Metrics
-  }, [session, t])
+  }, [versionModel, t])
 
   const deliver = useCallback(async (o: { versionId: number; ageNote: string; loadNote: string; metrics: Metrics }) => {
     if (!session) throw new Error('no plan')
     await session.exportNow()
     const { token } = await collabApi.deliver(session.id, o)
+    await refreshVersions()
+    nudge()
     return token
-  }, [session])
+  }, [session, refreshVersions, nudge])
 
   // —— 房间 ——
   const saveRoom = useCallback(async (r: Room) => {
@@ -453,15 +526,20 @@ export function CollabProvider({ children }: { children: ReactNode }) {
     location.href = `/brief.html?id=${encodeURIComponent(room.briefId)}`
   }, [room])
 
-  // —— 自己的造型开启共享 ——
+  // —— 自己的造型开启共享：原地变成共享方案 ——
   const enableSharing = useCallback(async () => {
+    const tab = activeTab
+    if (!tab || tab.planId) return
     // 先存一下：方案的 id 就是这份存档的 id
     const saved = await api.saveCurrent()
     if (!saved) return
     const body = exportOf(saved.data, saved.name)
     await collabApi.createPlan({ id: saved.docId, name: saved.name, data: body.data, qdf: body.qdf, parts: body.parts })
-    location.href = planUrl(saved.docId)
-  }, [api])
+    api.convertToPlan(tab.tabId, saved.docId, saved.name)
+    setMyPlans(list => [...list, { id: saved.docId, name: saved.name, role: 'owner' }])
+  }, [activeTab, api])
+
+  const planOfDoc = useCallback((docId: string) => myPlans.some(p => p.id === docId), [myPlans])
 
   const loginUrl = useCallback(() => {
     const base = import.meta.env.VITE_LOGIN_URL
@@ -470,20 +548,21 @@ export function CollabProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const value: CollabApi = {
-    enabled: collabEnabled(),
-    mode, status, error, rev, session,
+    enabled, mode,
+    error: activePlanId ? errors[activePlanId] || null : entry.plan && !activePlanId ? errors[entry.plan] || null : null,
+    rev, session,
     plan: session?.plan || null,
     role: session?.plan.myRole || 'guest',
     canEdit,
     canDeliver: !!session?.canDeliver,
-    members: session?.plan.members || [],
-    peers,
+    peers, colorOf,
     threads, versions, isUnread, unread, markRead, refreshThreads, refreshVersions,
-    placingPin, setPlacingPin, pinDraft, setPinDraft, addPin, reply, resolve, partGone, pinNumber, myForks, focusThread,
+    placingPin, setPlacingPin, pinDraft, setPinDraft, addPin, reply, resolve, partGone, pinNumber, myPlans, focusThread,
     activeThread, setActiveThread,
-    saveVersion, inviteUrl, shareUrl, setRole, removeMember, fork, metricsOf, deliver,
-    compare, openCompare, closeCompare,
-    delivery, room, saveRoom, enableSharing, loginUrl, report,
+    saveVersion, inviteUrl, viewUrl, setRole, removeMember, fork, metricsOf, deliver,
+    compare, openCompare, closeCompare, versionModel,
+    delivery, room, saveRoom, enableSharing, planOfDoc, openPlan,
+    joinAsk, joinAsGuest, loginUrl, report,
   }
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }
@@ -494,4 +573,7 @@ export function useCollab() {
   return ctx
 }
 
-export type { Opening }
+/** 这个人是不是方案里接单的设计师（可以锁定交付的那位） */
+export function isDesigner(plan: Plan | null, userId: number) {
+  return !!plan && plan.members.some(m => m.userId === userId && m.canDeliver && m.role !== 'owner')
+}

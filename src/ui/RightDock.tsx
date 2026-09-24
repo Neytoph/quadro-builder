@@ -9,9 +9,9 @@ import { BomPane } from './PartsList'
 import InventoryPane from './InventoryPane'
 import SafetyPane from './SafetyPane'
 import { usePresence } from './motion'
+import { useCollab } from '../collab/CollabContext'
 import CommentsPane from '../collab/ui/CommentsPane'
 import VersionsPane from '../collab/ui/VersionsPane'
-import MembersPane from '../collab/ui/MembersPane'
 
 const TITLE: Record<DockPane, string> = {
   file: 'btn.file',
@@ -21,13 +21,15 @@ const TITLE: Record<DockPane, string> = {
   bom: 'side.bom',
   inventory: 'side.inventory',
   safety: 'safety.title',
-  comments: 'collab.pane.comments',
+  comments: 'collab.pane.commentsTitle',
   versions: 'collab.pane.versions',
-  members: 'collab.pane.members',
 }
 
 export default function RightDock() {
-  const { pane: live, setPane } = useDock()
+  const { pane: open, setPane } = useDock()
+  const collab = useCollab()
+  // 评论和版本只属于共享方案：切到自己的标签页就不显示
+  const live = (open === 'comments' || open === 'versions') && collab.mode !== 'plan' ? null : open
   const { t } = useI18n()
   const { right, vw, vh } = usePanelLayout()
   const [pane, leaving] = usePresence(live)
@@ -65,7 +67,6 @@ export default function RightDock() {
         {pane === 'safety' && <SafetyPane />}
         {pane === 'comments' && <CommentsPane />}
         {pane === 'versions' && <VersionsPane />}
-        {pane === 'members' && <MembersPane />}
       </div>
     </aside>
   )

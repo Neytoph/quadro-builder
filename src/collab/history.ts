@@ -9,7 +9,7 @@
 // 通知出去，由 Builder 从文档重新读出整座造型、刷新画面。
 
 import * as Y from 'yjs'
-import { applyDelta, docToJSON, flatten, metaMap, partsMap, restoreParts, writeJSON, type ModelJSON, type Rec } from './ymodel'
+import { applyDelta, docToJSON, flatten, metaMap, partsMap, restoreParts, summarize, type EditSummary, type ModelJSON, type Rec } from './ymodel'
 
 /** 撤销步数上限，和原来的撤销栈一样。 */
 const MAX_UNDO = 60
@@ -48,6 +48,7 @@ export class ModelHistory {
   private readonly manager: Y.UndoManager
   private external: () => void = () => {}
   private changed: () => void = () => {}
+  private edited: (s: EditSummary) => void = () => {}
   private readonly onTx: (tr: Y.Transaction) => void
   private readonly onStack: () => void
 
@@ -78,15 +79,14 @@ export class ModelHistory {
   /** 撤销和重做能不能用变了。 */
   onChange(cb: () => void) { this.changed = cb }
 
+  /** 自己改了一次（编辑、撤销、重做），共享方案靠它告诉别人「谁加了几件」。 */
+  onEdit(cb: (s: EditSummary) => void) { this.edited = cb }
+
   /** 一次编辑：编辑前、编辑后的两份 JSON 文本。 */
   commit(before: string, after: string) {
     if (before === after) return
-    applyDelta(this.doc, JSON.parse(before) as ModelJSON, JSON.parse(after) as ModelJSON, this.origin)
-  }
-
-  /** 整座换成 json，记作一步可撤销的编辑。 */
-  commitAll(json: ModelJSON) {
-    writeJSON(this.doc, json, this.origin)
+    const summary = applyDelta(this.doc, JSON.parse(before) as ModelJSON, JSON.parse(after) as ModelJSON, this.origin)
+    this.edited(summary)
   }
 
   toJSON(): ModelJSON {
@@ -101,6 +101,11 @@ export class ModelHistory {
   private withRepair(step: () => void) {
     const before = flatten(docToJSON(this.doc))
     step()
+    this.repair(before)
+    this.edited(summarize(before, flatten(docToJSON(this.doc))))
+  }
+
+  private repair(before: Map<string, Rec>) {
     const parts = partsMap(this.doc)
     const restore = new Map<string, Rec>()
     let grew = true

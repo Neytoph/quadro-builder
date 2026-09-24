@@ -1,20 +1,18 @@
-// 打开一个共享方案：本机文档、y-websocket 连接、在线状态、导出。
+// 连上一个共享方案：y-websocket 连接、在线状态、导出。
 //
 // 连接照 y-websocket 的协议走 {VITE_SYNC_BASE}/collab/ws?plan=<id>；服务端只中转，
-// 不解析 Yjs（见接口约定「实时同步」一节）。成员的文档同时存在本机
-// （quadro.plan.<id>），断网时的修改先存着，连上以后自动合并；访客不在本机留东西。
+// 不解析 Yjs（见接口约定「实时同步」一节）。文档是方案那个标签页的，存在本机，
+// 断网时的修改先存着，连上以后自动合并。
 //
 // 服务端还没有任何更新记录（新建的方案）时，第一次连上以后编辑者用 quadro_plans.data
 // 生成文档交上去；访客和评论者在自己这边生成一份用来查看，服务端会丢掉他们的更新。
 
 import * as Y from 'yjs'
 import { WebsocketProvider } from 'y-websocket'
-import { IndexeddbPersistence } from 'y-indexeddb'
 import { BuildModel, buildQDF, partsOfData } from '../engine-api'
 import { collabApi, wsServerUrl, type ExportBody, type Parts, type Plan } from './api'
-import { ModelHistory } from './history'
-import { planDbName, SEED_ORIGIN, type LocalDoc } from './localDocs'
-import { docIsEmpty, docToJSON, flatten, metaMap, sameJson, writeJSON, type ModelJSON } from './ymodel'
+import { SEED_ORIGIN, type LocalDoc } from './localDocs'
+import { docIsEmpty, docToJSON, flatten, metaMap, sameJson, writeJSON, type EditSummary, type ModelJSON } from './ymodel'
 
 /** 编辑停下来多久以后把导出结果交给服务端。 */
 export const EXPORT_IDLE_MS = 30_000
@@ -35,10 +33,12 @@ export interface Peer {
 
 export type ConnState = 'connecting' | 'connected' | 'offline'
 
-const PEER_COLORS = ['#e8590c', '#1c7ed6', '#2f9e44', '#ae3ec9', '#f08c00', '#0c8599', '#d6336c', '#5c940d']
+/** 成员颜色：按加入顺序轮流取，头像描边、画面上的选中框、名字条都用它 */
+export const MEMBER_COLORS = ['#EA580C', '#2563EB', '#9333EA', '#0D9488', '#DB2777']
 
-export function peerColor(key: number) {
-  return PEER_COLORS[Math.abs(key) % PEER_COLORS.length]
+export function memberColor(members: Plan['members'], userId: number) {
+  const i = members.findIndex(m => m.userId === userId)
+  return MEMBER_COLORS[(i >= 0 ? i : Math.abs(userId)) % MEMBER_COLORS.length]
 }
 
 export function canEditRole(role: Plan['myRole']) {
@@ -98,14 +98,21 @@ export class PlanSession {
   synced = false
   private exportTimer: number | null = null
   private listeners = new Set<() => void>()
-  private readonly persistence: IndexeddbPersistence | null
-  private readonly onUpdate: (u: Uint8Array, origin: unknown) => void
+  private editSeq = 0
+  // 每个在线的端上一次看到的修改序号
+  private editSeen = new Map<number, number>()
+  /**
+   * 别人刚做的修改，按人攒着：停手 1.2 秒以后亮出来，亮 3 秒收走。
+   * 界面画底部那一条「林木木 加了 4 件、挪了 2 件」。
+   */
+  activity: Array<{ key: string; user: PeerUser; s: EditSummary; shown: boolean }> = []
+  private activityTimers = new Map<string, number>()
 
-  private constructor(plan: Plan, local: LocalDoc, persistence: IndexeddbPersistence | null) {
+  /** 连上一个共享方案。文档是它那个标签页的（存在本机），这里只管连接和在线状态。 */
+  constructor(plan: Plan, local: LocalDoc) {
     this.plan = plan
     this.id = plan.id
     this.local = local
-    this.persistence = persistence
     this.idTag = `c${local.doc.clientID.toString(36)}_`
     this.provider = new WebsocketProvider(wsServerUrl(), 'ws', local.doc, {
       params: { plan: plan.id },
@@ -128,11 +135,13 @@ export class PlanSession {
       if (first && this.canEdit && !sameModel(this.plan.data, this.toJSON())) this.scheduleExport()
       this.emit()
     })
-    this.provider.awareness.on('change', () => this.emit())
-    this.onUpdate = (_u, origin) => {
-      if (origin === this.local.history.origin) this.scheduleExport()
-    }
-    local.doc.on('update', this.onUpdate)
+    this.provider.awareness.on('change', () => { this.collectActivity(); this.emit() })
+    // 自己改了一次（编辑、撤销、重做）：30 秒后交导出，在线状态里告诉别人改了什么
+    local.history.onEdit((s) => {
+      this.scheduleExport()
+      const edit = { n: ++this.editSeq, ...s }
+      this.provider.awareness.setLocalStateField('edit', edit)
+    })
     // 浏览器说断网了就先断开，这段时间的修改留在本机；联网了立刻重连，
     // 连上时交给服务器的是完整状态，断网期间的修改一起合并进去。
     // 不等 y-websocket 自己 30 秒收不到消息才发现
@@ -146,16 +155,38 @@ export class PlanSession {
   private readonly onOffline: () => void
   private readonly onOnline: () => void
 
-  static async open(id: string): Promise<PlanSession> {
-    const plan = await collabApi.plan(id)
-    const doc = new Y.Doc()
-    let persistence: IndexeddbPersistence | null = null
-    if (plan.myRole !== 'guest') {
-      persistence = new IndexeddbPersistence(planDbName(plan.id), doc)
-      await persistence.whenSynced
-    }
-    const local: LocalDoc = { doc, history: new ModelHistory(doc), persistence }
-    return new PlanSession(plan, local, persistence)
+  private collectActivity() {
+    const aw = this.provider.awareness
+    aw.getStates().forEach((state, clientId) => {
+      if (clientId === aw.clientID) return
+      const edit = state.edit as ({ n: number } & EditSummary) | undefined
+      const user = state.user as PeerUser | null | undefined
+      if (!edit || !user) return
+      const seen = this.editSeen.get(clientId)
+      this.editSeen.set(clientId, edit.n)
+      // 第一次看到这个端：是它连上前的旧修改，不算
+      if (seen === undefined || seen === edit.n) return
+      const key = String(user.userId)
+      let item = this.activity.find(a => a.key === key && !a.shown)
+      if (!item) {
+        item = { key, user, s: { added: 0, removed: 0, moved: 0, changed: 0 }, shown: false }
+        this.activity.push(item)
+      }
+      item.s = {
+        added: item.s.added + edit.added, removed: item.s.removed + edit.removed,
+        moved: item.s.moved + edit.moved, changed: item.s.changed + edit.changed,
+      }
+      const pending = item
+      window.clearTimeout(this.activityTimers.get(key))
+      this.activityTimers.set(key, window.setTimeout(() => {
+        pending.shown = true
+        this.emit()
+        window.setTimeout(() => {
+          this.activity = this.activity.filter(a => a !== pending)
+          this.emit()
+        }, 3000)
+      }, 1200))
+    })
   }
 
   get canEdit() { return canEditRole(this.plan.myRole) }
@@ -181,7 +212,7 @@ export class PlanSession {
 
   private setUser() {
     const me = this.plan.me
-    const user: PeerUser | null = me ? { userId: me.userId, name: me.name, avatar: me.avatar, color: peerColor(me.userId) } : null
+    const user: PeerUser | null = me ? { userId: me.userId, name: me.name, avatar: me.avatar, color: memberColor(this.plan.members, me.userId) } : null
     this.provider.awareness.setLocalStateField('user', user)
   }
 
@@ -248,14 +279,15 @@ export class PlanSession {
     return v
   }
 
+  /** 断开（标签页关了）。文档归标签页管，这里不动。 */
   destroy() {
     window.removeEventListener('offline', this.onOffline)
     window.removeEventListener('online', this.onOnline)
     if (this.exportTimer) window.clearTimeout(this.exportTimer)
-    this.local.doc.off('update', this.onUpdate)
+    for (const id of this.activityTimers.values()) window.clearTimeout(id)
+    this.local.history.onEdit(() => {})
     this.provider.destroy()
-    this.local.history.destroy()
-    if (this.persistence) void this.persistence.destroy()
-    this.local.doc.destroy()
+    this.provider.awareness.destroy()
+    this.listeners.clear()
   }
 }

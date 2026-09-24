@@ -1,94 +1,113 @@
-import { useState } from 'react'
-import { createPortal } from 'react-dom'
+import { useRef, useState } from 'react'
+import { Upload } from 'lucide-react'
 import { useI18n } from '../../i18n'
 import { useEngine } from '../../store/EngineContext'
 import { partForFitting, partName } from '../../engine-api'
 import { syncNow } from '../../sync/bootstrap'
-import { importOne, isQdfFile, type ImportResult } from '../batchImport'
+import { useCollab } from '../CollabContext'
+import { importOne, isQdfFile, MAX_IMPORT, type ImportResult } from '../batchImport'
+import { useSignedIn } from './bits'
+import { Modal } from './Modals'
 
 function label(qdfName: string) {
   return String(partName(partForFitting(qdfName)) || qdfName)
 }
 
+type Row = ImportResult & { thumb: string | null }
+
 /**
- * 批量导入官方软件的 .qdf：拖进来或挑一批文件，每个文件存成一座造型。
- * 结果里列出每一座认不出的零件，设计师自己决定要不要在 builder 里补。
+ * 批量导入官方软件的 .qdf：一次拖进来多个，每个文件存成一座造型，放进「我的设计」。
+ * 结果一个文件一张卡：缩略图、件数、导入不了的零件；「发到广场」打开发布页补全再发。
  */
 export default function BatchImport({ onClose }: { onClose: () => void }) {
   const api = useEngine()
+  const collab = useCollab()
+  const signedIn = useSignedIn()
   const { t } = useI18n()
-  const [results, setResults] = useState<ImportResult[]>([])
+  const [rows, setRows] = useState<Row[]>([])
   const [busy, setBusy] = useState<{ k: number; n: number } | null>(null)
-  const [over, setOver] = useState(false)
+  const [over, setOver] = useState(0)
+  const [dropping, setDropping] = useState(true)
+  const input = useRef<HTMLInputElement>(null)
+  const publish = collab.enabled && signedIn
 
   const run = async (list: File[]) => {
-    const files = list.filter(isQdfFile)
+    const files = list.filter(isQdfFile).slice(0, MAX_IMPORT)
     if (!files.length) { api.notify(t('batch.noQdf'), 'warn'); return }
+    if (list.filter(isQdfFile).length > MAX_IMPORT) api.notify(t('batch.tooMany', { n: MAX_IMPORT }), 'warn')
+    setDropping(false)
     setBusy({ k: 0, n: files.length })
-    const out: ImportResult[] = []
     for (let i = 0; i < files.length; i++) {
       setBusy({ k: i + 1, n: files.length })
-      out.push(await importOne(files[i]))
-      setResults([...out])
+      const r = await importOne(files[i])
+      const thumb = r.data ? await api.captureThumb({ kind: 'model', data: r.data }) : null
+      setRows(list => [...list, { ...r, thumb }])
     }
     setBusy(null)
     void syncNow()
-    const ok = out.filter(r => r.ok).length
-    api.notify(t('batch.done', { ok, n: out.length }), ok === out.length ? 'ok' : 'warn')
   }
 
-  const pick = () => {
-    const input = document.createElement('input')
-    input.type = 'file'
-    input.accept = '.qdf'
-    input.multiple = true
-    input.onchange = () => { void run([...(input.files || [])]) }
-    input.click()
+  const toPlaza = async (docId: string) => {
+    if (!await api.pushDoc(docId)) { api.notify(t('saves.shareNotYet'), 'warn'); return }
+    window.open(`/publish.html?model=${encodeURIComponent(docId)}`, '_blank', 'noopener')
   }
 
-  // 从「文件」面板里打开：挂到 body 上，不然被面板框住
-  return createPortal(
-    <div className="m-backdrop fixed inset-0 z-[75] flex items-center justify-center bg-black/45 p-4" onClick={() => { if (!busy) onClose() }}>
-      <div role="dialog" aria-modal="true" className="m-modal qb-card w-full max-w-lg text-gray-100 p-5 max-h-[calc(100vh-2rem)] flex flex-col"
-        onClick={e => e.stopPropagation()} data-ui="batch-import">
-        <div className="text-base font-semibold">{t('batch.title')}</div>
-        <p className="text-sm text-gray-300 mt-1">{t('batch.body')}</p>
-        <div
-          onDragOver={e => { e.preventDefault(); setOver(true) }}
-          onDragLeave={() => setOver(false)}
-          onDrop={e => { e.preventDefault(); setOver(false); void run([...e.dataTransfer.files]) }}
-          className={`mt-3 rounded-xl border-2 border-dashed px-4 py-6 text-center text-sm ${over ? 'border-teal-500 bg-gray-900' : 'border-gray-700'}`}>
-          <div className="text-gray-300">{t('batch.drop')}</div>
-          <button type="button" disabled={!!busy} onClick={pick} className="qb-btn qb-btn-sm mt-2" data-ui="batch-pick">{t('batch.pick')}</button>
-          {busy && <div className="text-xs text-gray-400 mt-2 qb-num">{t('batch.progress', { k: busy.k, n: busy.n })}</div>}
-        </div>
-        {results.length > 0 && (
-          <div className="mt-3 flex-1 min-h-0 overflow-y-auto flex flex-col gap-1.5" data-ui="batch-results">
-            {results.map((r, i) => (
-              <div key={i} className="rounded-xl border border-gray-800 px-3 py-2" data-ui="batch-row" data-ok={r.ok}>
-                <div className="flex items-center gap-2">
-                  <span className={`w-2 h-2 rounded-full ${r.ok ? (r.skipped.length ? 'bg-amber-400' : 'bg-teal-400') : 'bg-red-500'}`} />
-                  <span className="text-sm text-gray-100 truncate flex-1">{r.name}</span>
-                  {r.ok && <span className="text-[11px] text-gray-400 qb-num">{t('batch.parts', { n: r.parts })}</span>}
-                  {r.ok && r.docId && (
-                    <button onClick={() => { void api.openDoc(r.docId!); onClose() }} className="text-xs text-teal-300 hover:text-teal-100 cursor-pointer">{t('saves.open')}</button>
+  const ok = rows.filter(r => r.ok).length
+  const bad = rows.length - ok
+  const title = rows.length ? (bad ? t('batch.resultBad', { ok, bad }) : t('batch.result', { ok })) : t('batch.title')
+
+  return (
+    <Modal onClose={() => { if (!busy) onClose() }} label={title} className="cb-import">
+      <div data-ui="batch-import">
+        <h3>{title}</h3>
+        {!rows.length && <p className="s">{t('batch.body')}</p>}
+        {(dropping || busy) && (
+          <button type="button" className={`cb-drop ${over ? 'over' : ''}`} data-ui="batch-drop" disabled={!!busy}
+            onClick={() => input.current?.click()}
+            onDragOver={e => { e.preventDefault(); setOver(e.dataTransfer.items.length || 1) }}
+            onDragLeave={() => setOver(0)}
+            onDrop={e => { e.preventDefault(); setOver(0); void run([...e.dataTransfer.files]) }}>
+            <Upload />
+            <b>{busy ? t('batch.progress', { k: busy.k, n: busy.n }) : over ? t('batch.release', { n: over }) : t('batch.drop')}</b>
+            <span>{t('batch.dropHint', { n: MAX_IMPORT })}</span>
+            {busy && <span className="cb-prog" style={{ width: '100%' }}><i style={{ width: `${Math.round(busy.k / busy.n * 100)}%` }} /></span>}
+          </button>
+        )}
+        {rows.length > 0 && (
+          <div className="cb-files" data-ui="batch-results">
+            {rows.map((r, i) => r.ok ? (
+              <div key={i} className="cb-file" data-ui="batch-row" data-ok="true">
+                {r.thumb ? <img src={r.thumb} alt="" /> : <span className="ph" />}
+                <div>
+                  <div className="fn">{r.file} <span className="cb-ok">✓ {t('collab.parts', { n: r.parts })}</span></div>
+                  <div className="ttl">{r.name}</div>
+                  {r.skipped.length > 0 && (
+                    <div className="cb-miss"><b>{t('batch.skippedN', { n: r.skipped.reduce((s, x) => s + x.count, 0) })}</b>
+                      {r.skipped.map(s => `${label(s.name)} ×${s.count}`).join(t('batch.sep'))}{t('batch.skippedRest')}</div>
                   )}
-                </div>
-                {!r.ok && <div className="text-[11px] text-red-400 mt-0.5">{t(r.error === 'noParts' ? 'batch.noParts' : 'batch.failed', { err: r.error || '' })}</div>}
-                {r.skipped.length > 0 && (
-                  <div className="text-[11px] text-amber-700 mt-0.5">
-                    {t('batch.skipped')}{r.skipped.map(s => `${label(s.name)} ×${s.count}`).join(t('batch.sep'))}
+                  <div className="acts">
+                    <button type="button" className="qb-btn qb-btn-ghost qb-btn-sm" onClick={() => { void api.openDoc(r.docId!); onClose() }}>{t('saves.open')}</button>
+                    {publish && <button type="button" className="qb-btn qb-btn-sm" onClick={() => { void toPlaza(r.docId!) }} data-ui="batch-publish">{t('batch.toPlaza')}</button>}
                   </div>
-                )}
+                </div>
+              </div>
+            ) : (
+              <div key={i} className="cb-file bad" data-ui="batch-row" data-ok="false">
+                <div>
+                  <div className="fn">{r.file} <span className="cb-bad">✗ {t('batch.unreadable')}</span></div>
+                  <div className="cb-miss bad">{r.error === 'noParts' ? t('batch.noParts') : t('batch.failed', { err: r.error || '' })}</div>
+                </div>
               </div>
             ))}
           </div>
         )}
-        <div className="flex justify-end mt-4">
-          <button type="button" disabled={!!busy} onClick={onClose} className="qb-btn qb-btn-ghost qb-btn-sm">{t('batch.close')}</button>
+        {rows.length > 0 && <div className="cb-sum">{t('batch.saved', { n: ok })}</div>}
+        <div className="foot">
+          {rows.length > 0 && !dropping && !busy && <button type="button" className="qb-btn qb-btn-ghost qb-btn-sm" onClick={() => setDropping(true)}>{t('batch.more')}</button>}
+          <button type="button" className="qb-btn qb-btn-sm" disabled={!!busy} onClick={onClose}>{t(rows.length ? 'collab.done' : 'batch.close')}</button>
         </div>
+        <input ref={input} type="file" accept=".qdf" multiple hidden onChange={e => { void run([...(e.target.files || [])]); e.target.value = '' }} />
       </div>
-    </div>,
-    document.body,
+    </Modal>
   )
 }
