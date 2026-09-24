@@ -43,14 +43,11 @@ type Ctx = {
   vw: number
   vh: number
   toolbarW: number
-  /** 左栏实际到哪儿（卡片多高就多高，量出来的底边）。小麦要看它底下还有没有地方趴 */
-  leftBottom: number
   leftColor: boolean
   leftKeys: boolean
   patchLeft: (p: Partial<PanelBox>) => void
   patchRight: (p: Partial<PanelBox>) => void
   setToolbarW: (w: number) => void
-  setLeftBottom: (y: number) => void
   setLeftColor: (on: boolean) => void
   setLeftKeys: (on: boolean) => void
   toggleLeftColor: () => void
@@ -222,11 +219,47 @@ export function canvasCorner(left: PanelBox, vw: number, extras: { right?: Panel
   }
 }
 
+/**
+ * 站点在右上角挂着小麦头像（56 像素，离边 20；右边栏开着的时候挪到右边栏左边）。
+ * 工具条伸到头像那儿的时候，头像让到工具条底下，跟工具提示同一排，提示给它留出这一段
+ */
+const HOST_CORNER = 88
+/** 工具提示窄过这个宽度，一行放不下几个字，就换一种摆法 */
+const TIP_MIN_W = 320
+/** 工具提示按两行字估的高度：右边栏的顶边只要高过提示的底边，就算跟提示同一排 */
+const TIP_ROW_H = 60
+
+/**
+ * 电脑上工具提示的位置：工具条正下方，跟往下挪的左栏、三个场景按钮同一排，宽度不超出工具条。
+ * 左边让开左栏和挪下来的三个按钮，右边让开右边栏和站点的小麦头像。
+ * 让完以后左右还能对称，就跟工具条居中；对称摆太窄，就在让出来的那一段里居中；
+ * 那一段也太窄（窗口窄、右边栏开着），挪到三个按钮那一排下面，那里只剩左栏要让。
+ * 挪下去还是连半个最小宽度都没有（窗口很窄又开着右边栏，画布只剩一条），就不弹提示，返回 null。
+ */
+export function statusTipBox(left: PanelBox, vw: number, toolbarW: number, dock: PanelBox | null) {
+  const barW = Math.min(toolbarW, vw - 16)
+  const barL = (vw - barW) / 2
+  let top = toolbarTop(left, vw) + TOOLBAR_CHROME_H + PANEL_GAP
+  const edge = dock && dock.top < top + TIP_ROW_H ? vw - PANEL_GAP - dock.width : vw
+  const hi = Math.min(barL + barW, edge - HOST_CORNER)
+  let lo = Math.max(barL, PANEL_GAP + leftColumnWidth(left, vw) + PANEL_GAP)
+  if (sceneButtonsDrop(left, vw, toolbarW)) {
+    const { sceneLeft, clusterW } = canvasCorner(left, vw, { toolbarW })
+    const sceneR = sceneLeft + clusterW + PANEL_GAP
+    if (hi - Math.max(lo, sceneR) >= TIP_MIN_W) lo = Math.max(lo, sceneR)
+    else top += CORNER_TILE + PANEL_GAP
+  }
+  const mid = vw / 2
+  const half = Math.min(mid - lo, hi - mid)
+  if (half * 2 >= TIP_MIN_W) return { top, left: Math.round(mid - half), width: Math.round(half * 2) }
+  if (hi - lo < TIP_MIN_W / 2) return null
+  return { top, left: Math.round(lo), width: Math.round(hi - lo) }
+}
+
 export function PanelLayoutProvider({ children }: { children: ReactNode }) {
   const [{ vw, vh }, setVp] = useState(viewport)
   const [layout, setLayout] = useState(() => load(viewport().vh))
   const [toolbarW, setToolbarWState] = useState(720)
-  const [leftBottom, setLeftBottomState] = useState(0)
 
   useEffect(() => {
     const on = () => setVp(viewport())
@@ -276,10 +309,6 @@ export function PanelLayoutProvider({ children }: { children: ReactNode }) {
     const n = Math.round(w)
     setToolbarWState(cur => (cur === n ? cur : n))
   }, [])
-  const setLeftBottom = useCallback((y: number) => {
-    const n = Math.round(y)
-    setLeftBottomState(cur => (cur === n ? cur : n))
-  }, [])
 
   const value = useMemo(
     () => ({
@@ -288,20 +317,17 @@ export function PanelLayoutProvider({ children }: { children: ReactNode }) {
       vw,
       vh,
       toolbarW,
-      leftBottom,
       leftColor: layout.leftColor,
       leftKeys: layout.leftKeys,
       patchLeft,
       patchRight,
       setToolbarW,
-      setLeftBottom,
       setLeftColor,
       setLeftKeys,
       toggleLeftColor,
       toggleLeftKeys,
     }),
-    [layout, vw, vh, toolbarW, leftBottom, patchLeft, patchRight, setToolbarW, setLeftBottom, setLeftColor, setLeftKeys,
-      toggleLeftColor, toggleLeftKeys],
+    [layout, vw, vh, toolbarW, patchLeft, patchRight, setToolbarW, setLeftColor, setLeftKeys, toggleLeftColor, toggleLeftKeys],
   )
   return <PanelCtx.Provider value={value}>{children}</PanelCtx.Provider>
 }

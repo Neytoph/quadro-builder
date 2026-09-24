@@ -7,7 +7,6 @@ import LeftStack from './ui/LeftStack'
 import RightDock from './ui/RightDock'
 import ProjectTabs from './ui/ProjectTabs'
 import AssemblyBar from './ui/AssemblyBar'
-import StatusTip from './ui/StatusTip'
 import Onboarding from './ui/Onboarding'
 import ThumbCapture from './ui/ThumbCapture'
 import ErrorBoundary from './ui/ErrorBoundary'
@@ -198,7 +197,6 @@ function AppInner() {
       <TopToolbar />
       <LeftStack />
       <RightDock />
-      <StatusTip />
       <AssemblyBar />
       <Toast />
       <ManualConfirm />

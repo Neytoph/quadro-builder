@@ -8,6 +8,7 @@ import { NARROW_MAX, toolbarTop, usePanelLayout } from './panelLayout'
 import { ACCESSORY_PACK, ACCESSORY_IDS } from '../engine/accessoryPack.js'
 import { MOTION, usePresence } from './motion'
 import { Pop } from './Pop'
+import StatusTip from './StatusTip'
 
 /** 下拉菜单里零件图的边长（px）。渲染图太小看不出形状。 */
 const ICON = 44
@@ -174,6 +175,7 @@ export default function TopToolbar() {
   const plain = 'flex items-center justify-center min-w-[2.5rem] h-12 px-2 rounded-[14px] text-gray-300 hover:bg-teal-100 hover:text-gray-100 disabled:opacity-30 cursor-pointer disabled:cursor-default shrink-0'
 
   return (
+    <>
     <div
       data-ui="toolbar-wrap"
       className={`fixed z-50 flex flex-col items-stretch gap-1.5 pointer-events-none ${narrow ? 'left-2 right-2' : 'left-1/2 -translate-x-1/2 items-center'}`}
@@ -364,5 +366,8 @@ export default function TopToolbar() {
       </button>
       </div>
     </div>
+    {/* 工具提示跟工具条那一层并排，自己按屏幕定位：那一层带着 transform，里面的 fixed 会以它为准 */}
+    <StatusTip menuOpen={open !== null} />
+    </>
   )
 }
