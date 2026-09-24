@@ -43,11 +43,14 @@ type Ctx = {
   vw: number
   vh: number
   toolbarW: number
+  /** 左栏实际到哪儿（卡片多高就多高，量出来的底边）。小麦要看它底下还有没有地方趴 */
+  leftBottom: number
   leftColor: boolean
   leftKeys: boolean
   patchLeft: (p: Partial<PanelBox>) => void
   patchRight: (p: Partial<PanelBox>) => void
   setToolbarW: (w: number) => void
+  setLeftBottom: (y: number) => void
   setLeftColor: (on: boolean) => void
   setLeftKeys: (on: boolean) => void
   toggleLeftColor: () => void
@@ -223,6 +226,7 @@ export function PanelLayoutProvider({ children }: { children: ReactNode }) {
   const [{ vw, vh }, setVp] = useState(viewport)
   const [layout, setLayout] = useState(() => load(viewport().vh))
   const [toolbarW, setToolbarWState] = useState(720)
+  const [leftBottom, setLeftBottomState] = useState(0)
 
   useEffect(() => {
     const on = () => setVp(viewport())
@@ -272,6 +276,10 @@ export function PanelLayoutProvider({ children }: { children: ReactNode }) {
     const n = Math.round(w)
     setToolbarWState(cur => (cur === n ? cur : n))
   }, [])
+  const setLeftBottom = useCallback((y: number) => {
+    const n = Math.round(y)
+    setLeftBottomState(cur => (cur === n ? cur : n))
+  }, [])
 
   const value = useMemo(
     () => ({
@@ -280,17 +288,20 @@ export function PanelLayoutProvider({ children }: { children: ReactNode }) {
       vw,
       vh,
       toolbarW,
+      leftBottom,
       leftColor: layout.leftColor,
       leftKeys: layout.leftKeys,
       patchLeft,
       patchRight,
       setToolbarW,
+      setLeftBottom,
       setLeftColor,
       setLeftKeys,
       toggleLeftColor,
       toggleLeftKeys,
     }),
-    [layout, vw, vh, toolbarW, patchLeft, patchRight, setToolbarW, setLeftColor, setLeftKeys, toggleLeftColor, toggleLeftKeys],
+    [layout, vw, vh, toolbarW, leftBottom, patchLeft, patchRight, setToolbarW, setLeftBottom, setLeftColor, setLeftKeys,
+      toggleLeftColor, toggleLeftKeys],
   )
   return <PanelCtx.Provider value={value}>{children}</PanelCtx.Provider>
 }

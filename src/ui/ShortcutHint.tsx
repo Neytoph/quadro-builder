@@ -123,11 +123,7 @@ export default function ShortcutHint({ open, onToggle }: { open: boolean; onTogg
     <div
       data-ui="shortcut-hint"
       data-mode={mode}
-      className={`relative flex flex-col min-h-0 overflow-hidden rounded-xl border shadow-lg backdrop-blur-sm ${
-        api.mode === 'delete' && !api.pasting
-          ? 'bg-gray-950/82 border-red-500/25'
-          : 'bg-gray-950/82 border-teal-500/25'
-      }`}
+      className="qb-card relative flex flex-col min-h-0 overflow-hidden"
     >
       <FoldHeader
         open={open}

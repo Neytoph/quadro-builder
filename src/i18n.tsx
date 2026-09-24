@@ -420,6 +420,10 @@ const zh: Dict = {
   'onboard.s6title': '存下来，或发给别人',
   'onboard.s6body': '「文件」里可以保存、导出给原厂软件用的 QDF，也可以复制分享链接。对方打开链接就能看到，不用注册。',
   'onboard.s6hint': '{save} 也能保存。',
+  'asm.steps': '逐层拼装 · {n} 步',
+  'nav.home': '回小麦坊',
+  'tip.select': '点零件选中；{addSelect} 加点选 · 双击 / L 整块 · {selectAll} 全选 · {copyPaste} 复制粘贴',
+  'tip.placeConnector': '点亮起来的接头换成这一种；再点可以转动',
 }
 
 const en: Dict = {
@@ -822,6 +826,10 @@ const en: Dict = {
   'onboard.s6title': 'Save it, or send it',
   'onboard.s6body': 'File lets you save, export QDF for the official software, or copy a share link. The other person just opens the link — no account.',
   'onboard.s6hint': '{save} saves too.',
+  'asm.steps': 'Step by step · {n} steps',
+  'nav.home': 'Back to xiaomaifang',
+  'tip.select': 'Click a part to select it; {addSelect}-click to add · double-click / L for the block · {selectAll} select all · {copyPaste} copy-paste',
+  'tip.placeConnector': 'Click a highlighted connector to swap it for this one; click again to turn it',
 }
 
 const de: Dict = {
@@ -1224,6 +1232,10 @@ const de: Dict = {
   'onboard.s6title': 'Speichern oder weiterschicken',
   'onboard.s6body': 'Unter Datei speicherst du, exportierst QDF für die Originalsoftware oder kopierst einen Teillink. Die andere Person öffnet einfach den Link — ohne Konto.',
   'onboard.s6hint': '{save} speichert ebenfalls.',
+  'asm.steps': 'Schritt für Schritt · {n} Schritte',
+  'nav.home': 'Zurück zu xiaomaifang',
+  'tip.select': 'Teil anklicken zum Auswählen; {addSelect}-Klick fügt hinzu · Doppelklick / L für den Block · {selectAll} alles · {copyPaste} kopieren/einfügen',
+  'tip.placeConnector': 'Markierten Verbinder anklicken, um ihn zu tauschen; nochmal klicken dreht ihn',
 }
 
 const dicts: Record<Lang, Dict> = { zh, en, de }

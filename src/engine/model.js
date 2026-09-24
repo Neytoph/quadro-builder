@@ -669,11 +669,52 @@ export class BuildModel {
     // faellt auch die Klemme.
     if (weg.bearingOn) this.fittings.delete(weg.bearingOn);
     for (const t of [...this.tubes.values()]) {
-      if (t.a === id || t.b === id) this.tubes.delete(t.id);
+      if (t.a !== id && t.b !== id) continue;
+      this._releaseArms(t);
+      this.tubes.delete(t.id);
     }
     this.nodes.delete(id);
     this._prunePanels();
     this._pruneClamps();
+  }
+
+  /**
+   * 管子从通上拿走时，通在这个方向上的臂一起去掉。
+   *
+   * 读进来的通带着文件里写明的臂（`arms`，有管的和空着的都在里面），画面和
+   * 导出都照它来。不去掉的话，删一根管以后料表已经换成少一臂的通，画面上和
+   * 导出的文件里却还是原来那个通，多出一截空臂。其他方向上原本空着的臂是原
+   * 设计留的，保持不动。
+   *
+   * `onlyId` 给定时只处理这一头：拖动拆开连接时，管子还插在留下的那一头。
+   */
+  _releaseArms(t, onlyId = null) {
+    const a = this.nodes.get(t.a), b = this.nodes.get(t.b);
+    if (!a || !b) return;
+    for (const [n, o] of [[a, b], [b, a]]) {
+      if (!n.arms || (onlyId && n.id !== onlyId)) continue;
+      const d = this._tubeDirAt(t, n, o);
+      const L = Math.hypot(d[0], d[1], d[2]);
+      if (L < 1e-6) continue;
+      n.arms = n.arms.filter((v) => (v[0] * d[0] + v[1] * d[1] + v[2] * d[2]) / L < 0.9);
+      if (!n.arms.length) delete n.arms;
+    }
+  }
+
+  /** 管子在通 `n` 这一头插进哪个方向（`o` 是另一头的通）。 */
+  _tubeDirAt(t, n, o) {
+    // 弯管插在切线方向上：起点的切线就是圆心指向另一头的方向
+    if (t.bow && t.bowCenter) {
+      const c = t.bowCenter;
+      return [o.x - c[0], o.y - c[1], o.z - c[2]];
+    }
+    // 斜向转接头的套筒插在通的一条轴上，方向记在转接头那一端（c45axis，
+    // 从通指向转接头）；连线本身斜着偏了十几度
+    if (t.arm) {
+      if (o.c45body && o.c45axis) return o.c45axis.slice();
+      if (n.c45body && n.c45axis) return n.c45axis.map((v) => -v);
+    }
+    return [o.x - n.x, o.y - n.y, o.z - n.z];
   }
 
   degree(nodeId) {
@@ -847,6 +888,8 @@ export class BuildModel {
   }
 
   removeTube(id) {
+    const t = this.tubes.get(id);
+    if (t) this._releaseArms(t);
     this.tubes.delete(id);
     this._prunePanels();
     this._pruneClamps();
@@ -921,7 +964,9 @@ export class BuildModel {
       }
       if (!hasNonArmTube) {
         for (const t of [...this.tubes.values()]) {
-          if (t.a === n.id || t.b === n.id) this.tubes.delete(t.id);
+          if (t.a !== n.id && t.b !== n.id) continue;
+          this._releaseArms(t);
+          this.tubes.delete(t.id);
         }
         this.nodes.delete(n.id);
       }
@@ -4289,10 +4334,13 @@ export class BuildModel {
       const a = nodeIds.has(t.a), b = nodeIds.has(t.b);
       if (a === b) continue;
       const movingId = a ? t.a : t.b;
+      this._releaseArms(t, movingId);
       let stubId = stubs.get(movingId);
       if (!stubId) {
         const src = this.nodes.get(movingId);
         const stub = { id: this._id("n"), x: src.x, y: src.y, z: src.z };
+        // 留下的通还是原来那样摆着，转过角度的照旧
+        if (src.quat) stub.quat = src.quat.slice();
         this.nodes.set(stub.id, stub);
         stubs.set(movingId, stub.id);
         stubId = stub.id;
@@ -5242,6 +5290,7 @@ export class BuildModel {
       const other = t.a === bodyId ? t.b : t.b === bodyId ? t.a : null;
       if (!other) continue;
       baseId = other;
+      this._releaseArms(t);
       this.tubes.delete(t.id);
     }
     body.c45 = false;

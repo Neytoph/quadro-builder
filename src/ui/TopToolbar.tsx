@@ -1,76 +1,33 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import { createPortal } from 'react-dom'
 import { useEngine } from '../store/EngineContext'
 import { useI18n } from '../i18n'
 import { CONN_KIND_ORDER, connKindLabel, labelOf } from '../names'
 import { ACC_CAT_ICON, CONN_CAT_ICON, PartImg, Svg16, TOOL_ICON, partIcon, tubeIcon } from './icons'
-
-/** 下拉菜单里零件图的边长（px）。渲染图太小看不出形状。 */
-const ICON = 32
 import { UI_ESCAPE_EVENT } from './events'
 import { NARROW_MAX, toolbarTop, usePanelLayout } from './panelLayout'
 import { ACCESSORY_PACK, ACCESSORY_IDS } from '../engine/accessoryPack.js'
 import { MOTION, usePresence } from './motion'
+import { Pop } from './Pop'
+
+/** 下拉菜单里零件图的边长（px）。渲染图太小看不出形状。 */
+const ICON = 44
 
 const TUBE_HOTKEY: Record<string, string> = { T15: '1', T25: '2', T35: '3', T10: '4', T20: '5', T75: '6' }
 
-// active 是「当前工具」，open 是「下拉开着」。动效开着的时候两者分开画：
-// 当前工具的底色由一块会滑动的色块垫着（见 TopToolbar 里的 m-tool-ind），
-// 下拉开着只描边，免得两块实心底色同时亮、滑块不知道该去哪。
-const btn = (active: boolean, tone: 'teal' | 'red' = 'teal', open = false) => {
-  const base = 'm-tool relative z-[1] flex flex-col items-center justify-center gap-0.5 min-w-[3.4rem] h-12 px-2 rounded-xl border text-[11px] cursor-pointer transition-colors'
-  if (MOTION && active) return `${base} text-white border-transparent font-semibold`
-  if (MOTION && open) return `${base} bg-teal-100 text-teal-700 border-teal-400`
-  return `${base} ${
-    active || open
-      ? (tone === 'red'
-        ? 'bg-red-500 text-white border-red-400 font-semibold'
-        : 'bg-teal-500 text-white border-teal-400 font-semibold')
-      : (tone === 'red'
-        ? 'bg-gray-900/70 text-gray-200 border-gray-700 hover:border-red-400'
-        : 'bg-gray-900/70 text-gray-200 border-gray-700 hover:border-teal-400')
-  }`
-}
-
-const dropItem = (on: boolean) =>
-  `flex items-center gap-2 w-full text-xs rounded-lg px-2 py-1.5 text-left cursor-pointer ${
-    on ? 'bg-teal-500 text-white font-semibold' : 'text-gray-50 hover:bg-gray-700'
-  }`
-
-function Pop({ anchor, leaving, children }: { anchor: HTMLElement | null; leaving: boolean; children: ReactNode }) {
-  const ref = useRef<HTMLDivElement>(null)
-  const [pos, setPos] = useState({ top: 0, left: 0 })
-  useLayoutEffect(() => {
-    // 菜单项按顺序一个接一个进来（错开多少由 CSS 按版本定）
-    ref.current?.querySelectorAll<HTMLElement>('button').forEach((b, i) => b.style.setProperty('--i', String(Math.min(i, 12))))
-  }, [])
-  useLayoutEffect(() => {
-    const el = ref.current
-    if (!anchor || !el) return
-    const place = () => {
-      const r = anchor.getBoundingClientRect()
-      const w = el.offsetWidth || 256
-      const left = Math.min(Math.max(8, r.left), window.innerWidth - w - 8)
-      setPos({ top: r.bottom + 6, left })
-    }
-    place()
-    const ro = new ResizeObserver(place)
-    ro.observe(el)
-    window.addEventListener('resize', place)
-    return () => {
-      ro.disconnect()
-      window.removeEventListener('resize', place)
-    }
-  }, [anchor])
-  return createPortal(
-    <div
-      ref={ref}
-      className={`m-pop fixed z-[60] pointer-events-auto bg-gray-800 border border-gray-600 rounded-xl shadow-2xl p-2 min-w-[16rem] w-max max-w-[22rem] ${leaving ? 'm-leave pointer-events-none' : ''}`}
-      style={pos}
-    >
-      {children}
-    </div>,
-    document.body,
+function DropItem({ on, onClick, title, img, label, compat }: {
+  on: boolean
+  onClick: () => void
+  title?: string
+  img: ReactNode
+  label: string
+  compat?: boolean
+}) {
+  return (
+    <button type="button" data-on={on} onClick={onClick} title={title} className="qb-drop-item">
+      {img}
+      <span className="whitespace-nowrap overflow-hidden text-ellipsis max-w-full">{label}</span>
+      {compat && <i className="qb-compat not-italic">兼容</i>}
+    </button>
   )
 }
 
@@ -78,25 +35,33 @@ function ToolDrop({
   open,
   active,
   onClick,
+  onClose,
   title,
   children,
   menu,
   tour,
+  width = 392,
 }: {
   open: boolean
   active: boolean
   onClick: () => void
+  onClose: () => void
   title?: string
   children: ReactNode
   menu: ReactNode
   tour?: string
+  width?: number
 }) {
   const ref = useRef<HTMLButtonElement>(null)
   const [shown, leaving] = usePresence(open ? true : null)
   return (
     <>
-      <button ref={ref} type="button" title={title} data-tour={tour} data-mode-on={active} className={btn(active, 'teal', open)} onClick={onClick}>{children}</button>
-      {shown && <Pop anchor={ref.current} leaving={leaving}>{menu}</Pop>}
+      <button ref={ref} type="button" title={title} data-tour={tour} data-mode-on={active} data-open={open} className="m-tool qb-tool" onClick={onClick}>{children}</button>
+      {shown && (
+        <Pop anchor={ref.current} leaving={leaving} onClose={onClose} align="center" width={width}>
+          <div className="qb-drop">{menu}</div>
+        </Pop>
+      )}
     </>
   )
 }
@@ -186,7 +151,7 @@ export default function TopToolbar() {
   ]
   const tubeDef = api.catalog.tubes.find(x => x.id === api.tubeId)
   const tubeCurved = api.catalog.curved.some(c => c.id === api.tubeId)
-  const tubeMark = tubeCurved ? t('hint.curved') : (tubeDef ? String(tubeDef.length_cm) : '')
+  const tubeMark = tubeCurved ? t('hint.curved') : (tubeDef ? `${tubeDef.length_cm} cm` : '')
   const panelDef = api.catalog.panels.find(p => p.id === api.panelId)
   // 洞洞板和透明窗板与 40×40 同尺寸，尺寸后面带一个词区分
   type PanelLike = { w?: number; h?: number; holes?: number; acrylic?: boolean; feature?: string; compat?: boolean }
@@ -205,211 +170,196 @@ export default function TopToolbar() {
   const officialPanels = api.catalog.panels.filter(p => !(p as PanelLike).compat)
   const compatPanels = api.catalog.panels.filter(p => (p as PanelLike).compat)
 
+  const sep = <div className="w-px bg-teal-200 mx-0.5 my-2 self-stretch shrink-0" />
+  const plain = 'flex items-center justify-center min-w-[2.5rem] h-12 px-2 rounded-[14px] text-gray-300 hover:bg-teal-100 hover:text-gray-100 disabled:opacity-30 cursor-pointer disabled:cursor-default shrink-0'
+
   return (
     <div
       data-ui="toolbar-wrap"
       className={`fixed z-50 flex flex-col items-stretch gap-1.5 pointer-events-none ${narrow ? 'left-2 right-2' : 'left-1/2 -translate-x-1/2 items-center'}`}
       style={{ top: toolbarTop(left, vw) }}
     >
-      <div ref={barRef} data-tour="toolbar" className="relative flex items-stretch gap-1 bg-gray-950/90 backdrop-blur border border-gray-800 rounded-2xl p-1 shadow-xl pointer-events-auto max-w-[calc(100vw-1rem)] overflow-x-auto scrollbar-thin">
+      <div ref={barRef} data-tour="toolbar" className="qb-card relative flex items-stretch gap-0.5 p-1 pointer-events-auto max-w-[calc(100vw-1rem)] overflow-x-auto scrollbar-none">
       {MOTION && <span ref={indRef} aria-hidden className="m-tool-ind" />}
-      <button disabled={!api.canUndo} onClick={api.undo} title={t('hint.undo')}
-        className="flex items-center justify-center min-w-[2.5rem] h-12 px-2 rounded-xl text-gray-200 hover:bg-gray-800 disabled:opacity-30 cursor-pointer disabled:cursor-default">
+      <button disabled={!api.canUndo} onClick={api.undo} title={t('hint.undo')} className={plain}>
         <Svg16 inner={TOOL_ICON.undo} />
       </button>
-      <button disabled={!api.canRedo} onClick={api.redo} title={t('hint.redo')}
-        className="flex items-center justify-center min-w-[2.5rem] h-12 px-2 rounded-xl text-gray-200 hover:bg-gray-800 disabled:opacity-30 cursor-pointer disabled:cursor-default">
+      <button disabled={!api.canRedo} onClick={api.redo} title={t('hint.redo')} className={plain}>
         <Svg16 inner={TOOL_ICON.redo} />
       </button>
-      <div className="w-px bg-gray-700 mx-0.5 self-stretch" />
+      {sep}
 
-      <button className={btn(api.mode === 'select')} data-mode-on={api.mode === 'select'} onClick={() => { api.setMode('select'); close() }}>
+      <button className="m-tool qb-tool" data-mode-on={api.mode === 'select'} onClick={() => { api.setMode('select'); close() }}>
         <Svg16 inner={TOOL_ICON.select} />{t('tool.select')}
       </button>
-      <button className={btn(api.mode === 'delete', 'red')} data-mode-on={api.mode === 'delete'} data-tone="red" title={t('tool.deleteHint')}
+      <button className="m-tool qb-tool" data-mode-on={api.mode === 'delete'} data-tone="red" title={t('tool.deleteHint')}
         onClick={() => { api.setMode(api.mode === 'delete' ? 'select' : 'delete'); close() }}>
         <Svg16 inner={TOOL_ICON.delete} />{t('tool.delete')}
       </button>
+      {sep}
 
       <ToolDrop
         tour="tool-tubes"
         open={open === 'tubes'}
         active={api.mode === 'add' && !api.placingConnector}
         onClick={() => { api.setMode('add'); toggle('tubes') }}
+        onClose={close}
         menu={(
           <>
+            <div className="qb-drop-h">{t('tool.tubes')} · {t('onboard.s2hint')}</div>
             {api.catalog.tubes.map(tube => (
-              <button key={tube.id} onClick={() => { api.setTube(tube.id); close() }}
+              <DropItem key={tube.id} on={api.tubeId === tube.id} onClick={() => { api.setTube(tube.id); close() }}
                 title={TUBE_HOTKEY[tube.id] ? t('hint.tubeKey', { n: tube.length_cm, k: TUBE_HOTKEY[tube.id] }) : undefined}
-                className={dropItem(api.tubeId === tube.id)}>
-                <PartImg id={tube.id} svg={tubeIcon(tube.id, tube.length_cm)} size={ICON} />
-                <span className="whitespace-nowrap">{t('hint.tubeName', { n: tube.length_cm })}</span>
-              </button>
+                img={<PartImg id={tube.id} svg={tubeIcon(tube.id, tube.length_cm)} size={ICON} />}
+                label={`${tube.length_cm} cm`} />
             ))}
             {api.catalog.curved.map(c => (
-              <button key={c.id} onClick={() => { api.setTube(c.id); close() }}
-                className={dropItem(api.tubeId === c.id)}>
-                <PartImg id={c.id} svg={tubeIcon(c.id)} size={ICON} />
-                <span className="whitespace-nowrap">{t('hint.curved')}</span>
-              </button>
+              <DropItem key={c.id} on={api.tubeId === c.id} onClick={() => { api.setTube(c.id); close() }}
+                img={<PartImg id={c.id} svg={tubeIcon(c.id)} size={ICON} />} label={t('hint.curved')} />
             ))}
           </>
         )}
       >
         <Svg16 inner={tubeIcon(api.tubeId, tubeDef?.length_cm)} />
-        <span className="leading-none">{t('tool.tubes')}{tubeMark ? <span className="opacity-80"> {tubeMark}</span> : null}</span>
+        <span>{t('tool.tubes')}</span>
+        {tubeMark ? <small>{tubeMark}</small> : null}
       </ToolDrop>
 
       <ToolDrop
         open={open === 'panels'}
         active={api.mode === 'panel'}
         onClick={() => { api.setMode('panel'); toggle('panels') }}
+        onClose={close}
         menu={(
           <>
             {officialPanels.map(p => (
-              <button key={p.id} onClick={() => { api.setPanel(p.id); close() }}
-                className={dropItem(api.panelId === p.id)}>
-                <PartImg id={p.id} svg={partIcon(p.id, 'panels')} size={ICON} />
-                <span className="whitespace-nowrap">{panelLabel(p) || labelOf(p.id, p.name)}</span>
-              </button>
+              <DropItem key={p.id} on={api.panelId === p.id} onClick={() => { api.setPanel(p.id); close() }}
+                img={<PartImg id={p.id} svg={partIcon(p.id, 'panels')} size={ICON} />}
+                label={panelLabel(p) || labelOf(p.id, p.name)} />
             ))}
-            {compatPanels.length > 0 && (
-              <div className="mt-1 pt-1 border-t border-gray-700 px-2 pb-0.5 text-[10px] text-gray-400 whitespace-nowrap">{t('panel.compat')}</div>
-            )}
+            {compatPanels.length > 0 && <div className="qb-drop-h">{t('panel.compat')}</div>}
             {compatPanels.map(p => (
-              <button key={p.id} onClick={() => { api.setPanel(p.id); close() }}
-                className={dropItem(api.panelId === p.id)}>
-                <PartImg id={p.id} svg={partIcon(p.id, 'panels')} size={ICON} />
-                <span className="whitespace-nowrap">{panelLabel(p) || labelOf(p.id, p.name)}</span>
-              </button>
+              <DropItem key={p.id} on={api.panelId === p.id} onClick={() => { api.setPanel(p.id); close() }} compat
+                img={<PartImg id={p.id} svg={partIcon(p.id, 'panels')} size={ICON} />}
+                label={panelLabel(p) || labelOf(p.id, p.name)} />
             ))}
           </>
         )}
       >
         <Svg16 inner={TOOL_ICON.panel} />
-        <span className="leading-none whitespace-nowrap">{t('tool.panels')}{panelMark ? <span className="opacity-80"> {panelMark}</span> : null}</span>
+        <span>{t('tool.panels')}</span>
+        {panelMark ? <small>{panelMark}</small> : null}
       </ToolDrop>
 
       <ToolDrop
         open={open === 'conn'}
         active={api.mode === 'c45' || api.mode === 'clamp' || !!api.placingConnector || (api.mode === 'fitting' && JOINT_FITTING.has(api.fittingKind))}
         onClick={() => toggle('conn')}
-        menu={(
-          <div className="max-h-[80vh] overflow-y-auto pr-0.5 scrollbar-thin">
-            {CONN_KIND_ORDER.map(kind => {
-              const items = api.catalog.connectors.filter(c => c.kind === kind)
-              if (!items.length) return null
-              return (
-                <div key={kind} className="mb-1.5 last:mb-0">
-                  <div className="text-[10px] uppercase tracking-wider text-gray-400 px-2 py-1">{connKindLabel(kind)}</div>
-                  {items.map(c => (
-                    <button key={c.id} onClick={() => { pickJoint(c.id, api); close() }}
-                      className={dropItem(jointActive(c.id, api))}>
-                      <PartImg id={c.id} svg={CONN_CAT_ICON[c.id] ?? CONN_CAT_ICON['6way']} size={ICON} />
-                      <span className="whitespace-nowrap">{labelOf(c.id, c.name)}</span>
-                    </button>
-                  ))}
-                </div>
-              )
-            })}
-          </div>
-        )}
+        onClose={close}
+        menu={CONN_KIND_ORDER.map(kind => {
+          const items = api.catalog.connectors.filter(c => c.kind === kind)
+          if (!items.length) return null
+          return (
+            <div key={kind} className="contents">
+              <div className="qb-drop-h">{connKindLabel(kind)}</div>
+              {items.map(c => (
+                <DropItem key={c.id} on={jointActive(c.id, api)} onClick={() => { pickJoint(c.id, api); close() }}
+                  img={<PartImg id={c.id} svg={CONN_CAT_ICON[c.id] ?? CONN_CAT_ICON['6way']} size={ICON} />}
+                  label={labelOf(c.id, c.name)} />
+              ))}
+            </div>
+          )
+        })}
       >
         <Svg16 inner={CONN_CAT_ICON['6way']} />
-        <span className="leading-none">{t('tool.connections')}</span>
+        <span>{t('tool.connections')}</span>
       </ToolDrop>
 
-      <div className="w-px bg-gray-700 mx-0.5 self-stretch" />
+      {sep}
 
       <ToolDrop
         open={open === 'wheels'}
         active={api.mode === 'fitting' && WHEEL_QDF.has(api.fittingKind)}
         onClick={() => toggle('wheels')}
+        onClose={close}
         menu={wheels.map(a => (
-          <button key={a.id} onClick={() => { if (a.qdf) api.setFitting(a.qdf); close() }}
-            className={dropItem(!!a.qdf && api.fittingKind === a.qdf && api.mode === 'fitting')}>
-            <PartImg id={a.id} svg={(a.qdf && ACC_CAT_ICON[a.qdf]) || TOOL_ICON.wheel} size={ICON} />
-            <span className="whitespace-nowrap">{labelOf(a.id, a.name)}</span>
-          </button>
+          <DropItem key={a.id} on={!!a.qdf && api.fittingKind === a.qdf && api.mode === 'fitting'}
+            onClick={() => { if (a.qdf) api.setFitting(a.qdf); close() }}
+            img={<PartImg id={a.id} svg={(a.qdf && ACC_CAT_ICON[a.qdf]) || TOOL_ICON.wheel} size={ICON} />}
+            label={labelOf(a.id, a.name)} />
         ))}
       >
         <Svg16 inner={TOOL_ICON.wheel} />
-        <span className="leading-none">{t('tool.wheels')}</span>
+        <span>{t('tool.wheels')}</span>
       </ToolDrop>
       <ToolDrop
         open={open === 'textiles'}
         active={api.mode === 'fitting' && TEXTIL_QDF.has(api.fittingKind)}
         onClick={() => toggle('textiles')}
+        onClose={close}
         menu={(
           <>
             {textiles.map(a => (
-              <button key={a.id} onClick={() => { if (a.qdf) api.setFitting(a.qdf, a.variant ? a.id : undefined); close() }}
-                className={dropItem(!!a.qdf && api.fittingKind === a.qdf && api.mode === 'fitting'
-                  && (a.variant ? api.fittingPart === a.id : !api.fittingPart))}>
-                <PartImg id={a.id} svg={(a.qdf && ACC_CAT_ICON[a.qdf]) || TOOL_ICON.textile} size={ICON} />
-                <span className="whitespace-nowrap">{labelOf(a.id, a.name)}</span>
-              </button>
+              <DropItem key={a.id}
+                on={!!a.qdf && api.fittingKind === a.qdf && api.mode === 'fitting' && (a.variant ? api.fittingPart === a.id : !api.fittingPart)}
+                onClick={() => { if (a.qdf) api.setFitting(a.qdf, a.variant ? a.id : undefined); close() }}
+                img={<PartImg id={a.id} svg={(a.qdf && ACC_CAT_ICON[a.qdf]) || TOOL_ICON.textile} size={ICON} />}
+                label={labelOf(a.id, a.name)} />
             ))}
             {/* 软包滚筒：套在管子上，不是布件，但归在这一栏最顺手 */}
-            <button key="sleeve" onClick={() => { api.setFitting('sleeve', 'sleeve'); close() }}
-              className={dropItem(api.fittingKind === 'sleeve' && api.mode === 'fitting')}>
-              <PartImg id="sleeve" svg={TOOL_ICON.textile} size={ICON} />
-              <span className="whitespace-nowrap">{labelOf('sleeve')}</span>
-            </button>
+            <DropItem on={api.fittingKind === 'sleeve' && api.mode === 'fitting'} onClick={() => { api.setFitting('sleeve', 'sleeve'); close() }}
+              img={<PartImg id="sleeve" svg={TOOL_ICON.textile} size={ICON} />} label={labelOf('sleeve')} />
           </>
         )}
       >
         <Svg16 inner={TOOL_ICON.textile} />
-        <span className="leading-none">{t('tool.textiles')}</span>
+        <span>{t('tool.textiles')}</span>
       </ToolDrop>
       <ToolDrop
         open={open === 'pools'}
         active={api.poolLinerId != null && (api.mode === 'fitting' || api.pasting)}
         onClick={() => toggle('pools')}
+        onClose={close}
         menu={pools.map(a => (
-          <button key={a.id} onClick={() => { api.startPool(a.id); close() }}
-            className={dropItem(api.poolLinerId === a.id && (api.mode === 'fitting' || api.pasting))}>
-            <PartImg id={a.id} svg={TOOL_ICON.pool} size={ICON} />
-            <span className="whitespace-nowrap">{labelOf(a.id, a.name)}</span>
-          </button>
+          <DropItem key={a.id} on={api.poolLinerId === a.id && (api.mode === 'fitting' || api.pasting)}
+            onClick={() => { api.startPool(a.id); close() }}
+            img={<PartImg id={a.id} svg={TOOL_ICON.pool} size={ICON} />} label={labelOf(a.id, a.name)} />
         ))}
       >
         <Svg16 inner={TOOL_ICON.pool} />
-        <span className="leading-none">{t('tool.pools')}</span>
+        <span>{t('tool.pools')}</span>
       </ToolDrop>
       <ToolDrop
         open={open === 'slides'}
         active={api.mode === 'slide'}
         onClick={() => toggle('slides')}
-        menu={(
-          <>
-            {slides.map(s => (
-              <button key={s.id} onClick={() => { api.setSlide(s.id); close() }}
-                className={dropItem(api.slideKind === s.id && api.mode === 'slide')}>
-                <PartImg id={s.part} svg={TOOL_ICON.slide} size={ICON} />
-                <span className="whitespace-nowrap">{labelOf(s.part)}</span>
-              </button>
-            ))}
-          </>
-        )}
+        onClose={close}
+        menu={slides.map(s => (
+          <DropItem key={s.id} on={api.slideKind === s.id && api.mode === 'slide'} onClick={() => { api.setSlide(s.id); close() }}
+            img={<PartImg id={s.part} svg={TOOL_ICON.slide} size={ICON} />} label={labelOf(s.part)} />
+        ))}
       >
         <Svg16 inner={TOOL_ICON.slide} />
-        <span className="leading-none">{t('tool.slides')}</span>
+        <span>{t('tool.slides')}</span>
       </ToolDrop>
 
-      <div className="w-px bg-gray-700 mx-0.5 self-stretch" />
+      {sep}
 
       <ToolDrop
         open={open === 'accessories'}
         active={api.mode === 'fitting' && ACCESSORY_IDS.has(api.fittingKind)}
         onClick={() => toggle('accessories')}
-        menu={<>{ACCESSORY_PACK.map(part => <button key={part.id} onClick={() => { api.setFitting(part.id, part.id); close() }} className={dropItem(api.mode === 'fitting' && api.fittingKind === part.id)}><Svg16 inner={TOOL_ICON.textile} size={18} /><span>{labelOf(part.id, part.name)}</span></button>)}</>}
+        onClose={close}
+        menu={ACCESSORY_PACK.map(part => (
+          <DropItem key={part.id} on={api.mode === 'fitting' && api.fittingKind === part.id} onClick={() => { api.setFitting(part.id, part.id); close() }} compat
+            img={<PartImg id={part.id} svg={TOOL_ICON.textile} size={ICON} />} label={labelOf(part.id, part.name)} />
+        ))}
       >
         <Svg16 inner={TOOL_ICON.textile} />
-        <span className="leading-none whitespace-nowrap">{t('tool.accessories')}</span>
+        <span>{t('tool.accessories')}</span>
       </ToolDrop>
 
-      <button className={btn(api.mode === 'reinforce')} data-mode-on={api.mode === 'reinforce'} title={t('tool.reinforceHint')} onClick={() => { api.startReinforce(); close() }}>
+      <button className="m-tool qb-tool" data-mode-on={api.mode === 'reinforce'} title={t('tool.reinforceHint')} onClick={() => { api.startReinforce(); close() }}>
         <Svg16 inner={TOOL_ICON.reinforce} />{t('tool.reinforce')}
       </button>
       </div>

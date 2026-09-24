@@ -33,12 +33,12 @@ export default function RightDock() {
     <aside
       data-tour="dock-panel"
       data-ui="right-dock"
-      className={`m-dock fixed z-[45] flex flex-col overflow-y-auto scrollbar-thin bg-gray-950/92 backdrop-blur border border-gray-800 rounded-2xl shadow-xl text-gray-200 ${leaving ? 'm-leave pointer-events-none' : ''}`}
+      className={`m-dock fixed z-[45] flex flex-col overflow-y-auto scrollbar-thin qb-card text-gray-200 ${leaving ? 'm-leave pointer-events-none' : ''}`}
       style={narrow
         ? { left: PANEL_GAP, right: PANEL_GAP, top: TAB_BAR_H + PANEL_GAP, bottom: PANEL_GAP, width: 'auto', height: 'auto' }
         : { width: right.width, top: right.top, right: PANEL_GAP, maxHeight: maxH }}
     >
-      <div className="sticky top-0 z-20 bg-gray-950/92 backdrop-blur">
+      <div className="sticky top-0 z-20 bg-teal-50">
         {!narrow && <PanelHandles side="right" hug moveLabel={t('hint.movePanel')} sizeLabel={t('hint.resize')} />}
         <div className="px-3 py-2 border-b border-gray-800 text-sm font-semibold shrink-0 flex items-center gap-2">
           <span key={pane} className="m-swap flex-1 min-w-0 truncate">{t(TITLE[pane])}</span>

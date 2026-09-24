@@ -191,7 +191,7 @@ export default function Onboarding() {
 
       <div
         ref={cardRef}
-        className="m-card absolute w-[min(21.25rem,calc(100vw-1.5rem))] bg-gray-900 text-gray-100 rounded-2xl border border-gray-700 shadow-2xl p-4 pointer-events-auto"
+        className="m-card qb-card absolute w-[min(21.25rem,calc(100vw-1.5rem))] text-gray-100 p-4 pointer-events-auto"
         style={{ top: card.top, left: card.left }}
         onClick={e => e.stopPropagation()}
       >
@@ -218,7 +218,7 @@ export default function Onboarding() {
             ))}
           </div>
           {i > 0 && (
-            <button type="button" onClick={() => setI(i - 1)} className="px-3 py-2 rounded-lg text-sm text-gray-300 hover:bg-gray-800 cursor-pointer">
+            <button type="button" onClick={() => setI(i - 1)} className="qb-btn qb-btn-ghost qb-btn-sm">
               {t('onboard.back')}
             </button>
           )}
@@ -226,7 +226,7 @@ export default function Onboarding() {
             type="button"
             autoFocus
             onClick={() => { if (last) finish('done'); else { track('builder.onboard.step', { i: i + 2 }); setI(i + 1) } }}
-            className="px-4 py-2 rounded-lg text-sm font-semibold bg-teal-500 hover:bg-teal-400 text-white cursor-pointer"
+            className="qb-btn qb-btn-sm"
           >
             {last ? t('onboard.done') : t('onboard.next')}
           </button>

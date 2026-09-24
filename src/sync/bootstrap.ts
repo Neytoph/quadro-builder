@@ -17,6 +17,8 @@ import type { SyncEvent } from './types'
 let started = false
 // 已经在跑的那一个。应用要「这就推上去」时找它。
 let live: ReturnType<typeof createSync> | null = null
+// 等着同步跑起来的界面（「发到社区」只给后端认得出的人）
+const waiting = new Set<() => void>()
 
 /**
  * 立刻跑一轮同步，等它跑完。
@@ -88,6 +90,8 @@ export function startSyncIfConfigured(
     live = sync
     track('builder.sync.start')
     sync.start()
+    waiting.forEach((cb) => cb())
+    waiting.clear()
     // 关页面前推一把，别把最后的改动留在本地
     window.addEventListener('pagehide', () => { void sync.syncNow() })
   }
@@ -131,6 +135,17 @@ export function startSyncIfConfigured(
   })()
 
   return sync
+}
+
+/** 同步跑起来了没有，也就是后端认不认得出这个人。 */
+export function syncStarted(): boolean {
+  return started
+}
+
+/** 同步跑起来的时候叫一声（在另一个标签页登录后切回来，也会在这时候跑起来）。返回的函数用来退订。 */
+export function onSyncStart(cb: () => void): () => void {
+  waiting.add(cb)
+  return () => { waiting.delete(cb) }
 }
 
 export { QuotaError }

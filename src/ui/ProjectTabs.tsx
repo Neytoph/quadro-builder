@@ -52,6 +52,9 @@ export default function ProjectTabs() {
       className="fixed top-0 left-0 right-0 z-40 flex items-center gap-2 px-2 bg-gray-950/95 border-b border-gray-800"
       style={{ height: TAB_BAR_H }}
     >
+      <a href="/" title={t('nav.home')} className="shrink-0 flex items-center justify-center w-8 h-8 rounded-[9px] overflow-hidden">
+        <img src={`${import.meta.env.BASE_URL}favicon.svg`} alt="" width={32} height={32} draggable={false} />
+      </a>
       {!narrow && (
       <div className="flex items-center gap-1 min-w-0 flex-1 overflow-x-auto scrollbar-thin">
       {api.tabs.map(tab => (
