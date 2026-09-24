@@ -43,6 +43,8 @@
   --color-gray-800: #fff1e6;
   --color-gray-900: #fff8f2;
   --color-gray-950: #ffffff;
+
+  --font-num: "Space Grotesk", "Noto Sans SC", ui-sans-serif, system-ui, sans-serif;
 }
 
 .app-viewport {
@@ -64,6 +66,113 @@ html, body, #root {
   display: block;
   outline: none;
 }
+
+/* 浮在画布上的卡片，全部浮层只用这一种：奶白底、浅驼色细边、很低的长阴影 */
+.qb-card {
+  background: rgba(255, 248, 242, .96);
+  border: 1.5px solid #e0b892;
+  border-radius: 18px;
+  box-shadow: 0 18px 40px -32px rgba(31, 36, 48, .28);
+  backdrop-filter: blur(12px);
+}
+
+/* 主按钮：深橙到亮橙的斜向渐变，带一层橙色发光 */
+.qb-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 9px 18px;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #ea580c, #ff8a2b);
+  color: #fff;
+  font-weight: 700;
+  font-size: 14px;
+  line-height: 1.2;
+  cursor: pointer;
+  box-shadow: 0 6px 20px -6px rgba(234, 88, 12, .55);
+  white-space: nowrap;
+  transition: transform .18s, box-shadow .18s, opacity .18s;
+}
+.qb-btn:hover { transform: translateY(-1px); box-shadow: 0 12px 28px -8px rgba(234, 88, 12, .6); }
+.qb-btn:disabled { opacity: .45; cursor: not-allowed; transform: none; box-shadow: none; }
+.qb-btn-ghost {
+  background: none;
+  color: #ea580c;
+  border: 1.5px solid #ffd3b0;
+  box-shadow: none;
+}
+.qb-btn-ghost:hover { background: #fff1e6; transform: none; box-shadow: none; }
+.qb-btn-sm { padding: 6px 12px; font-size: 13px; }
+
+.qb-num { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+
+/* 顶栏工具：竖排图标加字，当前的那颗是橙色渐变 */
+.qb-tool {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 3.4rem;
+  height: 3rem;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 14px;
+  background: none;
+  color: #1f2430;
+  font-size: 11px;
+  line-height: 1.1;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.qb-tool:hover { background: #fff1e6; }
+.qb-tool[data-mode-on="true"] { color: #fff; font-weight: 700; }
+.qb-tool[data-mode-on="true"]:hover { background: none; }
+.qb-tool[data-open="true"]:not([data-mode-on="true"]) { background: #fff1e6; color: #ea580c; }
+.qb-tool small { font-size: 10px; opacity: .75; }
+.qb-tool[data-mode-on="true"] small { opacity: .9; }
+html:not([data-motion]) .qb-tool[data-mode-on="true"] { background: linear-gradient(135deg, #ea580c, #ff8a2b); }
+html:not([data-motion]) .qb-tool[data-mode-on="true"][data-tone="red"] { background: #e11d48; }
+
+/* 工具下拉：零件图格子 */
+.qb-drop {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 6px;
+}
+.qb-drop-item {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  padding: 6px 4px;
+  border: 0;
+  border-radius: 12px;
+  background: #fff1e6;
+  color: #1f2430;
+  font: inherit;
+  font-size: 11.5px;
+  line-height: 1.2;
+  text-align: center;
+  cursor: pointer;
+}
+.qb-drop-item:hover { background: #ffe4cf; }
+.qb-drop-item[data-on="true"] { background: #fff; box-shadow: inset 0 0 0 2px #ff8a2b; }
+.qb-drop-item .qb-compat {
+  position: absolute;
+  right: 4px;
+  top: 4px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #e9f7ef;
+  color: #13763e;
+  font-size: 10px;
+}
+.qb-drop-h { grid-column: 1 / -1; font-size: 12px; color: #5a6270; padding: 4px 2px 0; }
 
 .scene-spinner {
   position: absolute;
@@ -102,6 +211,8 @@ html, body, #root {
   background: #ffd3b0;
   border-radius: 999px;
 }
+.scrollbar-none { scrollbar-width: none; }
+.scrollbar-none::-webkit-scrollbar { display: none; }
 
 .select-box {
   position: absolute;
@@ -203,6 +314,13 @@ html[data-motion] .m-pop:not(.m-leave) button {
   animation-delay: calc(var(--i, 0) * var(--m-step));
 }
 
+/* 工具提示：电脑上从工具条底下落出来，收起的时候折回工具条；手机上（.m-say-up）从拼装条上面冒出来，收回拼装条 */
+@keyframes m-say-in { from { opacity: 0; transform: translateY(var(--say-dy, -10px)) scale(.94); filter: blur(4px); } }
+@keyframes m-say-out { to { opacity: 0; transform: translateY(var(--say-dy, -10px)) scaleY(.6); filter: blur(3px); } }
+html[data-motion] .m-say { transform-origin: top center; animation: m-say-in var(--m-in) var(--m-pop) both; }
+html[data-motion] .m-say.m-say-up { --say-dy: 10px; transform-origin: bottom center; }
+html[data-motion] .m-say.m-leave { animation: m-say-out var(--m-out) ease-in both; }
+
 /* 提示条、确认框、进度框 */
 html[data-motion] .m-toast { animation: m-in-y var(--m-in) var(--m-pop) both; }
 html[data-motion] .m-toast.m-leave { animation: m-out-y var(--m-out) ease-in both; }
@@ -228,9 +346,9 @@ html[data-motion] .m-card [aria-hidden] > div { transition: background-color var
   position: absolute; left: 0; top: 0; z-index: 0; pointer-events: none; opacity: 0;
   background: var(--color-teal-500);
 }
-.m-tool-ind { border-radius: var(--radius-xl); border: 1px solid var(--color-teal-400); }
+.m-tool-ind { border-radius: 14px; background: linear-gradient(135deg, #ea580c, #ff8a2b); }
 .m-pill-ind { border-radius: var(--radius-lg); }
-.m-tool-ind[data-tone=red] { background: var(--color-red-500); border-color: var(--color-red-400); }
+.m-tool-ind[data-tone=red] { background: #e11d48; }
 .m-tool-ind[data-ready], .m-pill-ind[data-ready] {
   transition: transform var(--m-glide) var(--m-glide-ease), width var(--m-glide) var(--m-glide-ease),
     height var(--m-glide) var(--m-glide-ease), background-color .2s, border-color .2s, opacity .2s;

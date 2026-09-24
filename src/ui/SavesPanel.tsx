@@ -2,31 +2,19 @@ import { useEffect, useState } from 'react'
 import { useEngine } from '../store/EngineContext'
 import { useI18n } from '../i18n'
 import { useDock } from './dock'
-import { syncConfigured } from '../sync/bootstrap'
+import { onSyncStart, syncConfigured, syncStarted } from '../sync/bootstrap'
 
 /**
  * 「发到社区」摆不摆得出来，要两个都成立：
  *  1. 构建时设了 VITE_COMMUNITY_WRITE——开源本地版没有社区可发；
- *  2. 后端说这个人看得见社区（没开放的时候只有审核员看得见）。
- * 问不出来就当没有。这条入口缺了只是少一条路，摆错了是把人送去一扇打不开的门。
+ *  2. 同步跑起来了，也就是后端认得出这个人。发帖页只认服务器上那张列表，
+ *     没登录的时候这一座送不上去。
  */
 function useCommunityWrite(): string {
-  const [href, setHref] = useState('')
-  useEffect(() => {
-    const write = import.meta.env.VITE_COMMUNITY_WRITE
-    const base = import.meta.env.VITE_SYNC_BASE
-    if (!write || !base) return
-    let alive = true
-    void fetch(`${base}/cmty/gate`, {
-      credentials: 'include',
-      headers: { Accept: 'application/json' },
-    })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((g) => { if (alive && g && g.mine) setHref(write) })
-      .catch(() => { /* 问不出来就不摆 */ })
-    return () => { alive = false }
-  }, [])
-  return href
+  const write = import.meta.env.VITE_COMMUNITY_WRITE || ''
+  const [on, setOn] = useState(syncStarted)
+  useEffect(() => (on ? undefined : onSyncStart(() => setOn(true))), [on])
+  return on ? write : ''
 }
 
 export default function SavesPanel() {

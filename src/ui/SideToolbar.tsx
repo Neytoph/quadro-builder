@@ -28,7 +28,7 @@ export default function SideToolbar({ open, onToggle }: { open: boolean; onToggl
   return (
     <div
       data-ui="color-panel"
-      className="relative flex flex-col min-h-0 overflow-hidden bg-gray-950/85 backdrop-blur border border-gray-800 rounded-2xl shadow-xl text-gray-200"
+      className="qb-card relative flex flex-col min-h-0 overflow-hidden text-gray-200"
     >
       <FoldHeader
         open={open}

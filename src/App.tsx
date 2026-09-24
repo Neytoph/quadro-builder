@@ -27,12 +27,12 @@ function Toast() {
     return () => window.clearTimeout(id)
   }, [live, dismissToast])
   if (!toast) return null
-  const tone = toast.kind === 'err' ? 'bg-red-800' : toast.kind === 'warn' ? 'bg-amber-800' : 'bg-teal-800'
+  const tone = toast.kind === 'err' ? 'text-red-700' : toast.kind === 'warn' ? 'text-amber-700' : 'text-gray-100'
   return (
     // key 跟着消息走：连着两条提示时，第二条重新演一遍入场。
     // 压在顶栏、右侧面板和下拉菜单上面：手机上右侧面板盖满画布，
     // 在「文件」里点保存，提示要浮在面板上才看得见。确认框（z-75）仍在它上面。
-    <div key={toast.message} className={`m-toast fixed top-[9.5rem] left-1/2 -translate-x-1/2 w-max max-w-[calc(100vw-2rem)] text-center ${tone} text-white text-sm px-4 py-2 rounded-lg shadow-lg z-[70] pointer-events-none ${leaving ? 'm-leave' : ''}`}>
+    <div key={toast.message} className={`m-toast qb-card fixed top-[9.5rem] left-1/2 -translate-x-1/2 w-max max-w-[calc(100vw-2rem)] text-center ${tone} text-sm font-medium px-4 py-2 z-[70] pointer-events-none ${leaving ? 'm-leave' : ''}`}>
       {toast.message}
     </div>
   )
@@ -60,27 +60,14 @@ function ManualConfirm() {
         role="dialog"
         aria-modal="true"
         aria-labelledby="manual-confirm-title"
-        className="m-modal w-full max-w-sm bg-gray-900 text-gray-100 rounded-2xl border border-gray-700 shadow-2xl p-5"
+        className="m-modal qb-card w-full max-w-sm text-gray-100 p-5"
         onClick={e => e.stopPropagation()}
       >
         <div id="manual-confirm-title" className="text-base font-semibold">{t('confirm.exportManualTitle')}</div>
         <p className="text-sm text-gray-300 leading-relaxed mt-2 mb-5">{t('confirm.exportManual')}</p>
         <div className="flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={cancelExportManual}
-            className="px-3 py-2 rounded-lg text-sm text-gray-300 hover:bg-gray-800 cursor-pointer"
-          >
-            {t('confirm.cancel')}
-          </button>
-          <button
-            type="button"
-            autoFocus
-            onClick={() => void confirmExportManual()}
-            className="px-4 py-2 rounded-lg text-sm font-semibold bg-teal-500 hover:bg-teal-400 text-white cursor-pointer"
-          >
-            {t('confirm.okExport')}
-          </button>
+          <button type="button" onClick={cancelExportManual} className="qb-btn qb-btn-ghost qb-btn-sm">{t('confirm.cancel')}</button>
+          <button type="button" autoFocus onClick={() => void confirmExportManual()} className="qb-btn qb-btn-sm">{t('confirm.okExport')}</button>
         </div>
       </div>
     </div>
@@ -122,7 +109,7 @@ function NameDialog() {
         role="dialog"
         aria-modal="true"
         aria-labelledby="name-dialog-title"
-        className="m-modal w-full max-w-sm bg-gray-900 text-gray-100 rounded-2xl border border-gray-700 shadow-2xl p-5"
+        className="m-modal qb-card w-full max-w-sm text-gray-100 p-5"
         onClick={e => e.stopPropagation()}
         onSubmit={e => { e.preventDefault(); answerName(value) }}
       >
@@ -139,19 +126,8 @@ function NameDialog() {
           />
         </label>
         <div className="flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={() => answerName(null)}
-            className="px-3 py-2 rounded-lg text-sm text-gray-300 hover:bg-gray-800 cursor-pointer"
-          >
-            {t('confirm.cancel')}
-          </button>
-          <button
-            type="submit"
-            className="px-4 py-2 rounded-lg text-sm font-semibold bg-teal-500 hover:bg-teal-400 text-white cursor-pointer"
-          >
-            {shown.ok}
-          </button>
+          <button type="button" onClick={() => answerName(null)} className="qb-btn qb-btn-ghost qb-btn-sm">{t('confirm.cancel')}</button>
+          <button type="submit" className="qb-btn qb-btn-sm">{shown.ok}</button>
         </div>
       </form>
     </div>
@@ -164,7 +140,7 @@ function ManualProgress() {
   if (!exportingManual) return null
   return (
     <div className="m-backdrop fixed inset-0 z-[80] bg-black/45 flex items-center justify-center">
-      <div className="m-modal bg-gray-900 border border-gray-700 rounded-xl px-6 py-4 text-gray-100 text-sm shadow-xl tabular-nums">
+      <div className="m-modal qb-card px-6 py-4 text-gray-100 text-sm tabular-nums">
         {t('manual.progress', { k: exportingManual.page, n: exportingManual.total })}
       </div>
     </div>

@@ -1,10 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useEngine } from '../store/EngineContext'
 import { useI18n } from '../i18n'
-import { UI_ESCAPE_EVENT } from './events'
 import { usePresence } from './motion'
-import type { CSSProperties } from 'react'
+import { Pop } from './Pop'
 
 const ORDER_I18N: Record<string, string> = {
   'y+': 'assembly.orderYp',
@@ -14,90 +12,9 @@ const ORDER_I18N: Record<string, string> = {
   'z-': 'assembly.orderZm',
 }
 
-const dropItem = (on: boolean) =>
-  `flex items-center w-full text-sm rounded-lg px-3 py-2 text-left cursor-pointer whitespace-nowrap ${
-    on ? 'bg-teal-500 text-white font-semibold' : 'text-gray-50 hover:bg-gray-700'
-  }`
+const step = 'h-8 px-3 rounded-full text-[13px] text-gray-100 hover:bg-teal-100 disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer disabled:cursor-default whitespace-nowrap'
 
-function OrderMenu({
-  anchor,
-  value,
-  orders,
-  onPick,
-  onClose,
-  leaving,
-}: {
-  anchor: HTMLElement | null
-  value: string
-  orders: string[]
-  onPick: (id: string) => void
-  onClose: () => void
-  leaving: boolean
-}) {
-  const { t } = useI18n()
-  const ref = useRef<HTMLDivElement>(null)
-  const [pos, setPos] = useState({ top: 0, left: 0 })
-
-  useLayoutEffect(() => {
-    const el = ref.current
-    if (!anchor || !el) return
-    const place = () => {
-      const r = anchor.getBoundingClientRect()
-      const w = el.offsetWidth || 176
-      const left = Math.min(Math.max(8, r.left), window.innerWidth - w - 8)
-      const h = el.offsetHeight || 200
-      const top = r.bottom + 6 + h > window.innerHeight - 8
-        ? Math.max(8, r.top - h - 6)
-        : r.bottom + 6
-      setPos({ top, left })
-    }
-    place()
-    const ro = new ResizeObserver(place)
-    ro.observe(el)
-    window.addEventListener('resize', place)
-    return () => {
-      ro.disconnect()
-      window.removeEventListener('resize', place)
-    }
-  }, [anchor])
-
-  useEffect(() => {
-    const onDown = (e: PointerEvent) => {
-      const node = e.target as Node
-      if (ref.current?.contains(node) || anchor?.contains(node)) return
-      onClose()
-    }
-    const onEsc = () => onClose()
-    window.addEventListener('pointerdown', onDown, true)
-    window.addEventListener(UI_ESCAPE_EVENT, onEsc)
-    return () => {
-      window.removeEventListener('pointerdown', onDown, true)
-      window.removeEventListener(UI_ESCAPE_EVENT, onEsc)
-    }
-  }, [anchor, onClose])
-
-  return createPortal(
-    <div
-      ref={ref}
-      className={`m-pop fixed z-[60] min-w-[12rem] w-max max-w-[18rem] bg-gray-900 border border-gray-700 rounded-xl shadow-2xl p-1.5 ${leaving ? 'm-leave pointer-events-none' : ''}`}
-      style={pos}
-    >
-      {orders.map((order, i) => (
-        <button
-          key={order}
-          style={{ '--i': i } as CSSProperties}
-          type="button"
-          onClick={() => { onPick(order); onClose() }}
-          className={dropItem(order === value)}
-        >
-          {t(ORDER_I18N[order] || order)}
-        </button>
-      ))}
-    </div>,
-    document.body,
-  )
-}
-
+/** 画布底下的拼装条：没拼装时是「逐层拼装 · N 步」和「导出安装说明书」；拼装时翻步、看全部、换方向。 */
 export default function AssemblyBar() {
   const api = useEngine()
   const { t } = useI18n()
@@ -111,29 +28,26 @@ export default function AssemblyBar() {
   const totals = api.bom?.totals
   const hasParts = !!totals && (totals.tubes + totals.connectors + totals.panels + totals.other) > 0
   if (!hasParts && !api.assembly.active) return null
+  const n = api.assembly.max + 1
 
   if (!api.assembly.active) {
     return (
-      <div data-tour="assembly" className="m-asm fixed bottom-4 left-1/2 -translate-x-1/2 z-40">
-        <button onClick={() => api.setAssembly(true)}
-          className="bg-gray-900/90 backdrop-blur border border-gray-700 hover:border-teal-400 text-gray-50 text-sm rounded-full shadow-lg px-4 py-2 cursor-pointer">
-          {t('assembly.toggle')}
-        </button>
+      <div data-tour="assembly" className="m-asm qb-card fixed bottom-3 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 p-1.5 max-w-[calc(100vw-1rem)]">
+        <button onClick={() => api.setAssembly(true)} className="qb-btn qb-btn-ghost qb-btn-sm">{t('asm.steps', { n })}</button>
+        <button onClick={() => void api.exportAssemblyPdf()} disabled={!!api.exportingManual} className="qb-btn qb-btn-sm">{t('btn.exportManual')}</button>
       </div>
     )
   }
-  const n = api.assembly.max + 1
 
   return (
-    <div data-tour="assembly" className="m-asm fixed bottom-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1 bg-gray-900/95 backdrop-blur border border-teal-500/50 rounded-full p-1 shadow-lg">
-      <button disabled={api.assembly.step <= 0} onClick={() => api.stepAssembly(-1)}
-        className="w-8 h-8 rounded-full text-gray-50 hover:bg-gray-700 disabled:opacity-30 cursor-pointer" title={`${t('assembly.prev')} [`}>◀</button>
-      <div className="px-2.5 text-sm font-semibold text-teal-700 tabular-nums whitespace-nowrap overflow-hidden">
+    <div data-tour="assembly" className="m-asm qb-card fixed bottom-3 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1 p-1.5 max-w-[calc(100vw-1rem)] overflow-x-auto scrollbar-none">
+      <button onClick={() => api.setAssembly(false)} className="qb-btn qb-btn-sm shrink-0" title={t('assembly.allHint')}>{t('asm.steps', { n })}</button>
+      <button disabled={api.assembly.step <= 0} onClick={() => api.stepAssembly(-1)} className={step} title={`${t('assembly.prev')} [`}>‹ {t('assembly.prev')}</button>
+      <div className="px-1 text-[13.5px] font-bold qb-num whitespace-nowrap overflow-hidden">
         <span key={api.assembly.step} className="m-tick inline-block" data-dir={stepDir}>{t('assembly.step', { k: api.assembly.step + 1, n })}</span>
       </div>
-      <button disabled={api.assembly.step >= api.assembly.max} onClick={() => api.stepAssembly(1)}
-        className="w-8 h-8 rounded-full text-gray-50 hover:bg-gray-700 disabled:opacity-30 cursor-pointer" title={`${t('assembly.next')} ]`}>▶</button>
-      <div className="w-px h-5 bg-gray-700 mx-0.5" />
+      <button disabled={api.assembly.step >= api.assembly.max} onClick={() => api.stepAssembly(1)} className={step} title={`${t('assembly.next')} ]`}>{t('assembly.next')} ›</button>
+      <button onClick={() => api.setAssembly(false)} className={step} title={t('assembly.allHint')}>{t('assembly.all')}</button>
       <button
         ref={orderBtn}
         type="button"
@@ -142,23 +56,29 @@ export default function AssemblyBar() {
         aria-expanded={orderOpen}
         title={t('assembly.order')}
         onClick={() => setOrderOpen(o => !o)}
-        className="h-8 px-3 rounded-full text-sm text-gray-50 hover:bg-gray-700 cursor-pointer whitespace-nowrap"
+        className={`${step} bg-teal-100`}
       >
         {t(ORDER_I18N[api.assembly.order] || api.assembly.order)}
         <span className="ml-1 opacity-60">▾</span>
       </button>
       {orderShown && (
-        <OrderMenu
-          leaving={orderLeaving}
-          anchor={orderBtn.current}
-          value={api.assembly.order}
-          orders={api.assemblyOrders}
-          onPick={api.setAssemblyOrder}
-          onClose={() => setOrderOpen(false)}
-        />
+        <Pop anchor={orderBtn.current} leaving={orderLeaving} onClose={() => setOrderOpen(false)} align="right">
+          <div className="flex flex-col min-w-[11rem]">
+            {api.assemblyOrders.map((order, i) => (
+              <button
+                key={order}
+                style={{ '--i': i } as CSSProperties}
+                type="button"
+                onClick={() => { api.setAssemblyOrder(order); setOrderOpen(false) }}
+                className={`w-full text-left text-[13.5px] rounded-[10px] px-3 py-2 cursor-pointer whitespace-nowrap ${
+                  order === api.assembly.order ? 'bg-teal-500 text-white font-bold' : 'text-gray-100 hover:bg-teal-100'}`}
+              >
+                {t(ORDER_I18N[order] || order)}
+              </button>
+            ))}
+          </div>
+        </Pop>
       )}
-      <button onClick={() => api.setAssembly(false)}
-        className="px-3 h-8 rounded-full text-sm text-gray-50 hover:bg-gray-700 cursor-pointer" title={t('assembly.allHint')}>{t('assembly.all')}</button>
     </div>
   )
 }

@@ -72,7 +72,7 @@ export default function ThumbCapture() {
 
   if (!active) return null
   return (
-    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[90] max-w-[min(28rem,calc(100vw-2rem))] rounded-xl border border-gray-700 bg-gray-900/95 text-gray-100 text-sm px-4 py-2.5 shadow-xl tabular-nums">
+    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[90] max-w-[min(28rem,calc(100vw-2rem))] qb-card text-gray-100 text-sm px-4 py-2.5 tabular-nums">
       {done ? msg : `截图中 ${msg}`}
     </div>
   )
