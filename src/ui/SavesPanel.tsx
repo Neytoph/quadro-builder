@@ -1,19 +1,25 @@
 import { useEffect, useState } from 'react'
 import { useEngine } from '../store/EngineContext'
-import { useI18n } from '../i18n'
+import { useI18n, type Lang } from '../i18n'
 import { useDock } from './dock'
 import { onSyncStart, syncConfigured, syncStarted } from '../sync/bootstrap'
+
+// 构建时写进来的各语言发帖页地址（见 vite-env.d.ts）。没设就是空表。
+const WRITE_PAGES: Partial<Record<Lang, string>> = JSON.parse(import.meta.env.VITE_COMMUNITY_WRITE || '{}')
 
 /**
  * 「发到社区」摆不摆得出来，要两个都成立：
  *  1. 构建时设了 VITE_COMMUNITY_WRITE——开源本地版没有社区可发；
  *  2. 同步跑起来了，也就是后端认得出这个人。发帖页只认服务器上那张列表，
  *     没登录的时候这一座送不上去。
+ * 去的是当前界面语言的那一页，托管版的站点每种语言一套网址。
  */
-function useCommunityWrite(): string {
-  const write = import.meta.env.VITE_COMMUNITY_WRITE || ''
+function useCommunityWrite(lang: Lang): string {
   const [on, setOn] = useState(syncStarted)
   useEffect(() => (on ? undefined : onSyncStart(() => setOn(true))), [on])
+  if (!Object.keys(WRITE_PAGES).length) return ''
+  const write = WRITE_PAGES[lang]
+  if (!write) throw new Error(`VITE_COMMUNITY_WRITE 里没有 ${lang} 的发帖页地址`)
   return on ? write : ''
 }
 
@@ -24,7 +30,7 @@ export default function SavesPanel() {
   const [docs, setDocs] = useState<Array<{ id: string; name: string; updatedAt: number; local: boolean }>>([])
   // 没接同步的部署没有云端，每一座都在本机，标出来没有意义
   const cloud = syncConfigured()
-  const write = useCommunityWrite()
+  const write = useCommunityWrite(lang)
   const [sending, setSending] = useState('')
 
   useEffect(() => {

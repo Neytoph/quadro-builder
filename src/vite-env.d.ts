@@ -8,8 +8,9 @@ interface ImportMetaEnv {
    */
   readonly VITE_SYNC_BASE?: string
   /**
-   * 托管版的发帖页地址，例如 '/write.html'。设了才会在「我的设计」里
-   * 出现「发到社区」，而且还要后端说这个人看得见社区。
+   * 托管版每种界面语言的发帖页地址，写成 JSON，例如
+   * '{"zh":"/write.html","en":"/en/write.html","de":"/de/write.html"}'。
+   * 设了才会在「我的设计」里出现「发到社区」，而且还要后端说这个人看得见社区。
    * 开源本地版不设——它没有社区可发。
    */
   readonly VITE_COMMUNITY_WRITE?: string
