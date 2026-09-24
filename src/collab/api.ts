@@ -149,25 +149,26 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 
 const enc = encodeURIComponent
 
+// 列表接口返回 {复数名词:[...]}，新建东西的接口返回 {id}
 export const collabApi = {
   plan: (id: string) => call<Plan>('GET', `/collab/plans/${enc(id)}`),
   createPlan: (body: { id: string; name: string } & Omit<ExportBody, 'name'>) =>
-    call<Plan>('POST', '/collab/plans', body),
-  mine: () => call<Array<{ id: string; name: string; role: Role; briefId: number | null; unread: number; updatedAt: number }>>('GET', '/collab/plans/mine'),
+    call<{ id: string }>('POST', '/collab/plans', body),
+  mine: async () => (await call<{ plans: Array<{ id: string; name: string; role: Role; briefId: number | null; unread: number; updatedAt: number }> }>('GET', '/collab/plans/mine')).plans,
   exportPlan: (id: string, body: ExportBody) => call<unknown>('PUT', `/collab/plans/${enc(id)}/export`, body),
   invite: (id: string) => call<{ token: string; url: string }>('POST', `/collab/plans/${enc(id)}/invites`),
   join: (token: string) => call<{ planId: string }>('POST', `/collab/invites/${enc(token)}/join`),
   setRole: (id: string, userId: number, role: Role) => call<unknown>('PUT', `/collab/plans/${enc(id)}/members/${userId}`, { role }),
   removeMember: (id: string, userId: number) => call<unknown>('DELETE', `/collab/plans/${enc(id)}/members/${userId}`),
-  versions: (id: string) => call<VersionInfo[]>('GET', `/collab/plans/${enc(id)}/versions`),
+  versions: async (id: string) => (await call<{ versions: VersionInfo[] }>('GET', `/collab/plans/${enc(id)}/versions`)).versions,
   saveVersion: (id: string, body: { name: string; state: string } & Omit<ExportBody, 'name'>) =>
-    call<VersionInfo>('POST', `/collab/plans/${enc(id)}/versions`, body),
+    call<{ id: number }>('POST', `/collab/plans/${enc(id)}/versions`, body),
   version: (id: string, vid: string | number) => call<Version>('GET', `/collab/plans/${enc(id)}/versions/${enc(String(vid))}`),
-  threads: (id: string) => call<Thread[]>('GET', `/collab/plans/${enc(id)}/threads`),
+  threads: async (id: string) => (await call<{ threads: Thread[] }>('GET', `/collab/plans/${enc(id)}/threads`)).threads,
   newThread: (id: string, body: { anchor: Anchor; versionId: number | null; body: string; photos: string[]; refs: Ref[] }) =>
-    call<Thread>('POST', `/collab/plans/${enc(id)}/threads`, body),
+    call<{ id: number }>('POST', `/collab/plans/${enc(id)}/threads`, body),
   reply: (tid: number, body: { body: string; photos: string[]; refs: Ref[] }) =>
-    call<Post>('POST', `/collab/threads/${tid}/posts`, body),
+    call<{ id: number }>('POST', `/collab/threads/${tid}/posts`, body),
   resolve: (tid: number) => call<unknown>('POST', `/collab/threads/${tid}/resolve`),
   reopen: (tid: number) => call<unknown>('POST', `/collab/threads/${tid}/reopen`),
   photo: (id: string, file: File) => {

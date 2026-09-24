@@ -127,6 +127,14 @@ export function applyDelta(doc: Y.Doc, before: ModelJSON, after: ModelJSON, orig
   }, origin)
 }
 
+/** 把几件零件（带 `$type` 的记录）按原样写回文档。 */
+export function restoreParts(doc: Y.Doc, recs: Map<string, Rec>, origin: unknown) {
+  const parts = partsMap(doc)
+  doc.transact(() => {
+    for (const [id, rec] of recs) writePart(parts, id, rec, null)
+  }, origin)
+}
+
 /** 文档改成和 json 完全一样：和文档现有内容逐件比较，多的删掉，缺的、不一样的写上。 */
 export function writeJSON(doc: Y.Doc, json: ModelJSON, origin: unknown) {
   const b = flatten(json)

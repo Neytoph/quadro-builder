@@ -9,6 +9,9 @@ import { BomPane } from './PartsList'
 import InventoryPane from './InventoryPane'
 import SafetyPane from './SafetyPane'
 import { usePresence } from './motion'
+import CommentsPane from '../collab/ui/CommentsPane'
+import VersionsPane from '../collab/ui/VersionsPane'
+import MembersPane from '../collab/ui/MembersPane'
 
 const TITLE: Record<DockPane, string> = {
   file: 'btn.file',
@@ -18,6 +21,9 @@ const TITLE: Record<DockPane, string> = {
   bom: 'side.bom',
   inventory: 'side.inventory',
   safety: 'safety.title',
+  comments: 'collab.pane.comments',
+  versions: 'collab.pane.versions',
+  members: 'collab.pane.members',
 }
 
 export default function RightDock() {
@@ -57,6 +63,9 @@ export default function RightDock() {
         {pane === 'bom' && <BomPane />}
         {pane === 'inventory' && <InventoryPane />}
         {pane === 'safety' && <SafetyPane />}
+        {pane === 'comments' && <CommentsPane />}
+        {pane === 'versions' && <VersionsPane />}
+        {pane === 'members' && <MembersPane />}
       </div>
     </aside>
   )

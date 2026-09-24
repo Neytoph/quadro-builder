@@ -133,8 +133,18 @@ export class PlanSession {
       if (origin === this.local.history.origin) this.scheduleExport()
     }
     local.doc.on('update', this.onUpdate)
+    // 浏览器说断网了就先断开，这段时间的修改留在本机；联网了立刻重连，
+    // 连上时交给服务器的是完整状态，断网期间的修改一起合并进去。
+    // 不等 y-websocket 自己 30 秒收不到消息才发现
+    this.onOffline = () => this.provider.disconnect()
+    this.onOnline = () => this.provider.connect()
+    window.addEventListener('offline', this.onOffline)
+    window.addEventListener('online', this.onOnline)
     this.setUser()
   }
+
+  private readonly onOffline: () => void
+  private readonly onOnline: () => void
 
   static async open(id: string): Promise<PlanSession> {
     const plan = await collabApi.plan(id)
@@ -239,6 +249,8 @@ export class PlanSession {
   }
 
   destroy() {
+    window.removeEventListener('offline', this.onOffline)
+    window.removeEventListener('online', this.onOnline)
     if (this.exportTimer) window.clearTimeout(this.exportTimer)
     this.local.doc.off('update', this.onUpdate)
     this.provider.destroy()

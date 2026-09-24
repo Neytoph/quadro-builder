@@ -71,10 +71,14 @@ interface CollabApi {
   resolve: (tid: number, resolved: boolean) => Promise<void>
   /** 零件已经不在了的评论 */
   partGone: (t: Thread) => boolean
+  /** 位置评论的编号：按发表先后从 1 数 */
+  pinNumber: (t: Thread) => number
+  /** 我名下的其他造型（复制出来的那几份），留言时可以引用 */
+  myForks: Array<{ id: string; name: string }>
   focusThread: (t: Thread) => void
   activeThread: number | null
   setActiveThread: (id: number | null) => void
-  saveVersion: (name: string) => Promise<VersionInfo>
+  saveVersion: (name: string) => Promise<{ id: number }>
   inviteUrl: () => Promise<string>
   shareUrl: () => string
   setRole: (userId: number, role: Role) => Promise<void>
@@ -91,6 +95,7 @@ interface CollabApi {
   /** 自己的造型开启共享：成为一个共享方案，转到方案地址 */
   enableSharing: () => Promise<void>
   loginUrl: () => string
+  report: (err: unknown) => void
 }
 
 const Ctx = createContext<CollabApi | null>(null)
@@ -133,6 +138,11 @@ export function CollabProvider({ children }: { children: ReactNode }) {
     setError(err instanceof Error ? err.message : String(err))
     setStatus('error')
   }, [])
+
+  /** 打开以后的操作出错（断网时取评论之类）：提示出来，方案照常能用 */
+  const report = useCallback((err: unknown) => {
+    api.notify(err instanceof Error ? err.message : String(err), 'err')
+  }, [api])
 
   const refreshThreads = useCallback(async () => {
     const id = bootEntry().plan
@@ -188,7 +198,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
           if (dead) return
           const m = new BuildModel()
           if (!m.loadJSON(d.data).ok) throw new Error(t('collab.badModel'))
-          api.attachDoc({ local: memoryDoc(m.toJSON() as ModelJSON), name: String(d.name || ''), readOnly: true, idTag: '' })
+          api.attachDoc({ local: memoryDoc(m.toJSON() as ModelJSON), name: String(d.planName || ''), readOnly: true, idTag: '' })
           setDelivery({ token, supersededBy: d.supersededBy })
           setStatus('ready')
         } else if (mode === 'room') {
@@ -254,13 +264,20 @@ export function CollabProvider({ children }: { children: ReactNode }) {
         nudgeSeen.current.set(clientId, n)
       }
     })
-    if (changed) void Promise.all([refreshThreads(), refreshVersions()])
-  }, [rev, session, refreshThreads, refreshVersions])
+    if (changed) Promise.all([refreshThreads(), refreshVersions()]).catch(report)
+  }, [rev, session, refreshThreads, refreshVersions, report])
 
   // —— 对照 ——
   const loadSide = useCallback(async (id: string): Promise<{ json: ModelJSON; name: string }> => {
     if (!session) throw new Error('no plan')
     if (id === 'current') return { json: session.toJSON(), name: t('collab.current') }
+    // 评论者复制出去改的那一份：用它交上来的 data
+    if (id.startsWith('fork:')) {
+      const p = await collabApi.plan(id.slice('fork:'.length))
+      const m = new BuildModel()
+      if (!p.data || !m.loadJSON(p.data).ok) throw new Error(t('collab.badModel'))
+      return { json: m.toJSON() as ModelJSON, name: p.name }
+    }
     const v = await collabApi.version(session.id, id)
     return { json: docToJSON(docFromBase64(v.state)), name: v.name }
   }, [session, t])
@@ -360,6 +377,18 @@ export function CollabProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [api, api.tick])
 
+  const pinOrder = useMemo(() => {
+    const ids = threads.filter(th => th.kind === 'pin').map(th => th.id).sort((a, b) => a - b)
+    return new Map(ids.map((id, i) => [id, i + 1]))
+  }, [threads])
+  const pinNumber = useCallback((th: Thread) => pinOrder.get(th.id) || 0, [pinOrder])
+
+  const [myForks, setMyForks] = useState<Array<{ id: string; name: string }>>([])
+  useEffect(() => {
+    if (!session?.plan.me) return
+    collabApi.mine().then(list => setMyForks(list.filter(p => p.role === 'owner' && p.id !== session.id).map(p => ({ id: p.id, name: p.name })))).catch(report)
+  }, [session, report])
+
   const focusThread = useCallback((th: Thread) => {
     setActiveThread(th.id)
     if (th.anchor) api.engine()?.scene.flyToPoint(th.anchor.point)
@@ -450,11 +479,11 @@ export function CollabProvider({ children }: { children: ReactNode }) {
     members: session?.plan.members || [],
     peers,
     threads, versions, isUnread, unread, markRead, refreshThreads, refreshVersions,
-    placingPin, setPlacingPin, pinDraft, setPinDraft, addPin, reply, resolve, partGone, focusThread,
+    placingPin, setPlacingPin, pinDraft, setPinDraft, addPin, reply, resolve, partGone, pinNumber, myForks, focusThread,
     activeThread, setActiveThread,
     saveVersion, inviteUrl, shareUrl, setRole, removeMember, fork, metricsOf, deliver,
     compare, openCompare, closeCompare,
-    delivery, room, saveRoom, enableSharing, loginUrl,
+    delivery, room, saveRoom, enableSharing, loginUrl, report,
   }
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }

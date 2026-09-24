@@ -9,10 +9,38 @@
 // 通知出去，由 Builder 从文档重新读出整座造型、刷新画面。
 
 import * as Y from 'yjs'
-import { applyDelta, docToJSON, metaMap, partsMap, writeJSON, type ModelJSON } from './ymodel'
+import { applyDelta, docToJSON, flatten, metaMap, partsMap, restoreParts, writeJSON, type ModelJSON, type Rec } from './ymodel'
 
 /** 撤销步数上限，和原来的撤销栈一样。 */
 const MAX_UNDO = 60
+
+/** 撤销以后把还有零件连着的零件补回来：这个事务不进撤销记录。 */
+const REPAIR_ORIGIN = { name: 'undo-repair' }
+
+/**
+ * 一件零件离不开哪些零件：管的两端接头、板和布的两根承重管、套在管上的接头、
+ * 挂在管上的配件。组只是一批 id，不算。
+ */
+function refsOf(get: (k: string) => unknown): string[] {
+  const out: string[] = []
+  const add = (v: unknown) => { if (typeof v === 'string' && v) out.push(v) }
+  switch (get('$type')) {
+    case 'tube':
+    case 'panel':
+    case 'textile':
+      add(get('a'))
+      add(get('b'))
+      break
+    case 'node':
+      add((get('clampOn') as { tubeId?: string } | undefined)?.tubeId)
+      add(get('bearingOn'))
+      break
+    case 'fitting':
+      add(get('tube'))
+      break
+  }
+  return out
+}
 
 export class ModelHistory {
   readonly doc: Y.Doc
@@ -65,8 +93,32 @@ export class ModelHistory {
     return docToJSON(this.doc)
   }
 
-  undo() { this.manager.undo() }
-  redo() { this.manager.redo() }
+  // 撤掉自己加的零件时，别人的零件可能还连在它上面（接在我加的接头上的管、挂在我加的
+  // 管上的板）。撤完以后把这些还被连着的零件按撤销前的样子补回来，别人的零件不会悬空。
+  undo() { this.withRepair(() => this.manager.undo()) }
+  redo() { this.withRepair(() => this.manager.redo()) }
+
+  private withRepair(step: () => void) {
+    const before = flatten(docToJSON(this.doc))
+    step()
+    const parts = partsMap(this.doc)
+    const restore = new Map<string, Rec>()
+    let grew = true
+    while (grew) {
+      grew = false
+      const needs: string[] = []
+      for (const part of parts.values()) needs.push(...refsOf(k => part.get(k)))
+      for (const rec of restore.values()) needs.push(...refsOf(k => rec[k]))
+      for (const id of needs) {
+        if (parts.has(id) || restore.has(id)) continue
+        const rec = before.get(id)
+        if (!rec) continue
+        restore.set(id, rec)
+        grew = true
+      }
+    }
+    if (restore.size) restoreParts(this.doc, restore, REPAIR_ORIGIN)
+  }
   canUndo() { return this.manager.canUndo() }
   canRedo() { return this.manager.canRedo() }
 

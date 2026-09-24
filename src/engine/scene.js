@@ -558,7 +558,8 @@ export class SceneManager {
     // Weltpositionen der gezeichneten Kupplungen (Drehpunkt-Suche).
     this._nodePoints = [];
 
-    window.addEventListener("resize", () => this.onResize());
+    this._onWindowResize = () => this.onResize();
+    window.addEventListener("resize", this._onWindowResize);
     // Container-Größe verfolgen: Layout der Sidebar steht beim Konstruieren
     // evtl. noch nicht final -> sonst überlappen Canvas und Panel bis zum
     // ersten Resize. ResizeObserver gleicht das automatisch ab.
@@ -567,8 +568,19 @@ export class SceneManager {
       this._resizeObserver.observe(container);
     }
     this._buildViewCube();
+    this._disposed = false;
     this._animate = this._animate.bind(this);
     this._animate();
+  }
+
+  /** 不再用的画面（版本对照关掉时）：停下渲染循环，放掉渲染器和画布。 */
+  dispose() {
+    this._disposed = true;
+    window.removeEventListener("resize", this._onWindowResize);
+    if (this._resizeObserver) this._resizeObserver.disconnect();
+    this.controls.dispose();
+    this.renderer.dispose();
+    this.renderer.domElement.remove();
   }
 
   /**
@@ -6850,6 +6862,81 @@ export class SceneManager {
   }
 
   /**
+   * 画房间边界（需求单）：地面上的轮廓、门窗、墙角点，还有正在画的那一段。
+   * pts 是地面上的点 [x, z]（厘米）；closed 表示已经封口；openings 是门窗
+   * { kind: "door"|"window", edge, from, to }；cursor 是指针所在的点，画到一半时
+   * 从最后一个点连一段虚线过去。传 null 清掉。
+   */
+  setRoomDrawing(d) {
+    if (!this._roomDrawGroup) {
+      this._roomDrawGroup = new THREE.Group();
+      this.scene.add(this._roomDrawGroup);
+    }
+    const g = this._roomDrawGroup;
+    for (const o of [...g.children]) {
+      g.remove(o);
+      o.geometry?.dispose();
+      o.material?.dispose();
+    }
+    this.requestRender();
+    if (!d || !d.pts) return;
+    const Y = 0.6;
+    const WALL = 0xea580c, WINDOW = 0x3b82c4, DOOR = 0x9aa1ac;
+    const bar = (a, b, color, width, lift = 0) => {
+      const dx = b[0] - a[0], dz = b[1] - a[1];
+      const len = Math.hypot(dx, dz);
+      if (len < 0.5) return;
+      const m = new THREE.Mesh(new THREE.BoxGeometry(len, 1.2, width),
+        new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true, opacity: 0.95 }));
+      m.position.set((a[0] + b[0]) / 2, Y + lift, (a[1] + b[1]) / 2);
+      m.rotation.y = -Math.atan2(dz, dx);
+      m.renderOrder = 20 + lift;
+      m.raycast = () => {};
+      g.add(m);
+    };
+    const pts = d.pts;
+    const n = pts.length;
+    if (d.closed && n >= 3) {
+      const shape = new THREE.Shape(pts.map(([x, z]) => new THREE.Vector2(x, -z)));
+      const fill = new THREE.Mesh(new THREE.ShapeGeometry(shape),
+        new THREE.MeshBasicMaterial({ color: 0xfff1e6, transparent: true, opacity: 0.55, depthWrite: false, side: THREE.DoubleSide }));
+      fill.rotation.x = -Math.PI / 2;
+      fill.position.y = Y - 0.3;
+      fill.renderOrder = 19;
+      fill.raycast = () => {};
+      g.add(fill);
+    }
+    const edges = d.closed ? n : n - 1;
+    for (let i = 0; i < edges; i++) bar(pts[i], pts[(i + 1) % n], WALL, 3);
+    for (const o of d.openings || []) {
+      if (o.edge >= edges) continue;
+      const a = pts[o.edge], b = pts[(o.edge + 1) % n];
+      const L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+      const at = (t) => [a[0] + (b[0] - a[0]) * t / L, a[1] + (b[1] - a[1]) * t / L];
+      bar(at(Math.min(o.from, o.to)), at(Math.max(o.from, o.to)), o.kind === "window" ? WINDOW : DOOR, 7, 1);
+    }
+    if (d.cursor && n && !d.closed) bar(pts[n - 1], d.cursor, WALL, 1.5, 0.5);
+    if (d.pending) bar(d.pending[0], d.pending[1], d.pendingKind === "window" ? WINDOW : DOOR, 7, 1);
+    for (let i = 0; i < n; i++) {
+      const dot = new THREE.Mesh(new THREE.CylinderGeometry(i === 0 && !d.closed ? 6 : 4, i === 0 && !d.closed ? 6 : 4, 1.5, 20),
+        new THREE.MeshBasicMaterial({ color: i === 0 && !d.closed ? 0x0f766e : WALL, depthTest: false }));
+      dot.position.set(pts[i][0], Y + 2, pts[i][1]);
+      dot.renderOrder = 23;
+      dot.raycast = () => {};
+      g.add(dot);
+    }
+    this.requestRender();
+  }
+
+  /** 俯视：正交相机从正上方往下看，中心在 center，把 size 厘米见方框进画面。 */
+  topView(center = [0, 0], size = 600) {
+    this.setProjection("orthographic");
+    this.setCameraPose({ pos: [center[0], size * 1.6, center[1] + 0.01], target: [center[0], 0, center[1]], zoom: 1, projection: "orthographic" });
+    const b = { min: [center[0] - size / 2, 0, center[1] - size / 2], max: [center[0] + size / 2, 0, center[1] + size / 2], size: [size, 0, size] };
+    this._frameAlong(null, new THREE.Vector3(0, 1, 0.0001).normalize(), { bounds: b, animate: false });
+  }
+
+  /**
    * Das Bild der Szene als PNG-Datenstrom -- fuer "Als Bild speichern".
    *
    * Weggelassen wird alles, was zur Bedienung gehoert und nicht zum Modell:
@@ -7158,6 +7245,7 @@ export class SceneManager {
   }
 
   _animate() {
+    if (this._disposed) return;
     requestAnimationFrame(this._animate);
     if (this._stepCameraAnimation()) this._needsRender = true;
     if (this._stepCameraFly()) this._needsRender = true;

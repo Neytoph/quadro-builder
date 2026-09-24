@@ -16,7 +16,13 @@ import { PanelLayoutProvider } from './ui/panelLayout'
 import { UI_ESCAPE_EVENT } from './ui/events'
 import { DockProvider, useDock } from './ui/dock'
 import { usePresence } from './ui/motion'
-import { fullBuilderUrl, VIEW_ONLY } from './entry'
+import { bootEntry, fullBuilderUrl, VIEW_ONLY } from './entry'
+import { CollabProvider, useCollab } from './collab/CollabContext'
+import CollabScreens from './collab/ui/CollabScreens'
+import PlanOverlays from './collab/ui/PlanOverlays'
+import CompareView from './collab/ui/CompareView'
+import BatchImport from './collab/ui/BatchImport'
+import RoomEditor from './collab/ui/RoomEditor'
 
 function Toast() {
   const { toast: live, dismissToast } = useEngine()
@@ -205,14 +211,39 @@ function ViewBar() {
 /** 只看模式：嵌在方案页、造型页里，只有 3D 画面和分步手册，左上角是「在 Builder 里打开」。 */
 function ViewShell() {
   const { t } = useI18n()
+  const collab = useCollab()
+  // 交付查看嵌在交付页里：那一页自己有链接和全屏，这里只放画面和分步手册
+  const delivery = collab.mode === 'delivery'
   return (
     <div className="app-viewport w-screen flex bg-gray-950 overflow-hidden">
       <CanvasHost />
-      <a href={fullBuilderUrl()} target="_top" className="qb-btn qb-btn-sm fixed top-3 left-3 z-40 no-underline">{t('view.open')} ↗</a>
+      {!delivery && <a href={fullBuilderUrl()} target="_top" className="qb-btn qb-btn-sm fixed top-3 left-3 z-40 no-underline">{t('view.open')} ↗</a>}
       <ViewBar />
       <Toast />
+      <CollabScreens />
     </div>
   )
+}
+
+/** 画房间边界：只有画面和画图的面板。 */
+function RoomShell() {
+  const collab = useCollab()
+  return (
+    <div className="app-viewport w-screen flex bg-gray-950 overflow-hidden">
+      <CanvasHost />
+      {collab.room && <RoomEditor />}
+      <Toast />
+      <CollabScreens />
+    </div>
+  )
+}
+
+/** ?import=qdf：打开就是批量导入 */
+function ImportOnEntry() {
+  const [open, setOpen] = useState(() => bootEntry().importQdf)
+  const { ready } = useEngine()
+  if (!open || !ready) return null
+  return <BatchImport onClose={() => setOpen(false)} />
 }
 
 function ManualProgress() {
@@ -230,6 +261,7 @@ function ManualProgress() {
 
 function AppInner() {
   const api = useEngine()
+  const collab = useCollab()
   const { handleEsc } = useDock()
 
   useEffect(() => {
@@ -339,22 +371,28 @@ function AppInner() {
     return () => window.removeEventListener('keydown', onKey, true)
   }, [api, handleEsc])
 
+  // 共享方案里只能看的人（评论者、访客）：没有搭建工具条和颜色栏
+  const viewer = collab.mode === 'plan' && !collab.canEdit
   return (
     <div className="app-viewport w-screen flex bg-gray-950 overflow-hidden">
       <CanvasHost />
       <SceneToggle />
       <ProjectTabs />
-      <TopToolbar />
-      <LeftStack />
+      {!viewer && <TopToolbar />}
+      {!viewer && <LeftStack />}
       <RightDock />
       <AssemblyBar />
+      {collab.mode === 'plan' && <PlanOverlays />}
+      {collab.compare && <CompareView />}
+      <CollabScreens />
       <Toast />
       <ManualConfirm />
       <AccountDialog />
       <NameDialog />
       <ManualProgress />
-      <Onboarding />
+      {collab.mode === 'off' && <Onboarding />}
       <ThumbCapture />
+      <ImportOnEntry />
     </div>
   )
 }
@@ -372,11 +410,20 @@ export default function App() {
 function EngineShell() {
   return (
     <EngineProvider>
-      <PanelLayoutProvider>
-        <DockProvider>
-          {VIEW_ONLY ? <ViewShell /> : <AppInner />}
-        </DockProvider>
-      </PanelLayoutProvider>
+      <CollabProvider>
+        <PanelLayoutProvider>
+          <DockProvider>
+            <Shell />
+          </DockProvider>
+        </PanelLayoutProvider>
+      </CollabProvider>
     </EngineProvider>
   )
+}
+
+function Shell() {
+  const collab = useCollab()
+  if (VIEW_ONLY || collab.mode === 'delivery') return <ViewShell />
+  if (collab.mode === 'room') return <RoomShell />
+  return <AppInner />
 }

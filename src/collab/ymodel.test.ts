@@ -207,6 +207,32 @@ describe('撤销只撤自己的', () => {
     expect(B.history.canUndo()).toBe(true)
   })
 
+  it('撤销自己加的接头时，别人接在上面的管还连着，接头留下', () => {
+    const a = docFromJSON(pyramid)
+    const b = new Y.Doc()
+    Y.applyUpdate(b, Y.encodeStateAsUpdate(a))
+    link(a, b)
+    const A = editor(a, 'a_')
+    const B = editor(b, 'b_')
+    let mine = { node: '', tube: '' }
+    A.edit(m => {
+      const n0 = m.addNode(800, 0, 0), n1 = m.addNode(840, 0, 0)
+      const t = m.addTube(n0.id, n1.id, 'T35', 'blue', 35)!
+      mine = { node: n1.id, tube: t.id }
+    })
+    let theirs = ''
+    B.edit(m => {
+      const up = m.addNode(840, 40, 0)
+      theirs = m.addTube(mine.node, up.id, 'T35', 'red', 35)!.id
+    })
+    A.history.undo()
+    expect(A.model.tubes.has(mine.tube)).toBe(false)
+    expect(A.model.nodes.has(mine.node)).toBe(true)
+    expect(A.model.tubes.has(theirs)).toBe(true)
+    expect(B.model.tubes.has(theirs)).toBe(true)
+    expect(docToJSON(a)).toEqual(docToJSON(b))
+  })
+
   it('撤销删除：零件原样回来', () => {
     const doc = docFromJSON(pyramid)
     const A = editor(doc, '')
