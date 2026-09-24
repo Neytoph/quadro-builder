@@ -33,6 +33,11 @@ export function syncNow(): Promise<void> {
   return started && live ? live.syncNow() : Promise.resolve()
 }
 
+/** 部署有没有接同步。开源本地版没有云端，也就谈不上「只在这台设备上」。 */
+export function syncConfigured(): boolean {
+  return Boolean(import.meta.env.VITE_SYNC_BASE)
+}
+
 /** 后端认不认得出当前访客。401/403 = 没登录，其它错误当"暂时说不准"。 */
 async function authenticated(baseUrl: string): Promise<boolean | null> {
   try {

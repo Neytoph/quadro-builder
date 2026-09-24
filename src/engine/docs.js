@@ -58,17 +58,22 @@ export function dropDoc(docId) {
   return dbTx(DB_STORES.docs, "readwrite", (store) => store.delete(docId));
 }
 
-/** Serverstand übernehmen: gilt ab sofort als abgeglichen. */
+/**
+ * Serverstand übernehmen: gilt ab sofort als abgeglichen. Ein Grabstein vom
+ * Server bleibt Grabstein -- sonst stünde die anderswo gelöschte Datei ohne
+ * Inhalt in der Liste.
+ */
 export function putRemoteDoc(record) {
   const doc = {
     id: record.id,
     name: record.name || "Unbenannt",
-    data: record.data,
+    data: record.deletedAt ? null : record.data,
     createdAt: record.createdAt || Date.now(),
     updatedAt: record.updatedAt || Date.now(),
     rev: record.rev || 0,
     dirty: false,
   };
+  if (record.deletedAt) doc.deletedAt = record.deletedAt;
   return dbTx(DB_STORES.docs, "readwrite", (store) => store.put(doc)).then(() => doc);
 }
 

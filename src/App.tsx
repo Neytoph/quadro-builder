@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { LanguageProvider, useI18n } from './i18n'
 import { EngineProvider, useEngine } from './store/EngineContext'
 import CanvasHost from './ui/CanvasHost'
@@ -22,14 +22,17 @@ function Toast() {
   const [toast, leaving] = usePresence(live)
   useEffect(() => {
     if (!live) return
-    const id = window.setTimeout(dismissToast, 2800)
+    // 警告和出错往往是一整句要读完的话，多留一会儿
+    const id = window.setTimeout(dismissToast, live.kind === 'ok' ? 2800 : 6000)
     return () => window.clearTimeout(id)
   }, [live, dismissToast])
   if (!toast) return null
   const tone = toast.kind === 'err' ? 'text-red-700' : toast.kind === 'warn' ? 'text-amber-700' : 'text-gray-100'
   return (
-    // key 跟着消息走：连着两条提示时，第二条重新演一遍入场
-    <div key={toast.message} className={`m-toast qb-card fixed top-[9.5rem] left-1/2 -translate-x-1/2 ${tone} text-sm font-medium px-4 py-2 z-40 max-w-[calc(100vw-2rem)] ${leaving ? 'm-leave' : ''}`}>
+    // key 跟着消息走：连着两条提示时，第二条重新演一遍入场。
+    // 压在顶栏、右侧面板和下拉菜单上面：手机上右侧面板盖满画布，
+    // 在「文件」里点保存，提示要浮在面板上才看得见。确认框（z-75）仍在它上面。
+    <div key={toast.message} className={`m-toast qb-card fixed top-[9.5rem] left-1/2 -translate-x-1/2 w-max max-w-[calc(100vw-2rem)] text-center ${tone} text-sm font-medium px-4 py-2 z-[70] pointer-events-none ${leaving ? 'm-leave' : ''}`}>
       {toast.message}
     </div>
   )
@@ -71,6 +74,66 @@ function ManualConfirm() {
   )
 }
 
+function NameDialog() {
+  const { nameAsk, answerName } = useEngine()
+  const { t } = useI18n()
+  const [shown, leaving] = usePresence(nameAsk)
+  const [value, setValue] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
+  const selectPending = useRef(false)
+
+  useEffect(() => {
+    if (!nameAsk) return
+    if (inputRef.current?.value === nameAsk.value) {
+      inputRef.current.select()
+      return
+    }
+    setValue(nameAsk.value)
+    selectPending.current = true
+  }, [nameAsk])
+
+  // 预填的名字进了输入框以后整段选中，直接打字就替换掉
+  useEffect(() => {
+    if (!selectPending.current || !inputRef.current) return
+    selectPending.current = false
+    inputRef.current.select()
+  }, [value])
+
+  if (!shown) return null
+  return (
+    <div
+      className={`m-backdrop fixed inset-0 z-[75] flex items-center justify-center bg-black/45 p-4 ${leaving ? 'm-leave pointer-events-none' : ''}`}
+      onClick={() => answerName(null)}
+    >
+      <form
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="name-dialog-title"
+        className="m-modal qb-card w-full max-w-sm text-gray-100 p-5"
+        onClick={e => e.stopPropagation()}
+        onSubmit={e => { e.preventDefault(); answerName(value) }}
+      >
+        <div id="name-dialog-title" className="text-base font-semibold">{shown.title}</div>
+        <label className="block mt-3 mb-5">
+          <span className="text-xs text-gray-400">{t('saves.namePrompt')}</span>
+          <input
+            ref={inputRef}
+            autoFocus
+            value={value}
+            onChange={e => setValue(e.target.value)}
+            placeholder={t('tab.untitled')}
+            className="mt-1 w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm outline-none focus:border-teal-500"
+          />
+        </label>
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={() => answerName(null)} className="qb-btn qb-btn-ghost qb-btn-sm">{t('confirm.cancel')}</button>
+          <button type="submit" className="qb-btn qb-btn-sm">{shown.ok}</button>
+        </div>
+      </form>
+    </div>
+  )
+}
+
 function ManualProgress() {
   const { exportingManual } = useEngine()
   const { t } = useI18n()
@@ -92,6 +155,10 @@ function AppInner() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault()
+        if (api.nameAsk) {
+          api.answerName(null)
+          return
+        }
         if (api.exportManualConfirm) {
           api.cancelExportManual()
           return
@@ -108,6 +175,8 @@ function AppInner() {
         handleEsc()
         return
       }
+      // 起名框开着时，画布上的快捷键一律不响应
+      if (api.nameAsk) return
       const el = e.target as HTMLElement | null
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return
       if (el?.closest?.('[data-panel-chrome]')) return
@@ -116,7 +185,7 @@ function AppInner() {
       if (meta && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); api.redo(); return }
       if (meta && (e.key === 'c' || e.key === 'C')) { e.preventDefault(); api.copy(); return }
       if (meta && (e.key === 'v' || e.key === 'V')) { e.preventDefault(); api.paste(); return }
-      if (meta && (e.key === 's' || e.key === 'S')) { e.preventDefault(); void api.saveCurrent(); return }
+      if (meta && (e.key === 's' || e.key === 'S')) { e.preventDefault(); void (e.shiftKey ? api.saveCurrentAs() : api.saveCurrent()); return }
       if (meta && (e.key === 'a' || e.key === 'A')) { e.preventDefault(); api.selectAll(); return }
       if (meta && (e.key === 'g' || e.key === 'G')) { e.preventDefault(); e.shiftKey ? api.ungroup() : api.group(); return }
       if (meta) return
@@ -200,6 +269,7 @@ function AppInner() {
       <AssemblyBar />
       <Toast />
       <ManualConfirm />
+      <NameDialog />
       <ManualProgress />
       <Onboarding />
       <ThumbCapture />
