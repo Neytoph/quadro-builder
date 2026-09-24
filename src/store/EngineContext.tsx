@@ -24,6 +24,7 @@ import { MOTION } from '../ui/motion'
 type E = any
 type AnyRec = Record<string, E>
 type ToastKind = 'ok' | 'warn' | 'err'
+type NameAsk = { title: string; ok: string; value: string; resolve: (name: string | null) => void }
 export type SidePanel = 'bom' | 'inventory'
 
 export interface RoomSettings {
@@ -185,11 +186,17 @@ interface EngineApi {
   activateTab: (tabId: string) => void
   renameTab: (tabId: string, name: string) => void
   saveCurrent: (name?: string) => Promise<void>
+  saveCurrentAs: () => Promise<void>
+  /** 起名框：保存、另存为、重命名都用它，不走浏览器自带的弹框 */
+  askName: (title: string, ok: string, value: string) => Promise<string | null>
+  answerName: (name: string | null) => void
+  nameAsk: { title: string; ok: string; value: string } | null
   openDoc: (docId: string) => Promise<void>
   /** `local`：还没传到服务器过（rev 为 0），只在这台设备上。 */
   listDocs: () => Promise<Array<{ id: string; name: string; updatedAt: number; local: boolean }>>
   removeDoc: (docId: string) => Promise<void>
   renameDoc: (docId: string, name: string) => Promise<void>
+  duplicateDoc: (docId: string) => Promise<void>
   pushDoc: (docId: string) => Promise<boolean>
   importFile: (file: File) => Promise<void>
   openLibraryId: (id: string) => Promise<void>
@@ -481,6 +488,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const [exportingManual, setExportingManual] = useState<{ page: number; total: number } | null>(null)
   const [exportManualConfirm, setExportManualConfirm] = useState(false)
   const exportingManualRef = useRef(false)
+  const [nameAsk, setNameAsk] = useState<NameAsk | null>(null)
+  const nameAskRef = useRef<NameAsk | null>(null)
   const [catalog, setCatalog] = useState<EngineApi['catalog']>({
     tubes: [], curved: [], panels: [], colors: [], connectors: [], accessories: [],
   })
@@ -919,13 +928,30 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     syncTabs()
   }, [syncTabs, t])
 
+  /** 弹出起名框，等用户填完：点确定得到填的字，取消得到 null。 */
+  const askName = useCallback((title: string, ok: string, value: string) => {
+    nameAskRef.current?.resolve(null)
+    return new Promise<string | null>(resolve => {
+      const ask = { title, ok, value, resolve }
+      nameAskRef.current = ask
+      setNameAsk(ask)
+    })
+  }, [])
+
+  const answerName = useCallback((name: string | null) => {
+    const ask = nameAskRef.current
+    nameAskRef.current = null
+    setNameAsk(null)
+    ask?.resolve(name)
+  }, [])
+
   const saveCurrent = useCallback(async (name?: string) => {
     const e2 = eng.current
     const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
     if (!e2 || !tab) return
     let saveName = name || tab.name
     if (!name && !tab.docId && isUntitledName(tab.name)) {
-      const typed = window.prompt(t('saves.namePrompt'), '')
+      const typed = await askName(t('saves.saveTitle'), t('saves.saveOk'), '')
       if (typed == null) return
       saveName = typed.trim() || t('tab.untitled')
     }
@@ -942,7 +968,49 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     // 机器上；社区发帖页更是当场就要读服务器那张列表。不挡着上面那句提示：
     // 存进本地这件事已经成了，网络慢不该让用户对着按钮等。
     void syncNow()
-  }, [notify, syncTabs, t])
+  }, [askName, notify, syncTabs, t])
+
+  /** 存档里没人用的名字：原名空着就用原名，否则在后面加「副本」，还重名就往后编号。 */
+  const freeDocName = useCallback(async (name: string) => {
+    const taken = new Set((await docs.listDocs()).map((d: AnyRec) => String(d.name).trim().toLowerCase()))
+    const own = name.trim()
+    if (!taken.has(own.toLowerCase())) return own
+    const base = t('saves.copyName', { name: own })
+    if (!taken.has(base.toLowerCase())) return base
+    for (let i = 2; ; i++) {
+      const next = `${base} ${i}`
+      if (!taken.has(next.toLowerCase())) return next
+    }
+  }, [t])
+
+  /** 当前这一座存成一份新的存档，标签页从此跟着新的那一份走，原来那份保持不动。 */
+  const saveCurrentAs = useCallback(async () => {
+    const e2 = eng.current
+    const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
+    if (!e2 || !tab) return
+    const suggested = isUntitledName(tab.name) ? '' : await freeDocName(tab.name)
+    const typed = await askName(t('saves.saveAsTitle'), t('saves.saveOk'), suggested)
+    if (typed == null) return
+    const data = e2.model.toJSON()
+    const saved = await docs.saveDoc({ docId: null, name: typed.trim() || t('tab.untitled'), data })
+    tab.docId = saved.id
+    tab.name = saved.name
+    tab.dirty = false
+    tab.model = data
+    syncTabs()
+    track('builder.design.saveAs', { ...modelShape(data) })
+    notify(t('toast.saved', { name: saved.name }))
+    void syncNow()
+  }, [askName, freeDocName, notify, syncTabs, t])
+
+  const duplicateDoc = useCallback(async (docId: string) => {
+    const doc = await docs.getDoc(docId) as AnyRec | null
+    if (!doc) return
+    const saved = await docs.saveDoc({ docId: null, name: await freeDocName(String(doc.name)), data: doc.data })
+    track('builder.design.duplicate', { ...modelShape(doc.data) })
+    notify(t('toast.duplicated', { name: saved.name }))
+    void syncNow()
+  }, [freeDocName, notify, t])
 
   /**
    * 把这一座送到服务器上，送到了才返回 true。
@@ -1561,10 +1629,11 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       bump()
     },
     grassOn: !!scene?._sceneOn,
-    highlight, highlightIds, safety, setInv, newTab, closeTab, activateTab, renameTab, saveCurrent, openDoc,
+    highlight, highlightIds, safety, setInv, newTab, closeTab, activateTab, renameTab, saveCurrent, saveCurrentAs, askName, answerName, nameAsk, openDoc,
     listDocs: async () => (await docs.listDocs()).map((d: AnyRec) => ({ id: String(d.id), name: String(d.name), updatedAt: Number(d.updatedAt || 0), local: !Number(d.rev) })),
     removeDoc: async (id) => { await docs.removeDoc(id); bump() },
     renameDoc: async (id, name) => { await docs.renameDoc(id, name); bump() },
+    duplicateDoc: async (id) => { await duplicateDoc(id); bump() },
     pushDoc,
     importFile, openLibraryId, exportQdf, exportJson,
     // 装配模式是"图纸能不能照着搭"的唯一信号：进去了、翻到第几步、
