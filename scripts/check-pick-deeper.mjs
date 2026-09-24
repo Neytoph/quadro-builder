@@ -16,6 +16,7 @@ globalThis.fetch = async (url) => {
 const { loadCatalog } = await import('../src/engine/catalog.js')
 const { BuildModel } = await import('../src/engine/model.js')
 const { Builder } = await import('../src/engine/builder.js')
+const { withHistory } = await import('./withHistory.mjs')
 const { geometricPreset } = await import('../src/data/presets.ts')
 await loadCatalog()
 
@@ -52,7 +53,7 @@ let clock = 1000
 const realNow = performance.now
 performance.now = () => clock
 
-const b = new Builder(fakeScene(), m)
+const b = withHistory(new Builder(fakeScene(), m))
 b.onNotice = () => {}
 b.mode = 'select'
 const click = (x, y) => b._clickSelectRaw({ clientX: x, clientY: y })

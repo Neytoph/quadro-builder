@@ -16,6 +16,7 @@ globalThis.fetch = async (url) => {
 const { loadCatalog, gridSpacing } = await import('../src/engine/catalog.js')
 const { BuildModel } = await import('../src/engine/model.js')
 const { Builder } = await import('../src/engine/builder.js')
+const { withHistory } = await import('./withHistory.mjs')
 await loadCatalog()
 
 function fakeScene() {
@@ -37,7 +38,7 @@ function setup() {
   m.addTube(base.id, top.id, 'T35', 'red', 35)
   // 从顶接头往 +x 出发、往上弯
   const res = m.extendBow(top.id, [1, 0, 0], [0, 1, 0], 'TC1', 'red', R)
-  const b = new Builder(fakeScene(), m)
+  const b = withHistory(new Builder(fakeScene(), m))
   const notices = []
   b.onNotice = (msg) => notices.push(msg)
   b.mode = 'select'
@@ -83,7 +84,7 @@ function setup() {
   const bEnd = m.nodes.get(res.tube.b)
   const beyond = m.addNode(bEnd.x + 40, bEnd.y, bEnd.z)
   m.addTube(bEnd.id, beyond.id, 'T35', 'red', 35)                  // 终点接着一根直管
-  const b = new Builder(fakeScene(), m)
+  const b = withHistory(new Builder(fakeScene(), m))
   b.onNotice = () => {}
   b.mode = 'select'
   b.selection = new Map([[res.tube.id, 'tube']])

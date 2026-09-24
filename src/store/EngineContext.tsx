@@ -8,7 +8,7 @@ import {
 } from '../engine-api'
 import { useI18n } from '../i18n'
 import { syncNow, syncProbe, syncStarted } from '../sync/bootstrap'
-import { bootEntry, VIEW_ONLY, type ResumeExport } from '../entry'
+import { bootEntry, SESSIONLESS, VIEW_ONLY, type ResumeExport } from '../entry'
 import { publishSharePage, sharePagesEnabled, stampFor, type ExportKind, type Stamp } from '../sharePage'
 import { geometricPreset, jsonToFragment } from '../data/presets'
 import pyramidQdf from '../data/A0128.qdf?raw'
@@ -22,6 +22,8 @@ import { takeModelThumb, waitSceneReady } from '../engine/thumbShot.js'
 import { bomToCsv, bomToPngDataUrl, loadImage } from '../ui/bomExport'
 import { shareImageDataUrl } from '../ui/shareImage'
 import { MOTION } from '../ui/motion'
+import { createTabDoc, dropTabDoc, memoryDoc, openTabDoc, SEED_ORIGIN, type LocalDoc } from '../collab/localDocs'
+import { partCountOf, writeJSON, type ModelJSON } from '../collab/ymodel'
 
 // 引擎来自 Vanilla JS，这里不跟它的推断类型较劲。
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -358,11 +360,54 @@ function cubeLabels() {
   }
 }
 
-function pruneSessionTabs<T extends TabInfo & { model: unknown }>(tabs: T[]) {
-  const keep = tabs.filter(tb => tb.docId || modelPartCount(tb.model) > 0 || !isUntitledName(tb.name))
-  if (keep.length) return keep
+/**
+ * 标签页。造型本身在 local（这一页的 Yjs 文档和它的编辑记录）里，
+ * 会话记录只存名字、对应的存档和界面状态。
+ */
+type Tab = TabInfo & {
+  view: AnyRec
+  local: LocalDoc
+  /** 共享方案：新建零件 id 里夹的本端标记，见 BuildModel.idTag */
+  idTag?: string
+  /** 共享方案里的评论者和访客、交付查看：只能看 */
+  readOnly?: boolean
+}
+
+const EMPTY_MODEL: ModelJSON = { format: 2, nodes: [], tubes: [] }
+
+/** 让引擎按它的规矩读一遍再导出：旧格式升上来、坐标取整，写进文档的都是当前格式。 */
+function normalizeModel(data: unknown): ModelJSON | null {
+  const m = new BuildModel()
+  const res = m.loadJSON(data)
+  return res && res.ok ? m.toJSON() as ModelJSON : null
+}
+
+/**
+ * 整座换掉（打开文件、官方造型换进空标签页）：文档改成 json，不进撤销记录，
+ * 原来的撤销记录也清掉。当前页的画面由文档变化带着刷新。
+ */
+function replaceTabModel(tab: Tab, json: ModelJSON) {
+  writeJSON(tab.local.doc, json, SEED_ORIGIN)
+  tab.local.history.clear()
+}
+
+/** 新标签页，文档里是 seed。只放一座的打开方式不在本机留库。 */
+function makeTab(seed: ModelJSON, name: string, docId: string | null): Tab {
+  const tabId = docs.newTabId()
+  const local = SESSIONLESS ? memoryDoc(seed) : createTabDoc(tabId, seed)
+  return { tabId, docId, name, dirty: false, view: {}, local }
+}
+
+function tabParts(tab: Tab) {
+  return partCountOf(tab.local.history.toJSON())
+}
+
+/** 空的「未命名」标签页不留；全空的话留第一个。返回留下的和去掉的。 */
+function pruneSessionTabs(tabs: Tab[]) {
+  const keep = tabs.filter(tb => tb.docId || tabParts(tb) > 0 || !isUntitledName(tb.name))
+  if (keep.length) return { keep, gone: tabs.filter(tb => !keep.includes(tb)) }
   const first = tabs[0]
-  return first ? [{ ...first, dirty: false }] : tabs
+  return first ? { keep: [{ ...first, dirty: false }], gone: tabs.slice(1) } : { keep: tabs, gone: [] }
 }
 
 function loadInv(): Inventory {
@@ -491,7 +536,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const eng = useRef<{ scene: E; model: E; builder: E } | null>(null)
   const thumbBatch = useRef<{ json: unknown; camera: unknown; sceneOn: boolean; mode: string } | null>(null)
-  const tabsRef = useRef<Array<TabInfo & { model: unknown; view: AnyRec }>>([])
+  const tabsRef = useRef<Tab[]>([])
   const activeRef = useRef<string | null>(null)
   // 料表导出在回调里跑，用 ref 取当下的料表、尺寸、库存和语言
   const bomRef = useRef<BomView | null>(null)
@@ -530,30 +575,44 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     setToast({ message, kind })
   }, [])
 
-  /** 把标签页记进本机，下次打开接着来。只看模式不记：它嵌在别的页面里，不能盖掉这个人自己的标签页。 */
+  /**
+   * 模型里有、文档里还没有的改动写进文档。编辑都经 Builder 的 recordHistory 交给文档，
+   * 这里兜住没走那条路的改动，保证刷新以后还在。拖动、粘贴、截缩略图、换标签页的
+   * 过程中模型里是中间状态，不写。
+   */
+  const flushModel = useCallback(() => {
+    const e = eng.current
+    const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
+    if (!e || !tab || switching.current || thumbBatch.current || e.builder.busy()) return
+    if (e.builder.history !== tab.local.history) return
+    tab.local.history.commit(JSON.stringify(tab.local.history.toJSON()), JSON.stringify(e.model.toJSON()))
+  }, [])
+
+  /**
+   * 把标签页记进本机，下次打开接着来。造型本身已经在各页的 Yjs 文档里，这里记名字、
+   * 存档和界面状态。只看、共享方案、交付、画房间这几种打开方式不记：它们不是这个人
+   * 自己的标签页，不能盖掉。
+   */
   const saveSessionNow = useCallback(() => {
-    if (VIEW_ONLY) return Promise.resolve()
+    if (SESSIONLESS) return Promise.resolve()
     if (sessionTimer.current) window.clearTimeout(sessionTimer.current)
     sessionTimer.current = null
     const e = eng.current
     const active = tabsRef.current.find(x => x.tabId === activeRef.current)
     if (e && active) {
-      const json = e.model.toJSON()
-      if (modelPartCount(json) > 0 || modelPartCount(active.model) === 0) {
-        active.model = json
-      }
+      flushModel()
       active.view = { ...(e.builder.uiState() as AnyRec), camera: e.scene.cameraState() }
     }
     return docs.saveSession({
       tabs: tabsRef.current.map(tb => ({
-        tabId: tb.tabId, docId: tb.docId, name: tb.name, dirty: tb.dirty, model: tb.model, view: tb.view,
+        tabId: tb.tabId, docId: tb.docId, name: tb.name, dirty: tb.dirty, view: tb.view,
       })),
       activeTabId: activeRef.current,
     }) as Promise<void>
-  }, [])
+  }, [flushModel])
 
   const persistSession = useCallback(() => {
-    if (VIEW_ONLY) return
+    if (SESSIONLESS) return
     if (sessionTimer.current) window.clearTimeout(sessionTimer.current)
     sessionTimer.current = window.setTimeout(() => { void saveSessionNow() }, 400)
   }, [saveSessionNow])
@@ -586,12 +645,16 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     bump()
   }, [bump, persistSession, syncTabs])
 
-  const applyTab = useCallback((tab: TabInfo & { model: unknown; view: AnyRec }) => {
+  const applyTab = useCallback((tab: Tab) => {
     const e = eng.current
     if (!e) return
     switching.current = true
     e.builder.modelReplaced()
-    e.model.loadJSON(tab.model || { format: 2, nodes: [], tubes: [] })
+    e.builder.setHistory(tab.local.history)
+    e.builder.setReadOnly(!!tab.readOnly)
+    e.model.idTag = tab.idTag || ''
+    const res = e.model.loadJSON(tab.local.history.toJSON())
+    if (!res.ok) throw new Error(`tab ${tab.tabId} does not load: ${res.reason}`)
     e.builder.setUiState(tab.view || {})
     e.builder.setMode((tab.view?.mode as string) || 'select')
     if (tab.view?.camera) e.scene.restoreCameraState(tab.view.camera)
@@ -601,13 +664,19 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     bump()
   }, [bump])
 
+  /** 标签页的造型，从它的 Yjs 文档导出。当前页先把模型里没交出去的改动写进文档。 */
+  const exportTab = useCallback((tab: Tab): ModelJSON => {
+    if (tab.tabId === activeRef.current) flushModel()
+    return tab.local.history.toJSON()
+  }, [flushModel])
+
   const snapshotActive = useCallback(() => {
     const e = eng.current
     const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
     if (!e || !tab) return
-    tab.model = e.model.toJSON()
+    flushModel()
     tab.view = { ...(e.builder.uiState() as AnyRec), camera: e.scene.cameraState() }
-  }, [])
+  }, [flushModel])
 
   const markDirtyRef = useRef(markDirty)
   const bumpRef = useRef(bump)
@@ -669,39 +738,53 @@ export function EngineProvider({ children }: { children: ReactNode }) {
         // 开发模式下把引擎挂到 window 上，浏览器测试脚本靠它摆相机、查手柄
         if (import.meta.env.DEV) (window as unknown as { __quadroDev?: unknown }).__quadroDev = eng.current
 
-        // 只看模式只放这一座，不读这台设备上记着的标签页
-        if (!VIEW_ONLY) await docs.migrateOldDrafts()
-        const session = VIEW_ONLY ? null : await docs.loadSession()
+        // 只看、共享方案、交付、画房间：只放这一座，不读这台设备上记着的标签页。
+        // 共享方案和交付由 CollabProvider 连上以后 attachDoc 换进来。
+        if (!SESSIONLESS) await docs.migrateOldDrafts()
+        const session = SESSIONLESS ? null : await docs.loadSession()
         if (dead) return
         if (session?.tabs?.length) {
-          const mapped = session.tabs.map((tb: AnyRec) => ({
-            tabId: String(tb.tabId),
-            docId: (tb.docId as string) || null,
-            name: String(tb.name || t('tab.untitled')),
-            dirty: !!tb.dirty,
-            model: tb.model,
-            view: (tb.view as AnyRec) || {},
-          }))
+          const mapped: Tab[] = []
+          for (const tb of session.tabs as AnyRec[]) {
+            const tabId = String(tb.tabId)
+            // 旧版本把造型 JSON 记在会话里：本机还没有这一页的文档时，拿它生成一份
+            const legacy = tb.model ? normalizeModel(tb.model) : null
+            const local = await openTabDoc(tabId, legacy)
+            if (dead) return
+            mapped.push({
+              tabId,
+              docId: (tb.docId as string) || null,
+              name: String(tb.name || t('tab.untitled')),
+              dirty: !!tb.dirty,
+              view: (tb.view as AnyRec) || {},
+              local,
+            })
+          }
+          // 有存档、这一页却是空的（存档是别的设备同步过来的）：用存档的内容
           for (const tb of mapped) {
-            if (!tb.docId || modelPartCount(tb.model) > 0) continue
+            if (!tb.docId || tabParts(tb) > 0) continue
             const doc = await docs.getDoc(tb.docId) as AnyRec | null
             if (dead) return
-            if (doc?.data && modelPartCount(doc.data) > 0) {
-              tb.model = doc.data
+            const data = doc?.data ? normalizeModel(doc.data) : null
+            if (data && modelPartCount(data) > 0) {
+              writeJSON(tb.local.doc, data, SEED_ORIGIN)
               tb.dirty = false
-              if (doc.name) tb.name = String(doc.name)
+              if (doc?.name) tb.name = String(doc.name)
             }
           }
-          tabsRef.current = pruneSessionTabs(mapped)
+          const { keep, gone } = pruneSessionTabs(mapped)
+          for (const tb of gone) await dropTabDoc(tb.tabId, tb.local)
+          tabsRef.current = keep
           const wanted = session.activeTabId && tabsRef.current.some(x => x.tabId === session.activeTabId)
             ? session.activeTabId
             : tabsRef.current[0].tabId
           activeRef.current = wanted
           applyTabRef.current(tabsRef.current.find(x => x.tabId === wanted)!)
         } else {
-          const tab = { tabId: docs.newTabId(), docId: null, name: t('tab.untitled'), dirty: false, model: model.toJSON(), view: {} }
+          const tab = makeTab(EMPTY_MODEL, t('tab.untitled'), null)
           tabsRef.current = [tab]
           activeRef.current = tab.tabId
+          applyTabRef.current(tab)
         }
         syncTabsRef.current()
         setReady(true)
@@ -930,8 +1013,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     snapshotActive()
     const e2 = eng.current
     if (!e2) return
-    const empty = { format: 2, nodes: [], tubes: [] }
-    const tab = { tabId: docs.newTabId(), docId: null, name: t('tab.untitled'), dirty: false, model: empty, view: {} }
+    const tab = makeTab(EMPTY_MODEL, t('tab.untitled'), null)
     tabsRef.current = [...tabsRef.current, tab]
     activeRef.current = tab.tabId
     applyTab(tab)
@@ -949,9 +1031,11 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   }, [applyTab, snapshotActive, syncTabs])
 
   const closeTab = useCallback((tabId: string) => {
+    const closing = tabsRef.current.find(x => x.tabId === tabId)
     const rest = tabsRef.current.filter(x => x.tabId !== tabId)
+    if (closing) void dropTabDoc(closing.tabId, closing.local)
     if (!rest.length) {
-      const empty = { tabId: docs.newTabId(), docId: null, name: t('tab.untitled'), dirty: false, model: { format: 2, nodes: [], tubes: [] }, view: {} }
+      const empty = makeTab(EMPTY_MODEL, t('tab.untitled'), null)
       tabsRef.current = [empty]
       activeRef.current = empty.tabId
       applyTab(empty)
@@ -1004,12 +1088,11 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       if (typed == null) return
       saveName = typed.trim() || t('tab.untitled')
     }
-    const data = e2.model.toJSON()
+    const data = exportTab(tab)
     const saved = await docs.saveDoc({ docId: tab.docId, name: saveName, data })
     tab.docId = saved.id
     tab.name = saved.name
     tab.dirty = false
-    tab.model = data
     syncTabs()
     track('builder.design.save', { ...modelShape(data), named: !!name })
     notify(t('toast.saved', { name: saved.name }))
@@ -1040,12 +1123,11 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const suggested = isUntitledName(tab.name) ? '' : await freeDocName(tab.name)
     const typed = await askName(t('saves.saveAsTitle'), t('saves.saveOk'), suggested)
     if (typed == null) return
-    const data = e2.model.toJSON()
+    const data = exportTab(tab)
     const saved = await docs.saveDoc({ docId: null, name: typed.trim() || t('tab.untitled'), data })
     tab.docId = saved.id
     tab.name = saved.name
     tab.dirty = false
-    tab.model = data
     syncTabs()
     track('builder.design.saveAs', { ...modelShape(data) })
     notify(t('toast.saved', { name: saved.name }))
@@ -1091,12 +1173,14 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       syncTabs()
       return
     }
-    const tab = { tabId: docs.newTabId(), docId: doc.id, name: doc.name, dirty: false, model: doc.data, view: {} }
+    const data = normalizeModel(doc.data)
+    if (!data) { notify(t('lib.loadFailed'), 'err'); return }
+    const tab = makeTab(data, String(doc.name), String(doc.id))
     tabsRef.current = [...tabsRef.current, tab]
     activeRef.current = tab.tabId
     applyTab(tab)
     syncTabs()
-  }, [applyTab, snapshotActive, syncTabs])
+  }, [applyTab, notify, snapshotActive, syncTabs, t])
 
   const openLibraryId = useCallback(async (id: string) => {
     const official = parseOfficialId(id)
@@ -1145,20 +1229,24 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     if (!e2) return
     snapshotActive()
     const active = tabsRef.current.find(x => x.tabId === activeRef.current)
+    const json = normalizeModel(data)
+    if (!json) {
+      notify(t('lib.loadFailed'), 'err')
+      return
+    }
     const reuse = !!active && !active.docId && !active.dirty && modelPartCount(e2.model.toJSON()) === 0
     if (reuse && active) {
       active.name = name
-      active.model = data
       active.dirty = false
+      replaceTabModel(active, json)
       applyTab(active)
     } else {
-      const tab = { tabId: docs.newTabId(), docId: null, name, dirty: false, model: data, view: {} }
+      const tab = makeTab(json, name, null)
       tabsRef.current = [...tabsRef.current, tab]
       activeRef.current = tab.tabId
       applyTab(tab)
     }
     syncTabs()
-    e2.builder.clearHistory?.()
     notify(t('lib.loaded', { name }))
   }, [applyTab, notify, snapshotActive, syncTabs, t])
 
@@ -1181,16 +1269,16 @@ export function EngineProvider({ children }: { children: ReactNode }) {
           mergeEps: 2,
         })
       }
+      const json = normalizeModel(data)
+      if (!json) throw new Error('data')
+      const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
+      if (!tab) return
       switching.current = true
       e2.builder.modelReplaced()
-      const res = e2.model.loadJSON(data)
-      if (res && res.ok === false) throw new Error(res.reason || 'data')
-      e2.builder.clearHistory?.()
-      e2.builder.refresh()
+      replaceTabModel(tab, json)
       e2.scene.resetCamera(e2.model, { animate: true, swoop: true })
       switching.current = false
-      const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
-      if (tab) {
+      {
         tab.dirty = true
         tab.name = file.name.replace(/\.(qdf|json)$/i, '') || tab.name
       }
@@ -1321,12 +1409,16 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       const res = e2.model.loadJSON(data)
       if (res && res.ok === false) throw new Error(String(res.reason || 'data'))
     }
+    const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
+    if (!tab) return false
     loadingModel.current = true
     try {
       if (opts?.undoable) e2.builder.recordHistory(run)
       else {
-        run()
-        e2.builder.clearHistory?.()
+        const json = normalizeModel(data)
+        if (!json) return false
+        e2.builder.modelReplaced()
+        replaceTabModel(tab, json)
       }
     } catch {
       return false
@@ -1335,8 +1427,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     }
     e2.builder.refresh()
     if (opts?.frame !== false) e2.scene.resetCamera(e2.model, { animate: true, swoop: true })
-    const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
-    if (tab) tab.dirty = true
+    tab.dirty = true
     syncTabs()
     bump()
     return true
@@ -1620,12 +1711,11 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const e2 = eng.current
     const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
     if (!e2 || !tab) return
-    const data = e2.model.toJSON()
+    const data = exportTab(tab)
     const saved = await docs.saveDoc({ docId: null, name: await freeDocName(tab.name), data })
     tab.docId = saved.id
     tab.name = saved.name
     tab.dirty = false
-    tab.model = data
     syncTabs()
     track('builder.design.copy', { ...modelShape(data) })
     if (await syncProbe() && await pushDoc(saved.id)) notify(t('toast.copiedToAccount', { name: saved.name }))
@@ -1718,7 +1808,9 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const startThumbBatch = useCallback(() => {
     const e = eng.current
     if (!e || thumbBatch.current) return
+    flushModel()
     switching.current = true
+    e.builder.held = true
     thumbBatch.current = {
       json: e.model.toJSON(),
       camera: e.scene.cameraState(),
@@ -1729,15 +1821,19 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     e.builder.setMode('select')
     e.builder.modelReplaced()
     e.scene.setScene(false)
-  }, [])
+  }, [flushModel])
 
   const endThumbBatch = useCallback(() => {
     const e = eng.current
     const prev = thumbBatch.current
     thumbBatch.current = null
     if (e && prev) {
+      e.builder.held = false
+      e.builder._externalPending = false
       e.builder.modelReplaced()
-      e.model.loadJSON(prev.json || { format: 2, nodes: [], tubes: [] })
+      // 截图期间文档可能被别人改过：按文档现在的样子放回去
+      const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
+      e.model.loadJSON(tab ? tab.local.history.toJSON() : prev.json)
       e.builder.setMode(prev.mode || 'select')
       e.scene.setScene(prev.sceneOn)
       if (prev.camera) e.scene.restoreCameraState(prev.camera)

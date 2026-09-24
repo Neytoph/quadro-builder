@@ -16,6 +16,7 @@ globalThis.fetch = async (url) => {
 const { loadCatalog, gridSpacing } = await import('../src/engine/catalog.js')
 const { BuildModel } = await import('../src/engine/model.js')
 const { Builder } = await import('../src/engine/builder.js')
+const { withHistory } = await import('./withHistory.mjs')
 const { setLang } = await import('../src/engine/i18n.js')
 await loadCatalog()
 setLang('zh')
@@ -75,7 +76,7 @@ function setup() {
   const { m, bow } = setup()
   const el = { addEventListener() {}, removeEventListener() {}, style: {}, getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }) }
   const scene = new Proxy({ renderer: { domElement: el }, container: el }, { get(t, k) { return k in t ? t[k] : () => null } })
-  const b = new Builder(scene, m)
+  const b = withHistory(new Builder(scene, m))
   const notices = []
   b.onNotice = (msg) => notices.push(String(msg))
   b._notePlaced(bow.id, 'tube')

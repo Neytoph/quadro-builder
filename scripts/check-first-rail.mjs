@@ -17,6 +17,7 @@ globalThis.fetch = async (url) => {
 const { loadCatalog } = await import('../src/engine/catalog.js')
 const { BuildModel } = await import('../src/engine/model.js')
 const { Builder } = await import('../src/engine/builder.js')
+const { withHistory } = await import('./withHistory.mjs')
 await loadCatalog()
 
 let n = 0
@@ -49,7 +50,7 @@ for (const [label, setup] of [
 ]) {
   const { m, rails, up } = twoCells()
   const renders = []
-  const b = new Builder(fakeScene(renders), m, { onChange() {} })
+  const b = withHistory(new Builder(fakeScene(renders), m, { onChange() {} }))
   setup(b)
   b.refresh()
   const first = renders.at(-1).highlight
@@ -78,7 +79,7 @@ for (const [label, setup, fill] of [
   const { m, rails } = twoCells()
   ok(!!fill(m, rails[0].id, rails[1].id), `${label}：左格先放上`)
   const renders = []
-  const b = new Builder(fakeScene(renders), m, { onChange() {} })
+  const b = withHistory(new Builder(fakeScene(renders), m, { onChange() {} }))
   setup(b)
   b.refresh()
   const first = renders.at(-1).highlight

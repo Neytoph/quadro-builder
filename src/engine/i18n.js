@@ -460,6 +460,7 @@ const de = {
 
   // Hinweise aus dem Builder (onNotice)
   notice_collision: 'Hier liegt schon ein Rohr – kein Platz.',
+  notice_read_only: 'Du kannst hier nur ansehen und kommentieren, nicht bearbeiten.',
   notice_no_free_arm: 'Kein freier Arm für die Winkelkupplung – hier nicht möglich.',
   notice_clamp_placed: 'Doppelrohrverbinder gesetzt – grüner Punkt: zweites Rohr.',
   notice_second_tube_placed: 'Zweites Rohr im Doppelrohrverbinder gesetzt.',
@@ -1037,6 +1038,7 @@ const en = {
 
   // Notices from the builder (onNotice)
   notice_collision: 'There is already a tube here – no room.',
+  notice_read_only: 'You can view and comment here, but not edit.',
   notice_no_free_arm: 'No free arm for the angle connector – not possible here.',
   notice_clamp_placed: 'Double-tube connector placed – green dot: second tube.',
   notice_second_tube_placed: 'Second tube placed in the double-tube connector.',
@@ -1246,6 +1248,7 @@ const zh = {
   notice_touch_selected: (n) => n === 1 ? '已选 1 件。' : `已选 ${n} 件。`,
   notice_touch_box: '拖动会拉出一个选择框。',
   notice_collision: '这里已经有管子，放不下。',
+  notice_read_only: '这里只能查看和评论，不能修改。',
   notice_no_free_arm: '没有空闲臂给斜角接头。',
   notice_clamp_placed: '双管连接已放下，绿色点是第二根管。',
   notice_second_tube_placed: '双管连接的第二根管已放上。',
