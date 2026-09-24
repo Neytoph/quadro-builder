@@ -18,6 +18,8 @@ export interface Me {
   userId: number
   name: string
   avatar: string
+  /** 上次看过评论和留言的时间（毫秒），没看过是 0 */
+  lastReadAt: number
 }
 
 export interface Plan {
@@ -90,11 +92,24 @@ export interface ExportBody {
   parts: Parts
 }
 
+/** 门窗：画在房间轮廓第 edge 条边上（点 edge 到下一个点），from、to 是从起点沿边量的厘米数。 */
+export interface Opening {
+  kind: 'door' | 'window'
+  edge: number
+  from: number
+  to: number
+}
+
+/**
+ * 需求单的房间。厘米；outline 是内轮廓的顶点，顺时针，原点在外框左上角，x 向右、z 向下（俯视），
+ * w、d 等于外框的宽深。没画边界时没有 outline 和 openings。
+ */
 export interface Room {
   w: number
   d: number
   h: number
   outline?: Array<[number, number]>
+  openings?: Opening[]
 }
 
 export class ApiError extends Error {

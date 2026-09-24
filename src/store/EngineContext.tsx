@@ -191,7 +191,8 @@ interface EngineApi {
   closeTab: (tabId: string) => void
   activateTab: (tabId: string) => void
   renameTab: (tabId: string, name: string) => void
-  saveCurrent: (name?: string) => Promise<void>
+  /** 存下当前这一座；取消起名返回 null */
+  saveCurrent: (name?: string) => Promise<{ docId: string; name: string; data: ModelJSON } | null>
   saveCurrentAs: () => Promise<void>
   /** 起名框：保存、另存为、重命名都用它，不走浏览器自带的弹框 */
   askName: (title: string, ok: string, value: string) => Promise<string | null>
@@ -1110,11 +1111,11 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const saveCurrent = useCallback(async (name?: string) => {
     const e2 = eng.current
     const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
-    if (!e2 || !tab) return
+    if (!e2 || !tab) return null
     let saveName = name || tab.name
     if (!name && !tab.docId && isUntitledName(tab.name)) {
       const typed = await askName(t('saves.saveTitle'), t('saves.saveOk'), '')
-      if (typed == null) return
+      if (typed == null) return null
       saveName = typed.trim() || t('tab.untitled')
     }
     const data = exportTab(tab)
@@ -1129,7 +1130,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     // 机器上；社区发帖页更是当场就要读服务器那张列表。不挡着上面那句提示：
     // 存进本地这件事已经成了，网络慢不该让用户对着按钮等。
     void syncNow()
-  }, [askName, notify, syncTabs, t])
+    return { docId: String(saved.id), name: String(saved.name), data }
+  }, [askName, exportTab, notify, syncTabs, t])
 
   /** 存档里没人用的名字：原名空着就用原名，否则在后面加「副本」，还重名就往后编号。 */
   const freeDocName = useCallback(async (name: string) => {
