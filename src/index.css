@@ -60,7 +60,8 @@ html, body, #root {
 }
 
 #canvas-host,
-#canvas-host canvas {
+#canvas-host canvas,
+.qb-compare-host canvas {
   width: 100%;
   height: 100%;
   display: block;

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useI18n } from '../../i18n'
 import { useEngine } from '../../store/EngineContext'
 import { partForFitting, partName } from '../../engine-api'
@@ -45,7 +46,8 @@ export default function BatchImport({ onClose }: { onClose: () => void }) {
     input.click()
   }
 
-  return (
+  // 从「文件」面板里打开：挂到 body 上，不然被面板框住
+  return createPortal(
     <div className="m-backdrop fixed inset-0 z-[75] flex items-center justify-center bg-black/45 p-4" onClick={() => { if (!busy) onClose() }}>
       <div role="dialog" aria-modal="true" className="m-modal qb-card w-full max-w-lg text-gray-100 p-5 max-h-[calc(100vh-2rem)] flex flex-col"
         onClick={e => e.stopPropagation()} data-ui="batch-import">
@@ -86,6 +88,7 @@ export default function BatchImport({ onClose }: { onClose: () => void }) {
           <button type="button" disabled={!!busy} onClick={onClose} className="qb-btn qb-btn-ghost qb-btn-sm">{t('batch.close')}</button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

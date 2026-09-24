@@ -47,16 +47,21 @@ const modelOf = (page) => page.evaluate(() => {
   return { tubes: [...m.tubes.keys()], nodes: [...m.nodes.values()].map((n) => ({ id: n.id, x: n.x, y: n.y, z: n.z })) }
 })
 
-/** 从某个接头竖着往上接一根（方向键「上」正视时走的就是这一步） */
-const growUp = (page, pick) => page.evaluate((which) => {
+/**
+ * 从一个上方空着的接头竖着往上接一根（方向键「上」正视时走的就是这一步）。
+ * 'left' 挑最左边的，'right' 挑最右边的：两个人同时接不会撞在一处；'top' 挑最高的。
+ */
+const growUp = (page, side) => page.evaluate((which) => {
   const { model, builder } = window.__quadroDev
-  const nodes = [...model.nodes.values()]
-  const node = which === 'last' ? nodes[nodes.length - 1] : nodes[0]
+  const free = [...model.nodes.values()].filter((n) => !model.findNodeNear(n.x, n.y + 40, n.z))
+  free.sort((a, b) => (which === 'top' ? b.y - a.y : which === 'left' ? a.x - b.x : b.x - a.x) || b.y - a.y)
+  const before = model.tubes.size
   builder.setMode('add')
-  builder.selectedNodeId = node.id
+  builder.selectedNodeId = free[0].id
   builder.buildStep([0, 1, 0])
+  if (model.tubes.size !== before + 1) throw new Error('growUp: 没接上')
   return model.tubes.size
-}, pick)
+}, side)
 
 async function waitFor(page, fn, arg, label, timeout = 8000) {
   try {
@@ -116,11 +121,12 @@ check('编辑者有了搭建工具条', true)
 
 // —— 3. 实时编辑：一边改另一边马上看到 ——
 await waitFor(editor, (n) => window.__quadroDev.model.tubes.size === n, built, '编辑者看到同一座')
-const afterEditorAdd = await growUp(editor, 'first')
+const afterEditorAdd = await growUp(editor, 'left')
 check('编辑者接了一根', afterEditorAdd === built + 1)
 await waitFor(owner, (n) => window.__quadroDev.model.tubes.size === n, afterEditorAdd, '创建人实时看到编辑者接的管')
 check('创建人实时看到编辑者接的那一根', true)
-const afterOwnerAdd = await growUp(owner, 'last')
+// 创建人接在编辑者刚加的那个接头上（最高的那个）
+const afterOwnerAdd = await growUp(owner, 'top')
 await waitFor(editor, (n) => window.__quadroDev.model.tubes.size === n, afterOwnerAdd, '编辑者实时看到创建人接的管')
 check('编辑者实时看到创建人接的那一根', true)
 
@@ -178,29 +184,37 @@ await viewer.locator('[data-ui=pin-placer]').click({ position: { x: 700, y: 450 
 await viewer.locator('[data-ui=pin-draft] textarea').fill('这根管能不能换成红色？')
 await viewer.locator('[data-ui=pin-draft]').getByRole('button', { name: '发送' }).click()
 await viewer.locator('[data-ui=pin-thread]').first().waitFor()
-check('评论者在画面上放了一条位置评论', await viewer.locator('[data-ui=pin]').count() >= 1)
+await viewer.waitForTimeout(300)
+const pinBox = await viewer.locator('[data-ui=pin]').first().boundingBox()
+// 图钉的针尖落在点下去的那一处（700, 450）
+check('评论者在画面上放了一条位置评论，图钉就在点的地方',
+  !!pinBox && Math.abs(pinBox.x + pinBox.width / 2 - 700) < 30 && pinBox.y + pinBox.height > 400 && pinBox.y + pinBox.height < 470)
 await owner.getByRole('button', { name: /^评论/ }).click()
 await owner.locator('[data-ui=pin-thread]').filter({ hasText: '换成红色' }).waitFor({ timeout: 10000 })
 check('创建人马上收到这条评论', true)
 await owner.locator('[data-ui=pin-thread]').filter({ hasText: '换成红色' }).click()
 await owner.locator('[data-ui=pin-thread] textarea').fill('可以，下一版改')
 await owner.locator('[data-ui=pin-thread]').getByRole('button', { name: '发送' }).click()
-await owner.locator('[data-ui=pin-thread]').getByText('可以，下一版改').waitFor()
+await owner.locator('[data-ui=pin-thread] [data-ui=post]').filter({ hasText: '可以，下一版改' }).waitFor()
 check('创建人回复', true)
 await owner.locator('[data-ui=comments-tab-chat]').click()
 await owner.locator('[data-ui=chat] textarea').fill('预算大概 6000')
 await owner.locator('[data-ui=chat]').getByRole('button', { name: '发送' }).click()
-await owner.locator('[data-ui=chat]').getByText('预算大概 6000').waitFor()
+await owner.locator('[data-ui=chat] [data-ui=post]').filter({ hasText: '预算大概 6000' }).waitFor()
 check('留言区发言', true)
+await viewer.locator('[data-ui=comments-tab-chat]').click()
+await viewer.locator('[data-ui=chat] [data-ui=post]').filter({ hasText: '预算大概 6000' }).waitFor({ timeout: 10000 })
+check('评论者那边马上看到留言', true)
+await viewer.locator('[data-ui=comments-tab-pins]').click()
 await shot(owner, '3-comments')
 
 // —— 6. 断网再连能合并 ——
 await editorCtx.setOffline(true)
 await editor.waitForTimeout(1500)
-const offlineAdd = await growUp(editor, 'last')
+const offlineAdd = await growUp(editor, 'left')
 await owner.waitForTimeout(1500)
 check('编辑者断网时接的管创建人还看不到', (await modelOf(owner)).tubes.length === afterOwnerAdd)
-const ownerOffline = await growUp(owner, 'first')
+const ownerOffline = await growUp(owner, 'right')
 await editorCtx.setOffline(false)
 await waitFor(owner, (n) => window.__quadroDev.model.tubes.size === n, afterOwnerAdd + 2, '重连后创建人看到编辑者断网时接的管', 20000)
 await waitFor(editor, (n) => window.__quadroDev.model.tubes.size === n, afterOwnerAdd + 2, '重连后编辑者看到创建人接的管', 20000)
@@ -215,11 +229,12 @@ await owner.getByRole('dialog').locator('input').fill('第 1 版')
 await owner.keyboard.press('Enter')
 await owner.getByText('已存成版本「第 1 版」').waitFor()
 check('存版本', true)
-await growUp(owner, 'last')
+await growUp(owner, 'right')
 await owner.locator('[data-ui=version-row]').filter({ hasText: '第 1 版' }).getByText('和当前对照').click()
 await owner.locator('[data-ui=compare-view]').waitFor()
 await owner.waitForTimeout(1500)
-check('对照里标出新增 1 件', await owner.locator('[data-ui=compare-view]').getByText('新增 1').isVisible())
+// 往上接一根：多一个接头、一根管
+check('对照里标出新增的接头和管', await owner.locator('[data-ui=compare-view]').getByText('新增 2').isVisible())
 check('料表差异列出管子多了', await owner.locator('[data-ui=compare-bom] tbody tr').count() >= 1)
 check('地址栏带上 compare', new URL(owner.url()).searchParams.get('compare')?.endsWith(',current'))
 await shot(owner, '4-compare')

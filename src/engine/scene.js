@@ -3751,6 +3751,8 @@ export class SceneManager {
         const emissive = new THREE.Color(color).multiplyScalar(0.3);
         return this._tintMaterial(base, "tint:" + color + ":", color, emissive);
       }
+      // 版本对照：没变的零件退后，上了色的才看得出来
+      if (opts.dimUntinted) return this._dimmedMaterial(base);
       return base;
     };
 

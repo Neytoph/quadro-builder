@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useI18n } from '../../i18n'
 import { useEngine } from '../../store/EngineContext'
 import { useCollab } from '../CollabContext'
@@ -43,7 +44,8 @@ export default function DeliverDialog({ version, onClose }: { version: VersionIn
     </div>
   )
 
-  return (
+  // 从右侧面板里打开：挂到 body 上，不然被面板框住
+  return createPortal(
     <div className="m-backdrop fixed inset-0 z-[75] flex items-center justify-center bg-black/45 p-4" onClick={onClose}>
       <div role="dialog" aria-modal="true" className="m-modal qb-card w-full max-w-md text-gray-100 p-5 max-h-[calc(100vh-2rem)] overflow-y-auto"
         onClick={e => e.stopPropagation()} data-ui="deliver-dialog">
@@ -89,6 +91,7 @@ export default function DeliverDialog({ version, onClose }: { version: VersionIn
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

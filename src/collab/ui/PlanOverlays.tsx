@@ -107,13 +107,14 @@ export default function PlanOverlays() {
       )}
       <div ref={layer} className="fixed inset-0 z-[35] pointer-events-none" data-ui="plan-overlays">
         {pins.map(th => (
-          <button key={`pin-${th.id}`} ref={track(`pin-${th.id}`, () => th.anchor!.point as P3)}
-            data-ui="pin" data-thread={th.id}
-            onClick={() => { setPane('comments'); collab.focusThread(th) }}
-            className={`absolute left-0 top-0 -translate-x-1/2 -translate-y-full pointer-events-auto cursor-pointer w-7 h-7 rounded-full rounded-bl-none -rotate-45 flex items-center justify-center shadow-md border-2 border-white ${th.id === collab.activeThread ? 'bg-teal-500' : th.resolved ? 'bg-gray-400' : 'bg-orange-500'}`}
-            style={{ marginLeft: 0 }}>
-            <span className="rotate-45 text-white text-[11px] font-bold">{collab.pinNumber(th)}</span>
-          </button>
+          // 外层只管摆到那一点，里面的针尖朝下：旋转放在里层，不然位置也跟着转
+          <div key={`pin-${th.id}`} ref={track(`pin-${th.id}`, () => th.anchor!.point as P3)} className="absolute left-0 top-0">
+            <button data-ui="pin" data-thread={th.id}
+              onClick={() => { setPane('comments'); collab.focusThread(th) }}
+              className={`absolute -left-3.5 -top-[34px] pointer-events-auto cursor-pointer w-7 h-7 rounded-full rounded-bl-none -rotate-45 flex items-center justify-center shadow-md border-2 border-white ${th.id === collab.activeThread ? 'bg-teal-500' : th.resolved ? 'bg-gray-400' : 'bg-orange-500'}`}>
+              <span className="rotate-45 text-white text-[11px] font-bold">{collab.pinNumber(th)}</span>
+            </button>
+          </div>
         ))}
         {peers.map(p => (
           <div key={`peer-${p.clientId}`} data-ui="peer-mark"
@@ -129,7 +130,7 @@ export default function PlanOverlays() {
         ))}
         {draft && (
           <div key="draft" ref={track('draft', () => draft.point)} className="absolute left-0 top-0 pointer-events-auto" data-ui="pin-draft">
-            <div className="-translate-x-1/2 -translate-y-full w-7 h-7 rounded-full rounded-bl-none -rotate-45 bg-orange-500 border-2 border-white shadow-md" />
+            <div className="absolute -left-3.5 -top-[34px] w-7 h-7 rounded-full rounded-bl-none -rotate-45 bg-orange-500 border-2 border-white shadow-md" />
             <div className="qb-card absolute left-4 -top-3 w-72 p-3 text-gray-100">
               <div className="text-xs text-gray-400 mb-1.5">{t(draft.partId ? 'collab.pin.onPart' : 'collab.pin.onSpace')}</div>
               <Composer autoFocus placeholder={t('collab.pin.placeholder')}

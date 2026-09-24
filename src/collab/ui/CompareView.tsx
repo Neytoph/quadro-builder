@@ -27,7 +27,7 @@ function useSide(host: React.RefObject<HTMLDivElement | null>, json: ModelJSON |
     if (!s || !json) return
     const res = s.model.loadJSON(json)
     if (!res.ok) throw new Error(`compare: model does not load (${res.reason})`)
-    const draw = () => { s.scene.renderModel(s.model, null, { tints }); s.scene.requestRender() }
+    const draw = () => { s.scene.renderModel(s.model, null, { tints, dimUntinted: true }); s.scene.requestRender() }
     s.scene.onMeshesReady = draw
     draw()
   }, [json, tints])
@@ -70,10 +70,17 @@ export default function CompareView() {
       raf = requestAnimationFrame(tick)
       const a = left.current, b = right.current
       if (!a || !b) return
-      if (!framed.current && cmp) {
+      // 两边画布都有了尺寸再框：按大的那一座框住，另一边照抄
+      if (!framed.current && cmp && leftHost.current?.clientWidth && rightHost.current?.clientWidth) {
         framed.current = true
-        b.scene.resetCamera(b.model, { animate: false })
-        a.scene.setCameraPose(b.scene.getCameraPose())
+        a.scene.onResize()
+        b.scene.onResize()
+        const size = (m: E) => { const bb = m.bounds(2.5); return bb ? bb.size[0] * bb.size[1] * bb.size[2] + bb.size[0] + bb.size[2] : 0 }
+        const big = size(a.model) > size(b.model) ? a : b
+        big.scene.resetCamera(big.model, { animate: false })
+        const pose = big.scene.getCameraPose()
+        a.scene.setCameraPose(pose)
+        b.scene.setCameraPose(pose)
       }
       const pa = JSON.stringify(a.scene.getCameraPose())
       const pb = JSON.stringify(b.scene.getCameraPose())
@@ -102,8 +109,8 @@ export default function CompareView() {
       </div>
       <div className="flex-1 min-h-0 grid grid-cols-2 gap-px bg-gray-800">
         {[{ host: leftHost, name: cmp.names[0], side: 'left' }, { host: rightHost, name: cmp.names[1], side: 'right' }].map(s => (
-          <div key={s.side} className="relative bg-gray-950 min-w-0">
-            <div ref={s.host} className="absolute inset-0" data-ui={`compare-${s.side}`} />
+          <div key={s.side} className="relative bg-gray-950 min-w-0 min-h-0 overflow-hidden">
+            <div ref={s.host} className="qb-compare-host absolute inset-0" data-ui={`compare-${s.side}`} />
             <div className="qb-card absolute top-2 left-2 px-2.5 py-1 text-xs text-gray-100 pointer-events-none">{s.name}</div>
           </div>
         ))}
