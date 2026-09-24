@@ -10,6 +10,7 @@ import {
 import { connectorsForNode } from "./bom.js";
 import { POOL_KINDS } from "./model.js";
 import { partIcon } from "../ui/icons";
+import { drawQr } from "../sharePage";
 
 const PAGE_W = 297;
 const PAGE_H = 210;
@@ -645,7 +646,45 @@ function paintLegend(ctx, items, icons, x, y, maxW, maxY) {
   ctx.textBaseline = "top";
 }
 
-function paintCover(ctx, { front, back, copy, items, icons, fill, frontMarks, backMarks }) {
+// 方案页的二维码印在每一页右下角：二维码在上，网址在下；封面上再加一句说明。
+const STAMP_QR_COVER = 26;
+const STAMP_QR_STEP = 17;
+const STAMP_GAP = 4;
+
+function stampWidth(ctx, stamp, qr, withHint) {
+  ctx.font = font(600, mm(2.3));
+  let w = Math.max(mm(qr), ctx.measureText(stamp.host).width);
+  if (withHint) {
+    ctx.font = font(400, mm(2.2));
+    w = Math.max(w, ctx.measureText(stamp.hint).width);
+  }
+  return w;
+}
+
+/** 画在右下角，返回占掉的宽度（料表要给它让出来）。 */
+function paintStamp(ctx, stamp, qr, withHint) {
+  const w = stampWidth(ctx, stamp, qr, withHint);
+  const cx = mm(PAGE_W - M) - w / 2;
+  const bottom = mm(PAGE_H - 2.5);
+  const size = mm(qr);
+  const qrY = bottom - mm(2.3) - mm(0.8) - size;
+  ctx.save();
+  ctx.textAlign = "center";
+  ctx.textBaseline = "bottom";
+  ctx.fillStyle = ACCENT;
+  ctx.font = font(600, mm(2.3));
+  ctx.fillText(stamp.host, cx, bottom);
+  drawQr(ctx, stamp.url, cx - size / 2, qrY, size);
+  if (withHint) {
+    ctx.fillStyle = MUTED;
+    ctx.font = font(400, mm(2.2));
+    ctx.fillText(stamp.hint, cx, qrY - mm(0.8));
+  }
+  ctx.restore();
+  return w + mm(STAMP_GAP);
+}
+
+function paintCover(ctx, { front, back, copy, items, icons, fill, frontMarks, backMarks, stamp }) {
   const box = coverBox();
   ctx.fillStyle = INK;
   ctx.font = font(600, mm(5.4));
@@ -662,13 +701,14 @@ function paintCover(ctx, { front, back, copy, items, icons, fill, frontMarks, ba
   paintPair(ctx, front, back, box, copy, fill, frontMarks, backMarks);
 
   const bomY = box.imgY + box.imgH + 1.5;
+  const stampW = stamp ? paintStamp(ctx, stamp, STAMP_QR_COVER, true) : 0;
   ctx.fillStyle = ACCENT;
   ctx.font = font(600, mm(3.2));
   ctx.fillText(copy.bomTitle, mm(M), mm(bomY));
-  paintLegend(ctx, items, icons, mm(M), mm(bomY + 4.2), mm(PAGE_W - M * 2), mm(PAGE_H - 3));
+  paintLegend(ctx, items, icons, mm(M), mm(bomY + 4.2), mm(PAGE_W - M * 2) - stampW, mm(PAGE_H - 3));
 }
 
-function paintStep(ctx, { front, back, copy, heading, items, icons, k, n, fill, frontMarks, backMarks }) {
+function paintStep(ctx, { front, back, copy, heading, items, icons, k, n, fill, frontMarks, backMarks, stamp }) {
   const box = stepBox();
   ctx.fillStyle = INK;
   ctx.font = font(600, mm(4.4));
@@ -682,6 +722,7 @@ function paintStep(ctx, { front, back, copy, heading, items, icons, k, n, fill, 
   paintPair(ctx, front, back, box, copy, fill, frontMarks, backMarks);
 
   const partsY = box.imgY + box.imgH + 1.2;
+  const stampW = stamp ? paintStamp(ctx, stamp, STAMP_QR_STEP, false) : 0;
   ctx.fillStyle = ACCENT;
   ctx.font = font(600, mm(3));
   ctx.fillText(copy.thisStep, mm(M), mm(partsY));
@@ -690,7 +731,7 @@ function paintStep(ctx, { front, back, copy, heading, items, icons, k, n, fill, 
     ctx.font = font(400, mm(2.8));
     ctx.fillText(copy.none, mm(M), mm(partsY + 4.4));
   } else {
-    paintLegend(ctx, items, icons, mm(M), mm(partsY + 4), mm(PAGE_W - M * 2), mm(PAGE_H - 2.5));
+    paintLegend(ctx, items, icons, mm(M), mm(partsY + 4), mm(PAGE_W - M * 2) - stampW, mm(PAGE_H - 2.5));
   }
 }
 
@@ -740,9 +781,12 @@ function stepFilter(step) {
  *   copy: Record<string, string>,
  *   filename: string,
  *   onProgress?: (p: { page: number, total: number }) => void,
+ *   stamp?: { url: string, host: string, hint: string } | null,
  * }} opts
+ *
+ * stamp 是方案页的网址和二维码（src/sharePage.ts），给了就印在每一页右下角。
  */
-export async function exportAssemblyPdf({ scene, builder, model, name, bom, copy, filename, onProgress }) {
+export async function exportAssemblyPdf({ scene, builder, model, name, bom, copy, filename, onProgress, stamp }) {
   builder.enterAssembly();
   const steps = builder.buildPlan?.steps || [];
   if (!steps.length) {
@@ -805,7 +849,7 @@ export async function exportAssemblyPdf({ scene, builder, model, name, bom, copy
       paintCover(ctx, {
         front: coverFront.img, back: coverBack.img, copy: coverCopy,
         items: itemsCover, icons: coverIcons, fill,
-        frontMarks: coverFront.marks, backMarks: coverBack.marks,
+        frontMarks: coverFront.marks, backMarks: coverBack.marks, stamp,
       });
       await pageToPdf(doc, c, true);
     }
@@ -837,7 +881,7 @@ export async function exportAssemblyPdf({ scene, builder, model, name, bom, copy
       paintStep(ctx, {
         front: front.img, back: back.img, copy, heading, items, icons,
         k: i + 1, n: steps.length, fill,
-        frontMarks: front.marks, backMarks: back.marks,
+        frontMarks: front.marks, backMarks: back.marks, stamp,
       });
       await pageToPdf(doc, c, false);
     }

@@ -16,6 +16,7 @@ import { PanelLayoutProvider } from './ui/panelLayout'
 import { UI_ESCAPE_EVENT } from './ui/events'
 import { DockProvider, useDock } from './ui/dock'
 import { usePresence } from './ui/motion'
+import { fullBuilderUrl, VIEW_ONLY } from './entry'
 
 function Toast() {
   const { toast: live, dismissToast } = useEngine()
@@ -130,6 +131,86 @@ function NameDialog() {
           <button type="submit" className="qb-btn qb-btn-sm">{shown.ok}</button>
         </div>
       </form>
+    </div>
+  )
+}
+
+/** 导出文件要先注册：没登录时问要不要去注册；注册完回来问要不要接着导出。 */
+function AccountDialog() {
+  const { accountAsk, answerAccount } = useEngine()
+  const { t } = useI18n()
+  const [shown, leaving] = usePresence(accountAsk)
+
+  useEffect(() => {
+    if (!accountAsk) return
+    const onEsc = () => answerAccount(false)
+    window.addEventListener(UI_ESCAPE_EVENT, onEsc)
+    return () => window.removeEventListener(UI_ESCAPE_EVENT, onEsc)
+  }, [accountAsk, answerAccount])
+
+  if (!shown) return null
+  const resume = shown.phase === 'resume'
+  return (
+    <div
+      className={`m-backdrop fixed inset-0 z-[75] flex items-center justify-center bg-black/45 p-4 ${leaving ? 'm-leave pointer-events-none' : ''}`}
+      onClick={() => answerAccount(false)}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="account-dialog-title"
+        className="m-modal qb-card w-full max-w-sm text-gray-100 p-5"
+        onClick={e => e.stopPropagation()}
+      >
+        <div id="account-dialog-title" className="text-base font-semibold">{t(resume ? 'account.resumeTitle' : 'account.title')}</div>
+        <p className="text-sm text-gray-300 leading-relaxed mt-2 mb-5">
+          {resume ? t('account.resumeBody', { what: t(`account.what.${shown.kind}`) }) : t('account.body')}
+        </p>
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={() => answerAccount(false)} className="qb-btn qb-btn-ghost qb-btn-sm">{t('confirm.cancel')}</button>
+          <button type="button" autoFocus onClick={() => answerAccount(true)} className="qb-btn qb-btn-sm">{t(resume ? 'account.resumeGo' : 'account.go')}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** 只看模式底下那一条：看成品和一步一步看手册来回切。 */
+function ViewBar() {
+  const api = useEngine()
+  const { t } = useI18n()
+  const totals = api.bom?.totals
+  const hasParts = !!totals && (totals.tubes + totals.connectors + totals.panels + totals.other) > 0
+  if (!hasParts) return null
+  const n = api.assembly.max + 1
+  const step = 'h-8 px-3 rounded-full text-[13px] text-gray-100 hover:bg-teal-100 disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer disabled:cursor-default whitespace-nowrap'
+  if (!api.assembly.active) {
+    return (
+      <div data-tour="assembly" className="m-asm qb-card fixed bottom-3 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 p-1.5 max-w-[calc(100vw-1rem)]">
+        <button onClick={() => api.setAssembly(true)} className="qb-btn qb-btn-sm">{t('view.manual', { n })}</button>
+      </div>
+    )
+  }
+  return (
+    <div data-tour="assembly" className="m-asm qb-card fixed bottom-3 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1 p-1.5 max-w-[calc(100vw-1rem)] overflow-x-auto scrollbar-none">
+      {/* 嵌在手机上的方案页里只有三百来像素宽：上一步、下一步只留箭头，字在宽屏上才露出来 */}
+      <button disabled={api.assembly.step <= 0} onClick={() => api.stepAssembly(-1)} className={step} aria-label={t('assembly.prev')}>‹<span className="hidden sm:inline"> {t('assembly.prev')}</span></button>
+      <div className="px-1 text-[13.5px] font-bold qb-num whitespace-nowrap">{t('assembly.step', { k: api.assembly.step + 1, n })}</div>
+      <button disabled={api.assembly.step >= api.assembly.max} onClick={() => api.stepAssembly(1)} className={step} aria-label={t('assembly.next')}><span className="hidden sm:inline">{t('assembly.next')} </span>›</button>
+      <button onClick={() => api.setAssembly(false)} className={step}>{t('view.whole')}</button>
+    </div>
+  )
+}
+
+/** 只看模式：嵌在方案页、造型页里，只有 3D 画面和分步手册，左上角是「在 Builder 里打开」。 */
+function ViewShell() {
+  const { t } = useI18n()
+  return (
+    <div className="app-viewport w-screen flex bg-gray-950 overflow-hidden">
+      <CanvasHost />
+      <a href={fullBuilderUrl()} target="_top" className="qb-btn qb-btn-sm fixed top-3 left-3 z-40 no-underline">{t('view.open')} ↗</a>
+      <ViewBar />
+      <Toast />
     </div>
   )
 }
@@ -269,6 +350,7 @@ function AppInner() {
       <AssemblyBar />
       <Toast />
       <ManualConfirm />
+      <AccountDialog />
       <NameDialog />
       <ManualProgress />
       <Onboarding />
@@ -292,7 +374,7 @@ function EngineShell() {
     <EngineProvider>
       <PanelLayoutProvider>
         <DockProvider>
-          <AppInner />
+          {VIEW_ONLY ? <ViewShell /> : <AppInner />}
         </DockProvider>
       </PanelLayoutProvider>
     </EngineProvider>

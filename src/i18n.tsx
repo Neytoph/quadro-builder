@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { setLang as syncEngineLang } from './engine/i18n.js'
 import { detectOsFamily, type OsFamily } from './platform'
+import { bootEntry } from './entry'
 
 export type Lang = 'zh' | 'en' | 'de'
 
@@ -389,6 +390,27 @@ const zh: Dict = {
   'toast.shareFailed': '无法复制链接，请检查剪贴板权限。',
   'toast.shareTooBig': '设计太大，链接受不了。请改用导出 JSON。',
   'toast.shareInvalid': '分享链接无效',
+  'toast.srcFailed': '这一座打不开：链接失效了，或者作者已经删掉。',
+  'toast.stampFailed': '方案页没生成，这次没导出。检查网络后再点一次。',
+  'toast.copiedToAccount': '「{name}」已存进你的账号，可以接着改了。',
+  'toast.copiedLocal': '「{name}」存在这台设备上了。登录以后会存进你的账号。',
+  'stamp.hint': '扫码看 3D 成品和分步手册',
+  'stamp.page': '方案页',
+  'account.title': '导出文件要先注册',
+  'account.body': '注册是免费的。注册完会回到这里，这一座还在，接着导出就行。',
+  'account.go': '去注册',
+  'account.resumeTitle': '已经登录，接着导出吗？',
+  'account.resumeBody': '要导出的是：{what}',
+  'account.resumeGo': '导出',
+  'account.what.manual': '安装手册（PDF）',
+  'account.what.bom': '料表（表格）',
+  'account.what.bompng': '料表（图片）',
+  'account.what.shareimg': '分享图',
+  'account.what.qdf': 'QDF 文件',
+  'account.what.json': 'JSON 文件',
+  'view.manual': '分步手册 · {n} 步',
+  'view.whole': '看成品',
+  'view.open': '在 Builder 里打开',
   'kit.buy': '该买哪套',
   'kit.stock': '对照库存',
   'kit.empty': '还没搭东西——先接几根管、贴块板，再来看。',
@@ -804,6 +826,27 @@ const en: Dict = {
   'toast.shareFailed': 'Could not copy the link. Check clipboard permission.',
   'toast.shareTooBig': 'This design is too large for a link. Export JSON instead.',
   'toast.shareInvalid': 'That share link is invalid',
+  'toast.srcFailed': 'This design can’t be opened: the link has expired or the author deleted it.',
+  'toast.stampFailed': 'The plan page couldn’t be created, so nothing was exported. Check your connection and try again.',
+  'toast.copiedToAccount': '“{name}” is saved to your account. Go ahead and change it.',
+  'toast.copiedLocal': '“{name}” is saved on this device. It moves to your account once you log in.',
+  'stamp.hint': 'Scan for the 3D model and step-by-step manual',
+  'stamp.page': 'Plan page',
+  'account.title': 'Sign up to export files',
+  'account.body': 'Signing up is free. You’ll come back here afterwards with this design still open, ready to export.',
+  'account.go': 'Sign up',
+  'account.resumeTitle': 'You’re logged in. Export now?',
+  'account.resumeBody': 'You were exporting: {what}',
+  'account.resumeGo': 'Export',
+  'account.what.manual': 'Assembly manual (PDF)',
+  'account.what.bom': 'Parts list (spreadsheet)',
+  'account.what.bompng': 'Parts list (image)',
+  'account.what.shareimg': 'Share image',
+  'account.what.qdf': 'QDF file',
+  'account.what.json': 'JSON file',
+  'view.manual': 'Step-by-step · {n} steps',
+  'view.whole': 'Whole model',
+  'view.open': 'Open in Builder',
   'kit.buy': 'Which kit',
   'kit.stock': 'Against stock',
   'kit.empty': 'Nothing built yet — add a few tubes or a panel, then come back.',
@@ -1219,6 +1262,27 @@ const de: Dict = {
   'toast.shareFailed': 'Link ließ sich nicht kopieren. Zwischenablage prüfen.',
   'toast.shareTooBig': 'Der Entwurf ist zu groß für einen Link. Stattdessen JSON exportieren.',
   'toast.shareInvalid': 'Dieser Teillink ist ungültig',
+  'toast.srcFailed': 'Dieses Modell lässt sich nicht öffnen: Der Link ist abgelaufen oder wurde vom Autor gelöscht.',
+  'toast.stampFailed': 'Die Planseite konnte nicht angelegt werden, deshalb wurde nichts exportiert. Prüf die Verbindung und versuch es noch einmal.',
+  'toast.copiedToAccount': '„{name}“ ist in deinem Konto gespeichert. Du kannst gleich weiterbauen.',
+  'toast.copiedLocal': '„{name}“ ist auf diesem Gerät gespeichert. Nach dem Anmelden landet es in deinem Konto.',
+  'stamp.hint': 'Scannen: 3D-Modell und Schritt-für-Schritt-Anleitung',
+  'stamp.page': 'Planseite',
+  'account.title': 'Zum Exportieren registrieren',
+  'account.body': 'Die Registrierung ist kostenlos. Danach kommst du hierher zurück, das Modell ist noch offen und du kannst exportieren.',
+  'account.go': 'Registrieren',
+  'account.resumeTitle': 'Du bist angemeldet. Jetzt exportieren?',
+  'account.resumeBody': 'Du wolltest exportieren: {what}',
+  'account.resumeGo': 'Exportieren',
+  'account.what.manual': 'Aufbauanleitung (PDF)',
+  'account.what.bom': 'Teileliste (Tabelle)',
+  'account.what.bompng': 'Teileliste (Bild)',
+  'account.what.shareimg': 'Bild zum Teilen',
+  'account.what.qdf': 'QDF-Datei',
+  'account.what.json': 'JSON-Datei',
+  'view.manual': 'Schritt für Schritt · {n} Schritte',
+  'view.whole': 'Ganzes Modell',
+  'view.open': 'Im Builder öffnen',
   'kit.buy': 'Welcher Baukasten',
   'kit.stock': 'Gegen Bestand',
   'kit.empty': 'Noch nichts gebaut — erst ein paar Rohre oder eine Platte, dann hierher.',
@@ -1268,6 +1332,9 @@ const de: Dict = {
 const dicts: Record<Lang, Dict> = { zh, en, de }
 
 function detect(): Lang {
+  // 嵌在别的页面里（只看模式）或从别的页面跳过来，跟着那一页的语言
+  const fromUrl = bootEntry().lang
+  if (fromUrl) return fromUrl
   const stored = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(ENGINE_KEY)
   if (isLang(stored)) return stored
   const nav = (navigator.language || '').toLowerCase()
