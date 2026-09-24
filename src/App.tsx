@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { LanguageProvider, useI18n } from './i18n'
 import { EngineProvider, useEngine } from './store/EngineContext'
 import CanvasHost from './ui/CanvasHost'
@@ -87,6 +87,77 @@ function ManualConfirm() {
   )
 }
 
+function NameDialog() {
+  const { nameAsk, answerName } = useEngine()
+  const { t } = useI18n()
+  const [shown, leaving] = usePresence(nameAsk)
+  const [value, setValue] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
+  const selectPending = useRef(false)
+
+  useEffect(() => {
+    if (!nameAsk) return
+    if (inputRef.current?.value === nameAsk.value) {
+      inputRef.current.select()
+      return
+    }
+    setValue(nameAsk.value)
+    selectPending.current = true
+  }, [nameAsk])
+
+  // 预填的名字进了输入框以后整段选中，直接打字就替换掉
+  useEffect(() => {
+    if (!selectPending.current || !inputRef.current) return
+    selectPending.current = false
+    inputRef.current.select()
+  }, [value])
+
+  if (!shown) return null
+  return (
+    <div
+      className={`m-backdrop fixed inset-0 z-[75] flex items-center justify-center bg-black/45 p-4 ${leaving ? 'm-leave pointer-events-none' : ''}`}
+      onClick={() => answerName(null)}
+    >
+      <form
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="name-dialog-title"
+        className="m-modal w-full max-w-sm bg-gray-900 text-gray-100 rounded-2xl border border-gray-700 shadow-2xl p-5"
+        onClick={e => e.stopPropagation()}
+        onSubmit={e => { e.preventDefault(); answerName(value) }}
+      >
+        <div id="name-dialog-title" className="text-base font-semibold">{shown.title}</div>
+        <label className="block mt-3 mb-5">
+          <span className="text-xs text-gray-400">{t('saves.namePrompt')}</span>
+          <input
+            ref={inputRef}
+            autoFocus
+            value={value}
+            onChange={e => setValue(e.target.value)}
+            placeholder={t('tab.untitled')}
+            className="mt-1 w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm outline-none focus:border-teal-500"
+          />
+        </label>
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => answerName(null)}
+            className="px-3 py-2 rounded-lg text-sm text-gray-300 hover:bg-gray-800 cursor-pointer"
+          >
+            {t('confirm.cancel')}
+          </button>
+          <button
+            type="submit"
+            className="px-4 py-2 rounded-lg text-sm font-semibold bg-teal-500 hover:bg-teal-400 text-white cursor-pointer"
+          >
+            {shown.ok}
+          </button>
+        </div>
+      </form>
+    </div>
+  )
+}
+
 function ManualProgress() {
   const { exportingManual } = useEngine()
   const { t } = useI18n()
@@ -108,6 +179,10 @@ function AppInner() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault()
+        if (api.nameAsk) {
+          api.answerName(null)
+          return
+        }
         if (api.exportManualConfirm) {
           api.cancelExportManual()
           return
@@ -124,6 +199,8 @@ function AppInner() {
         handleEsc()
         return
       }
+      // 起名框开着时，画布上的快捷键一律不响应
+      if (api.nameAsk) return
       const el = e.target as HTMLElement | null
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return
       if (el?.closest?.('[data-panel-chrome]')) return
@@ -132,7 +209,7 @@ function AppInner() {
       if (meta && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); api.redo(); return }
       if (meta && (e.key === 'c' || e.key === 'C')) { e.preventDefault(); api.copy(); return }
       if (meta && (e.key === 'v' || e.key === 'V')) { e.preventDefault(); api.paste(); return }
-      if (meta && (e.key === 's' || e.key === 'S')) { e.preventDefault(); void api.saveCurrent(); return }
+      if (meta && (e.key === 's' || e.key === 'S')) { e.preventDefault(); void (e.shiftKey ? api.saveCurrentAs() : api.saveCurrent()); return }
       if (meta && (e.key === 'a' || e.key === 'A')) { e.preventDefault(); api.selectAll(); return }
       if (meta && (e.key === 'g' || e.key === 'G')) { e.preventDefault(); e.shiftKey ? api.ungroup() : api.group(); return }
       if (meta) return
@@ -216,6 +293,7 @@ function AppInner() {
       <AssemblyBar />
       <Toast />
       <ManualConfirm />
+      <NameDialog />
       <ManualProgress />
       <Onboarding />
       <ThumbCapture />

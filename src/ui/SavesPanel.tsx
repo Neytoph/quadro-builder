@@ -72,12 +72,15 @@ export default function SavesPanel() {
               {cloud && d.local && <span className="ml-1.5 text-amber-700">· {t('saves.localOnly')}</span>}
             </div>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-x-2 gap-y-1">
             <button onClick={() => { void api.openDoc(d.id); setPane('bom') }} className="text-xs text-teal-300 hover:text-teal-100 cursor-pointer">{t('saves.open')}</button>
             <button onClick={() => {
-              const name = window.prompt(t('saves.namePrompt'), d.name)
-              if (name) void api.renameDoc(d.id, name).then(() => api.listDocs().then(setDocs))
+              void api.askName(t('saves.rename'), t('saves.rename'), d.name).then(name => {
+                if (name) void api.renameDoc(d.id, name).then(() => api.listDocs().then(setDocs))
+              })
             }} className="text-xs text-gray-400 hover:text-teal-600 cursor-pointer">{t('saves.rename')}</button>
+            <button onClick={() => { void api.duplicateDoc(d.id).then(() => api.listDocs().then(setDocs)) }}
+              className="text-xs text-gray-400 hover:text-teal-600 cursor-pointer">{t('saves.duplicate')}</button>
             {/* 刚搭完是最想说两句的时候。从这儿走，那座会跟着进正文，不用再挑一遍。 */}
             {write && (
               <button onClick={() => { void share(d.id) }} disabled={!!sending}

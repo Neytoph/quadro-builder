@@ -16,6 +16,7 @@ export default function FilePanel() {
         {/* 手机上这块面板盖满画布，新开的标签页被挡在后面，点完得有一句话 */}
         <button onClick={() => { api.newTab(); api.notify(t('toast.newTab')) }} className={btn}>{t('btn.new')}</button>
         <button onClick={() => void api.saveCurrent()} className={btn}>{t('btn.save')}</button>
+        <button onClick={() => void api.saveCurrentAs()} className={btn}>{t('btn.saveAs')}</button>
         <button onClick={() => fileRef.current?.click()} className={btn}>{t('btn.import')}</button>
         <button onClick={api.exportQdf} className={btn}>{t('btn.exportQdf')}</button>
         <button onClick={api.exportJson} className={btn}>{t('btn.exportJson')}</button>
