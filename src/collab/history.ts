@@ -68,6 +68,9 @@ export class ModelHistory {
     this.onTx = (tr) => {
       if (tr.origin === this.origin) return
       if (!tr.changed.size) return
+      // 只改了方案的名字：造型没变，不用重新读
+      const meta = metaMap(doc)
+      if ([...tr.changed].every(([type, keys]) => type instanceof Y.Map && type === meta && [...keys].every(k => k === 'name' || k === 'plan'))) return
       this.external()
     }
     doc.on('afterTransaction', this.onTx)

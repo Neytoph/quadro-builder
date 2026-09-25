@@ -5,7 +5,7 @@ import * as Y from 'yjs'
 import { loadCatalog, buildableTubes, panels, geometry } from '../engine/catalog.js'
 import { BuildModel } from '../engine/model.js'
 import { parseQDF } from '../engine/qdfimport.js'
-import { docFromJSON, docToJSON, docIsEmpty, partsMap, type ModelJSON } from './ymodel'
+import { docFromJSON, docToJSON, docIsEmpty, metaMap, partsMap, planName, setPlanName, type ModelJSON } from './ymodel'
 import { ModelHistory } from './history'
 
 let pyramid: ModelJSON
@@ -253,5 +253,68 @@ describe('撤销只撤自己的', () => {
     while (A.history.canUndo()) { A.history.undo(); n++ }
     expect(n).toBe(60)
     expect(A.model.tubes.size).toBe(10)
+  })
+})
+
+describe('方案的名字', () => {
+  it('改名写进 meta，没改过名是 null', () => {
+    const doc = docFromJSON(pyramid)
+    expect(planName(doc, 'p1')).toBeNull()
+    setPlanName(doc, 'p1', '第 2 版：加滑梯')
+    expect(metaMap(doc).get('name')).toBe('第 2 版：加滑梯')
+    expect(metaMap(doc).get('plan')).toBe('p1')
+    expect(planName(doc, 'p1')).toBe('第 2 版：加滑梯')
+    expect(docIsEmpty(doc)).toBe(false)
+  })
+
+  it('两个 Y.Doc 之间名字跟着同步，后改的留下', () => {
+    const a = docFromJSON(pyramid)
+    const b = new Y.Doc()
+    Y.applyUpdate(b, Y.encodeStateAsUpdate(a))
+    link(a, b)
+    setPlanName(a, 'p1', '客厅攀爬架')
+    expect(planName(b, 'p1')).toBe('客厅攀爬架')
+    setPlanName(b, 'p1', '客厅攀爬架 · 改')
+    expect(planName(a, 'p1')).toBe('客厅攀爬架 · 改')
+    expect(docToJSON(a)).toEqual(docToJSON(b))
+  })
+
+  it('断开时改名，重连后另一边拿到', () => {
+    const a = docFromJSON(pyramid)
+    const b = new Y.Doc()
+    Y.applyUpdate(b, Y.encodeStateAsUpdate(a))
+    setPlanName(a, 'p1', '阳台那座')
+    expect(planName(b, 'p1')).toBeNull()
+    exchange(a, b)
+    expect(planName(b, 'p1')).toBe('阳台那座')
+  })
+
+  it('复制出来的方案带着原方案的记录：原方案的名字不算', () => {
+    const a = docFromJSON(pyramid)
+    setPlanName(a, 'p1', '原来的名字')
+    const fork = new Y.Doc()
+    Y.applyUpdate(fork, Y.encodeStateAsUpdate(a))
+    expect(planName(fork, 'p2')).toBeNull()
+    setPlanName(fork, 'p2', '我的副本')
+    expect(planName(fork, 'p2')).toBe('我的副本')
+  })
+
+  it('改名不进撤销记录，也不让编辑端重新读造型', () => {
+    const a = docFromJSON(pyramid)
+    const b = new Y.Doc()
+    Y.applyUpdate(b, Y.encodeStateAsUpdate(a))
+    link(a, b)
+    const A = editor(a, 'a_')
+    let reloads = 0
+    const B = new ModelHistory(b)
+    B.onExternal(() => { reloads++ })
+    setPlanName(a, 'p1', '新名字')
+    expect(A.history.canUndo()).toBe(false)
+    expect(reloads).toBe(0)
+    A.edit(m => { addTube(m, 900, 0) })
+    expect(reloads).toBe(1)
+    A.history.undo()
+    expect(planName(a, 'p1')).toBe('新名字')
+    expect(planName(b, 'p1')).toBe('新名字')
   })
 })

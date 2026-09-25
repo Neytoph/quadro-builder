@@ -12,7 +12,7 @@ import { WebsocketProvider } from 'y-websocket'
 import { BuildModel, buildQDF, partsOfData } from '../engine-api'
 import { collabApi, wsServerUrl, type ExportBody, type Parts, type Plan } from './api'
 import { SEED_ORIGIN, type LocalDoc } from './localDocs'
-import { docIsEmpty, docToJSON, flatten, metaMap, sameJson, writeJSON, type EditSummary, type ModelJSON } from './ymodel'
+import { docIsEmpty, docToJSON, flatten, metaMap, NAME_ORIGIN, planName, sameJson, setPlanName, writeJSON, type EditSummary, type ModelJSON } from './ymodel'
 
 /** 编辑停下来多久以后把导出结果交给服务端。 */
 export const EXPORT_IDLE_MS = 30_000
@@ -133,11 +133,18 @@ export class PlanSession {
       const first = !this.synced
       this.synced = true
       this.seedIfEmpty()
-      // 上一次停手不到 30 秒就关了页面，服务端那份 data 没跟上：连上以后补交一次
-      if (first && this.canEdit && !sameModel(this.plan.data, this.toJSON())) this.scheduleExport()
+      // 上一次停手不到 30 秒就关了页面、改名以后没交上去，服务端那份没跟上：连上以后补交一次
+      if (first && this.canEdit && (this.name !== this.plan.name || !sameModel(this.plan.data, this.toJSON()))) this.scheduleExport()
       this.emit()
     })
     this.provider.awareness.on('change', () => { this.collectActivity(); this.emit() })
+    // 名字变了：自己改的立即交一次导出，服务端的方案名、需求单、交付页跟着变；别人改的刷新标签页
+    this.onMeta = (ev, tr) => {
+      if (!ev.keysChanged.has('name') && !ev.keysChanged.has('plan')) return
+      if (tr.origin === NAME_ORIGIN && tr.local) void this.exportNow()
+      this.emit()
+    }
+    metaMap(local.doc).observe(this.onMeta)
     // 自己改了一次（编辑、撤销、重做）：30 秒后交导出，在线状态里告诉别人改了什么
     local.history.onEdit((s) => {
       this.scheduleExport()
@@ -156,6 +163,7 @@ export class PlanSession {
 
   private readonly onOffline: () => void
   private readonly onOnline: () => void
+  private readonly onMeta: (ev: Y.YMapEvent<unknown>, tr: Y.Transaction) => void
 
   private collectActivity() {
     const aw = this.provider.awareness
@@ -206,8 +214,17 @@ export class PlanSession {
     return this.canEdit && !!me && this.plan.members.some(m => m.userId === me.userId && m.canDeliver)
   }
 
+  /** 方案的名字：文档里改过名就用文档里的，没改过用服务端的。 */
   get name(): string {
-    return String(metaMap(this.local.doc).get('name') || this.plan.name)
+    return planName(this.local.doc, this.id) ?? this.plan.name
+  }
+
+  /** 改名（创建人、编辑者）。名字写进文档，立即交一次导出。空名字不改。 */
+  rename(name: string) {
+    if (!this.canEdit) throw new Error(`plan ${this.id}: ${this.plan.myRole} cannot rename`)
+    const next = name.trim()
+    if (!next || next === this.name) return
+    setPlanName(this.local.doc, this.id, next)
   }
 
   /** 文档里还没有造型（没连上过、本机也没有）：界面显示「连接中」。 */
@@ -275,6 +292,7 @@ export class PlanSession {
   private async exportWithCover(body: ExportBody) {
     const cover = await this.cover()
     await collabApi.exportPlan(this.id, cover ? { ...body, cover } : body)
+    this.plan = { ...this.plan, name: body.name }
   }
 
   private scheduleExport() {
@@ -304,6 +322,7 @@ export class PlanSession {
   destroy() {
     window.removeEventListener('offline', this.onOffline)
     window.removeEventListener('online', this.onOnline)
+    metaMap(this.local.doc).unobserve(this.onMeta)
     if (this.exportTimer) window.clearTimeout(this.exportTimer)
     for (const id of this.activityTimers.values()) window.clearTimeout(id)
     this.local.history.onEdit(() => {})

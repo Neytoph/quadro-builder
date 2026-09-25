@@ -70,23 +70,31 @@ export default function ProjectTabs() {
       </a>
       {!narrow && (
       <div className="flex items-center gap-1 min-w-0 flex-1 overflow-x-auto scrollbar-thin">
-      {api.tabs.map(tab => (
-        <div key={tab.tabId}
+      {api.tabs.map(tab => {
+        // 共享方案：创建人、编辑者改的是方案的名字，评论者和访客不能改
+        const renamable = !tab.planId || collab.renamable(tab.planId)
+        return (
+        <div key={tab.tabId} data-plan-tab={tab.planId || undefined}
           className={`m-tab flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs shrink-0 ${tab.tabId === api.activeTabId ? 'bg-gray-800 border-teal-500 text-teal-700' : 'bg-transparent border-transparent text-gray-400 hover:text-gray-200 hover:bg-gray-900'}`}>
           {editing === tab.tabId ? (
             <input autoFocus defaultValue={tab.name} className="bg-transparent w-24 outline-none"
-              onBlur={e => { api.renameTab(tab.tabId, e.target.value); setEditing(null) }}
+              onBlur={e => {
+                if (tab.planId) collab.renamePlan(tab.planId, e.target.value)
+                else api.renameTab(tab.tabId, e.target.value)
+                setEditing(null)
+              }}
               onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} />
           ) : (
-            <button onClick={() => api.activateTab(tab.tabId)} onDoubleClick={() => setEditing(tab.tabId)}
-              title={t('hint.renameTab')} className="cursor-pointer max-w-[10rem] truncate">
+            <button onClick={() => api.activateTab(tab.tabId)} onDoubleClick={() => { if (renamable) setEditing(tab.tabId) }}
+              title={renamable ? t('hint.renameTab') : undefined} className="cursor-pointer max-w-[10rem] truncate">
               {tab.name}{tab.dirty ? ' •' : ''}
             </button>
           )}
           <button onClick={() => close(tab.tabId, tab.dirty)} className="text-gray-500 hover:text-teal-600 cursor-pointer"
             title={t('saves.delete')}>×</button>
         </div>
-      ))}
+        )
+      })}
       <button onClick={api.newTab} className="w-6 h-6 shrink-0 rounded-md border border-gray-800 bg-gray-900/80 text-gray-300 hover:border-teal-400 cursor-pointer">+</button>
       </div>
       )}

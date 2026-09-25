@@ -84,6 +84,10 @@ interface CollabApi {
   focusThread: (t: Thread) => void
   activeThread: number | null
   setActiveThread: (id: number | null) => void
+  /** 这个方案的标签页能不能改名：创建人、编辑者能改，评论者和访客不能 */
+  renamable: (planId: string) => boolean
+  /** 方案改名：名字写进文档同步给成员，立即交一次导出 */
+  renamePlan: (planId: string, name: string) => void
   saveVersion: (name: string) => Promise<{ id: number }>
   inviteUrl: () => Promise<string>
   viewUrl: () => string
@@ -145,7 +149,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
   const nudgeSeen = useRef(new Map<number, number>())
 
   // 引擎那边这几样是稳定的，下面的回调和副作用只依赖它们，不依赖每次渲染都换新的 api
-  const { notify, tabLocal, setTabAccess, openPlanTab, saveCurrent, convertToPlan, engine, tick } = api
+  const { notify, tabLocal, setTabAccess, setTabName, openPlanTab, saveCurrent, convertToPlan, engine, tick } = api
   const report = useCallback((err: unknown) => { notify(errText(err), 'err') }, [notify])
 
   const activeTab = api.tabs.find(x => x.tabId === api.activeTabId) || null
@@ -203,6 +207,28 @@ export function CollabProvider({ children }: { children: ReactNode }) {
     // 只跟角色走
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, canEdit, activeTab?.tabId, setTabAccess])
+
+  // 标签页的名字跟着方案的名字：自己改的、别人改的、服务端取来的
+  useEffect(() => {
+    for (const tab of api.tabs) {
+      const s = tab.planId ? sessions.current.get(tab.planId) : null
+      if (s && s.name !== tab.name) setTabName(tab.tabId, s.name)
+    }
+    setMyPlans(list => {
+      const next = list.map(p => {
+        const name = sessions.current.get(p.id)?.name
+        return name && name !== p.name ? { ...p, name } : p
+      })
+      return next.some((p, i) => p !== list[i]) ? next : list
+    })
+  }, [rev, api.tabs, setTabName])
+
+  const renamable = useCallback((planId: string) => !!sessions.current.get(planId)?.canEdit, [])
+  const renamePlan = useCallback((planId: string, name: string) => {
+    const s = sessions.current.get(planId)
+    if (!s) throw new Error(`renamePlan: plan ${planId} is not open`)
+    s.rename(name)
+  }, [])
 
   // 地址栏跟着当前标签页：共享方案显示它的地址，刷新以后还是这个方案
   useEffect(() => {
@@ -571,6 +597,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
     threads, versions, isUnread, unread, markRead, refreshThreads, refreshVersions,
     placingPin, setPlacingPin, pinDraft, setPinDraft, addPin, reply, resolve, partGone, pinNumber, myPlans, focusThread,
     activeThread, setActiveThread,
+    renamable, renamePlan,
     saveVersion, inviteUrl, viewUrl, setRole, removeMember, fork, metricsOf, deliver,
     compare, openCompare, closeCompare, versionModel,
     delivery, room, saveRoom, enableSharing, planOfDoc, openPlan,

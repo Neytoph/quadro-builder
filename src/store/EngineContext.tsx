@@ -195,6 +195,8 @@ interface EngineApi {
   closeTab: (tabId: string) => void
   activateTab: (tabId: string) => void
   renameTab: (tabId: string, name: string) => void
+  /** 共享方案的标签页换成方案现在的名字 */
+  setTabName: (tabId: string, name: string) => void
   /** 存下当前这一座；取消起名返回 null */
   saveCurrent: (name?: string) => Promise<{ docId: string; name: string; data: ModelJSON } | null>
   saveCurrentAs: () => Promise<void>
@@ -1175,6 +1177,14 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     syncTabs()
   }, [syncTabs, t])
 
+  /** 共享方案的标签页跟着方案的名字走：名字随文档同步，不算没保存。 */
+  const setTabName = useCallback((tabId: string, name: string) => {
+    const tab = tabsRef.current.find(x => x.tabId === tabId)
+    if (!tab || tab.name === name) return
+    tab.name = name
+    syncTabs()
+  }, [syncTabs])
+
   /** 弹出起名框，等用户填完：点确定得到填的字，取消得到 null。 */
   const askName = useCallback((title: string, ok: string, value: string) => {
     nameAskRef.current?.resolve(null)
@@ -2082,7 +2092,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       bump()
     },
     grassOn: !!scene?._sceneOn,
-    highlight, highlightIds, safety, setInv, newTab, closeTab, activateTab, renameTab, saveCurrent, saveCurrentAs, askName, answerName, nameAsk, openDoc,
+    highlight, highlightIds, safety, setInv, newTab, closeTab, activateTab, renameTab, setTabName, saveCurrent, saveCurrentAs, askName, answerName, nameAsk, openDoc,
     listDocs: async () => (await docs.listDocs()).map((d: AnyRec) => ({ id: String(d.id), name: String(d.name), updatedAt: Number(d.updatedAt || 0), local: !Number(d.rev) })),
     removeDoc: async (id) => { await docs.removeDoc(id); bump() },
     renameDoc: async (id, name) => { await docs.renameDoc(id, name); bump() },

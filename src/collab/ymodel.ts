@@ -3,7 +3,8 @@
 // 结构：根下两个 Y.Map。
 //   parts  partId -> Y.Map，字段和 model.toJSON() 里这一件的对象一致，另加 `$type`
 //          说明它属于哪一类（node / tube / panel / clamp / textile / fitting / slide / group）
-//   meta   format（造型格式版本）、name（共享方案的名字）、room（房间边界）
+//   meta   format（造型格式版本）、name 和 plan（共享方案的名字、这个名字属于哪个方案）、
+//          room（房间边界）
 //
 // 每个字段单独一个键：两个人改同一件的不同字段能合并，改同一个字段按 Yjs 的规则留一个。
 // 字段的值是普通 JSON（数组、对象整体替换）。
@@ -41,6 +42,28 @@ export function partsMap(doc: Y.Doc): Y.Map<Y.Map<Json>> {
 
 export function metaMap(doc: Y.Doc): Y.Map<Json> {
   return doc.getMap('meta')
+}
+
+/** 改名的事务 origin：改名不进撤销记录。 */
+export const NAME_ORIGIN = { name: 'rename' }
+
+/**
+ * 文档里这个方案的名字，没改过名是 null。复制出来的方案带着原方案的全部记录，
+ * 名字记着属于哪个方案，别的方案的名字不算。
+ */
+export function planName(doc: Y.Doc, planId: string): string | null {
+  const meta = metaMap(doc)
+  const name = meta.get('name')
+  return meta.get('plan') === planId && typeof name === 'string' && name ? name : null
+}
+
+/** 方案改名，成员之间经文档同步。 */
+export function setPlanName(doc: Y.Doc, planId: string, name: string) {
+  const meta = metaMap(doc)
+  doc.transact(() => {
+    meta.set('plan', planId)
+    meta.set('name', name)
+  }, NAME_ORIGIN)
 }
 
 /** 文档里有没有造型：一件零件都没有、也没写过格式版本的，是还没生成的新文档。 */
