@@ -150,6 +150,9 @@ export function CollabProvider({ children }: { children: ReactNode }) {
 
   const activeTab = api.tabs.find(x => x.tabId === api.activeTabId) || null
   const activePlanId = activeTab?.planId || null
+  // 方案导出时截封面要看的是那一刻：哪个方案开在画面上、截图用哪一份引擎接口
+  const shotRef = useRef({ activePlanId, coverShot: api.coverShot })
+  shotRef.current = { activePlanId, coverShot: api.coverShot }
   const session = activePlanId ? sessions.current.get(activePlanId) || null : null
   // rev 随每个连接的变化走，让下面读 session 的地方跟着刷新
   void rev
@@ -176,6 +179,9 @@ export function CollabProvider({ children }: { children: ReactNode }) {
         const local = tabLocal(tabId)
         if (!local) return
         const s = new PlanSession(plan, local)
+        // 页面在后台时浏览器不出帧，截图等不到，这一次不带封面
+        s.cover = async () => (shotRef.current.activePlanId === planId && document.visibilityState === 'visible'
+          ? shotRef.current.coverShot() : null)
         sessions.current.set(planId, s)
         setReadAt(r => ({ ...r, [planId]: plan.me?.lastReadAt || 0 }))
         s.subscribe(bump)
@@ -223,6 +229,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
           const m = new BuildModel()
           if (!m.loadJSON(d.data).ok) throw new Error(t('collab.badModel'))
           api.attachDoc({ local: memoryDoc(m.toJSON() as ModelJSON), name: String(d.planName || ''), readOnly: true })
+          if (entry.assembly) api.setAssembly(true)
           setDelivery({ token: entry.delivery, supersededBy: d.supersededBy })
           return
         }
@@ -537,6 +544,9 @@ export function CollabProvider({ children }: { children: ReactNode }) {
     if (!saved) return
     const body = exportOf(saved.data, saved.name)
     await collabApi.createPlan({ id: saved.docId, name: saved.name, data: body.data, qdf: body.qdf, parts: body.parts })
+    // 开启共享的这一刻画面上就是这一座：截一张交上去当方案封面
+    const cover = await shotRef.current.coverShot()
+    if (cover) await collabApi.exportPlan(saved.docId, { ...body, cover })
     convertToPlan(tab.tabId, saved.docId, saved.name)
     setMyPlans(list => [...list, { id: saved.docId, name: saved.name, role: 'owner' }])
   }, [activeTab, saveCurrent, convertToPlan])

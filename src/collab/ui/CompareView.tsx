@@ -114,7 +114,8 @@ export default function CompareView() {
 
   return (
     <div className="cb-compare" data-ui="compare-view">
-      <div className="cb-cmpbar qb-card">
+      {/* data-tour=toolbar：站点装进来的小麦头像会让开工具条，对照时这一条就是工具条 */}
+      <div className="cb-cmpbar qb-card" data-tour="toolbar">
         <Select side={0} />
         <span className="cb-legend">→</span>
         <Select side={1} />

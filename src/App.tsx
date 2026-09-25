@@ -16,7 +16,7 @@ import { PanelLayoutProvider } from './ui/panelLayout'
 import { UI_ESCAPE_EVENT } from './ui/events'
 import { DockProvider, useDock } from './ui/dock'
 import { usePresence } from './ui/motion'
-import { bootEntry, fullBuilderUrl, VIEW_ONLY } from './entry'
+import { bootEntry, DELIVERY_EMBED, fullBuilderUrl, VIEW_ONLY } from './entry'
 import { CollabProvider, useCollab } from './collab/CollabContext'
 import './collab/collab.css'
 import { JoinModal } from './collab/ui/Modals'
@@ -213,13 +213,17 @@ function ViewBar() {
 function ViewShell() {
   const { t } = useI18n()
   const collab = useCollab()
-  // 交付查看嵌在交付页里：那一页自己有链接和全屏，这里只放画面和分步手册
+  const { ready, setViewCubeEnabled } = useEngine()
+  // 交付查看没有「在 Builder 里打开」；嵌在交付页里时连分步手册和视角方块也不画
   const delivery = collab.mode === 'delivery'
+  useEffect(() => {
+    if (ready && DELIVERY_EMBED) setViewCubeEnabled(false)
+  }, [ready, setViewCubeEnabled])
   return (
-    <div className="app-viewport w-screen flex bg-gray-950 overflow-hidden">
+    <div className="app-viewport w-screen flex bg-gray-950 overflow-hidden" data-ui={DELIVERY_EMBED ? 'delivery-embed' : undefined}>
       <CanvasHost />
       {!delivery && <a href={fullBuilderUrl()} target="_top" className="qb-btn qb-btn-sm fixed top-3 left-3 z-40 no-underline">{t('view.open')} ↗</a>}
-      <ViewBar />
+      {!DELIVERY_EMBED && <ViewBar />}
       <Toast />
     </div>
   )

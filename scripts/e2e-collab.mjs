@@ -117,6 +117,10 @@ check(`开启共享：标签页原地变成共享方案 ${planId}`, !!planId && 
 check('顶栏多出「评论」「版本」', await owner.getByRole('button', { name: '版本', exact: true }).isVisible())
 await owner.locator('[data-ui=sync-state][data-conn=connected]').waitFor()
 check('左下角「已同步」', await owner.locator('[data-ui=sync-state]').getByText('已同步').isVisible())
+const mine = await (await ownerCtx.request.get('/quadro/collab/plans/mine')).json()
+const cover = mine.plans.find((p) => p.id === planId)?.cover
+const coverRes = cover ? await ownerCtx.request.get(cover) : null
+check('开启共享时交上画面缩略图，「我参与的方案」里有封面', !!coverRes && coverRes.ok() && /^image\//.test(coverRes.headers()['content-type']))
 
 // —— 2. 邀请：共享弹层里拿邀请链接，编辑者打开加入成为评论者，创建人把他改成编辑者 ——
 const invite = await inviteFrom(owner)
@@ -264,29 +268,56 @@ await shot(owner, '9-compare')
 await owner.locator('[data-ui=compare-close]').click()
 
 // —— 8. 锁定交付，?delivery= 不登录也能打开 ——
-await owner.getByRole('button', { name: '版本', exact: true }).click()
-const canDeliver = await owner.locator('[data-ui=version-deliver]').count()
-if (canDeliver) {
-  await owner.locator('[data-ui=version-deliver]').click()
-  await owner.locator('[data-ui=deliver-dialog] dl').waitFor()
-  await owner.locator('[data-ui=deliver-age]').fill('下层 18 个月以上，大人在旁边看着')
-  await owner.locator('[data-ui=deliver-load]').fill('上层按两个孩子设计，合计不超过 40 kg')
-  await shot(owner, '10-deliver')
-  await owner.locator('[data-ui=deliver-submit]').click()
-  await owner.locator('[data-ui=deliver-done]').waitFor()
-  const url = new URL(await owner.locator('[data-ui=deliver-url]').inputValue())
-  const token = url.searchParams.get('t')
-  check('锁定交付，拿到交付页地址 /deliver.html?t=', url.pathname === '/deliver.html' && !!token)
-  await closeModal(owner)
-  const dctx = await person(null)
-  const dpage = await open(dctx, `/builder/?delivery=${token}`)
-  await waitFor(dpage, () => window.__quadroDev.model.tubes.size > 0, null, '交付查看打开')
-  check('?delivery= 不登录也能打开，只读', await dpage.evaluate(() => window.__quadroDev.builder.readOnly))
-  await shot(dpage, '11-delivery')
-  await dctx.close()
-} else {
-  console.log('· 这个方案里没有可交付的编辑者，交付一段跳过')
-}
+// 退出对照以后版本抽屉还开着
+await owner.locator('[data-ui=versions-pane]').waitFor()
+// 自己开启共享的造型，创建人自己能锁定交付
+check('创建人的版本抽屉里有「锁定交付」', await owner.locator('[data-ui=version-deliver]').count() > 0)
+await owner.locator('[data-ui=version-deliver]').click()
+await owner.locator('[data-ui=deliver-dialog] dl').waitFor()
+await owner.locator('[data-ui=deliver-age]').fill('下层 18 个月以上，大人在旁边看着')
+await owner.locator('[data-ui=deliver-load]').fill('上层按两个孩子设计，合计不超过 40 kg')
+await shot(owner, '10-deliver')
+await owner.locator('[data-ui=deliver-submit]').click()
+await owner.locator('[data-ui=deliver-done]').waitFor()
+const url = new URL(await owner.locator('[data-ui=deliver-url]').inputValue())
+const token = url.searchParams.get('t')
+check('锁定交付，拿到交付页地址 /deliver.html?t=', url.pathname === '/deliver.html' && !!token)
+await closeModal(owner)
+const dctx = await person(null)
+const dpage = await open(dctx, `/builder/?delivery=${token}`)
+await waitFor(dpage, () => window.__quadroDev.model.tubes.size > 0, null, '交付查看打开')
+check('?delivery= 不登录也能打开，只读', await dpage.evaluate(() => window.__quadroDev.builder.readOnly))
+check('单独打开时有分步手册按钮和视角方块', await dpage.locator('[data-tour=assembly]').isVisible() && await dpage.evaluate(() => window.__quadroDev.scene._cubeEnabled))
+await shot(dpage, '11-delivery')
+
+// 交付页里嵌的那一份：只剩可拖动的三维画面
+await dpage.goto(`/deliver.html?t=${token}`)
+const frame = dpage.frameLocator('.dl-view iframe')
+await frame.locator('[data-ui=delivery-embed] #canvas-host canvas').waitFor({ timeout: 20000 })
+const inner = dpage.frames().find((f) => f.url().includes('/builder/?delivery='))
+await inner.waitForFunction(() => window.__quadroDev?.model.tubes.size > 0)
+await dpage.waitForTimeout(800)
+check('交付页 iframe 里没有分步手册按钮', await frame.locator('[data-tour=assembly]').count() === 0)
+check('交付页 iframe 里不画视角方块', await inner.evaluate(() => window.__quadroDev.scene._cubeEnabled === false))
+check('交付页 iframe 里没有小麦头像', !(await frame.locator('.qh-chat-root').count()) || !(await frame.locator('.qh-chat-fab').isVisible()))
+check('交付页 iframe 里没有「在 Builder 里打开」', !(await frame.getByText('在 Builder 里打开').count()))
+const canvasBox = await frame.locator('#canvas-host canvas').boundingBox()
+const camBefore = await inner.evaluate(() => window.__quadroDev.scene.camera.position.toArray().join())
+await dpage.mouse.move(canvasBox.x + canvasBox.width / 2, canvasBox.y + canvasBox.height / 2)
+await dpage.mouse.down()
+await dpage.mouse.move(canvasBox.x + canvasBox.width / 2 + 160, canvasBox.y + canvasBox.height / 2 + 20, { steps: 8 })
+await dpage.mouse.up()
+await dpage.waitForTimeout(400)
+check('交付页 iframe 里的三维画面能拖动旋转', await inner.evaluate(() => window.__quadroDev.scene.camera.position.toArray().join()) !== camBefore)
+await dpage.screenshot({ path: `${SHOTS}collab-12-deliver-page.png` })
+
+// 「开始拼」：&assembly=1 单独打开，直接进逐层拼装
+await dpage.goto(`/builder/?delivery=${token}&assembly=1`)
+await waitFor(dpage, () => window.__quadroDev?.builder.mode === 'assembly', null, '进逐层拼装')
+check('&assembly=1 打开就是逐层拼装，底下是上一步、下一步', await dpage.locator('[data-tour=assembly]').getByText('下一步').isVisible())
+await dpage.waitForTimeout(600)
+await shot(dpage, '13-assembly')
+await dctx.close()
 
 // —— 9. 评论者复制一份：新开一个标签页，是他自己的方案 ——
 await viewer.locator('[data-ui=plan-fork]').click()

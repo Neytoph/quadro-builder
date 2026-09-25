@@ -7124,6 +7124,14 @@ export class SceneManager {
     this._needsRender = true;
   }
 
+  /** 视角方块画不画（交付页里嵌的查看不画）。关掉以后也不接点击。 */
+  setViewCubeEnabled(on) {
+    if (this._cubeEnabled === !!on) return;
+    this._cubeEnabled = !!on;
+    this.setViewCubeHover(null);
+    this._needsRender = true;
+  }
+
   setViewCubeInset(px) {
     this.setViewCubePad(this._cubePadRight, px);
   }

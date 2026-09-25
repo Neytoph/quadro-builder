@@ -82,11 +82,14 @@ export function putRemoteDoc(record) {
  * Zwischenzeit weitergearbeitet (`updatedAt` weicht ab), bleibt die Marke
  * stehen -- der nächste Abgleich schickt den neueren Stand hinterher.
  */
-export function markDocSynced(docId, rev, expectUpdatedAt) {
+export function markDocSynced(docId, rev, expectUpdatedAt, sentCover) {
   return dbTx(DB_STORES.docs, "readonly", (store) => store.get(docId)).then((doc) => {
     if (!doc) return null;
     doc.rev = rev;
     if (expectUpdatedAt == null || doc.updatedAt === expectUpdatedAt) doc.dirty = false;
+    // 交上去的封面就是现在记着的这张：交完不再带；推送途中换了新的，留着下次交
+    if (sentCover && doc.cover === sentCover) delete doc.cover;
+    if (doc.cover) doc.dirty = true;
     return dbTx(DB_STORES.docs, "readwrite", (store) => store.put(doc)).then(() => doc);
   });
 }
@@ -113,6 +116,21 @@ export function saveDoc({ docId, name, data }) {
       rev: alt?.rev || 0,
       dirty: true,
     };
+    if (alt?.cover) doc.cover = alt.cover;
+    return dbTx(DB_STORES.docs, "readwrite", (store) => store.put(doc)).then(() => doc);
+  });
+}
+
+/**
+ * 给这份存档记一张封面（图片的 data URL），下一次同步时跟着交上去，交成功就清掉。
+ * 批量导入 .qdf 用它：「我的设计」和发到广场的方案要有这一座的画面。
+ */
+export function setDocCover(docId, cover) {
+  return getDoc(docId).then((doc) => {
+    if (!doc) throw new Error(`setDocCover: ${docId} 不在`);
+    doc.cover = cover;
+    doc.updatedAt = Date.now();
+    doc.dirty = true;
     return dbTx(DB_STORES.docs, "readwrite", (store) => store.put(doc)).then(() => doc);
   });
 }

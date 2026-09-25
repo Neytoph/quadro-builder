@@ -95,6 +95,8 @@ export interface ExportBody {
   data: ModelJSON
   qdf: string
   parts: Parts
+  /** 画面缩略图（图片的 data URL），服务端存成方案封面；截不到时不带，封面不变 */
+  cover?: string
 }
 
 /** 门窗：画在房间轮廓第 edge 条边上（点 edge 到下一个点），from、to 是从起点沿边量的厘米数。 */

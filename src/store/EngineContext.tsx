@@ -221,6 +221,7 @@ interface EngineApi {
   roomOverflow: { w: number; d: number; h: number }
   loadPreset: (key: string) => void
   setViewCubePad: (right: number, bottom: number, size?: number) => void
+  setViewCubeEnabled: (on: boolean) => void
   exportPng: () => Promise<void>
   /** 料表存成表格文件 */
   exportBomCsv: () => Promise<void>
@@ -251,6 +252,8 @@ interface EngineApi {
   endThumbBatch: () => void
   /** 截一张缩略图：官方造型、起步造型，或者一份造型 JSON（批量导入的结果） */
   captureThumb: (job: ThumbJob) => Promise<string | null>
+  /** 当前画面这一座的缩略图（和模型库封面同一条截图通路），共享方案导出时当封面 */
+  coverShot: () => Promise<string | null>
   /** 交付查看：把一份外面取来的文档换进来当唯一的标签页，只能看。 */
   attachDoc: (o: { local: LocalDoc; name: string; readOnly: boolean }) => void
   /** 打开共享方案的标签页（已开着就切过去），返回标签页 id */
@@ -1917,6 +1920,9 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const setViewCubePad = useCallback((right: number, bottom: number, size?: number) => {
     eng.current?.scene?.setViewCubePad?.(right, bottom, size)
   }, [])
+  const setViewCubeEnabled = useCallback((on: boolean) => {
+    eng.current?.scene?.setViewCubeEnabled?.(on)
+  }, [])
 
   const applyColorTune = useCallback((tune: { scene: Record<string, unknown>; frame: Record<string, string>; grade?: Record<string, number> }) => {
     applyFrameHex(tune.frame)
@@ -2066,7 +2072,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     deleteSel: () => { bumpCount('builder.edit.delete'); builder?.deleteSelection(); bump() },
     copy, paste, cancelPaste, selectAll, selectConnected,
     nudgePasteY: (steps) => { builder?.nudgePasteY?.(steps); bump() },
-    setViewCubePad,
+    setViewCubePad, setViewCubeEnabled,
     frame: () => { scene?.resetCamera?.(model, { animate: true }); bump() },
     toggleGrass: () => {
       const next = !scene?._sceneOn
@@ -2097,6 +2103,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     catalog,
     applyColorTune,
     startThumbBatch, endThumbBatch, captureThumb,
+    // 正在给模型库、批量导入截图时，画面上是别的造型，这一张不截
+    coverShot: async () => (thumbBatch.current ? null : coverShot()),
     attachDoc, openPlanTab, convertToPlan, setTabAccess, tabLocal,
     readOnly: !!builder?.readOnly,
     engine,

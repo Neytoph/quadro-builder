@@ -86,6 +86,7 @@ export function createSync(opts: SyncOptions = {}) {
       name: `${local.name}（冲突副本）`,
       data: local.data,
     })
+    if (local.cover) await docs.setDocCover(copy.id, local.cover)
     await docs.putRemoteDoc(remote)
     emit({ type: 'conflict', id: local.id, copyId: copy.id })
   }
@@ -111,9 +112,10 @@ export function createSync(opts: SyncOptions = {}) {
             method: 'PUT',
             body: JSON.stringify({
               name: doc.name, data: doc.data, parts, baseRev: doc.rev,
+              ...(doc.cover ? { cover: doc.cover } : {}),
             }),
           })
-          await docs.markDocSynced(doc.id, r.rev, stamp)
+          await docs.markDocSynced(doc.id, r.rev, stamp, doc.cover)
         }
         emit({ type: 'pushed', id: doc.id, rev: doc.rev })
       } catch (err) {

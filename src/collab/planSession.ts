@@ -266,6 +266,17 @@ export class PlanSession {
     return exportOf(this.toJSON(), this.name)
   }
 
+  /**
+   * 导出时带的封面：这个方案的标签页正开在画面上时截一张，不在画面上时是 null。
+   * 由 CollabProvider 接上。
+   */
+  cover: () => Promise<string | null> = async () => null
+
+  private async exportWithCover(body: ExportBody) {
+    const cover = await this.cover()
+    await collabApi.exportPlan(this.id, cover ? { ...body, cover } : body)
+  }
+
   private scheduleExport() {
     if (!this.canEdit) return
     if (this.exportTimer) window.clearTimeout(this.exportTimer)
@@ -279,13 +290,13 @@ export class PlanSession {
   async exportNow() {
     if (!this.canEdit) return
     if (this.exportTimer) { window.clearTimeout(this.exportTimer); this.exportTimer = null }
-    await collabApi.exportPlan(this.id, this.exportBody())
+    await this.exportWithCover(this.exportBody())
   }
 
   async saveVersion(name: string) {
     const body = this.exportBody()
     const v = await collabApi.saveVersion(this.id, { name, state: stateBase64(this.local.doc), data: body.data, qdf: body.qdf, parts: body.parts })
-    await collabApi.exportPlan(this.id, body)
+    await this.exportWithCover(body)
     return v
   }
 

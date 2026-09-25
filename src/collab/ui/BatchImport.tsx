@@ -2,8 +2,8 @@ import { useRef, useState } from 'react'
 import { Upload } from 'lucide-react'
 import { useI18n } from '../../i18n'
 import { useEngine } from '../../store/EngineContext'
-import { partForFitting, partName } from '../../engine-api'
-import { syncNow } from '../../sync/bootstrap'
+import { docs, partForFitting, partName } from '../../engine-api'
+import { syncConfigured, syncNow } from '../../sync/bootstrap'
 import { useCollab } from '../CollabContext'
 import { importOne, isQdfFile, MAX_IMPORT, type ImportResult } from '../batchImport'
 import { useSignedIn } from './bits'
@@ -41,6 +41,8 @@ export default function BatchImport({ onClose }: { onClose: () => void }) {
       setBusy({ k: i + 1, n: files.length })
       const r = await importOne(files[i])
       const thumb = r.data ? await api.captureThumb({ kind: 'model', data: r.data }) : null
+      // 这张缩略图就是「我的设计」和广场上这一座的封面，跟着下一次同步交上去；开源本地版没有同步，不记
+      if (thumb && syncConfigured()) await docs.setDocCover(r.docId!, thumb)
       setRows(list => [...list, { ...r, thumb }])
     }
     setBusy(null)
