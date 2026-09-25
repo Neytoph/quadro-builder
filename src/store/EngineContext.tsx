@@ -8,6 +8,7 @@ import {
 } from '../engine-api'
 import { useI18n } from '../i18n'
 import { syncNow, syncProbe, syncStarted } from '../sync/bootstrap'
+import { tabOpenedFrom, tabSavedAs } from '../sync/origin'
 import { bootEntry, VIEW_ONLY, type ResumeExport } from '../entry'
 import { publishSharePage, sharePagesEnabled, stampFor, type ExportKind, type Stamp } from '../sharePage'
 import { geometricPreset, jsonToFragment } from '../data/presets'
@@ -1006,6 +1007,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     }
     const data = e2.model.toJSON()
     const saved = await docs.saveDoc({ docId: tab.docId, name: saveName, data })
+    tabSavedAs(tab.tabId, saved.id)
     tab.docId = saved.id
     tab.name = saved.name
     tab.dirty = false
@@ -1042,6 +1044,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     if (typed == null) return
     const data = e2.model.toJSON()
     const saved = await docs.saveDoc({ docId: null, name: typed.trim() || t('tab.untitled'), data })
+    tabSavedAs(tab.tabId, saved.id)
     tab.docId = saved.id
     tab.name = saved.name
     tab.dirty = false
@@ -1622,6 +1625,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     if (!e2 || !tab) return
     const data = e2.model.toJSON()
     const saved = await docs.saveDoc({ docId: null, name: await freeDocName(tab.name), data })
+    tabSavedAs(tab.tabId, saved.id)
     tab.docId = saved.id
     tab.name = saved.name
     tab.dirty = false
@@ -1661,6 +1665,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
         tab.name = ent.name
         syncTabs()
       }
+      if (tab && ent.origin) tabOpenedFrom(tab.tabId, ent.origin)
       track('builder.design.open', { from: payload ? 'share' : 'src', view: VIEW_ONLY, copy: ent.copy })
       if (ent.copy && !VIEW_ONLY) await copyToAccount()
     })()
