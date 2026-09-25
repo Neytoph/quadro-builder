@@ -285,6 +285,22 @@ function DocOnEntry() {
   return null
 }
 
+/**
+ * ?new=1：这台设备上记着的标签页恢复出来以后，在它们后面新开一个空白标签页。
+ * 开完从地址栏去掉，刷新不会再开一个。
+ */
+function NewOnEntry() {
+  const { ready, newTab } = useEngine()
+  const done = useRef(false)
+  useEffect(() => {
+    if (!bootEntry().blank || !ready || done.current) return
+    done.current = true
+    newTab()
+    dropParam('new')
+  }, [ready, newTab])
+  return null
+}
+
 function ManualProgress() {
   const { exportingManual } = useEngine()
   const { t } = useI18n()
@@ -443,6 +459,7 @@ function AppInner() {
       <ThumbCapture />
       <ImportOnEntry />
       <DocOnEntry />
+      <NewOnEntry />
     </div>
   )
 }

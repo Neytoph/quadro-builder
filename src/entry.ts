@@ -19,9 +19,11 @@
 //	?import=qdf                    打开后直接进入批量导入 .qdf
 //	?room=brief:<id>               画房间边界，画完写回需求单
 //	?doc=<doc id>                  打开自己「我的设计」里的这一座；没登录先去登录，登录完回到这个地址
+//	?new=1                         新开一个空白标签页，已开的标签页都留着（工作台「新建造型」）
 //
 // 除了只看模式，参数读完就从地址栏去掉：刷新一下不该再打开一遍、再存一份。
-// ?doc= 例外，打开以后才去掉：没登录时跳去登录页，要带着它回来。
+// ?doc= 和 ?new= 在处理完以后才去掉：?doc= 没登录时跳去登录页，要带着它回来；
+// ?new= 要等这台设备上记着的标签页恢复出来，再在它们后面新开一个。
 // 当前标签页是共享方案时，地址栏由 CollabProvider 写成这个方案的地址。
 
 export type ResumeExport = 'manual' | 'bom' | 'bompng' | 'shareimg' | 'qdf' | 'json'
@@ -49,6 +51,8 @@ export interface Entry {
   roomBrief: string | null
   /** 「我的设计」里的一座 */
   doc: string | null
+  /** 新开一个空白标签页 */
+  blank: boolean
 }
 
 let entry: Entry | null = null
@@ -63,15 +67,15 @@ const SOURCE_RE = /^(pro|plan|invite|delivery):[A-Za-z0-9_-]+$/
 
 const collab = Boolean(import.meta.env.VITE_SYNC_BASE)
 
-export function bootEntry(): Entry {
-  if (entry) return entry
-  const q = new URLSearchParams(location.search)
+/** 按地址上的参数读出打开方式；collab 是托管版有没有设 VITE_SYNC_BASE */
+export function readEntry(search: string, hash: string, collab: boolean): Entry {
+  const q = new URLSearchParams(search)
   const lang = q.get('lang')
   const resume = q.get('export') as ResumeExport | null
   const src = q.get('src')
   const cmp = (q.get('compare') || '').split(',').map(s => s.trim()).filter(Boolean)
   const room = q.get('room') || ''
-  entry = {
+  return {
     view: q.get('view') === '1',
     src: sameSite(src),
     source: src && SOURCE_RE.test(src) ? src : null,
@@ -79,7 +83,7 @@ export function bootEntry(): Entry {
     copy: q.get('copy') === '1',
     resume: resume && RESUMES.includes(resume) ? resume : null,
     lang: lang === 'zh' || lang === 'en' || lang === 'de' ? lang : null,
-    hash: location.hash,
+    hash,
     plan: collab ? q.get('plan') : null,
     invite: collab ? q.get('invite') : null,
     compare: collab && cmp.length === 2 ? [cmp[0], cmp[1]] : null,
@@ -88,8 +92,15 @@ export function bootEntry(): Entry {
     importQdf: q.get('import') === 'qdf',
     roomBrief: collab && room.startsWith('brief:') ? room.slice('brief:'.length) : null,
     doc: collab ? q.get('doc') : null,
+    blank: collab && q.get('new') === '1',
   }
+}
+
+export function bootEntry(): Entry {
+  if (entry) return entry
+  entry = readEntry(location.search, location.hash, collab)
   if (!entry.view) {
+    const q = new URLSearchParams(location.search)
     for (const k of ['src', 'name', 'copy', 'export', 'lang', 'import']) q.delete(k)
     const rest = q.toString()
     history.replaceState(null, '', `${location.pathname}${rest ? `?${rest}` : ''}${location.hash}`)

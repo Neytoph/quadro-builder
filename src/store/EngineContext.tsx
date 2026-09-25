@@ -24,6 +24,7 @@ import { shareImageDataUrl } from '../ui/shareImage'
 import { MOTION } from '../ui/motion'
 import { createTabDoc, dropTabDoc, memoryDoc, openTabDoc, SEED_ORIGIN, type LocalDoc } from '../collab/localDocs'
 import { partCountOf, writeJSON, type ModelJSON } from '../collab/ymodel'
+import { appendTab } from './tabs'
 
 // 引擎来自 Vanilla JS，这里不跟它的推断类型较劲。
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1048,8 +1049,9 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const e2 = eng.current
     if (!e2) return
     const tab = makeTab(EMPTY_MODEL, t('tab.untitled'), null)
-    tabsRef.current = [...tabsRef.current, tab]
-    activeRef.current = tab.tabId
+    const next = appendTab(tabsRef.current, tab)
+    tabsRef.current = next.tabs
+    activeRef.current = next.active
     applyTab(tab)
     syncTabs()
   }, [applyTab, snapshotActive, syncTabs, t])
