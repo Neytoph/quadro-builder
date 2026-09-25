@@ -34,3 +34,26 @@ describe('?new=1 新开一个空白标签页', () => {
     expect(readEntry(location.search, location.hash, true).blank).toBe(false)
   })
 })
+
+describe('?src= 和 &origin= 的出处', () => {
+  it('同站路径的 src 既是要打开的文件，也是出处', () => {
+    const e = readEntry('?src=/quadro/shares/abc/model.json', '', true)
+    expect(e.src).toBe('/quadro/shares/abc/model.json')
+    expect(e.origin).toBe('/quadro/shares/abc/model.json')
+    expect(e.source).toBeNull()
+  })
+
+  it('写了 origin 就用 origin', () => {
+    const e = readEntry(`?origin=${encodeURIComponent('/scheme.html?id=7')}`, '#s=payload', true)
+    expect(e.src).toBeNull()
+    expect(e.origin).toBe('/scheme.html?id=7')
+  })
+
+  it('来源标记不是出处，别的站点的地址也不认', () => {
+    const e = readEntry('?plan=p1&src=plan:p1', '', true)
+    expect(e.source).toBe('plan:p1')
+    expect(e.src).toBeNull()
+    expect(e.origin).toBeNull()
+    expect(readEntry('?origin=//evil.example/x', '', true).origin).toBeNull()
+  })
+})
