@@ -9,7 +9,7 @@ import {
 import { useI18n } from '../i18n'
 import { syncNow, syncProbe, syncStarted } from '../sync/bootstrap'
 import { tabOpenedFrom, tabSavedAs } from '../sync/origin'
-import { bootEntry, VIEW_ONLY, type ResumeExport } from '../entry'
+import { bootEntry, SESSIONLESS, VIEW_ONLY, type ResumeExport } from '../entry'
 import { publishSharePage, sharePagesEnabled, stampFor, type ExportKind, type Stamp } from '../sharePage'
 import { geometricPreset, jsonToFragment } from '../data/presets'
 import pyramidQdf from '../data/A0128.qdf?raw'
@@ -23,6 +23,9 @@ import { takeModelThumb, waitSceneReady } from '../engine/thumbShot.js'
 import { bomToCsv, bomToPngDataUrl, loadImage } from '../ui/bomExport'
 import { shareImageDataUrl } from '../ui/shareImage'
 import { MOTION } from '../ui/motion'
+import { createTabDoc, dropTabDoc, memoryDoc, openTabDoc, SEED_ORIGIN, type LocalDoc } from '../collab/localDocs'
+import { partCountOf, writeJSON, type ModelJSON } from '../collab/ymodel'
+import { appendTab } from './tabs'
 
 // 引擎来自 Vanilla JS，这里不跟它的推断类型较劲。
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -54,11 +57,15 @@ export interface SafetyResult {
   height: number
 }
 
+export type ThumbJob = { kind: 'official' | 'preset'; id: string } | { kind: 'model'; data: unknown }
+
 export interface TabInfo {
   tabId: string
   docId: string | null
   name: string
   dirty: boolean
+  /** 共享方案的标签页：方案 id。它的文档经 WebSocket 同步，不用保存 */
+  planId: string | null
 }
 
 export interface BomRow {
@@ -190,7 +197,10 @@ interface EngineApi {
   closeTab: (tabId: string) => void
   activateTab: (tabId: string) => void
   renameTab: (tabId: string, name: string) => void
-  saveCurrent: (name?: string) => Promise<void>
+  /** 共享方案的标签页换成方案现在的名字 */
+  setTabName: (tabId: string, name: string) => void
+  /** 存下当前这一座；取消起名返回 null */
+  saveCurrent: (name?: string) => Promise<{ docId: string; name: string; data: ModelJSON } | null>
   saveCurrentAs: () => Promise<void>
   /** 起名框：保存、另存为、重命名都用它，不走浏览器自带的弹框 */
   askName: (title: string, ok: string, value: string) => Promise<string | null>
@@ -215,6 +225,7 @@ interface EngineApi {
   roomOverflow: { w: number; d: number; h: number }
   loadPreset: (key: string) => void
   setViewCubePad: (right: number, bottom: number, size?: number) => void
+  setViewCubeEnabled: (on: boolean) => void
   exportPng: () => Promise<void>
   /** 料表存成表格文件 */
   exportBomCsv: () => Promise<void>
@@ -243,7 +254,22 @@ interface EngineApi {
   applyColorTune: (tune: { scene: Record<string, unknown>; frame: Record<string, string>; grade?: Record<string, number> }) => void
   startThumbBatch: () => void
   endThumbBatch: () => void
-  captureThumb: (job: { kind: 'official' | 'preset'; id: string }) => Promise<string | null>
+  /** 截一张缩略图：官方造型、起步造型，或者一份造型 JSON（批量导入的结果） */
+  captureThumb: (job: ThumbJob) => Promise<string | null>
+  /** 当前画面这一座的缩略图（和模型库封面同一条截图通路），共享方案导出时当封面 */
+  coverShot: () => Promise<string | null>
+  /** 交付查看：把一份外面取来的文档换进来当唯一的标签页，只能看。 */
+  attachDoc: (o: { local: LocalDoc; name: string; readOnly: boolean }) => void
+  /** 打开共享方案的标签页（已开着就切过去），返回标签页 id */
+  openPlanTab: (planId: string, name: string) => string
+  /** 自己的造型开启共享：标签页原地变成共享方案 */
+  convertToPlan: (tabId: string, planId: string, name: string) => void
+  /** 共享方案标签页的权限：能不能改、新建零件 id 的本端标记（见 BuildModel.idTag） */
+  setTabAccess: (tabId: string, o: { readOnly: boolean; idTag: string }) => void
+  tabLocal: (tabId: string) => LocalDoc | null
+  readOnly: boolean
+  /** 引擎本体（共享界面要投影坐标、取点、给零件上色） */
+  engine: () => { scene: E; model: E; builder: E } | null
 }
 
 const Ctx = createContext<EngineApi | null>(null)
@@ -359,11 +385,63 @@ function cubeLabels() {
   }
 }
 
-function pruneSessionTabs<T extends TabInfo & { model: unknown }>(tabs: T[]) {
-  const keep = tabs.filter(tb => tb.docId || modelPartCount(tb.model) > 0 || !isUntitledName(tb.name))
-  if (keep.length) return keep
+/**
+ * 标签页。造型本身在 local（这一页的 Yjs 文档和它的编辑记录）里，
+ * 会话记录只存名字、对应的存档和界面状态。
+ */
+type Tab = TabInfo & {
+  view: AnyRec
+  local: LocalDoc
+  /** 共享方案：新建零件 id 里夹的本端标记，见 BuildModel.idTag */
+  idTag?: string
+  /** 共享方案里的评论者和访客、交付查看：只能看 */
+  readOnly?: boolean
+}
+
+const EMPTY_MODEL: ModelJSON = { format: 2, nodes: [], tubes: [] }
+
+/** 让引擎按它的规矩读一遍再导出：旧格式升上来、坐标取整，写进文档的都是当前格式。 */
+function normalizeModel(data: unknown): ModelJSON | null {
+  const m = new BuildModel()
+  const res = m.loadJSON(data)
+  return res && res.ok ? m.toJSON() as ModelJSON : null
+}
+
+/**
+ * 整座换掉（打开文件、官方造型换进空标签页）：文档改成 json，不进撤销记录，
+ * 原来的撤销记录也清掉。当前页的画面由文档变化带着刷新。
+ */
+function replaceTabModel(tab: Tab, json: ModelJSON) {
+  writeJSON(tab.local.doc, json, SEED_ORIGIN)
+  tab.local.history.clear()
+}
+
+/** 新标签页，文档里是 seed。只放一座的打开方式不在本机留库。 */
+function makeTab(seed: ModelJSON, name: string, docId: string | null): Tab {
+  const tabId = docs.newTabId()
+  const local = SESSIONLESS ? memoryDoc(seed) : createTabDoc(tabId, seed)
+  return { tabId, docId, name, dirty: false, planId: null, view: {}, local }
+}
+
+/**
+ * 共享方案的标签页：文档先空着，连上服务器以后拿到方案的内容（服务器上还没有就由
+ * 编辑者用方案的 data 生成）。
+ */
+function makePlanTab(planId: string, name: string): Tab {
+  const tabId = docs.newTabId()
+  return { tabId, docId: null, name, dirty: false, planId, view: {}, local: createTabDoc(tabId, null) }
+}
+
+function tabParts(tab: Tab) {
+  return partCountOf(tab.local.history.toJSON())
+}
+
+/** 空的「未命名」标签页不留；全空的话留第一个。返回留下的和去掉的。 */
+function pruneSessionTabs(tabs: Tab[]) {
+  const keep = tabs.filter(tb => tb.planId || tb.docId || tabParts(tb) > 0 || !isUntitledName(tb.name))
+  if (keep.length) return { keep, gone: tabs.filter(tb => !keep.includes(tb)) }
   const first = tabs[0]
-  return first ? [{ ...first, dirty: false }] : tabs
+  return first ? { keep: [{ ...first, dirty: false }], gone: tabs.slice(1) } : { keep: tabs, gone: [] }
 }
 
 function loadInv(): Inventory {
@@ -492,7 +570,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const eng = useRef<{ scene: E; model: E; builder: E } | null>(null)
   const thumbBatch = useRef<{ json: unknown; camera: unknown; sceneOn: boolean; mode: string } | null>(null)
-  const tabsRef = useRef<Array<TabInfo & { model: unknown; view: AnyRec }>>([])
+  const tabsRef = useRef<Tab[]>([])
   const activeRef = useRef<string | null>(null)
   // 料表导出在回调里跑，用 ref 取当下的料表、尺寸、库存和语言
   const bomRef = useRef<BomView | null>(null)
@@ -531,36 +609,50 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     setToast({ message, kind })
   }, [])
 
-  /** 把标签页记进本机，下次打开接着来。只看模式不记：它嵌在别的页面里，不能盖掉这个人自己的标签页。 */
+  /**
+   * 模型里有、文档里还没有的改动写进文档。编辑都经 Builder 的 recordHistory 交给文档，
+   * 这里兜住没走那条路的改动，保证刷新以后还在。拖动、粘贴、截缩略图、换标签页的
+   * 过程中模型里是中间状态，不写。
+   */
+  const flushModel = useCallback(() => {
+    const e = eng.current
+    const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
+    if (!e || !tab || switching.current || thumbBatch.current || e.builder.busy()) return
+    if (e.builder.history !== tab.local.history) return
+    tab.local.history.commit(JSON.stringify(tab.local.history.toJSON()), JSON.stringify(e.model.toJSON()))
+  }, [])
+
+  /**
+   * 把标签页记进本机，下次打开接着来。造型本身已经在各页的 Yjs 文档里，这里记名字、
+   * 存档和界面状态。只看、共享方案、交付、画房间这几种打开方式不记：它们不是这个人
+   * 自己的标签页，不能盖掉。
+   */
   const saveSessionNow = useCallback(() => {
-    if (VIEW_ONLY) return Promise.resolve()
+    if (SESSIONLESS) return Promise.resolve()
     if (sessionTimer.current) window.clearTimeout(sessionTimer.current)
     sessionTimer.current = null
     const e = eng.current
     const active = tabsRef.current.find(x => x.tabId === activeRef.current)
     if (e && active) {
-      const json = e.model.toJSON()
-      if (modelPartCount(json) > 0 || modelPartCount(active.model) === 0) {
-        active.model = json
-      }
+      flushModel()
       active.view = { ...(e.builder.uiState() as AnyRec), camera: e.scene.cameraState() }
     }
     return docs.saveSession({
       tabs: tabsRef.current.map(tb => ({
-        tabId: tb.tabId, docId: tb.docId, name: tb.name, dirty: tb.dirty, model: tb.model, view: tb.view,
+        tabId: tb.tabId, docId: tb.docId, name: tb.name, dirty: tb.dirty, planId: tb.planId, view: tb.view,
       })),
       activeTabId: activeRef.current,
     }) as Promise<void>
-  }, [])
+  }, [flushModel])
 
   const persistSession = useCallback(() => {
-    if (VIEW_ONLY) return
+    if (SESSIONLESS) return
     if (sessionTimer.current) window.clearTimeout(sessionTimer.current)
     sessionTimer.current = window.setTimeout(() => { void saveSessionNow() }, 400)
   }, [saveSessionNow])
 
   const syncTabs = useCallback(() => {
-    setTabs(tabsRef.current.map(({ tabId, docId, name, dirty }) => ({ tabId, docId, name, dirty })))
+    setTabs(tabsRef.current.map(({ tabId, docId, name, dirty, planId }) => ({ tabId, docId, name, dirty, planId })))
     setActiveTabId(activeRef.current)
     persistSession()
   }, [persistSession])
@@ -568,7 +660,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const markDirty = useCallback(() => {
     if (switching.current) return
     const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
-    if (tab && !tab.dirty) {
+    // 共享方案随改随同步，没有「没保存」这回事
+    if (tab && !tab.dirty && !tab.planId) {
       tab.dirty = true
       syncTabs()
     } else {
@@ -587,12 +680,16 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     bump()
   }, [bump, persistSession, syncTabs])
 
-  const applyTab = useCallback((tab: TabInfo & { model: unknown; view: AnyRec }) => {
+  const applyTab = useCallback((tab: Tab) => {
     const e = eng.current
     if (!e) return
     switching.current = true
     e.builder.modelReplaced()
-    e.model.loadJSON(tab.model || { format: 2, nodes: [], tubes: [] })
+    e.builder.setHistory(tab.local.history)
+    e.builder.setReadOnly(!!tab.readOnly)
+    e.model.idTag = tab.idTag || ''
+    const res = e.model.loadJSON(tab.local.history.toJSON())
+    if (!res.ok) throw new Error(`tab ${tab.tabId} does not load: ${res.reason}`)
     e.builder.setUiState(tab.view || {})
     e.builder.setMode((tab.view?.mode as string) || 'select')
     if (tab.view?.camera) e.scene.restoreCameraState(tab.view.camera)
@@ -602,13 +699,19 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     bump()
   }, [bump])
 
+  /** 标签页的造型，从它的 Yjs 文档导出。当前页先把模型里没交出去的改动写进文档。 */
+  const exportTab = useCallback((tab: Tab): ModelJSON => {
+    if (tab.tabId === activeRef.current) flushModel()
+    return tab.local.history.toJSON()
+  }, [flushModel])
+
   const snapshotActive = useCallback(() => {
     const e = eng.current
     const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
     if (!e || !tab) return
-    tab.model = e.model.toJSON()
+    flushModel()
     tab.view = { ...(e.builder.uiState() as AnyRec), camera: e.scene.cameraState() }
-  }, [])
+  }, [flushModel])
 
   const markDirtyRef = useRef(markDirty)
   const bumpRef = useRef(bump)
@@ -670,39 +773,54 @@ export function EngineProvider({ children }: { children: ReactNode }) {
         // 开发模式下把引擎挂到 window 上，浏览器测试脚本靠它摆相机、查手柄
         if (import.meta.env.DEV) (window as unknown as { __quadroDev?: unknown }).__quadroDev = eng.current
 
-        // 只看模式只放这一座，不读这台设备上记着的标签页
-        if (!VIEW_ONLY) await docs.migrateOldDrafts()
-        const session = VIEW_ONLY ? null : await docs.loadSession()
+        // 只看、交付、画房间：只放这一座，不读这台设备上记着的标签页。
+        // 交付由 CollabProvider 取到以后 attachDoc 换进来。
+        if (!SESSIONLESS) await docs.migrateOldDrafts()
+        const session = SESSIONLESS ? null : await docs.loadSession()
         if (dead) return
         if (session?.tabs?.length) {
-          const mapped = session.tabs.map((tb: AnyRec) => ({
-            tabId: String(tb.tabId),
-            docId: (tb.docId as string) || null,
-            name: String(tb.name || t('tab.untitled')),
-            dirty: !!tb.dirty,
-            model: tb.model,
-            view: (tb.view as AnyRec) || {},
-          }))
+          const mapped: Tab[] = []
+          for (const tb of session.tabs as AnyRec[]) {
+            const tabId = String(tb.tabId)
+            // 旧版本把造型 JSON 记在会话里：本机还没有这一页的文档时，拿它生成一份
+            const legacy = tb.model ? normalizeModel(tb.model) : null
+            const local = await openTabDoc(tabId, legacy)
+            if (dead) return
+            mapped.push({
+              tabId,
+              docId: (tb.docId as string) || null,
+              name: String(tb.name || t('tab.untitled')),
+              dirty: !!tb.dirty,
+              planId: (tb.planId as string) || null,
+              view: (tb.view as AnyRec) || {},
+              local,
+            })
+          }
+          // 有存档、这一页却是空的（存档是别的设备同步过来的）：用存档的内容
           for (const tb of mapped) {
-            if (!tb.docId || modelPartCount(tb.model) > 0) continue
+            if (!tb.docId || tabParts(tb) > 0) continue
             const doc = await docs.getDoc(tb.docId) as AnyRec | null
             if (dead) return
-            if (doc?.data && modelPartCount(doc.data) > 0) {
-              tb.model = doc.data
+            const data = doc?.data ? normalizeModel(doc.data) : null
+            if (data && modelPartCount(data) > 0) {
+              writeJSON(tb.local.doc, data, SEED_ORIGIN)
               tb.dirty = false
-              if (doc.name) tb.name = String(doc.name)
+              if (doc?.name) tb.name = String(doc.name)
             }
           }
-          tabsRef.current = pruneSessionTabs(mapped)
+          const { keep, gone } = pruneSessionTabs(mapped)
+          for (const tb of gone) await dropTabDoc(tb.tabId, tb.local)
+          tabsRef.current = keep
           const wanted = session.activeTabId && tabsRef.current.some(x => x.tabId === session.activeTabId)
             ? session.activeTabId
             : tabsRef.current[0].tabId
           activeRef.current = wanted
           applyTabRef.current(tabsRef.current.find(x => x.tabId === wanted)!)
         } else {
-          const tab = { tabId: docs.newTabId(), docId: null, name: t('tab.untitled'), dirty: false, model: model.toJSON(), view: {} }
+          const tab = makeTab(EMPTY_MODEL, t('tab.untitled'), null)
           tabsRef.current = [tab]
           activeRef.current = tab.tabId
+          applyTabRef.current(tab)
         }
         syncTabsRef.current()
         setReady(true)
@@ -931,10 +1049,10 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     snapshotActive()
     const e2 = eng.current
     if (!e2) return
-    const empty = { format: 2, nodes: [], tubes: [] }
-    const tab = { tabId: docs.newTabId(), docId: null, name: t('tab.untitled'), dirty: false, model: empty, view: {} }
-    tabsRef.current = [...tabsRef.current, tab]
-    activeRef.current = tab.tabId
+    const tab = makeTab(EMPTY_MODEL, t('tab.untitled'), null)
+    const next = appendTab(tabsRef.current, tab)
+    tabsRef.current = next.tabs
+    activeRef.current = next.active
     applyTab(tab)
     syncTabs()
   }, [applyTab, snapshotActive, syncTabs, t])
@@ -949,10 +1067,94 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     syncTabs()
   }, [applyTab, snapshotActive, syncTabs])
 
+  const attachDoc = useCallback((o: { local: LocalDoc; name: string; readOnly: boolean }) => {
+    const old = tabsRef.current
+    const tab: Tab = { tabId: docs.newTabId(), docId: null, name: o.name, dirty: false, planId: null, view: {}, local: o.local, readOnly: o.readOnly }
+    tabsRef.current = [tab]
+    activeRef.current = tab.tabId
+    applyTab(tab)
+    for (const tb of old) if (tb.local !== o.local) tb.local.history.destroy()
+    syncTabs()
+  }, [applyTab, syncTabs])
+
+  /**
+   * 要整座换掉的时候（导入文件、打开分享链接）用的标签页：当前页是自己的就用它，
+   * 是共享方案就新开一页——换掉方案里的造型等于替所有人改了。
+   */
+  const ownActiveTab = useCallback((): Tab | null => {
+    const active = tabsRef.current.find(x => x.tabId === activeRef.current)
+    if (!active || !active.planId) return active || null
+    snapshotActive()
+    const tab = makeTab(EMPTY_MODEL, t('tab.untitled'), null)
+    tabsRef.current = [...tabsRef.current, tab]
+    activeRef.current = tab.tabId
+    applyTab(tab)
+    syncTabs()
+    return tab
+  }, [applyTab, snapshotActive, syncTabs, t])
+
+  /** 打开共享方案：已经有这个方案的标签页就切过去，没有就新开一个。 */
+  const openPlanTab = useCallback((planId: string, name: string) => {
+    const existing = tabsRef.current.find(x => x.planId === planId)
+    if (existing) {
+      if (name && existing.name !== name) existing.name = name
+      if (existing.tabId !== activeRef.current) {
+        snapshotActive()
+        activeRef.current = existing.tabId
+        applyTab(existing)
+      }
+      syncTabs()
+      return existing.tabId
+    }
+    snapshotActive()
+    const tab = makePlanTab(planId, name)
+    // 刚打开的空白「未命名」页让给方案，不多留一个空标签
+    const active = tabsRef.current.find(x => x.tabId === activeRef.current)
+    const reuse = active && !active.planId && !active.docId && !active.dirty && tabParts(active) === 0 && isUntitledName(active.name)
+    tabsRef.current = reuse
+      ? tabsRef.current.map(x => (x === active ? tab : x))
+      : [...tabsRef.current, tab]
+    if (reuse && active) void dropTabDoc(active.tabId, active.local)
+    activeRef.current = tab.tabId
+    applyTab(tab)
+    syncTabs()
+    return tab.tabId
+  }, [applyTab, snapshotActive, syncTabs])
+
+  /** 自己的造型开启共享：这个标签页原地变成共享方案，文档不换。 */
+  const convertToPlan = useCallback((tabId: string, planId: string, name: string) => {
+    const tab = tabsRef.current.find(x => x.tabId === tabId)
+    if (!tab) throw new Error(`convertToPlan: no tab ${tabId}`)
+    tab.planId = planId
+    tab.name = name
+    tab.dirty = false
+    syncTabs()
+  }, [syncTabs])
+
+  /** 共享方案标签页的权限：能不能改、新建零件 id 的本端标记。 */
+  const setTabAccess = useCallback((tabId: string, o: { readOnly: boolean; idTag: string }) => {
+    const tab = tabsRef.current.find(x => x.tabId === tabId)
+    if (!tab) return
+    tab.readOnly = o.readOnly
+    tab.idTag = o.idTag
+    const e2 = eng.current
+    if (!e2 || tabId !== activeRef.current) return
+    e2.builder.setReadOnly(o.readOnly)
+    e2.model.idTag = o.idTag
+    e2.builder.refresh()
+    bump()
+  }, [bump])
+
+  /** 标签页的文档（共享方案要连上服务器） */
+  const tabLocal = useCallback((tabId: string) => tabsRef.current.find(x => x.tabId === tabId)?.local || null, [])
+  const engine = useCallback(() => eng.current, [])
+
   const closeTab = useCallback((tabId: string) => {
+    const closing = tabsRef.current.find(x => x.tabId === tabId)
     const rest = tabsRef.current.filter(x => x.tabId !== tabId)
+    if (closing) void dropTabDoc(closing.tabId, closing.local)
     if (!rest.length) {
-      const empty = { tabId: docs.newTabId(), docId: null, name: t('tab.untitled'), dirty: false, model: { format: 2, nodes: [], tubes: [] }, view: {} }
+      const empty = makeTab(EMPTY_MODEL, t('tab.untitled'), null)
       tabsRef.current = [empty]
       activeRef.current = empty.tabId
       applyTab(empty)
@@ -978,6 +1180,14 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     syncTabs()
   }, [syncTabs, t])
 
+  /** 共享方案的标签页跟着方案的名字走：名字随文档同步，不算没保存。 */
+  const setTabName = useCallback((tabId: string, name: string) => {
+    const tab = tabsRef.current.find(x => x.tabId === tabId)
+    if (!tab || tab.name === name) return
+    tab.name = name
+    syncTabs()
+  }, [syncTabs])
+
   /** 弹出起名框，等用户填完：点确定得到填的字，取消得到 null。 */
   const askName = useCallback((title: string, ok: string, value: string) => {
     nameAskRef.current?.resolve(null)
@@ -998,20 +1208,23 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const saveCurrent = useCallback(async (name?: string) => {
     const e2 = eng.current
     const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
-    if (!e2 || !tab) return
+    if (!e2 || !tab) return null
+    if (tab.planId) {
+      notify(t('collab.autoSynced'))
+      return null
+    }
     let saveName = name || tab.name
     if (!name && !tab.docId && isUntitledName(tab.name)) {
       const typed = await askName(t('saves.saveTitle'), t('saves.saveOk'), '')
-      if (typed == null) return
+      if (typed == null) return null
       saveName = typed.trim() || t('tab.untitled')
     }
-    const data = e2.model.toJSON()
+    const data = exportTab(tab)
     const saved = await docs.saveDoc({ docId: tab.docId, name: saveName, data })
     tabSavedAs(tab.tabId, saved.id)
     tab.docId = saved.id
     tab.name = saved.name
     tab.dirty = false
-    tab.model = data
     syncTabs()
     track('builder.design.save', { ...modelShape(data), named: !!name })
     notify(t('toast.saved', { name: saved.name }))
@@ -1019,7 +1232,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     // 机器上；社区发帖页更是当场就要读服务器那张列表。不挡着上面那句提示：
     // 存进本地这件事已经成了，网络慢不该让用户对着按钮等。
     void syncNow()
-  }, [askName, notify, syncTabs, t])
+    return { docId: String(saved.id), name: String(saved.name), data }
+  }, [askName, exportTab, notify, syncTabs, t])
 
   /** 存档里没人用的名字：原名空着就用原名，否则在后面加「副本」，还重名就往后编号。 */
   const freeDocName = useCallback(async (name: string) => {
@@ -1042,13 +1256,15 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const suggested = isUntitledName(tab.name) ? '' : await freeDocName(tab.name)
     const typed = await askName(t('saves.saveAsTitle'), t('saves.saveOk'), suggested)
     if (typed == null) return
-    const data = e2.model.toJSON()
+    const data = exportTab(tab)
     const saved = await docs.saveDoc({ docId: null, name: typed.trim() || t('tab.untitled'), data })
     tabSavedAs(tab.tabId, saved.id)
-    tab.docId = saved.id
-    tab.name = saved.name
-    tab.dirty = false
-    tab.model = data
+    // 共享方案另存一份到「我的设计」：标签页还是那个方案
+    if (!tab.planId) {
+      tab.docId = saved.id
+      tab.name = saved.name
+      tab.dirty = false
+    }
     syncTabs()
     track('builder.design.saveAs', { ...modelShape(data) })
     notify(t('toast.saved', { name: saved.name }))
@@ -1094,12 +1310,14 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       syncTabs()
       return
     }
-    const tab = { tabId: docs.newTabId(), docId: doc.id, name: doc.name, dirty: false, model: doc.data, view: {} }
+    const data = normalizeModel(doc.data)
+    if (!data) { notify(t('lib.loadFailed'), 'err'); return }
+    const tab = makeTab(data, String(doc.name), String(doc.id))
     tabsRef.current = [...tabsRef.current, tab]
     activeRef.current = tab.tabId
     applyTab(tab)
     syncTabs()
-  }, [applyTab, snapshotActive, syncTabs])
+  }, [applyTab, notify, snapshotActive, syncTabs, t])
 
   const openLibraryId = useCallback(async (id: string) => {
     const official = parseOfficialId(id)
@@ -1148,20 +1366,25 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     if (!e2) return
     snapshotActive()
     const active = tabsRef.current.find(x => x.tabId === activeRef.current)
-    const reuse = !!active && !active.docId && !active.dirty && modelPartCount(e2.model.toJSON()) === 0
+    const json = normalizeModel(data)
+    if (!json) {
+      notify(t('lib.loadFailed'), 'err')
+      return
+    }
+    // 共享方案的标签页不让给别的造型
+    const reuse = !!active && !active.planId && !active.docId && !active.dirty && modelPartCount(e2.model.toJSON()) === 0
     if (reuse && active) {
       active.name = name
-      active.model = data
       active.dirty = false
+      replaceTabModel(active, json)
       applyTab(active)
     } else {
-      const tab = { tabId: docs.newTabId(), docId: null, name, dirty: false, model: data, view: {} }
+      const tab = makeTab(json, name, null)
       tabsRef.current = [...tabsRef.current, tab]
       activeRef.current = tab.tabId
       applyTab(tab)
     }
     syncTabs()
-    e2.builder.clearHistory?.()
     notify(t('lib.loaded', { name }))
   }, [applyTab, notify, snapshotActive, syncTabs, t])
 
@@ -1184,16 +1407,16 @@ export function EngineProvider({ children }: { children: ReactNode }) {
           mergeEps: 2,
         })
       }
+      const json = normalizeModel(data)
+      if (!json) throw new Error('data')
+      const tab = ownActiveTab()
+      if (!tab) return
       switching.current = true
       e2.builder.modelReplaced()
-      const res = e2.model.loadJSON(data)
-      if (res && res.ok === false) throw new Error(res.reason || 'data')
-      e2.builder.clearHistory?.()
-      e2.builder.refresh()
+      replaceTabModel(tab, json)
       e2.scene.resetCamera(e2.model, { animate: true, swoop: true })
       switching.current = false
-      const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
-      if (tab) {
+      {
         tab.dirty = true
         tab.name = file.name.replace(/\.(qdf|json)$/i, '') || tab.name
       }
@@ -1324,12 +1547,16 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       const res = e2.model.loadJSON(data)
       if (res && res.ok === false) throw new Error(String(res.reason || 'data'))
     }
+    const tab = opts?.undoable ? tabsRef.current.find(x => x.tabId === activeRef.current) : ownActiveTab()
+    if (!tab) return false
     loadingModel.current = true
     try {
       if (opts?.undoable) e2.builder.recordHistory(run)
       else {
-        run()
-        e2.builder.clearHistory?.()
+        const json = normalizeModel(data)
+        if (!json) return false
+        e2.builder.modelReplaced()
+        replaceTabModel(tab, json)
       }
     } catch {
       return false
@@ -1338,8 +1565,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     }
     e2.builder.refresh()
     if (opts?.frame !== false) e2.scene.resetCamera(e2.model, { animate: true, swoop: true })
-    const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
-    if (tab) tab.dirty = true
+    tab.dirty = true
     syncTabs()
     bump()
     return true
@@ -1623,13 +1849,12 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const e2 = eng.current
     const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
     if (!e2 || !tab) return
-    const data = e2.model.toJSON()
+    const data = exportTab(tab)
     const saved = await docs.saveDoc({ docId: null, name: await freeDocName(tab.name), data })
     tabSavedAs(tab.tabId, saved.id)
     tab.docId = saved.id
     tab.name = saved.name
     tab.dirty = false
-    tab.model = data
     syncTabs()
     track('builder.design.copy', { ...modelShape(data) })
     if (await syncProbe() && await pushDoc(saved.id)) notify(t('toast.copiedToAccount', { name: saved.name }))
@@ -1659,6 +1884,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       const e2 = eng.current
       if (!e2) return
       if (modelPartCount(e2.model.toJSON()) > 0) newTab()
+      // 当前是共享方案的标签页时 applyModelJson 自己会新开一个
       if (!applyModelJson(data, { undoable: false })) { notify(t('toast.shareInvalid'), 'err'); return }
       const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
       if (tab && ent.name) {
@@ -1711,6 +1937,9 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const setViewCubePad = useCallback((right: number, bottom: number, size?: number) => {
     eng.current?.scene?.setViewCubePad?.(right, bottom, size)
   }, [])
+  const setViewCubeEnabled = useCallback((on: boolean) => {
+    eng.current?.scene?.setViewCubeEnabled?.(on)
+  }, [])
 
   const applyColorTune = useCallback((tune: { scene: Record<string, unknown>; frame: Record<string, string>; grade?: Record<string, number> }) => {
     applyFrameHex(tune.frame)
@@ -1723,7 +1952,9 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const startThumbBatch = useCallback(() => {
     const e = eng.current
     if (!e || thumbBatch.current) return
+    flushModel()
     switching.current = true
+    e.builder.held = true
     thumbBatch.current = {
       json: e.model.toJSON(),
       camera: e.scene.cameraState(),
@@ -1734,15 +1965,19 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     e.builder.setMode('select')
     e.builder.modelReplaced()
     e.scene.setScene(false)
-  }, [])
+  }, [flushModel])
 
   const endThumbBatch = useCallback(() => {
     const e = eng.current
     const prev = thumbBatch.current
     thumbBatch.current = null
     if (e && prev) {
+      e.builder.held = false
+      e.builder._externalPending = false
       e.builder.modelReplaced()
-      e.model.loadJSON(prev.json || { format: 2, nodes: [], tubes: [] })
+      // 截图期间文档可能被别人改过：按文档现在的样子放回去
+      const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
+      e.model.loadJSON(tab ? tab.local.history.toJSON() : prev.json)
       e.builder.setMode(prev.mode || 'select')
       e.scene.setScene(prev.sceneOn)
       if (prev.camera) e.scene.restoreCameraState(prev.camera)
@@ -1752,12 +1987,14 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     bump()
   }, [bump])
 
-  const captureThumb = useCallback(async (job: { kind: 'official' | 'preset'; id: string }) => {
+  const captureThumb = useCallback(async (job: ThumbJob) => {
     const e = eng.current
     if (!e) return null
     let data: unknown = null
     try {
-      if (job.kind === 'official') {
+      if (job.kind === 'model') {
+        data = job.data
+      } else if (job.kind === 'official') {
         const text = await fetchOfficialQdf(job.id)
         data = parseDesign(text)
       } else if (job.id === 'pyramid') {
@@ -1852,7 +2089,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     deleteSel: () => { bumpCount('builder.edit.delete'); builder?.deleteSelection(); bump() },
     copy, paste, cancelPaste, selectAll, selectConnected,
     nudgePasteY: (steps) => { builder?.nudgePasteY?.(steps); bump() },
-    setViewCubePad,
+    setViewCubePad, setViewCubeEnabled,
     frame: () => { scene?.resetCamera?.(model, { animate: true }); bump() },
     toggleGrass: () => {
       const next = !scene?._sceneOn
@@ -1862,7 +2099,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       bump()
     },
     grassOn: !!scene?._sceneOn,
-    highlight, highlightIds, safety, setInv, newTab, closeTab, activateTab, renameTab, saveCurrent, saveCurrentAs, askName, answerName, nameAsk, openDoc,
+    highlight, highlightIds, safety, setInv, newTab, closeTab, activateTab, renameTab, setTabName, saveCurrent, saveCurrentAs, askName, answerName, nameAsk, openDoc,
     listDocs: async () => (await docs.listDocs()).map((d: AnyRec) => ({ id: String(d.id), name: String(d.name), updatedAt: Number(d.updatedAt || 0), local: !Number(d.rev) })),
     removeDoc: async (id) => { await docs.removeDoc(id); bump() },
     renameDoc: async (id, name) => { await docs.renameDoc(id, name); bump() },
@@ -1883,6 +2120,11 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     catalog,
     applyColorTune,
     startThumbBatch, endThumbBatch, captureThumb,
+    // 正在给模型库、批量导入截图时，画面上是别的造型，这一张不截
+    coverShot: async () => (thumbBatch.current ? null : coverShot()),
+    attachDoc, openPlanTab, convertToPlan, setTabAccess, tabLocal,
+    readOnly: !!builder?.readOnly,
+    engine,
   }
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>

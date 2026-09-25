@@ -2,22 +2,29 @@ import { useEffect, useRef, useState } from 'react'
 import { useEngine } from '../store/EngineContext'
 import { LANGS, useI18n } from '../i18n'
 import { ONBOARDING_EVENT } from './Onboarding'
+import { useCollab } from '../collab/CollabContext'
+import BatchImport from '../collab/ui/BatchImport'
 
 const btn = 'text-sm rounded-lg border border-gray-700 bg-gray-800 hover:border-teal-400 px-3 py-2.5 text-left cursor-pointer leading-snug'
 
 export default function FilePanel() {
   const api = useEngine()
+  const collab = useCollab()
   const { t, lang, setLang } = useI18n()
   const fileRef = useRef<HTMLInputElement>(null)
+  const [batch, setBatch] = useState(false)
+  // 共享方案随改随同步，没有「保存」；「另存为」存一份到自己的设计里
+  const plan = collab.mode === 'plan'
 
   return (
     <div className="p-3">
       <div className="flex flex-col gap-1.5">
         {/* 手机上这块面板盖满画布，新开的标签页被挡在后面，点完得有一句话 */}
         <button onClick={() => { api.newTab(); api.notify(t('toast.newTab')) }} className={btn}>{t('btn.new')}</button>
-        <button onClick={() => void api.saveCurrent()} className={btn}>{t('btn.save')}</button>
+        {!plan && <button onClick={() => void api.saveCurrent()} className={btn}>{t('btn.save')}</button>}
         <button onClick={() => void api.saveCurrentAs()} className={btn}>{t('btn.saveAs')}</button>
         <button onClick={() => fileRef.current?.click()} className={btn}>{t('btn.import')}</button>
+        <button onClick={() => setBatch(true)} className={btn} data-ui="batch-open">{t('batch.open')}</button>
         <button onClick={api.exportQdf} className={btn}>{t('btn.exportQdf')}</button>
         <button onClick={api.exportJson} className={btn}>{t('btn.exportJson')}</button>
         <button onClick={api.exportPng} className={btn}>{t('btn.exportPng')}</button>
@@ -31,6 +38,7 @@ export default function FilePanel() {
         <input ref={fileRef} type="file" accept=".qdf,.json,application/json" hidden
           onChange={e => { const f = e.target.files?.[0]; if (f) void api.importFile(f); e.target.value = '' }} />
       </div>
+      {batch && <BatchImport onClose={() => setBatch(false)} />}
 
       <div className="mt-4 pt-3 border-t border-gray-800">
         <div className="text-[10px] uppercase tracking-wider text-gray-400 mb-1.5">{t('section.room')}</div>

@@ -17,6 +17,7 @@ globalThis.fetch = async (url) => {
 const { loadCatalog, buildableTubes, panels, geometry, getPanel, getPartById } = await import('../src/engine/catalog.js')
 const { BuildModel } = await import('../src/engine/model.js')
 const { Builder } = await import('../src/engine/builder.js')
+const { withHistory } = await import('./withHistory.mjs')
 const { buildQDF } = await import('../src/engine/qdfexport.js')
 const { parseQDF } = await import('../src/engine/qdfimport.js')
 const { computeBOM } = await import('../src/engine/bom.js')
@@ -82,7 +83,7 @@ for (const f of ['sensory', 'pocket', 'basin']) {
 for (const v of ['rainbow', 'bridge']) {
   const { m, rails } = cells(1)
   const handles = []
-  const b = new Builder(fakeScene(handles), m)
+  const b = withHistory(new Builder(fakeScene(handles), m))
   b.onNotice = () => {}
   b.setFitting('textil2', 'textile_' + v)
   ok(b.fittingKind === 'textil2' && b.fittingPart === 'textile_' + v, '选中了具体的件')
@@ -112,7 +113,7 @@ for (const v of ['rainbow', 'bridge']) {
 {
   // 普通布件不带标记
   const { m, rails } = cells(1)
-  const b = new Builder(fakeScene([]), m); b.onNotice = () => {}
+  const b = withHistory(new Builder(fakeScene([]), m)); b.onNotice = () => {}
   b.setFitting('textil2'); b.mode = 'fitting'
   b._placeRailFitting(rails[0].id, rails[1].id, 0, 40)
   ok(!([...m.textiles.values()][0].variant), '普通布件没有变体标记')
@@ -123,7 +124,7 @@ for (const v of ['rainbow', 'bridge']) {
 {
   const { m } = cells(2)   // 3 根竖向 + 4 根横向 = 7 根直管
   const handles = []
-  const b = new Builder(fakeScene(handles), m)
+  const b = withHistory(new Builder(fakeScene(handles), m))
   const notices = []
   b.onNotice = (s) => notices.push(s)
   b.setFitting('sleeve', 'sleeve'); b.mode = 'fitting'

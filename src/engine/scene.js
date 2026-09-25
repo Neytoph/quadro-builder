@@ -558,7 +558,8 @@ export class SceneManager {
     // Weltpositionen der gezeichneten Kupplungen (Drehpunkt-Suche).
     this._nodePoints = [];
 
-    window.addEventListener("resize", () => this.onResize());
+    this._onWindowResize = () => this.onResize();
+    window.addEventListener("resize", this._onWindowResize);
     // Container-Größe verfolgen: Layout der Sidebar steht beim Konstruieren
     // evtl. noch nicht final -> sonst überlappen Canvas und Panel bis zum
     // ersten Resize. ResizeObserver gleicht das automatisch ab.
@@ -567,8 +568,19 @@ export class SceneManager {
       this._resizeObserver.observe(container);
     }
     this._buildViewCube();
+    this._disposed = false;
     this._animate = this._animate.bind(this);
     this._animate();
+  }
+
+  /** 不再用的画面（版本对照关掉时）：停下渲染循环，放掉渲染器和画布。 */
+  dispose() {
+    this._disposed = true;
+    window.removeEventListener("resize", this._onWindowResize);
+    if (this._resizeObserver) this._resizeObserver.disconnect();
+    this.controls.dispose();
+    this.renderer.dispose();
+    this.renderer.domElement.remove();
   }
 
   /**
@@ -3722,6 +3734,8 @@ export class SceneManager {
     // Eingefuegte Teile an einer belegten Stelle: Rot geht allem vor -- es sagt,
     // dass der Klick hier nichts absetzt.
     const invalid = opts.invalid && opts.invalid.size ? opts.invalid : null;
+    // 按零件上色（id -> 颜色）：共享方案里别人选中的零件、版本对照里增减的零件
+    const tints = opts.tints && opts.tints.size ? opts.tints : null;
     const matFor = (id, base) => {
       if (invalid && id != null && invalid.has(id)) return this._invalidMaterial(base);
       if (focusId != null && id === focusId) return this._focusMaterial(base);
@@ -3730,8 +3744,15 @@ export class SceneManager {
       }
       if (marked) {
         if (id != null && marked.has(id)) return this._selectedMaterial(base);
-        return dimOthers ? this._dimmedMaterial(base) : base;
+        if (dimOthers) return this._dimmedMaterial(base);
       }
+      if (tints && id != null && tints.has(id)) {
+        const color = tints.get(id);
+        const emissive = new THREE.Color(color).multiplyScalar(0.3);
+        return this._tintMaterial(base, "tint:" + color + ":", color, emissive);
+      }
+      // 版本对照：没变的零件退后，上了色的才看得出来
+      if (opts.dimUntinted) return this._dimmedMaterial(base);
       return base;
     };
 
@@ -5605,6 +5626,35 @@ export class SceneManager {
     return data ? { object: hit.object, data, point: hit.point, distance: hit.distance, instanceId: hit.instanceId } : null;
   }
 
+  /**
+   * 位置评论落在哪：指针下最近的零件和它表面上的那一点；没点到零件就取地面上的点。
+   * 返回 { partId, point:[x,y,z] }，地面也没点到（朝天上点）是 null。
+   */
+  pickPoint(clientX, clientY) {
+    const hit = this.pickForDelete(clientX, clientY);
+    if (hit && hit.data && hit.data.id != null) {
+      return { partId: String(hit.data.id), point: [hit.point.x, hit.point.y, hit.point.z] };
+    }
+    this._setMouse(clientX, clientY);
+    const ground = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    const p = new THREE.Vector3();
+    if (!this._raycaster.ray.intersectPlane(ground, p)) return null;
+    return { partId: null, point: [p.x, p.y, p.z] };
+  }
+
+  /** 镜头飞到一个点（点开一条位置评论）：朝向不变，把点周围 radius 厘米框进画面。 */
+  flyToPoint(point, radius = 70) {
+    const target = this.controls ? this.controls.target : new THREE.Vector3(...this._defaultCam.target);
+    const dir = this.camera.position.clone().sub(target).normalize();
+    const r = radius;
+    const bounds = {
+      min: [point[0] - r, point[1] - r, point[2] - r],
+      max: [point[0] + r, point[1] + r, point[2] + r],
+      size: [2 * r, 2 * r, 2 * r],
+    };
+    this._frameAlong(null, dir, { bounds, animate: true });
+  }
+
   // Wie pickBuild, aber inkl. Rutschen/Dächer (nur fuers Loeschen relevant; im
   // Bau-Modus sollen die dekorativen Platzhalter keine Klicks abfangen).
   pickForDelete(clientX, clientY) {
@@ -6814,6 +6864,81 @@ export class SceneManager {
   }
 
   /**
+   * 画房间边界（需求单）：地面上的轮廓、门窗、墙角点，还有正在画的那一段。
+   * pts 是地面上的点 [x, z]（厘米）；closed 表示已经封口；openings 是门窗
+   * { kind: "door"|"window", edge, from, to }；cursor 是指针所在的点，画到一半时
+   * 从最后一个点连一段虚线过去。传 null 清掉。
+   */
+  setRoomDrawing(d) {
+    if (!this._roomDrawGroup) {
+      this._roomDrawGroup = new THREE.Group();
+      this.scene.add(this._roomDrawGroup);
+    }
+    const g = this._roomDrawGroup;
+    for (const o of [...g.children]) {
+      g.remove(o);
+      o.geometry?.dispose();
+      o.material?.dispose();
+    }
+    this.requestRender();
+    if (!d || !d.pts) return;
+    const Y = 0.6;
+    const WALL = 0xea580c, WINDOW = 0x3b82c4, DOOR = 0x9aa1ac;
+    const bar = (a, b, color, width, lift = 0) => {
+      const dx = b[0] - a[0], dz = b[1] - a[1];
+      const len = Math.hypot(dx, dz);
+      if (len < 0.5) return;
+      const m = new THREE.Mesh(new THREE.BoxGeometry(len, 1.2, width),
+        new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true, opacity: 0.95 }));
+      m.position.set((a[0] + b[0]) / 2, Y + lift, (a[1] + b[1]) / 2);
+      m.rotation.y = -Math.atan2(dz, dx);
+      m.renderOrder = 20 + lift;
+      m.raycast = () => {};
+      g.add(m);
+    };
+    const pts = d.pts;
+    const n = pts.length;
+    if (d.closed && n >= 3) {
+      const shape = new THREE.Shape(pts.map(([x, z]) => new THREE.Vector2(x, -z)));
+      const fill = new THREE.Mesh(new THREE.ShapeGeometry(shape),
+        new THREE.MeshBasicMaterial({ color: 0xfff1e6, transparent: true, opacity: 0.55, depthWrite: false, side: THREE.DoubleSide }));
+      fill.rotation.x = -Math.PI / 2;
+      fill.position.y = Y - 0.3;
+      fill.renderOrder = 19;
+      fill.raycast = () => {};
+      g.add(fill);
+    }
+    const edges = d.closed ? n : n - 1;
+    for (let i = 0; i < edges; i++) bar(pts[i], pts[(i + 1) % n], WALL, 3);
+    for (const o of d.openings || []) {
+      if (o.edge >= edges) continue;
+      const a = pts[o.edge], b = pts[(o.edge + 1) % n];
+      const L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+      const at = (t) => [a[0] + (b[0] - a[0]) * t / L, a[1] + (b[1] - a[1]) * t / L];
+      bar(at(Math.min(o.from, o.to)), at(Math.max(o.from, o.to)), o.kind === "window" ? WINDOW : DOOR, 7, 1);
+    }
+    if (d.cursor && n && !d.closed) bar(pts[n - 1], d.cursor, WALL, 1.5, 0.5);
+    if (d.pending) bar(d.pending[0], d.pending[1], d.pendingKind === "window" ? WINDOW : DOOR, 7, 1);
+    for (let i = 0; i < n; i++) {
+      const dot = new THREE.Mesh(new THREE.CylinderGeometry(i === 0 && !d.closed ? 6 : 4, i === 0 && !d.closed ? 6 : 4, 1.5, 20),
+        new THREE.MeshBasicMaterial({ color: i === 0 && !d.closed ? 0x0f766e : WALL, depthTest: false }));
+      dot.position.set(pts[i][0], Y + 2, pts[i][1]);
+      dot.renderOrder = 23;
+      dot.raycast = () => {};
+      g.add(dot);
+    }
+    this.requestRender();
+  }
+
+  /** 俯视：正交相机从正上方往下看，中心在 center，把 size 厘米见方框进画面。 */
+  topView(center = [0, 0], size = 600) {
+    this.setProjection("orthographic");
+    this.setCameraPose({ pos: [center[0], size * 1.6, center[1] + 0.01], target: [center[0], 0, center[1]], zoom: 1, projection: "orthographic" });
+    const b = { min: [center[0] - size / 2, 0, center[1] - size / 2], max: [center[0] + size / 2, 0, center[1] + size / 2], size: [size, 0, size] };
+    this._frameAlong(null, new THREE.Vector3(0, 1, 0.0001).normalize(), { bounds: b, animate: false });
+  }
+
+  /**
    * Das Bild der Szene als PNG-Datenstrom -- fuer "Als Bild speichern".
    *
    * Weggelassen wird alles, was zur Bedienung gehoert und nicht zum Modell:
@@ -6999,6 +7124,14 @@ export class SceneManager {
     this._needsRender = true;
   }
 
+  /** 视角方块画不画（交付页里嵌的查看不画）。关掉以后也不接点击。 */
+  setViewCubeEnabled(on) {
+    if (this._cubeEnabled === !!on) return;
+    this._cubeEnabled = !!on;
+    this.setViewCubeHover(null);
+    this._needsRender = true;
+  }
+
   setViewCubeInset(px) {
     this.setViewCubePad(this._cubePadRight, px);
   }
@@ -7122,6 +7255,7 @@ export class SceneManager {
   }
 
   _animate() {
+    if (this._disposed) return;
     requestAnimationFrame(this._animate);
     if (this._stepCameraAnimation()) this._needsRender = true;
     if (this._stepCameraFly()) this._needsRender = true;

@@ -1,5 +1,5 @@
 import { useI18n } from '../i18n'
-import { HEIGHT_MIN, NARROW_MAX, PanelHandles, PANEL_GAP, TAB_BAR_H, usePanelLayout } from './panelLayout'
+import { HEIGHT_MIN, NARROW_MAX, PanelHandles, PANEL_GAP, TAB_BAR_H, TOOLBAR_CHROME_H, toolbarTop, usePanelLayout } from './panelLayout'
 import { useDock, type DockPane } from './dock'
 import FilePanel from './FilePanel'
 import LibraryPanel from './LibraryPanel'
@@ -9,6 +9,9 @@ import { BomPane } from './PartsList'
 import InventoryPane from './InventoryPane'
 import SafetyPane from './SafetyPane'
 import { usePresence } from './motion'
+import { useCollab } from '../collab/CollabContext'
+import CommentsPane from '../collab/ui/CommentsPane'
+import VersionsPane from '../collab/ui/VersionsPane'
 
 const TITLE: Record<DockPane, string> = {
   file: 'btn.file',
@@ -18,16 +21,25 @@ const TITLE: Record<DockPane, string> = {
   bom: 'side.bom',
   inventory: 'side.inventory',
   safety: 'safety.title',
+  comments: 'collab.pane.commentsTitle',
+  versions: 'collab.pane.versions',
 }
 
 export default function RightDock() {
-  const { pane: live, setPane } = useDock()
+  const { pane: open, setPane } = useDock()
+  const collab = useCollab()
+  // 评论和版本只属于共享方案：切到自己的标签页就不显示
+  const live = (open === 'comments' || open === 'versions') && collab.mode !== 'plan' ? null : open
   const { t } = useI18n()
-  const { right, vw, vh } = usePanelLayout()
+  const { right, left, vw, vh, toolbarW } = usePanelLayout()
   const [pane, leaving] = usePresence(live)
   if (!pane) return null
   const narrow = vw <= NARROW_MAX
-  const maxH = Math.max(HEIGHT_MIN, vh - right.top - PANEL_GAP)
+  // 面板宽到够着居中的工具条时，往下让到工具条底下，标题不被挡住
+  const toolbarRight = (vw + toolbarW) / 2
+  const clash = vw - PANEL_GAP - right.width < toolbarRight + PANEL_GAP
+  const top = clash ? Math.max(right.top, toolbarTop(left, vw) + TOOLBAR_CHROME_H + PANEL_GAP) : right.top
+  const maxH = Math.max(HEIGHT_MIN, vh - top - PANEL_GAP)
 
   return (
     <aside
@@ -36,7 +48,7 @@ export default function RightDock() {
       className={`m-dock fixed z-[45] flex flex-col overflow-y-auto scrollbar-thin qb-card text-gray-200 ${leaving ? 'm-leave pointer-events-none' : ''}`}
       style={narrow
         ? { left: PANEL_GAP, right: PANEL_GAP, top: TAB_BAR_H + PANEL_GAP, bottom: PANEL_GAP, width: 'auto', height: 'auto' }
-        : { width: right.width, top: right.top, right: PANEL_GAP, maxHeight: maxH }}
+        : { width: right.width, top, right: PANEL_GAP, maxHeight: maxH }}
     >
       <div className="sticky top-0 z-20 bg-teal-50">
         {!narrow && <PanelHandles side="right" hug moveLabel={t('hint.movePanel')} sizeLabel={t('hint.resize')} />}
@@ -57,6 +69,8 @@ export default function RightDock() {
         {pane === 'bom' && <BomPane />}
         {pane === 'inventory' && <InventoryPane />}
         {pane === 'safety' && <SafetyPane />}
+        {pane === 'comments' && <CommentsPane />}
+        {pane === 'versions' && <VersionsPane />}
       </div>
     </aside>
   )

@@ -16,6 +16,7 @@ globalThis.fetch = async (url) => {
 const { loadCatalog, getConnector, spacingFor } = await import('../src/engine/catalog.js')
 const { BuildModel } = await import('../src/engine/model.js')
 const { Builder } = await import('../src/engine/builder.js')
+const { withHistory } = await import('./withHistory.mjs')
 const { connectorsForNode } = await import('../src/engine/bom.js')
 const { parseDesign } = await import('../src/engine/library.js')
 const { buildQDF } = await import('../src/engine/qdfexport.js')
@@ -97,7 +98,7 @@ const fourWay = (m) => [...m.nodes.values()].find((n) => plain(m, n) && n.arms.l
   const n = fourWay(m)
   const el = { addEventListener() {}, removeEventListener() {}, style: {}, getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }) }
   const scene = new Proxy({ renderer: { domElement: el }, container: el }, { get(t, k) { return k in t ? t[k] : () => null } })
-  const b = new Builder(scene, m)
+  const b = withHistory(new Builder(scene, m))
   const t = tubeAt(m, n)
   b.selection.set(t.id, 'tube')
   b.deleteSelection()

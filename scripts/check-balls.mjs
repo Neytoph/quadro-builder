@@ -16,6 +16,7 @@ globalThis.fetch = async (url) => {
 const { loadCatalog, getTube } = await import('../src/engine/catalog.js')
 const { BuildModel, POOL_SETS, POOL_KINDS } = await import('../src/engine/model.js')
 const { Builder } = await import('../src/engine/builder.js')
+const { withHistory } = await import('./withHistory.mjs')
 const { computeBOM, ballBagsFor } = await import('../src/engine/bom.js')
 const { buildQDF } = await import('../src/engine/qdfexport.js')
 await loadCatalog()
@@ -95,7 +96,7 @@ function withPool(linerId = 'pool_liner_l') {
 {
   const { m, f } = withPool('pool_liner_s')
   const handles = []
-  const b = new Builder(fakeScene(handles), m)
+  const b = withHistory(new Builder(fakeScene(handles), m))
   const notices = []
   b.onNotice = (s) => notices.push(s)
   ok(b.startPool('balls') === 'mount', '选海洋球该进入挂载态')
@@ -111,7 +112,7 @@ function withPool(linerId = 'pool_liner_l') {
   ok(f.balls === false, '再点倒出来')
   b.undo && b.undo()
   // 没有泳池时不进模式
-  const empty = new Builder(fakeScene([]), new BuildModel())
+  const empty = withHistory(new Builder(fakeScene([]), new BuildModel()))
   const en = []
   empty.onNotice = (s) => en.push(s)
   ok(empty.startPool('balls') === false && empty.mode !== 'fitting', '没泳池不进模式')

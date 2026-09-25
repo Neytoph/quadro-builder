@@ -3,7 +3,9 @@ import { MOTION } from './motion'
 import { useEngine } from '../store/EngineContext'
 import { useI18n } from '../i18n'
 import { NARROW_MAX, TAB_BAR_H, usePanelLayout } from './panelLayout'
-import { DOCK_PILLS, useDock } from './dock'
+import { DOCK_PILLS, PLAN_PILLS, useDock } from './dock'
+import { useCollab } from '../collab/CollabContext'
+import ShareCluster from '../collab/ui/ShareCluster'
 
 const GROUPS: (typeof DOCK_PILLS)[] = [
   DOCK_PILLS.filter(p => p.id === 'file' || p.id === 'saves'),
@@ -12,8 +14,19 @@ const GROUPS: (typeof DOCK_PILLS)[] = [
   DOCK_PILLS.filter(p => p.id === 'safety'),
 ]
 
+// 当前标签页是共享方案：「我的库存」和「安全」之间多一组「评论 / 版本」
+const PLAN_GROUPS: (typeof DOCK_PILLS)[] = [...GROUPS.slice(0, 3), PLAN_PILLS, GROUPS[3]]
+// 没登录的访客：只留看的格子
+const VISITOR_GROUPS: (typeof DOCK_PILLS)[] = [
+  DOCK_PILLS.filter(p => p.id === 'advisor' || p.id === 'bom'),
+  PLAN_PILLS,
+  GROUPS[3],
+]
+
 export default function ProjectTabs() {
   const api = useEngine()
+  const collab = useCollab()
+  const planMode = collab.mode === 'plan'
   const { t } = useI18n()
   const { pane, toggle } = useDock()
   const { vw } = usePanelLayout()
@@ -57,30 +70,38 @@ export default function ProjectTabs() {
       </a>
       {!narrow && (
       <div className="flex items-center gap-1 min-w-0 flex-1 overflow-x-auto scrollbar-thin">
-      {api.tabs.map(tab => (
-        <div key={tab.tabId}
+      {api.tabs.map(tab => {
+        // 共享方案：创建人、编辑者改的是方案的名字，评论者和访客不能改
+        const renamable = !tab.planId || collab.renamable(tab.planId)
+        return (
+        <div key={tab.tabId} data-plan-tab={tab.planId || undefined}
           className={`m-tab flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs shrink-0 ${tab.tabId === api.activeTabId ? 'bg-gray-800 border-teal-500 text-teal-700' : 'bg-transparent border-transparent text-gray-400 hover:text-gray-200 hover:bg-gray-900'}`}>
           {editing === tab.tabId ? (
             <input autoFocus defaultValue={tab.name} className="bg-transparent w-24 outline-none"
-              onBlur={e => { api.renameTab(tab.tabId, e.target.value); setEditing(null) }}
+              onBlur={e => {
+                if (tab.planId) collab.renamePlan(tab.planId, e.target.value)
+                else api.renameTab(tab.tabId, e.target.value)
+                setEditing(null)
+              }}
               onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} />
           ) : (
-            <button onClick={() => api.activateTab(tab.tabId)} onDoubleClick={() => setEditing(tab.tabId)}
-              title={t('hint.renameTab')} className="cursor-pointer max-w-[10rem] truncate">
+            <button onClick={() => api.activateTab(tab.tabId)} onDoubleClick={() => { if (renamable) setEditing(tab.tabId) }}
+              title={renamable ? t('hint.renameTab') : undefined} className="cursor-pointer max-w-[10rem] truncate">
               {tab.name}{tab.dirty ? ' •' : ''}
             </button>
           )}
           <button onClick={() => close(tab.tabId, tab.dirty)} className="text-gray-500 hover:text-teal-600 cursor-pointer"
             title={t('saves.delete')}>×</button>
         </div>
-      ))}
+        )
+      })}
       <button onClick={api.newTab} className="w-6 h-6 shrink-0 rounded-md border border-gray-800 bg-gray-900/80 text-gray-300 hover:border-teal-400 cursor-pointer">+</button>
       </div>
       )}
 
       <div ref={pillsRef} className={`relative flex items-center gap-1.5 ${narrow ? 'flex-1 overflow-x-auto scrollbar-thin' : 'shrink-0'}`}>
         {MOTION && <span ref={indRef} aria-hidden className="m-pill-ind" />}
-        {GROUPS.map((group, i) => (
+        {(planMode ? (collab.plan && !collab.plan.me ? VISITOR_GROUPS : PLAN_GROUPS) : GROUPS).map((group, i) => (
           <div key={i} className="flex items-center gap-0.5 shrink-0">
             {i > 0 && <span className="w-px h-4 bg-gray-700 mx-0.5" />}
             {group.map(item => {
@@ -89,6 +110,7 @@ export default function ProjectTabs() {
               const issues = item.id === 'safety' && api.safety
                 ? api.safety.findings.filter(f => f.level !== 'info').length
                 : null
+              const unread = item.id === 'comments' ? collab.unread.pins + collab.unread.chat : 0
               const mark = issues == null ? '' : issues ? ` · ${issues}` : ' ✓'
               const tone = issues == null || on ? '' : issues ? ' text-amber-300' : ' text-teal-400'
               return (
@@ -99,12 +121,14 @@ export default function ProjectTabs() {
                       : `text-gray-300 hover:text-teal-600 hover:bg-gray-900${tone}`
                   }`}>
                   {t(item.labelKey)}{mark}
+                  {unread > 0 && <b className="cb-n" data-unread>{unread}</b>}
                 </button>
               )
             })}
           </div>
         ))}
       </div>
+      <ShareCluster />
     </div>
   )
 }

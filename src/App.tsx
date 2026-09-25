@@ -16,7 +16,18 @@ import { PanelLayoutProvider } from './ui/panelLayout'
 import { UI_ESCAPE_EVENT } from './ui/events'
 import { DockProvider, useDock } from './ui/dock'
 import { usePresence } from './ui/motion'
-import { fullBuilderUrl, VIEW_ONLY } from './entry'
+import { bootEntry, DELIVERY_EMBED, dropParam, fullBuilderUrl, VIEW_ONLY } from './entry'
+import { syncNow, syncProbe } from './sync/bootstrap'
+import { pullDoc } from './sync/docEntry'
+import { collabApi } from './collab/api'
+import { CollabProvider, useCollab } from './collab/CollabContext'
+import './collab/collab.css'
+import { JoinModal } from './collab/ui/Modals'
+import PlanOverlays from './collab/ui/PlanOverlays'
+import CollabCoach from './collab/ui/CollabCoach'
+import CompareView from './collab/ui/CompareView'
+import BatchImport from './collab/ui/BatchImport'
+import RoomEditor from './collab/ui/RoomEditor'
 
 function Toast() {
   const { toast: live, dismissToast } = useEngine()
@@ -205,14 +216,89 @@ function ViewBar() {
 /** 只看模式：嵌在方案页、造型页里，只有 3D 画面和分步手册，左上角是「在 Builder 里打开」。 */
 function ViewShell() {
   const { t } = useI18n()
+  const collab = useCollab()
+  const { ready, setViewCubeEnabled } = useEngine()
+  // 交付查看没有「在 Builder 里打开」；嵌在交付页里时连分步手册和视角方块也不画
+  const delivery = collab.mode === 'delivery'
+  useEffect(() => {
+    if (ready && DELIVERY_EMBED) setViewCubeEnabled(false)
+  }, [ready, setViewCubeEnabled])
   return (
-    <div className="app-viewport w-screen flex bg-gray-950 overflow-hidden">
+    <div className="app-viewport w-screen flex bg-gray-950 overflow-hidden" data-ui={DELIVERY_EMBED ? 'delivery-embed' : undefined}>
       <CanvasHost />
-      <a href={fullBuilderUrl()} target="_top" className="qb-btn qb-btn-sm fixed top-3 left-3 z-40 no-underline">{t('view.open')} ↗</a>
-      <ViewBar />
+      {!delivery && <a href={fullBuilderUrl()} target="_top" className="qb-btn qb-btn-sm fixed top-3 left-3 z-40 no-underline">{t('view.open')} ↗</a>}
+      {!DELIVERY_EMBED && <ViewBar />}
       <Toast />
     </div>
   )
+}
+
+/** 画房间边界：一张俯视的平面图和左边的面板（三维画面在底下，不用）。 */
+function RoomShell() {
+  const collab = useCollab()
+  return (
+    <div className="app-viewport w-screen flex bg-gray-950 overflow-hidden">
+      <CanvasHost />
+      {collab.room && <RoomEditor />}
+      <Toast />
+    </div>
+  )
+}
+
+/** ?import=qdf：打开就是批量导入 */
+function ImportOnEntry() {
+  const [open, setOpen] = useState(() => bootEntry().importQdf)
+  const { ready } = useEngine()
+  if (!open || !ready) return null
+  return <BatchImport onClose={() => setOpen(false)} />
+}
+
+/**
+ * ?doc=<doc id>：打开自己「我的设计」里的这一座。没登录先去登录；登录了等同步跑完一轮，
+ * 开启过共享的这一座打开方案标签页，其余的打开它的标签页；本机没有就从 /models 拉下来，
+ * 服务端也没有（不是自己的、删掉了）就说找不到。
+ */
+function DocOnEntry() {
+  const api = useEngine()
+  const collab = useCollab()
+  const { t } = useI18n()
+  const done = useRef(false)
+  const { ready, openDoc, notify } = api
+  const { openPlan, loginUrl, report } = collab
+
+  useEffect(() => {
+    const id = bootEntry().doc
+    if (!id || !ready || done.current) return
+    done.current = true
+    void (async () => {
+      const signedIn = await syncProbe()
+      if (signedIn === false) { location.href = loginUrl(); return }
+      if (signedIn !== true) throw new Error('?doc=: sync server did not answer')
+      await syncNow()
+      dropParam('doc')
+      if ((await collabApi.mine()).some(p => p.id === id)) { await openPlan(id); return }
+      if (!await pullDoc(import.meta.env.VITE_SYNC_BASE as string, id)) { notify(t('doc.notFound'), 'err'); return }
+      await openDoc(id)
+    })().catch(report)
+  }, [ready, openDoc, notify, openPlan, loginUrl, report, t])
+
+  return null
+}
+
+/**
+ * ?new=1：这台设备上记着的标签页恢复出来以后，在它们后面新开一个空白标签页。
+ * 开完从地址栏去掉，刷新不会再开一个。
+ */
+function NewOnEntry() {
+  const { ready, newTab } = useEngine()
+  const done = useRef(false)
+  useEffect(() => {
+    if (!bootEntry().blank || !ready || done.current) return
+    done.current = true
+    newTab()
+    dropParam('new')
+  }, [ready, newTab])
+  return null
 }
 
 function ManualProgress() {
@@ -230,6 +316,7 @@ function ManualProgress() {
 
 function AppInner() {
   const api = useEngine()
+  const collab = useCollab()
   const { handleEsc } = useDock()
 
   useEffect(() => {
@@ -270,6 +357,14 @@ function AppInner() {
       if (meta && (e.key === 'a' || e.key === 'A')) { e.preventDefault(); api.selectAll(); return }
       if (meta && (e.key === 'g' || e.key === 'G')) { e.preventDefault(); e.shiftKey ? api.ungroup() : api.group(); return }
       if (meta) return
+      // 共享方案的成员：C 放一颗评论图钉
+      if ((e.key === 'c' || e.key === 'C') && collab.mode === 'plan' && collab.role !== 'guest') {
+        e.preventDefault()
+        api.setMode('select')
+        collab.setPinDraft(null)
+        collab.setPlacingPin(!collab.placingPin)
+        return
+      }
       if ((e.key === 'm' || e.key === 'M') && (api.selectionCount || api.pasting)) {
         e.preventDefault()
         api.mirror(e.shiftKey ? 'fb' : 'lr')
@@ -337,24 +432,34 @@ function AppInner() {
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [api, handleEsc])
+  }, [api, collab, handleEsc])
 
+  // 共享方案里只能看的人没有颜色栏；访客连工具条也没有，评论者的工具条只剩「选择」「评论」
+  const viewer = collab.mode === 'plan' && !collab.canEdit
+  const visitor = viewer && collab.role === 'guest'
   return (
     <div className="app-viewport w-screen flex bg-gray-950 overflow-hidden">
       <CanvasHost />
       <SceneToggle />
       <ProjectTabs />
-      <TopToolbar />
-      <LeftStack />
+      {!visitor && !collab.compare && <TopToolbar />}
+      {!viewer && !collab.compare && <LeftStack />}
       <RightDock />
-      <AssemblyBar />
+      {!collab.compare && <AssemblyBar />}
+      {collab.mode === 'plan' && !collab.compare && <PlanOverlays />}
+      {collab.mode === 'plan' && collab.compare && <CompareView key={collab.session?.id} />}
+      <JoinModal />
       <Toast />
       <ManualConfirm />
       <AccountDialog />
       <NameDialog />
       <ManualProgress />
-      <Onboarding />
+      {collab.mode === 'off' && <Onboarding />}
+      {collab.mode === 'plan' && <CollabCoach />}
       <ThumbCapture />
+      <ImportOnEntry />
+      <DocOnEntry />
+      <NewOnEntry />
     </div>
   )
 }
@@ -372,11 +477,20 @@ export default function App() {
 function EngineShell() {
   return (
     <EngineProvider>
-      <PanelLayoutProvider>
-        <DockProvider>
-          {VIEW_ONLY ? <ViewShell /> : <AppInner />}
-        </DockProvider>
-      </PanelLayoutProvider>
+      <CollabProvider>
+        <PanelLayoutProvider>
+          <DockProvider>
+            <Shell />
+          </DockProvider>
+        </PanelLayoutProvider>
+      </CollabProvider>
     </EngineProvider>
   )
+}
+
+function Shell() {
+  const collab = useCollab()
+  if (VIEW_ONLY || collab.mode === 'delivery') return <ViewShell />
+  if (collab.mode === 'room') return <RoomShell />
+  return <AppInner />
 }

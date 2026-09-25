@@ -26,6 +26,11 @@ interface ImportMetaEnv {
    * 开源本地版不设，导出不拦。
    */
   readonly VITE_REGISTER_URL?: string
+  /**
+   * 托管版的登录页，例如 '/login'。共享方案的邀请链接没登录时先去这里，
+   * 带着 ?next= 回到 Builder 接着加入。开源本地版不设（也就没有共享方案）。
+   */
+  readonly VITE_LOGIN_URL?: string
 }
 interface ImportMeta {
   readonly env: ImportMetaEnv

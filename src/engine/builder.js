@@ -114,9 +114,17 @@ export class Builder {
     this.assemblyOrder = "y+";   // Aufbaurichtung, siehe buildplan.BUILD_ORDERS
     this.manualLabels = false;   // 说明书导出：显示当前步所有接头/管标注
 
-    this._undoStack = [];
-    this._redoStack = [];
-    this._maxUndo = 60;
+    // 编辑记录（src/collab/history.ts）：每次编辑的前后两份 JSON 交给它写进
+    // Yjs 文档，撤销和重做也由它做。由外壳在打开一座造型时 setHistory 接上。
+    this.history = null;
+    // 拖动、粘贴进行中时文档被别处改了：等这次操作收尾再读进来
+    this._externalPending = false;
+    // 只能看（共享方案的评论者和访客、交付查看）：能选、能转视角，改动一律不收
+    this.readOnly = false;
+    // 外壳借模型去截缩略图、封面：这段时间模型里放的是别的东西
+    this.held = false;
+    // 按零件上色（id -> 颜色）：共享方案里别人选中的零件
+    this.tints = null;
 
     this._down = null;
     this._clampDrag = null;
@@ -135,18 +143,70 @@ export class Builder {
   }
 
   // --- Undo ---------------------------------------------------------------
-  // Fuehrt eine Modell-Aenderung aus und merkt den Zustand davor (nur wenn sich
-  // wirklich etwas geaendert hat).
+  /**
+   * 接上一座造型的编辑记录。文档被别处改了（撤销、重做、别人的修改、本机数据库
+   * 读出来的内容）时从文档重新读出整座；拖动或粘贴进行中就等它收尾。
+   */
+  setHistory(history) {
+    if (this.history && this.history !== history) {
+      this.history.onChange(() => {});
+      this.history.onExternal(() => {});
+    }
+    this.history = history;
+    this._externalPending = false;
+    history.onChange(() => this.onHistoryChange());
+    history.onExternal(() => this._externalChange());
+    this.onHistoryChange();
+  }
+
+  /**
+   * 正在拖动、滑动夹子或者粘贴，或者外壳借模型去截图（held）：模型里是还没交出去的
+   * 中间状态。
+   */
+  busy() {
+    return !!(this.held || this._paste || this._drag || this._clampDrag || this._clampSlide);
+  }
+
+  _externalChange() {
+    if (this.busy()) { this._externalPending = true; return; }
+    this._externalPending = false;
+    this.applyExternal(this.history.toJSON());
+  }
+
+  /** 从文档读出来的整座造型换进模型，选择里已经不存在的零件去掉。 */
+  applyExternal(json) {
+    const res = this.model.loadJSON(json);
+    if (!res.ok) throw new Error(`Yjs document does not load: ${res.reason}`);
+    if (this.selectedNodeId && !this.model.nodes.has(this.selectedNodeId)) {
+      this.selectedNodeId = null;
+    }
+    this._pruneSelection();
+    if (this.mode === "assembly") this.enterAssembly();
+    this.refresh();
+  }
+
+  setReadOnly(on) {
+    this.readOnly = !!on;
+    if (this.readOnly && this.mode !== "select" && this.mode !== "assembly") this.setMode("select");
+  }
+
+  // 只读时的改动：模型退回改动前，提示一句。
+  _refuseEdit(beforeJson) {
+    this.model.loadJSON(JSON.parse(beforeJson));
+    this._pruneSelection();
+    this.onNotice(t("notice_read_only"), "warn");
+    this.refresh();
+  }
+
+  // Fuehrt eine Modell-Aenderung aus und gibt sie an die Bearbeitungshistorie
+  // weiter (nur wenn sich wirklich etwas geaendert hat).
   recordHistory(mutateFn) {
     const before = JSON.stringify(this.model.toJSON());
     const ret = mutateFn();
     const after = JSON.stringify(this.model.toJSON());
-    if (after !== before) {
-      this._undoStack.push(before);
-      if (this._undoStack.length > this._maxUndo) this._undoStack.shift();
-      this._redoStack = []; // neue Aenderung verwirft die Redo-Historie
-      this.onHistoryChange();
-    }
+    if (after === before) return ret;
+    if (this.readOnly) { this._refuseEdit(before); return ret; }
+    this.history.commit(before, after);
     return ret;
   }
 
@@ -168,44 +228,26 @@ export class Builder {
     return true;
   }
 
-  canUndo() { return this._undoStack.length > 0; }
+  canUndo() { return !!this.history && this.history.canUndo(); }
 
-  canRedo() { return this._redoStack.length > 0; }
+  canRedo() { return !!this.history && this.history.canRedo(); }
 
   clearHistory() {
-    this._undoStack = [];
-    this._redoStack = [];
-    this.onHistoryChange();
+    this.history.clear();
   }
 
+  // 撤销和重做改的是文档；文档一变，_externalChange 把结果读回模型。
+  // 粘贴中撤销先放下手上的副本；拖动中（按键还按着）不撤销。
   undo() {
-    if (!this._undoStack.length) return;
-    const prev = this._undoStack.pop();
-    this._redoStack.push(JSON.stringify(this.model.toJSON()));
-    if (this._redoStack.length > this._maxUndo) this._redoStack.shift();
-    this.model.loadJSON(JSON.parse(prev));
-    if (this.selectedNodeId && !this.model.nodes.has(this.selectedNodeId)) {
-      this.selectedNodeId = null;
-    }
-    this._pruneSelection();
-    if (this.mode === "assembly") this.enterAssembly();
-    this.onHistoryChange();
-    this.refresh();
+    if (this._paste) this.cancelPaste();
+    if (this.busy() || !this.canUndo()) return;
+    this.history.undo();
   }
 
   redo() {
-    if (!this._redoStack.length) return;
-    const next = this._redoStack.pop();
-    this._undoStack.push(JSON.stringify(this.model.toJSON()));
-    if (this._undoStack.length > this._maxUndo) this._undoStack.shift();
-    this.model.loadJSON(JSON.parse(next));
-    if (this.selectedNodeId && !this.model.nodes.has(this.selectedNodeId)) {
-      this.selectedNodeId = null;
-    }
-    this._pruneSelection();
-    if (this.mode === "assembly") this.enterAssembly();
-    this.onHistoryChange();
-    this.refresh();
+    if (this._paste) this.cancelPaste();
+    if (this.busy() || !this.canRedo()) return;
+    this.history.redo();
   }
 
   // --- oeffentliche Steuerung --------------------------------------------
@@ -780,6 +822,7 @@ export class Builder {
    */
   startPaste(frag, opts = {}) {
     if (!frag) return false;
+    if (this.readOnly) { this.onNotice(t("notice_read_only"), "warn"); return false; }
     this.cancelPaste();
     this.setMode("select");
     this._paste = {
@@ -990,14 +1033,12 @@ export class Builder {
     this.refresh();
   }
 
-  /** Zustand von VOR einer Aenderung in die Historie legen (siehe recordHistory). */
+  /** Eine Aenderung abschliessen: Zustand davor und jetzt an die Historie (siehe recordHistory). */
   _pushHistory(beforeJson) {
     const after = JSON.stringify(this.model.toJSON());
     if (after === beforeJson) return;
-    this._undoStack.push(beforeJson);
-    if (this._undoStack.length > this._maxUndo) this._undoStack.shift();
-    this._redoStack = [];
-    this.onHistoryChange();
+    if (this.readOnly) { this._refuseEdit(beforeJson); return; }
+    this.history.commit(beforeJson, after);
   }
 
   /** Ein echtes Rohr -- keine Arm-Huelse und keine Doppelrohr-Verbindung. */
@@ -1064,7 +1105,7 @@ export class Builder {
 
   /** Laesst sich an dieser Stelle ein Ziehen der Auswahl beginnen? */
   _isMoveHandle(id) {
-    return this.mode === "select" && this.selection.size > 0 && this.selection.has(id);
+    return !this.readOnly && this.mode === "select" && this.selection.size > 0 && this.selection.has(id);
   }
 
   _beginMoveDrag(e, pick) {
@@ -1270,11 +1311,10 @@ export class Builder {
   }
 
   /**
-   * Zustand, der zu EINEM Modell gehört: gewähltes Bauteil, Modus, Ansichts-
-   * schalter und die Schrittspeicher. Beim Wechsel zwischen Tabs wird er
-   * gesichert und wieder eingesetzt -- jede Datei behält so ihre eigene
-   * Werkzeugleiste. Alles darin ist JSON-tauglich (die Schrittspeicher halten
-   * ohnehin nur Modell-Abzüge).
+   * Zustand, der zu EINEM Modell gehört: gewähltes Bauteil, Modus und Ansichts-
+   * schalter. Beim Wechsel zwischen Tabs wird er gesichert und wieder
+   * eingesetzt -- jede Datei behält so ihre eigene Werkzeugleiste. Alles darin
+   * ist JSON-tauglich. Die Schrittspeicher gehören zur Historie jedes Tabs.
    */
   uiState() {
     return {
@@ -1283,7 +1323,6 @@ export class Builder {
       clampPart: this.clampPart, slideKind: this.slideKind,
       color: this.color,
       assemblyOrder: this.assemblyOrder, assemblyStep: this.assemblyStep,
-      undo: this._undoStack.slice(), redo: this._redoStack.slice(),
     };
   }
 
@@ -1299,8 +1338,6 @@ export class Builder {
     if (s.color) this.color = s.color;
     if (s.assemblyOrder) this.assemblyOrder = s.assemblyOrder;
     this.assemblyStep = s.assemblyStep || 0;
-    this._undoStack = Array.isArray(s.undo) ? s.undo.slice() : [];
-    this._redoStack = Array.isArray(s.redo) ? s.redo.slice() : [];
     this.selection.clear();
     this.selectedNodeId = null;
     this.highlight = null;
@@ -1547,7 +1584,13 @@ export class Builder {
   }
 
   refresh() {
-    const assembly = this.mode === "assembly" && this.buildPlan.steps.length
+    // 拖动、粘贴期间攒下的外部修改：操作收尾以后的第一次刷新读进来
+    if (this._externalPending && !this.busy()) {
+      this._externalPending = false;
+      this.applyExternal(this.history.toJSON());
+      return;
+    }
+    const assembly =this.mode === "assembly" && this.buildPlan.steps.length
       ? this._assemblyVisibility() : null;
     // Genau EIN gewaehltes Teil: dessen Namen anzeigen. Nur dann -- alle Namen
     // auf einmal machten das Bild unleserlich, deshalb gibt es den frueheren
@@ -1589,7 +1632,7 @@ export class Builder {
     const firstRails = this._firstRailCandidates();
     this.scene.renderModel(this.model, this.selectedNodeId,
       { labelFor, slideNameFor, labelIds, soloId, soloLabel, assembly, suggest, reinforce,
-        selected, highlight: this.highlight || firstRails, invalid,
+        selected, highlight: this.highlight || firstRails, invalid, tints: this.tints,
         focusId: this.panelRail ? this.panelRail.id : null,
         preview: !!(this._paste || this._drag || this._clampDrag || this._clampSlide) });
     this._buildHandles();
@@ -3355,6 +3398,7 @@ export class Builder {
   }
 
   _beginClampDrag(id) {
+    if (this.readOnly) return false;
     const c = this.model.clamps.get(id);
     if (!c || !c.dir || !c.off) return false;
     this._clampDrag = {
@@ -3441,6 +3485,7 @@ export class Builder {
   }
 
   _beginClampSlide(id) {
+    if (this.readOnly) return false;
     const c = this.model.clamps.get(id);
     if (!c || !c.dir) return false;
     const group = this.model.clampCohort(id);

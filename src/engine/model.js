@@ -612,10 +612,13 @@ export class BuildModel {
     // 点到组里任何一件整组一起选。gid -> Set<id>
     this.groups = new Map();
     this._seq = 1;
+    // 共享方案里几个人同时加零件：每个编辑端一个标记夹在前缀和序号中间，
+    // 各端新建的 id 不会撞上。标记以非数字结尾，id 末尾仍是序号。
+    this.idTag = "";
   }
 
   _id(prefix) {
-    return prefix + this._seq++;
+    return prefix + this.idTag + this._seq++;
   }
 
   // --- Knoten -------------------------------------------------------------
