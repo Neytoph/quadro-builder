@@ -115,6 +115,11 @@ check('标签页名字是存档名', await page.getByText('攀爬架测试').fir
 // 开源本地版（没设 VITE_SYNC_BASE）：共享相关的界面一样都不出现
 check('开源本地版没有「共享」按钮', !(await page.locator('.cb-cluster, [data-ui=share-enable], [data-ui=plan-share]').count()))
 check('开源本地版顶栏没有「评论」「版本」', !(await page.getByRole('button', { name: /^评论|^版本$/ }).count()))
+// 共享方案的提示气泡没记过看过，带着 ?plan= 打开也不出现
+await page.goto(BASE + '?plan=dmugq53qaboel4')
+await page.waitForFunction(() => window.__quadroDev?.model)
+await page.waitForTimeout(1500)
+check('开源本地版带着 ?plan= 打开也不出共享方案的提示气泡', !(await page.locator('[data-ui=collab-coach]').count()))
 await page.close()
 
 // 批量导入 .qdf：?import=qdf 打开就是导入框，每个文件存成一座造型

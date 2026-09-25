@@ -146,6 +146,9 @@ export function CollabProvider({ children }: { children: ReactNode }) {
   const [readAt, setReadAt] = useState<Record<string, number>>({})
   const [myPlans, setMyPlans] = useState<Array<{ id: string; name: string; role: Role }>>([])
   const [joinAsk, setJoinAsk] = useState<JoinAsk | null>(null)
+  // 地址上带着邀请：加入以前先不连这个方案。上次看过它的话标签页会恢复出来，
+  // 抢在加入之前按访客连上，加入以后还是只读
+  const [joining, setJoining] = useState(!!(entry.plan && entry.invite))
   const nudgeSeen = useRef(new Map<number, number>())
 
   // 引擎那边这几样是稳定的，下面的回调和副作用只依赖它们，不依赖每次渲染都换新的 api
@@ -178,6 +181,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
     }
     for (const [planId, tabId] of wanted) {
       if (sessions.current.has(planId) || loading.current.has(planId)) continue
+      if (joining && planId === entry.plan) continue
       loading.current.add(planId)
       collabApi.plan(planId).then((plan) => {
         const local = tabLocal(tabId)
@@ -195,7 +199,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
         setErrors(e => ({ ...e, [planId]: errText(err) }))
       }).finally(() => { loading.current.delete(planId) })
     }
-  }, [enabled, api.ready, api.tabs, tabLocal, setTabAccess, bump])
+  }, [enabled, api.ready, api.tabs, tabLocal, setTabAccess, bump, joining, entry.plan])
 
   useEffect(() => () => { for (const s of sessions.current.values()) s.destroy() }, [])
 
@@ -267,13 +271,15 @@ export function CollabProvider({ children }: { children: ReactNode }) {
         if (!entry.plan) return
         const plan = await collabApi.plan(entry.plan)
         if (entry.invite) {
-          if (!plan.me) { setJoinAsk({ plan, invite: entry.invite }); return }
+          if (!plan.me) { setJoining(false); setJoinAsk({ plan, invite: entry.invite }); return }
           await collabApi.join(entry.invite)
+          setJoining(false)
           dropParam('invite')
           api.notify(t('collab.join.joined'))
         }
         api.openPlanTab(plan.id, plan.name)
       } catch (err) {
+        setJoining(false)
         if (entry.plan) setErrors(e => ({ ...e, [entry.plan as string]: errText(err) }))
         else report(err)
       }

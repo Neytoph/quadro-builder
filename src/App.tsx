@@ -21,6 +21,7 @@ import { CollabProvider, useCollab } from './collab/CollabContext'
 import './collab/collab.css'
 import { JoinModal } from './collab/ui/Modals'
 import PlanOverlays from './collab/ui/PlanOverlays'
+import CollabCoach from './collab/ui/CollabCoach'
 import CompareView from './collab/ui/CompareView'
 import BatchImport from './collab/ui/BatchImport'
 import RoomEditor from './collab/ui/RoomEditor'
@@ -403,6 +404,7 @@ function AppInner() {
       <NameDialog />
       <ManualProgress />
       {collab.mode === 'off' && <Onboarding />}
+      {collab.mode === 'plan' && <CollabCoach />}
       <ThumbCapture />
       <ImportOnEntry />
     </div>

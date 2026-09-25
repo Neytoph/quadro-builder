@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useI18n } from '../../i18n'
 import { mediaUrl, type Post, type Thread } from '../api'
 import { isDesigner, useCollab } from '../CollabContext'
+import { useDock, type CommentsTab } from '../../ui/dock'
 import { day, Face, when } from './bits'
 import { Compose, RefCard } from './Compose'
 
@@ -15,7 +16,9 @@ type Filter = 'open' | 'done' | 'all'
 export default function CommentsPane() {
   const collab = useCollab()
   const { t } = useI18n()
-  const [tab, setTab] = useState<'pins' | 'chat'>(collab.unread.chat && !collab.unread.pins ? 'chat' : 'pins')
+  const { commentsTab } = useDock()
+  const [tab, setTab] = useState<CommentsTab>(commentsTab || (collab.unread.chat && !collab.unread.pins ? 'chat' : 'pins'))
+  useEffect(() => { if (commentsTab) setTab(commentsTab) }, [commentsTab])
   const [filter, setFilter] = useState<Filter>('open')
   const seen = useRef<(p: Post) => boolean>(collab.isUnread)
 

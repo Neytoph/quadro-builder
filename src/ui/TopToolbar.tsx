@@ -380,7 +380,7 @@ export default function TopToolbar() {
       {commenting && <>
         {sep}
         {/* 共享方案：放一颗图钉写位置评论（快捷键 C） */}
-        <button className="m-tool qb-tool" data-mode-on={collab.placingPin} title={t('collab.pin.toolHint')} data-ui="tool-comment"
+        <button className="m-tool qb-tool" data-mode-on={collab.placingPin} title={t('collab.pin.toolHint')} data-ui="tool-comment" data-tour="tool-comment"
           onClick={() => { api.setMode('select'); collab.setPinDraft(null); collab.setPlacingPin(!collab.placingPin); close() }}>
           <MessageSquarePlus size={16} strokeWidth={2} />{t('collab.pin.tool')}
         </button>

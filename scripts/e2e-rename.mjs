@@ -28,6 +28,8 @@ async function person(label) {
   await ctx.addInitScript(() => {
     if (!location.protocol.startsWith('http')) return
     localStorage.setItem('quadro.builder.onboarded.v2', '1')
+    localStorage.setItem('quadro.builder.collab-coach.v1', '1')
+    localStorage.setItem('quadro.builder.collab-coach-guest.v1', '1')
     localStorage.setItem('quadro.lang', 'zh')
     localStorage.setItem('quadro-builder-lang', 'zh')
   })

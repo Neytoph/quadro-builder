@@ -1,17 +1,13 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useI18n } from '../i18n'
 import { UI_ESCAPE_EVENT } from './events'
 import { useDock, type DockPane } from './dock'
 import { usePanelLayout } from './panelLayout'
 import { track } from '../analytics/track'
+import { CoachFrame, useCoachMeasure, type Prefer } from './CoachFrame'
 
 const KEY = 'quadro.builder.onboarded.v2'
 export const ONBOARDING_EVENT = 'quadro:onboarding'
-
-const PAD = 8
-const CARD_W = 340
-
-type Prefer = 'left' | 'right' | 'bottom' | 'top'
 
 const STEPS: Array<{
   title: string
@@ -38,59 +34,16 @@ function markDone() {
   try { localStorage.setItem(KEY, '1') } catch { /* ignore */ }
 }
 
-function clamp(n: number, min: number, max: number) {
-  return Math.min(Math.max(min, n), max)
-}
-
-function placeCard(hole: DOMRect | null, prefer: Prefer, cardH: number) {
-  const margin = 12
-  const vw = window.innerWidth
-  const vh = window.innerHeight
-  const w = Math.min(CARD_W, vw - margin * 2)
-  const h = cardH
-  if (!hole) return { top: Math.max(margin, (vh - h) / 2), left: Math.max(margin, (vw - w) / 2) }
-  const midY = hole.top + hole.height / 2 - h / 2
-  const midX = hole.left + hole.width / 2 - w / 2
-  const right = hole.right + PAD + margin
-  const left = hole.left - w - margin
-  const below = hole.bottom + PAD + margin
-  const above = hole.top - h - margin
-  const order: Prefer[] = prefer === 'left'
-    ? ['left', 'right', 'bottom', 'top']
-    : prefer === 'right'
-      ? ['right', 'left', 'bottom', 'top']
-      : prefer === 'top'
-        ? ['top', 'bottom', 'right', 'left']
-        : ['bottom', 'top', 'right', 'left']
-  for (const side of order) {
-    if (side === 'right' && right + w <= vw - margin) return { top: clamp(midY, margin, vh - h - margin), left: right }
-    if (side === 'left' && left >= margin) return { top: clamp(midY, margin, vh - h - margin), left: left }
-    if (side === 'bottom' && below + h <= vh - margin) return { top: below, left: clamp(midX, margin, vw - w - margin) }
-    if (side === 'top' && above >= margin) return { top: above, left: clamp(midX, margin, vw - w - margin) }
-  }
-  return { top: clamp(below, margin, vh - h - margin), left: clamp(midX, margin, vw - w - margin) }
-}
-
-function readTourRect(id: string): DOMRect | null {
-  const el = document.querySelector(`[data-tour="${id}"]`)
-  if (!el) return null
-  const r = el.getBoundingClientRect()
-  if (r.width < 2 || r.height < 2) return null
-  return r
-}
-
 export default function Onboarding() {
   const { t } = useI18n()
   const { setPane } = useDock()
   const { setLeftColor } = usePanelLayout()
   const [open, setOpen] = useState(shouldOpen)
   const [i, setI] = useState(0)
-  const [hole, setHole] = useState<DOMRect | null>(null)
-  const cardRef = useRef<HTMLDivElement>(null)
-  const [cardH, setCardH] = useState(220)
 
   const step = STEPS[i]
   const last = i >= STEPS.length - 1
+  const { hole, cardRef, cardH } = useCoachMeasure(open, i, step.tour)
 
   // how: done=走到最后一步、skip=点了跳过、esc=按 Esc 关掉。
   // 三者分开记，因为它们说明的事完全不同——skip 是引导没用，
@@ -134,104 +87,17 @@ export default function Onboarding() {
     if (step.color) setLeftColor(true)
   }, [open, i, step, setPane, setLeftColor])
 
-  useLayoutEffect(() => {
-    if (!open || !step) return
-    let dead = false
-    const measure = () => {
-      if (dead) return
-      setHole(readTourRect(step.tour))
-      const ch = cardRef.current?.offsetHeight
-      if (ch && ch > 40) setCardH(ch)
-    }
-    measure()
-    const a = window.requestAnimationFrame(measure)
-    const t1 = window.setTimeout(measure, 80)
-    const t2 = window.setTimeout(measure, 220)
-    window.addEventListener('resize', measure)
-    window.addEventListener('scroll', measure, true)
-    return () => {
-      dead = true
-      window.cancelAnimationFrame(a)
-      window.clearTimeout(t1)
-      window.clearTimeout(t2)
-      window.removeEventListener('resize', measure)
-      window.removeEventListener('scroll', measure, true)
-    }
-  }, [open, i, step])
-
   if (!open || !step) return null
 
-  const spot = hole
-    ? {
-      top: hole.top - PAD,
-      left: hole.left - PAD,
-      width: hole.width + PAD * 2,
-      height: hole.height + PAD * 2,
-    }
-    : null
-  const card = placeCard(hole, step.prefer, cardH)
-
   return (
-    <div className="m-onb fixed inset-0 z-[80] pointer-events-none" role="dialog" aria-modal="true" aria-labelledby="onboard-title">
-      {spot ? (
-        <>
-          {/* 这五块在步骤之间滑过去（m-spot），四块遮罩和光圈用同一条曲线，接缝不会裂开 */}
-          <div className="m-spot absolute bg-black/50 pointer-events-auto" style={{ top: 0, left: 0, right: 0, height: Math.max(0, spot.top) }} />
-          <div className="m-spot absolute bg-black/50 pointer-events-auto" style={{ top: spot.top + spot.height, left: 0, right: 0, bottom: 0 }} />
-          <div className="m-spot absolute bg-black/50 pointer-events-auto" style={{ top: spot.top, left: 0, width: Math.max(0, spot.left), height: spot.height }} />
-          <div className="m-spot absolute bg-black/50 pointer-events-auto" style={{ top: spot.top, left: spot.left + spot.width, right: 0, height: spot.height }} />
-          <div
-            className="m-spot absolute rounded-2xl pointer-events-none shadow-[0_0_0_2px_#2dd4bf,0_0_0_6px_rgba(45,212,191,0.28)]"
-            style={spot}
-          />
-        </>
-      ) : (
-        <div className="absolute inset-0 bg-black/50 pointer-events-auto" />
-      )}
-
-      <div
-        ref={cardRef}
-        className="m-card qb-card absolute w-[min(21.25rem,calc(100vw-1.5rem))] text-gray-100 p-4 pointer-events-auto"
-        style={{ top: card.top, left: card.left }}
-        onClick={e => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between mb-2">
-          <div className="text-[11px] tracking-wide text-teal-400">
-            {t('onboard.kicker')} · {i + 1}/{STEPS.length}
-          </div>
-          <button type="button" onClick={() => finish('skip')} className="text-gray-400 hover:text-teal-300 text-sm cursor-pointer">
-            {t('onboard.skip')}
-          </button>
-        </div>
-        <div key={i} className="m-swap">
-          <div id="onboard-title" className="text-base font-semibold mb-1.5">{t(step.title)}</div>
-          <p className="text-sm text-gray-300 leading-relaxed">{t(step.body)}</p>
-          {step.hint && (
-            <p className="text-[12px] text-teal-300/90 leading-relaxed mt-2">{t(step.hint)}</p>
-          )}
-          <p className="text-[11px] text-gray-500 mt-2">{t('onboard.try')}</p>
-        </div>
-        <div className="flex items-center gap-2 mt-4">
-          <div className="flex-1 flex gap-1" aria-hidden="true">
-            {STEPS.map((_, k) => (
-              <div key={k} className={`h-1 flex-1 rounded-full ${k <= i ? 'bg-teal-400' : 'bg-gray-700'}`} />
-            ))}
-          </div>
-          {i > 0 && (
-            <button type="button" onClick={() => setI(i - 1)} className="qb-btn qb-btn-ghost qb-btn-sm">
-              {t('onboard.back')}
-            </button>
-          )}
-          <button
-            type="button"
-            autoFocus
-            onClick={() => { if (last) finish('done'); else { track('builder.onboard.step', { i: i + 2 }); setI(i + 1) } }}
-            className="qb-btn qb-btn-sm"
-          >
-            {last ? t('onboard.done') : t('onboard.next')}
-          </button>
-        </div>
-      </div>
-    </div>
+    <CoachFrame
+      hole={hole} prefer={step.prefer} cardRef={cardRef} cardH={cardH}
+      ui="onboard" kicker={t('onboard.kicker')} step={i} count={STEPS.length}
+      title={t(step.title)} body={t(step.body)} hint={step.hint ? t(step.hint) : undefined} tryLine={t('onboard.try')}
+      skipLabel={t('onboard.skip')} backLabel={t('onboard.back')} nextLabel={last ? t('onboard.done') : t('onboard.next')}
+      onSkip={() => finish('skip')}
+      onBack={() => setI(i - 1)}
+      onNext={() => { if (last) finish('done'); else { track('builder.onboard.step', { i: i + 2 }); setI(i + 1) } }}
+    />
   )
 }

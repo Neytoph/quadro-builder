@@ -161,13 +161,13 @@ export default function PlanOverlays() {
       ))}
 
       {viewer && !me && (
-        <div className="cb-ro qb-card" data-ui="read-only-banner"><Eye />
+        <div className="cb-ro qb-card" data-ui="read-only-banner" data-tour="read-only-banner"><Eye />
           <span><b>{t('collab.readOnly.guestTitle')}</b> · {t('collab.readOnly.guest', { owner: collab.plan?.members.find(m => m.role === 'owner')?.name || '' })}</span>
           <a href={collab.loginUrl()} className="qb-btn qb-btn-sm no-underline">{t('collab.readOnly.login')}</a>
         </div>
       )}
       {viewer && me && (
-        <div className="cb-ro low qb-card" data-ui="read-only-banner"><MessageSquare />
+        <div className="cb-ro low qb-card" data-ui="read-only-banner" data-tour="read-only-banner"><MessageSquare />
           <span><b>{t(collab.role === 'guest' ? 'collab.readOnly.visitorTitle' : 'collab.readOnly.commenterTitle')}</b> · {t(collab.role === 'guest' ? 'collab.readOnly.visitor' : 'collab.readOnly.commenter')}</span>
           {collab.role !== 'guest' && <button type="button" className="qb-btn qb-btn-ghost qb-btn-sm" onClick={() => setFork(true)} data-ui="plan-fork"><GitFork />{t('collab.forkOwn')}</button>}
         </div>

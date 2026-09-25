@@ -30,12 +30,18 @@ type Ctx = {
   setPane: (p: DockPane | null) => void
   toggle: (p: DockPane) => void
   handleEsc: () => void
+  /** 评论抽屉要停在哪一栏：共享方案的提示气泡替人切到「留言」 */
+  commentsTab: CommentsTab | null
+  setCommentsTab: (tab: CommentsTab | null) => void
 }
+
+export type CommentsTab = 'pins' | 'chat'
 
 const DockCtx = createContext<Ctx | null>(null)
 
 export function DockProvider({ children }: { children: ReactNode }) {
   const [pane, setPane] = useState<DockPane | null>(null)
+  const [commentsTab, setCommentsTab] = useState<CommentsTab | null>(null)
   const { right, patchRight } = usePanelLayout()
 
   useEffect(() => {
@@ -57,7 +63,7 @@ export function DockProvider({ children }: { children: ReactNode }) {
     setPane(null)
   }, [])
 
-  const value = useMemo(() => ({ pane, setPane, toggle, handleEsc }), [pane, toggle, handleEsc])
+  const value = useMemo(() => ({ pane, setPane, toggle, handleEsc, commentsTab, setCommentsTab }), [pane, toggle, handleEsc, commentsTab])
   return <DockCtx.Provider value={value}>{children}</DockCtx.Provider>
 }
 

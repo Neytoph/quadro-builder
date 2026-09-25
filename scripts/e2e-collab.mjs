@@ -22,6 +22,8 @@ async function person(user) {
   const ctx = await browser.newContext({ baseURL: SITE, viewport: { width: 1440, height: 900 }, permissions: ['clipboard-read', 'clipboard-write'] })
   await ctx.addInitScript(() => {
     localStorage.setItem('quadro.builder.onboarded.v2', '1')
+    localStorage.setItem('quadro.builder.collab-coach.v1', '1')
+    localStorage.setItem('quadro.builder.collab-coach-guest.v1', '1')
     localStorage.setItem('quadro.lang', 'zh')
     localStorage.setItem('quadro-builder-lang', 'zh')
   })
