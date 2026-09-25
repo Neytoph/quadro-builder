@@ -18,8 +18,10 @@
 //	&assembly=1                    交付页「开始拼」：直接进这一版的逐层拼装
 //	?import=qdf                    打开后直接进入批量导入 .qdf
 //	?room=brief:<id>               画房间边界，画完写回需求单
+//	?doc=<doc id>                  打开自己「我的设计」里的这一座；没登录先去登录，登录完回到这个地址
 //
 // 除了只看模式，参数读完就从地址栏去掉：刷新一下不该再打开一遍、再存一份。
+// ?doc= 例外，打开以后才去掉：没登录时跳去登录页，要带着它回来。
 // 当前标签页是共享方案时，地址栏由 CollabProvider 写成这个方案的地址。
 
 export type ResumeExport = 'manual' | 'bom' | 'bompng' | 'shareimg' | 'qdf' | 'json'
@@ -45,6 +47,8 @@ export interface Entry {
   assembly: boolean
   importQdf: boolean
   roomBrief: string | null
+  /** 「我的设计」里的一座 */
+  doc: string | null
 }
 
 let entry: Entry | null = null
@@ -83,6 +87,7 @@ export function bootEntry(): Entry {
     assembly: collab && !!q.get('delivery') && q.get('assembly') === '1',
     importQdf: q.get('import') === 'qdf',
     roomBrief: collab && room.startsWith('brief:') ? room.slice('brief:'.length) : null,
+    doc: collab ? q.get('doc') : null,
   }
   if (!entry.view) {
     for (const k of ['src', 'name', 'copy', 'export', 'lang', 'import']) q.delete(k)

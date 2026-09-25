@@ -73,7 +73,7 @@ export function dbTx(storeName, mode, fn) {
   return openLib().then((db) => new Promise((resolve, reject) => {
     const tx = db.transaction(storeName, mode);
     const out = fn(tx.objectStore(storeName));
-    tx.oncomplete = () => { db.close(); resolve(out && out.result !== undefined ? out.result : out); };
+    tx.oncomplete = () => { db.close(); resolve(out instanceof IDBRequest ? out.result : out); };
     tx.onerror = () => { db.close(); reject(tx.error); };
     tx.onabort = () => { db.close(); reject(tx.error); };
   }));
