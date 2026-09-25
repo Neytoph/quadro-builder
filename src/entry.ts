@@ -2,6 +2,8 @@
 // 靠它们让 Builder 一打开就做一件事：
 //
 //	?src=/path/to/file    取这份造型文件（Builder 的 JSON 或 .qdf）在新标签页里打开，只认同站路径
+//	&origin=/path         这一座出自哪个方案（同站路径）。没写就当 src。广场方案走 #s= 分享链接打开，
+//	                      页面用它说明出处。存进账号时报给服务器，给方案的作者记一次「照着搭」
 //	&name=小屋             标签页的名字
 //	&copy=1               打开之后存一份到自己的存档里（登录了就跟着同步进账号）
 //	?view=1               只看模式：嵌在方案页里，只有 3D 画面和分步手册，不改、不存
@@ -17,6 +19,8 @@ const RESUMES: ResumeExport[] = ['manual', 'bom', 'bompng', 'shareimg', 'qdf', '
 export interface Entry {
   view: boolean
   src: string | null
+  /** 这一座出自哪个方案，见文件头 */
+  origin: string | null
   name: string | null
   copy: boolean
   resume: ResumeExport | null
@@ -41,6 +45,7 @@ export function bootEntry(): Entry {
   entry = {
     view: q.get('view') === '1',
     src: sameSite(q.get('src')),
+    origin: sameSite(q.get('origin')) ?? sameSite(q.get('src')),
     name: q.get('name'),
     copy: q.get('copy') === '1',
     resume: resume && RESUMES.includes(resume) ? resume : null,
@@ -48,7 +53,7 @@ export function bootEntry(): Entry {
     hash: location.hash,
   }
   if (!entry.view) {
-    for (const k of ['src', 'name', 'copy', 'export', 'lang']) q.delete(k)
+    for (const k of ['src', 'origin', 'name', 'copy', 'export', 'lang']) q.delete(k)
     const rest = q.toString()
     history.replaceState(null, '', `${location.pathname}${rest ? `?${rest}` : ''}${location.hash}`)
   }
