@@ -403,7 +403,7 @@ function AppInner() {
           : e.key === 'ArrowRight' ? axes.right
           : neg(axes.right)
         if (api.mode === 'select' && api.selectionCount) api.moveSelection(dir)
-        else { if (api.mode !== 'add') api.setMode('add'); api.buildStep(dir) }
+        else { if (api.mode !== 'add' && !api.readOnly) api.setMode('add'); api.buildStep(dir) }
         return
       }
       if (e.key === 'q' || e.key === 'Q') {
