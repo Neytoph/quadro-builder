@@ -1164,8 +1164,6 @@ export class Builder {
     const origin = pick.point.clone();
     this._drag = {
       origin,
-      // 按下去的那一件：原地松开没拖的时候，这一下照点击处理（见 _onUp）
-      pick,
       // Zustand vor dem Ziehen: der ganze Zug wird EIN Undo-Schritt.
       before: JSON.stringify(this.model.toJSON()),
       applied: [0, 0, 0],
@@ -2747,6 +2745,11 @@ export class Builder {
               // sonst kaeme das Halten auf einem gewaehlten Teil nie an, weil der
               // Zug schon begonnen haette.
               this._dragKandidat = { e, pick };
+            } else if (pick.data.kind === "panel") {
+              // 选着的面板：原地点一下是翻面（见 _clickSelectRaw），挪过点击的范围才开始拖。
+              // 不先转视角，免得开始拖之前画面跟着晃
+              this._dragKandidat = { e, pick };
+              return;
             } else {
               this._beginMoveDrag(e, pick);
               return;
@@ -3182,15 +3185,7 @@ export class Builder {
     }
     // Verschieben abschliessen: hier faellt der eine Undo-Schritt an und hier
     // werden deckungsgleiche Kupplungen zusammengelegt.
-    if (this._drag) {
-      // 在选着的面板上原地按下又松开、没有拖：这是一次点击（再点翻面，快点两下选整块）
-      const klick = d && e.button === 0 && !d.add && this._drag.pick.data.kind === "panel"
-        && Math.hypot(e.clientX - d.x, e.clientY - d.y) <= CLICK_TOLERANCE
-        && this._drag.applied.every((v) => v === 0);
-      this._endMoveDrag();
-      if (klick) this._clickSelect(e);
-      return;
-    }
+    if (this._drag) { this._endMoveDrag(); return; }
     if (this._clampDrag) { this._endClampDrag(e); return; }
     if (this._clampSlide) { this._endClampSlide(); return; }
     this._clampDragKandidat = null;

@@ -1,6 +1,8 @@
-// 选择模式里真用鼠标点面板：选中后隔一会儿再点就翻面、撤销；快速连点两下是选整块；Shift / Ctrl 点、
-// 拖动、点没选中的面板都不翻面；选中多块时先点成只选这一块、再点才翻；面板后面压着零件时
-// 再点也是翻面，管子、接头照旧隔一会儿在同一处再点就往里选；共享方案标签页照样能翻，只能看时不翻。
+// 选择模式里真用鼠标点面板：选中后隔一会儿再点就翻面、撤销，翻面等过 500 毫秒才执行；双击和
+// 间隔不到 500 毫秒的两下是选整块；Shift / Ctrl / ⌘ 点、拖动、点没选中的面板都不翻面；选中多块时
+// 先点成只选这一块、再点才翻；成组的板只翻点到的那块；面板后面压着零件时再点也是翻面，管子、
+// 接头照旧隔一会儿在同一处再点就往里选；翻面排着时撤销撤的就是它、点别处先翻完；共享方案标签页
+// 照样能翻、写进共享文档，只能看时不翻；触屏点一下选中、再点一下翻面。
 // 运行：先起开发服务 npx vite --port 5230 --strictPort，再 node scripts/e2e-flip.mjs
 // 截图存到 SHOTS（默认 ../qb-shots），文件名 flip-*。
 import { chromium } from '@playwright/test'
@@ -16,17 +18,22 @@ const browser = await chromium.launch()
 let ok = 0
 const check = (label, cond) => { assert.ok(cond, label); ok++; console.log(`✓ ${label}`) }
 
-const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } })
-await ctx.addInitScript(() => {
-  localStorage.setItem('quadro.builder.onboarded.v2', '1')
-  localStorage.setItem('quadro.lang', 'zh')
-  localStorage.setItem('quadro-builder-lang', 'zh')
-})
-const page = await ctx.newPage()
-page.on('pageerror', (e) => { console.error('pageerror', e); process.exitCode = 1 })
-await page.goto(BASE)
-await page.waitForFunction(() => window.__quadroDev?.model && document.querySelector('canvas'))
-await page.waitForTimeout(600)
+// 打开一页 Builder；触屏那一段用 hasTouch 的上下文另开一页
+async function openPage(opts = {}) {
+  const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 }, ...opts })
+  await ctx.addInitScript(() => {
+    localStorage.setItem('quadro.builder.onboarded.v2', '1')
+    localStorage.setItem('quadro.lang', 'zh')
+    localStorage.setItem('quadro-builder-lang', 'zh')
+  })
+  const p = await ctx.newPage()
+  p.on('pageerror', (e) => { console.error('pageerror', e); process.exitCode = 1 })
+  await p.goto(BASE)
+  await p.waitForFunction(() => window.__quadroDev?.model && document.querySelector('canvas'))
+  await p.waitForTimeout(600)
+  return p
+}
+let page = await openPage()
 
 const shot = async (name) => {
   await page.mouse.move(1380, 880)
@@ -88,14 +95,19 @@ async function click(p, modifiers = []) {
   await page.waitForTimeout(PAUSE)
 }
 
+// 摆好平台，等零件落下来的动效放完（点选用的碰撞体这时才到位），返回两块板和它们中心的屏幕位置
+async function loadSettled() {
+  const [a, b] = await load()
+  const ca = await toScreen([20, 0, 20])
+  const cb = await toScreen([60, 0, 20])
+  await page.waitForFunction(([c, id]) => window.__quadroDev.scene.pickAllForDelete(c.x, c.y)[0]?.data.id === id,
+    [ca, a], { timeout: 10000 })
+  await page.waitForTimeout(500)
+  return { p1: a, p2: b, c1: ca, c2: cb }
+}
+
 // ---- 1. 选中 → 再点翻面 → 撤销 ----
-const [p1, p2] = await load()
-const c1 = await toScreen([20, 0, 20])
-const c2 = await toScreen([60, 0, 20])
-// 零件落下来的动效放完，点选用的碰撞体才到位
-await page.waitForFunction(([c, id]) => window.__quadroDev.scene.pickAllForDelete(c.x, c.y)[0]?.data.id === id,
-  [c1, p1], { timeout: 10000 })
-await page.waitForTimeout(500)
+const { p1, p2, c1, c2 } = await loadSettled()
 check('第一块板中心点下去最前面是它', (await frontAt(c1)) === p1)
 check('第二块板中心点下去最前面是它', (await frontAt(c2)) === p2)
 await click(c1)
@@ -120,6 +132,31 @@ await page.keyboard.press('Meta+z')
 await page.waitForTimeout(300)
 check('再撤销：回到最初的上面', (await side(p1)) === 1)
 await shot('3-undone')
+
+// ---- 1b. 翻面等过选整块的时间窗口才执行 ----
+await page.mouse.click(c1.x, c1.y)
+await page.waitForTimeout(250)
+check('再点之后 250 毫秒：还没翻', (await side(p1)) === 1)
+await page.waitForTimeout(450)
+check('过了 500 毫秒：翻了', (await side(p1)) === -1)
+await page.keyboard.press('Meta+z')
+await page.waitForTimeout(300)
+check('撤销回到上面', (await side(p1)) === 1)
+await page.waitForTimeout(PAUSE)
+
+// ---- 1c. 分开的两下点击、间隔不到 500 毫秒：选整块，不翻 ----
+check('这时还只选着第一块板', await onlySelected(p1))
+const depth2 = await undoDepth()
+await page.mouse.click(c1.x, c1.y)
+await page.waitForTimeout(350)
+await page.mouse.click(c1.x, c1.y)
+await page.waitForTimeout(1200)
+const block2 = await selected()
+check(`间隔 350 毫秒的两下：选中整块（${block2.length} 件）`, block2.length > 2 && block2.includes(p2))
+check('间隔 350 毫秒的两下：不翻', (await side(p1)) === 1)
+check('间隔 350 毫秒的两下：没记撤销', (await undoDepth()) === depth2)
+await page.evaluate(() => window.__quadroDev.builder.clearSelection())
+await page.waitForTimeout(300)
 
 // ---- 2. 快速连点两下：选整块，不翻面 ----
 await page.evaluate(() => window.__quadroDev.builder.clearSelection())
@@ -229,6 +266,79 @@ check(`选着管子隔一会儿在同一处再点：改选后面那件（${tubeS
 await shot('5-tube-deeper')
 check('面板都没翻', (await side(p1)) === 1 && (await side(p2)) === 1)
 
+// ---- 7b. 成组的两块板：点一块选中整组，再点只翻点到的那块 ----
+await page.evaluate(() => window.__quadroDev.builder.clearSelection())
+await click(c1)
+await click(c2, ['Shift'])
+check('Shift 点第二块：两块都选着', (await selected()).length === 2)
+await page.keyboard.press('Meta+g')
+await page.waitForTimeout(300)
+check('⌘G 把两块板成组', await page.evaluate(([a, b]) => {
+  const { model } = window.__quadroDev
+  const g = model.groupOf(a)
+  return !!g && g === model.groupOf(b)
+}, [p1, p2]))
+await page.evaluate(() => window.__quadroDev.builder.clearSelection())
+await page.waitForTimeout(300)
+await click(c1)
+check('点成组的第一块：整组两块都选中', (await selected()).sort().join() === [p1, p2].sort().join())
+await click(c1)
+check('再点：点到的第一块翻面', (await side(p1)) === -1)
+check('再点：同组的第二块不翻', (await side(p2)) === 1)
+await shot('5-group-flipped')
+await page.keyboard.press('Meta+z')
+await page.waitForTimeout(300)
+check('撤销翻面', (await side(p1)) === 1)
+await page.keyboard.press('Meta+z')
+await page.waitForTimeout(300)
+check('撤销成组', await page.evaluate((a) => !window.__quadroDev.model.groupOf(a), p1))
+
+// ---- 7c. 翻面还排着的时候按撤销：撤的就是这次翻面 ----
+await page.evaluate(() => window.__quadroDev.builder.clearSelection())
+await click(c1)
+const depth3 = await undoDepth()
+await page.mouse.click(c1.x, c1.y)
+await page.waitForTimeout(100)
+await page.keyboard.press('Meta+z')
+await page.waitForTimeout(PAUSE)
+check('排着翻面时按撤销：面板还在上面', (await side(p1)) === 1)
+check('排着翻面时按撤销：撤销栈回到点之前', (await undoDepth()) === depth3)
+check('排着翻面时按撤销：能重做这次翻面', await page.evaluate(() => window.__quadroDev.builder.canRedo()))
+await page.keyboard.press('Meta+Shift+z')
+await page.waitForTimeout(300)
+check('重做：翻到下面', (await side(p1)) === -1)
+await page.keyboard.press('Meta+z')
+await page.waitForTimeout(300)
+check('再撤销回到上面', (await side(p1)) === 1)
+
+// ---- 7d. 翻面还排着的时候点别处：先翻完，再照常处理这一下 ----
+// 顺带记下哪些零件又放了一遍落下来的入场动效：点选着的面板不该让旁边的零件重新落一遍
+// （落的时候点选用的碰撞体也跟着在半空，紧接着点旁边那块会点空）
+await page.evaluate(() => {
+  const { scene } = window.__quadroDev
+  window.__replayed = []
+  const orig = scene._motionAfterRender.bind(scene)
+  scene._motionAfterRender = (old, opts) => {
+    const before = new Set(scene._appearing.keys())
+    const r = orig(old, opts)
+    for (const k of scene._appearing.keys()) if (!before.has(k)) window.__replayed.push(k)
+    return r
+  }
+})
+await page.evaluate(() => window.__quadroDev.builder.clearSelection())
+await click(c1)
+await page.mouse.click(c1.x, c1.y)
+await page.waitForTimeout(100)
+await page.mouse.click(c2.x, c2.y)
+check('点选着的面板、翻面：没有零件重新放入场动效', (await page.evaluate(() => window.__replayed)).length === 0)
+check('排着翻面时点第二块：第一块马上翻了', (await side(p1)) === -1)
+await page.waitForTimeout(PAUSE)
+check('点第二块：改选第二块', await onlySelected(p2))
+check('点第二块：第二块不翻', (await side(p2)) === 1)
+await page.keyboard.press('Meta+z')
+await page.waitForTimeout(300)
+check('撤销回到上面', (await side(p1)) === 1)
+
 // ---- 8. 共享方案标签页：别处修改读回以后照样能翻；只能看时不翻 ----
 await page.evaluate(() => {
   const { builder, model } = window.__quadroDev
@@ -240,10 +350,17 @@ await click(c1)
 check('共享方案：点面板选中它', await onlySelected(p1))
 await click(c1)
 check('共享方案：再点翻面', (await side(p1)) === -1)
+// 共享方案的文档（Yjs，发给别人的就是它）里也翻了；没写 side 和模型一样算在上面
+const docSide = (id) => page.evaluate((id) => {
+  const p = window.__quadroDev.builder.history.toJSON().panels.find((q) => q.id === id)
+  return p.side < 0 ? -1 : 1
+}, id)
+check('共享方案：翻面写进了共享文档', (await docSide(p1)) === -1)
 await shot('6-plan-flipped')
 await page.keyboard.press('Meta+z')
 await page.waitForTimeout(300)
 check('共享方案：撤销', (await side(p1)) === 1)
+check('共享方案：撤销也写进了共享文档', (await docSide(p1)) === 1)
 await page.evaluate(() => {
   const { builder } = window.__quadroDev
   builder.setReadOnly(true)
@@ -255,8 +372,23 @@ const roDepth = await undoDepth()
 await click(c1)
 check('只能看：再点不翻面', (await side(p1)) === 1)
 check('只能看：没有记撤销', (await undoDepth()) === roDepth)
+check('只能看：没有弹「只能查看」的提示', !(await toast()).includes('只能查看'))
 await shot('7-readonly')
 await page.evaluate(() => { const { builder, model } = window.__quadroDev; builder.setReadOnly(false); model.idTag = '' })
+
+// ---- 9. 触屏：点一下选中，隔一会儿再点一下就翻 ----
+await page.context().close()
+page = await openPage({ hasTouch: true })
+const touch = await loadSettled()
+const tap = async (p) => { await page.touchscreen.tap(p.x, p.y); await page.waitForTimeout(PAUSE) }
+await tap(touch.c1)
+check('触屏：点一下选中面板', await onlySelected(touch.p1))
+check('触屏：输入方式认成触屏', await page.evaluate(() => window.__quadroDev.builder.inputType === 'touch'))
+await tap(touch.c1)
+check('触屏：再点一下翻面', (await side(touch.p1)) === -1)
+await shot('8-touch-flipped')
+await tap(touch.c2)
+check('触屏：点没选中的第二块只选中它，不翻', await onlySelected(touch.p2) && (await side(touch.p2)) === 1)
 
 await browser.close()
 console.log(`\n${ok} 项通过`)
