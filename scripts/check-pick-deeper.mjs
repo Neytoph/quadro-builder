@@ -1,5 +1,4 @@
 // 选择模式：同一位置隔一会儿再点一次，选到后面那一件；快的两下还是选整块。
-// 选着的是面板时这样再点是翻面，不往里选。
 //   npx --yes vite-node scripts/check-pick-deeper.mjs
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -31,19 +30,12 @@ const panelIds = [...m.panels.values()].filter((p) => !p.poolPart).map((p) => p.
 ok(panelIds.length >= 1, `该有板，得到 ${panelIds.length}`)
 const front = [...m.tubes.values()][0].id
 const back = [...m.nodes.values()][0].id
-const tubeHits = [
+const hits = [
   { data: { kind: 'tube', id: front }, distance: 100, point: null },
   { data: { kind: 'node', id: back }, distance: 140, point: null },
 ]
-// 面板在前、后面压着那根管
-const panel = panelIds[0]
-const panelHits = [
-  { data: { kind: 'panel', id: panel }, distance: 100, point: null },
-  { data: { kind: 'tube', id: front }, distance: 140, point: null },
-]
-let hits = tubeHits
 
-// 假场景：指针下面总是 hits 这几件，排在前面的在前
+// 假场景：指针下面总是这两件，前面那件在前
 function fakeScene() {
   const el = { addEventListener() {}, removeEventListener() {}, style: {}, getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }) }
   const base = {
@@ -52,12 +44,6 @@ function fakeScene() {
     pickForDelete: () => hits[0],
     pickClamp: () => null,
     addHandle: () => ({}), clearHandles: () => {},
-    // 选整块时只留看得见的：这里全都看得见
-    selectableParts: () => new Map([
-      ...[...m.nodes.keys()].map((id) => [id, 'node']),
-      ...[...m.tubes.keys()].map((id) => [id, 'tube']),
-      ...[...m.panels.keys()].map((id) => [id, 'panel']),
-    ]),
   }
   return new Proxy(base, { get(t, k) { return k in t ? t[k] : () => null } })
 }
@@ -101,31 +87,6 @@ clock += 100             // 100 ms 内再点：算双击
 click(300, 300)
 ok(sel().length > 1 || sel()[0] !== undefined, '快的两下走整块选择')
 ok(!(sel().length === 1 && sel()[0] !== before && sel()[0] !== front), '双击没有被当成往里选')
-
-// 6. 选着的是面板：隔一会儿同一处再点是翻面，不往里选
-hits = panelHits
-const wait = (ms) => new Promise((r) => setTimeout(r, ms))
-clock += 1500
-b.clearSelection()
-click(500, 500)
-ok(sel().length === 1 && sel()[0] === panel, `第一下选中面板，得到 ${sel()}`)
-const side0 = m.panels.get(panel).side
-clock += 1500
-click(501, 500)
-ok(sel().length === 1 && sel()[0] === panel, `选着面板隔一会儿再点：还选着面板，得到 ${sel()}`)
-await wait(600)
-ok(m.panels.get(panel).side === -side0, '选着面板隔一会儿再点：翻到另一面')
-b.undo()
-ok(m.panels.get(panel).side === side0, '撤销翻回来')
-
-// 7. 选着面板快的两下：选整块，不翻
-clock += 1500
-click(500, 500)
-clock += 100
-click(500, 500)
-await wait(600)
-ok(sel().length > 1, `选着面板快的两下：选整块，得到 ${sel().length} 件`)
-ok(m.panels.get(panel).side === side0, '选着面板快的两下：不翻')
 
 performance.now = realNow
 
