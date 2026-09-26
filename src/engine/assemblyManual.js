@@ -4,10 +4,10 @@
 
 import { jsPDF } from "jspdf";
 import {
-  partForFitting, partName, slideKindName, getPanel, getPartById, geometry, colorHex, colorName,
+  partForFitting, partName, slideKindName, geometry, colorHex, colorName,
   reinforcementPart, poolLinerFor,
 } from "./catalog.js";
-import { connectorsForNode } from "./bom.js";
+import { connectorsForNode, textileRow } from "./bom.js";
 import { POOL_KINDS } from "./model.js";
 import { partIcon } from "../ui/icons";
 import { drawQr } from "../sharePage";
@@ -258,7 +258,8 @@ function allowId(set, id) {
   return !set || set.has(id);
 }
 
-function collectPositions(model, filter = null) {
+/** @param {ReturnType<typeof stepFilter> | null} [filter] 只收这一步的件；null 收全部 */
+export function collectPositions(model, filter = null) {
   const map = new Map();
   const nodes = filter?.nodes || null;
   const tubes = filter?.tubes || null;
@@ -307,7 +308,7 @@ function collectPositions(model, filter = null) {
     if (!allowId(textiles, tx.id) && !all) continue;
     if (!(all || textiles)) continue;
     const cor = model.panelCorners(tx);
-    pushPos(map, `${tx.w}x${tx.h}|${tx.color}`, centroid(cor));
+    pushPos(map, textileRow(model, tx).key, centroid(cor));
   }
 
   for (const sl of (model.slides ? model.slides.values() : [])) {
@@ -351,7 +352,7 @@ function numberItems(rows) {
   return rows.filter((r) => r && r.count > 0 && r.name).map((r, i) => ({ ...r, num: i + 1 }));
 }
 
-function coverItems(bom) {
+export function coverItems(bom) {
   if (!bom) return [];
   const rows = [];
   const take = (list) => {
@@ -422,12 +423,12 @@ function extraStepItems(model, step) {
   for (const id of step.textileIds || []) {
     const tx = model.textiles?.get?.(id);
     if (!tx) continue;
-    const def = tx.panelId ? getPanel(tx.panelId) : getPartById("textile");
-    const key = `${tx.w}x${tx.h}|${tx.color}`;
+    // 和料表同一个口径：短布面的名字里已经有尺寸，普通布面按尺寸分行
+    const { def, id: tid, fest, key } = textileRow(model, tx);
     const base = def ? partName(def) : "";
-    const size = tx.w && tx.h ? `${tx.w}×${tx.h} cm` : "";
+    const size = tx.w && tx.h && !fest ? `${tx.w}×${tx.h} cm` : "";
     bump(map, key, {
-      key, id: (def && def.id) || tx.panelId || "textile", kind: "textiles",
+      key, id: tid, kind: "textiles",
       name: [base, size].filter(Boolean).join(" ") || size,
       color: tx.color, colorName: colorName(tx.color),
     });
@@ -435,7 +436,7 @@ function extraStepItems(model, step) {
   return [...map.values()];
 }
 
-function stepItems(model, step) {
+export function stepItems(model, step) {
   const rows = [];
   for (const r of step.connectors || []) {
     rows.push({
@@ -760,7 +761,7 @@ function restoreBuilder(builder, saved) {
   builder.refresh();
 }
 
-function stepFilter(step) {
+export function stepFilter(step) {
   return {
     nodes: new Set(step.nodeIds || []),
     tubes: new Set(step.tubeIds || []),

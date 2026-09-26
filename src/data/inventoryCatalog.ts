@@ -12,7 +12,7 @@ export type InvCatalogItem = {
   id: string
 }
 
-const TEXTIL = new Set(['textile', 'lattice', 'textile_round', 'bag', 'roof', 'roof_large'])
+const TEXTIL = new Set(['textile', 'textile_20x40', 'lattice', 'textile_round', 'bag', 'roof', 'roof_large'])
 const WHEEL = new Set(['wheel', 'wheel_floating', 'hub_cap', 'caster', 'wheel_adapter', 'wheel_bearing', 'steering_lock'])
 const SLIDE = new Set(['slide_integral', 'slide_module', 'slide_curved', 'slide_end'])
 const SKIP_PANEL = new Set(['panel_70x120', 'pool_floor'])

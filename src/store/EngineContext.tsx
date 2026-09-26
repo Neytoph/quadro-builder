@@ -4,7 +4,7 @@ import {
   BuildModel, Builder, SceneManager, loadCatalog, computeBOM, compareInventory, connectorsForNode, computeSafety,
   parseQDF, parseDesign, designEntry, buildQDF, buildableTubes, buildableCurvedTubes, buildablePanels, tubeColors, allConnectors, accessories,
   panels, geometry, RANDOM_COLOR, BUILD_ORDERS, docs, storage, setLang as setEngineLang, t as engineT,
-  computeBuildPlan, partsOfModel,
+  computeBuildPlan, partsOfModel, textilePart,
 } from '../engine-api'
 import { useI18n } from '../i18n'
 import { syncNow, syncProbe, syncStarted } from '../sync/bootstrap'
@@ -250,7 +250,7 @@ interface EngineApi {
     panels: Array<{ id: string; w?: number; h?: number; name?: string; holes?: number; acrylic?: boolean; feature?: string; compat?: boolean }>
     colors: Array<{ id: string; hex: string; name?: string; name_en?: string }>
     connectors: Array<{ id: string; kind: string; qdf?: string; name?: string }>
-    accessories: Array<{ id: string; qdf?: string; name?: string; variant?: string; compat?: boolean }>
+    accessories: Array<{ id: string; qdf?: string; name?: string; variant?: string; compat?: boolean; rail?: { along: number; gap: number } }>
   }
   applyColorTune: (tune: { scene: Record<string, unknown>; frame: Record<string, string>; grade?: Record<string, number> }) => void
   startThumbBatch: () => void
@@ -277,7 +277,7 @@ const Ctx = createContext<EngineApi | null>(null)
 
 const TEXTIL = new Set([
   'textil2', 'lattice2', 'textil-round2', 'bag2', 'roof-large2', 'roof2',
-  'textile', 'lattice', 'textile_round', 'bag', 'roof_large', 'roof',
+  'textile', 'textile_20x40', 'lattice', 'textile_round', 'bag', 'roof_large', 'roof',
 ])
 const WHEEL = new Set([
   'multi-wheel2', 'floating-wheel2', 'hub-cap2', 'casters2', 'adapter2', 'bearing2', 'steering-lock2',
@@ -491,7 +491,7 @@ function download(name: string, text: string, type: string) {
   URL.revokeObjectURL(a.href)
 }
 
-function asBom(raw: AnyRec): BomView {
+export function asBom(raw: AnyRec): BomView {
   const tubes = ((raw.tubes as AnyRec[]) || []).map(r => ({
     key: String(r.key ?? `${r.tubeId}|${r.color}`), name: cleanBomText(r.name), count: Number(r.count),
     color: (r.color as string) || null, colorName: (r.colorName as string) || null, subtotal: Number(r.subtotal || 0),
@@ -1018,7 +1018,11 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     } else if (kind === 'reinforcements') {
       for (const tb of model.tubes.values()) if (tb.reinforced) ids.add(tb.id)
     } else if (kind === 'textiles') {
-      for (const tx of model.textiles.values()) if (colorOk(tx)) ids.add(tx.id)
+      // 普通布面、短布面、彩虹带各是一行：按这块布认出来的零件比对
+      for (const tx of model.textiles.values()) {
+        const def = textilePart(model.textileSpan(tx), tx.variant)
+        if (colorOk(tx) && (!id || (def && def.id) === id)) ids.add(tx.id)
+      }
     } else {
       for (const f of model.fittings.values()) {
         if (f.kind === id || partIdOf(f) === id) ids.add(f.id)
