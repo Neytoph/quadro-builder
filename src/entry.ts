@@ -8,7 +8,7 @@
 //	&name=小屋             标签页的名字
 //	&copy=1               打开之后存一份到自己的存档里（登录了就跟着同步进账号）
 //	?view=1               只看模式：嵌在方案页里，只有 3D 画面和分步手册，不改、不存
-//	?export=manual|bom|bompng|shareimg|qdf|json   注册完回来，接着导出
+//	?export=manual|bom|bompng|shareimg|qdf|json|link   注册完回来，接着导出（link 是复制分享链接）
 //	?lang=zh|en|de        界面语言，嵌在别的页面里时跟着那一页
 //
 // 共享方案（托管版设了 VITE_SYNC_BASE 才认）：
@@ -28,9 +28,9 @@
 // ?new= 要等这台设备上记着的标签页恢复出来，再在它们后面新开一个。
 // 当前标签页是共享方案时，地址栏由 CollabProvider 写成这个方案的地址。
 
-export type ResumeExport = 'manual' | 'bom' | 'bompng' | 'shareimg' | 'qdf' | 'json'
+export type ResumeExport = 'manual' | 'bom' | 'bompng' | 'shareimg' | 'qdf' | 'json' | 'link'
 
-const RESUMES: ResumeExport[] = ['manual', 'bom', 'bompng', 'shareimg', 'qdf', 'json']
+const RESUMES: ResumeExport[] = ['manual', 'bom', 'bompng', 'shareimg', 'qdf', 'json', 'link']
 
 export interface Entry {
   view: boolean

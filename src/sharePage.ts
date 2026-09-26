@@ -2,22 +2,26 @@
 //
 // 托管版构建时设了 VITE_SHARE_API（例如 '/quadro/shares'）：导出安装手册、料表、
 // 分享图之前，先把这一座存成一个方案页，文件的每一页角上印它的网址和二维码，
-// 拿到纸的人扫一下就能转动看 3D、一步一步看手册。开源本地版不设，导出的文件
-// 不带网址，行为和从前一样。
+// 拿到纸的人扫一下就能转动看 3D、一步一步看手册。「复制分享链接」也走它：
+// 复制的是这个方案页的地址，一条短链接，不再把整座造型编进链接里。
+// 开源本地版不设，导出的文件不带网址，分享链接照旧是编进整座造型的长链接。
 //
 // 后端契约：
 //
 //	POST {VITE_SHARE_API}
-//	  ← {key, title, model, parts, size:[宽,深,高], steps, cover: dataURL}
+//	  ← {key, title, model, parts, size:[宽,深,高], steps, cover: dataURL, stats}
 //	  → {slug, url}   url 是方案页的绝对地址
+//
+// stats 是这一座的量（src/designStats.ts），后端可以拿它当客观量。
 //
 // key 是这一座在 Builder 里的标识（存过档用存档 id，没存过用标签页 id），
 // 同一座再导出一次，后端更新同一个方案页，二维码不变。
 
 import QRCode from 'qrcode'
+import type { DesignStats } from './designStats'
 
-/** 导出物的来源标记，写在二维码链接的 ?from= 上。 */
-export type ExportKind = 'manual' | 'bom' | 'shareimg'
+/** 导出物的来源标记，写在二维码链接和分享链接的 ?from= 上。 */
+export type ExportKind = 'manual' | 'bom' | 'shareimg' | 'link'
 
 export interface Stamp {
   /** 二维码里的完整链接，带 ?from= */
@@ -34,6 +38,7 @@ export interface SharePageInput {
   size: [number, number, number]
   steps: number
   cover: string
+  stats: DesignStats
 }
 
 export function sharePagesEnabled(): boolean {

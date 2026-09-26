@@ -161,6 +161,8 @@ function AccountDialog() {
 
   if (!shown) return null
   const resume = shown.phase === 'resume'
+  // 复制分享链接也要先有账号（链接指向存在账号下的方案页），说法跟导出文件分开
+  const k = shown.kind === 'link' ? '.link' : ''
   return (
     <div
       className={`m-backdrop fixed inset-0 z-[75] flex items-center justify-center bg-black/45 p-4 ${leaving ? 'm-leave pointer-events-none' : ''}`}
@@ -173,13 +175,13 @@ function AccountDialog() {
         className="m-modal qb-card w-full max-w-sm text-gray-100 p-5"
         onClick={e => e.stopPropagation()}
       >
-        <div id="account-dialog-title" className="text-base font-semibold">{t(resume ? 'account.resumeTitle' : 'account.title')}</div>
+        <div id="account-dialog-title" className="text-base font-semibold">{t(resume ? `account.resumeTitle${k}` : `account.title${k}`)}</div>
         <p className="text-sm text-gray-300 leading-relaxed mt-2 mb-5">
-          {resume ? t('account.resumeBody', { what: t(`account.what.${shown.kind}`) }) : t('account.body')}
+          {resume ? t('account.resumeBody', { what: t(`account.what.${shown.kind}`) }) : t(`account.body${k}`)}
         </p>
         <div className="flex justify-end gap-2">
           <button type="button" onClick={() => answerAccount(false)} className="qb-btn qb-btn-ghost qb-btn-sm">{t('confirm.cancel')}</button>
-          <button type="button" autoFocus onClick={() => answerAccount(true)} className="qb-btn qb-btn-sm">{t(resume ? 'account.resumeGo' : 'account.go')}</button>
+          <button type="button" autoFocus onClick={() => answerAccount(true)} className="qb-btn qb-btn-sm">{t(resume ? `account.resumeGo${k}` : 'account.go')}</button>
         </div>
       </div>
     </div>

@@ -11,6 +11,7 @@ import { syncNow, syncProbe, syncStarted } from '../sync/bootstrap'
 import { tabOpenedFrom, tabSavedAs } from '../sync/origin'
 import { bootEntry, SESSIONLESS, VIEW_ONLY, type ResumeExport } from '../entry'
 import { publishSharePage, sharePagesEnabled, stampFor, type ExportKind, type Stamp } from '../sharePage'
+import { statsOfModel } from '../designStats'
 import { geometricPreset, jsonToFragment } from '../data/presets'
 import pyramidQdf from '../data/A0128.qdf?raw'
 import { clearSharePayload, decodeShare, peekSharePayload, shareUrl } from '../share'
@@ -1231,9 +1232,26 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     // 存下就推上去。等一个同步周期的话，这中间关掉页面这一座就只在这台
     // 机器上；社区发帖页更是当场就要读服务器那张列表。不挡着上面那句提示：
     // 存进本地这件事已经成了，网络慢不该让用户对着按钮等。
-    void syncNow()
+    void pushSaved(String(saved.id), String(saved.name), data)
     return { docId: String(saved.id), name: String(saved.name), data }
+    // pushSaved 每次渲染重建，只在回调里调用，不进依赖表
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [askName, exportTab, notify, syncTabs, t])
+
+  /**
+   * 存下以后推上去。登录着（同步在跑）的时候先截一张这一座的画面记成封面，跟着这一版交上去，
+   * 「我的设计」和发布出去的方案用的就是它；送到服务器以后发一个 quadro:design-saved 事件，
+   * 托管页面接着做它的事（比如提示去发布），Builder 自己不管。
+   */
+  async function pushSaved(docId: string, name: string, data: ModelJSON) {
+    if (!syncStarted()) { void syncNow(); return }
+    const cover = await coverShot()
+    if (cover) await docs.setDocCover(docId, cover)
+    if (!await pushDoc(docId)) return
+    window.dispatchEvent(new CustomEvent('quadro:design-saved', {
+      detail: { docId, name, parts: modelPartCount(data) },
+    }))
+  }
 
   /** 存档里没人用的名字：原名空着就用原名，否则在后面加「副本」，还重名就往后编号。 */
   const freeDocName = useCallback(async (name: string) => {
@@ -1268,7 +1286,9 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     syncTabs()
     track('builder.design.saveAs', { ...modelShape(data) })
     notify(t('toast.saved', { name: saved.name }))
-    void syncNow()
+    void pushSaved(String(saved.id), String(saved.name), data)
+    // pushSaved 每次渲染重建，只在回调里调用，不进依赖表
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [askName, freeDocName, notify, syncTabs, t])
 
   const duplicateDoc = useCallback(async (docId: string) => {
@@ -1635,6 +1655,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       size: [Math.round(b.size[0]), Math.round(b.size[2]), Math.round(b.size[1])],
       steps: (computeBuildPlan(e2.model, e2.builder.assemblyOrder || 'y+') as { steps: unknown[] }).steps.length,
       cover,
+      stats: statsOfModel(e2.model),
     })
     return stampFor(url, kind)
   }
@@ -1830,6 +1851,35 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const shareCurrent = useCallback(async () => {
     const e2 = eng.current
     if (!e2) return
+    // 托管版：存成方案页，复制它的短地址。没登录和导出文件一样先去注册
+    if (sharePagesEnabled()) {
+      if (needAccount('link')) return
+      if (modelPartCount(e2.model.toJSON()) === 0) { notify(t('toast.linkEmpty'), 'warn'); return }
+      // 剪贴板要在这一次点击里就开始写（Safari 过了这一下就不让写），地址还在路上，
+      // 先交给它一个会兑现的 Promise
+      const link = (async () => {
+        const cover = await coverShot()
+        if (!cover) throw new Error('cover shot failed')
+        const stamp = await makeStamp('link', cover)
+        if (!stamp) throw new Error('share pages disabled')
+        return stamp.url
+      })()
+      try {
+        await navigator.clipboard.write([new ClipboardItem({
+          'text/plain': link.then(u => new Blob([u], { type: 'text/plain' })),
+        })])
+      } catch {
+        // 方案页没存上和剪贴板不让写是两回事，分开说
+        notify(t(await link.then(() => 'toast.shareFailed', () => 'toast.linkFailed')), 'err')
+        return
+      }
+      const url = await link
+      track('builder.design.share', { short: true })
+      notify(t('toast.linkCopied'))
+      // 托管页面接这一声（例如提示去发布），Builder 自己不管后面的事
+      window.dispatchEvent(new CustomEvent('quadro:share-link', { detail: { url } }))
+      return
+    }
     try {
       const url = await shareUrl(e2.model.toJSON())
       if (!url) { notify(t('toast.shareTooBig'), 'warn'); return }
@@ -1839,6 +1889,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     } catch {
       notify(t('toast.shareFailed'), 'err')
     }
+    // needAccount、coverShot、makeStamp 每次渲染重建，只在回调里调用，不进依赖表
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notify, t])
 
   /**
@@ -1916,6 +1968,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     shareimg: () => { void exportPng() },
     qdf: () => exportQdf(),
     json: () => exportJson(),
+    link: () => { void shareCurrent() },
   }
 
   const answerAccount = useCallback((go: boolean) => {
