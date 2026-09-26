@@ -571,6 +571,14 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const eng = useRef<{ scene: E; model: E; builder: E } | null>(null)
   const thumbBatch = useRef<{ json: unknown; camera: unknown; sceneOn: boolean; mode: string } | null>(null)
+  // 截图一次只做一件：存下时截的封面、开启共享时截的封面、发布前截的画面可能同时来，
+  // 两批叠在一起，先结束的那一批会把场景复位，后一批截到的就是错的
+  const shotTurn = useRef<Promise<unknown>>(Promise.resolve())
+  function inTurn<T>(job: () => Promise<T>): Promise<T> {
+    const run = shotTurn.current.then(job)
+    shotTurn.current = run.then(() => undefined, () => undefined)
+    return run
+  }
   const tabsRef = useRef<Tab[]>([])
   const activeRef = useRef<string | null>(null)
   // 料表导出在回调里跑，用 ref 取当下的料表、尺寸、库存和语言
@@ -1232,21 +1240,30 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     // 存下就推上去。等一个同步周期的话，这中间关掉页面这一座就只在这台
     // 机器上；社区发帖页更是当场就要读服务器那张列表。不挡着上面那句提示：
     // 存进本地这件事已经成了，网络慢不该让用户对着按钮等。
+    await coverSaved(String(saved.id))
     void pushSaved(String(saved.id), String(saved.name), data)
     return { docId: String(saved.id), name: String(saved.name), data }
-    // pushSaved 每次渲染重建，只在回调里调用，不进依赖表
+    // coverSaved、pushSaved 每次渲染重建，只在回调里调用，不进依赖表
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [askName, exportTab, notify, syncTabs, t])
 
   /**
-   * 存下以后推上去。登录着（同步在跑）的时候先截一张这一座的画面记成封面，跟着这一版交上去，
-   * 「我的设计」和发布出去的方案用的就是它；送到服务器以后发一个 quadro:design-saved 事件，
+   * 登录着（同步在跑）的时候，存下的这一座截一张画面记成封面，跟着这一版交上去，
+   * 「我的设计」和发布出去的方案用的就是它。截完才算存完：存下之后紧接着的事
+   * （比如开启共享）也要截图，两次截图不能叠在一起。
+   */
+  async function coverSaved(docId: string) {
+    if (!syncStarted()) return
+    const cover = await coverShot()
+    if (cover) await docs.setDocCover(docId, cover)
+  }
+
+  /**
+   * 存下以后推上去；送到服务器以后发一个 quadro:design-saved 事件，
    * 托管页面接着做它的事（比如提示去发布），Builder 自己不管。
    */
   async function pushSaved(docId: string, name: string, data: ModelJSON) {
     if (!syncStarted()) { void syncNow(); return }
-    const cover = await coverShot()
-    if (cover) await docs.setDocCover(docId, cover)
     if (!await pushDoc(docId)) return
     window.dispatchEvent(new CustomEvent('quadro:design-saved', {
       detail: { docId, name, parts: modelPartCount(data) },
@@ -1286,8 +1303,9 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     syncTabs()
     track('builder.design.saveAs', { ...modelShape(data) })
     notify(t('toast.saved', { name: saved.name }))
+    await coverSaved(String(saved.id))
     void pushSaved(String(saved.id), String(saved.name), data)
-    // pushSaved 每次渲染重建，只在回调里调用，不进依赖表
+    // coverSaved、pushSaved 每次渲染重建，只在回调里调用，不进依赖表
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [askName, freeDocName, notify, syncTabs, t])
 
@@ -1624,17 +1642,19 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   }
 
   /** 成品图：空背景、3/4 视角，和模型库封面同一条截图通路，截完复位。 */
-  async function coverShot(): Promise<string | null> {
-    const e2 = eng.current
-    if (!e2) return null
-    startThumbBatch()
-    try {
-      await waitSceneReady(e2.scene)
-      const url = await takeModelThumb(e2.scene, e2.model)
-      return typeof url === 'string' && url.startsWith('data:image') ? url : null
-    } finally {
-      endThumbBatch()
-    }
+  function coverShot(): Promise<string | null> {
+    return inTurn(async () => {
+      const e2 = eng.current
+      if (!e2) return null
+      startThumbBatch()
+      try {
+        await waitSceneReady(e2.scene)
+        const url = await takeModelThumb(e2.scene, e2.model)
+        return typeof url === 'string' && url.startsWith('data:image') ? url : null
+      } finally {
+        endThumbBatch()
+      }
+    })
   }
 
   /**
@@ -2040,7 +2060,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     bump()
   }, [bump])
 
-  const captureThumb = useCallback(async (job: ThumbJob) => {
+  const captureThumb = useCallback((job: ThumbJob) => inTurn(async () => {
     const e = eng.current
     if (!e) return null
     let data: unknown = null
@@ -2082,7 +2102,9 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     } finally {
       if (!batched) endThumbBatch()
     }
-  }, [endThumbBatch, startThumbBatch])
+    // inTurn 只碰 ref，不进依赖表
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [endThumbBatch, startThumbBatch])
 
   const value: EngineApi = {
     ready, error, hostRef, tick,
