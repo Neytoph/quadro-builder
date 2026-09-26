@@ -84,6 +84,28 @@ export function accessories() {
 }
 
 /**
+ * Tuecher mit fester Groesse (Feld `rail`: Schlaufe laengs der Tragrohre und
+ * Abstand der beiden Tragrohre, in cm). Das gewoehnliche Tuch hat keins -- es
+ * nimmt jedes Feld des Netzrasters.
+ */
+export function railTextiles() {
+  return accessories().filter((a) => a.qdf === "textil2" && a.rail);
+}
+
+/**
+ * Katalogteil eines gesetzten Tuchs. Regenbogenband und -bruecke tragen ihre
+ * Variante; sonst sagt die Lage, welches Tuch es ist: passen Schlaufenlaenge
+ * und Rohrabstand zu einem Tuch fester Groesse, ist es dieses.
+ */
+export function textilePart(span, variant) {
+  if (variant) return getPartById("textile_" + variant);
+  const tol = 1.5;
+  const fest = span && railTextiles().find((a) =>
+    Math.abs(a.rail.along - span.len) <= tol && Math.abs(a.rail.gap - span.gap) <= tol);
+  return fest || getPartById("textile");
+}
+
+/**
  * Katalogteil zu einer QDF-Elementart ("multi-wheel2" ...). Die Zuordnung steht
  * als Feld `qdf` am Teil, damit Import, Stueckliste und Export dieselbe Quelle
  * nutzen. Die Lochzapfenkupplung gibt es ein- und dreiarmig -- welche, sagt die

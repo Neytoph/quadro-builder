@@ -981,6 +981,20 @@
       "url": "https://quadroshop.com/collections/textiles"
     },
     {
+      "id": "textile_20x40",
+      "code": "",
+      "name": "Textil 20 x 40 cm",
+      "name_en": "Textile 20 x 40 cm",
+      "price": 0,
+      "qdf": "textil2",
+      "rail": {
+        "along": 20,
+        "gap": 40
+      },
+      "note": "kurzes Tuch: Schlaufen um zwei 15er-Rohre (20 cm längs), 40 cm Abstand dazwischen · im QDF ein textil2 mit 150 x 350 mm, wie das 180 x 750-Tuch in A0112 · im Shop nicht einzeln · Preis noch offen",
+      "url": "https://quadroshop.com/collections/textiles"
+    },
+    {
       "id": "pool_liner_xs",
       "code": "10017",
       "name": "Poolfolie XS",

@@ -10,7 +10,7 @@ const COL: Record<string, number> = {
   '5way': 0, '4way': 1, '3way': 2, cross: 3, t: 4, elbow: 5, straight: 6, diagonal: 7,
   T10: 8, T15: 9, T20: 10, T25: 11, T35: 12, TS5: 13, T75: 14, TC1: 15, TS7: 15,
   panel_40x40: 16, panel_40x20: 17, hole_panel_40x40: 18,
-  textile: 19, lattice: 19, textile_round: 19, textil2: 19, lattice2: 19, 'textil-round2': 19,
+  textile: 19, textile_20x40: 19, lattice: 19, textile_round: 19, textil2: 19, lattice2: 19, 'textil-round2': 19,
   wheel: 20, 'multi-wheel2': 20,
   wheel_bearing: 21, bearing2: 21,
   hub_cap: 22, 'hub-cap2': 22,

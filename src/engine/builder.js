@@ -1,7 +1,7 @@
 // Bau-Interaktion: Auswahl, Anbau ueber Richtungs-Handles, Loeschen.
 
 import { DIRECTIONS, DIAGONAL_DIRECTIONS, DIR_ALIGN_TOL, ARM_ALIGN_TOL, CLAMP_LINK_DIST, C45_SLEEVE_LEN, C45_ARM_LEN } from "./config.js";
-import { accessories, buildableTubes, geometry, getTube, spacingFor, getPanel, defaultPanel, diagonalTubeId, slideKindLabel, slideKindName, isCurvedTube, gridSpacing, partName, partForFitting, getPartById, getConnector, poolLinerFor, reinforcementPart } from "./catalog.js";
+import { buildableTubes, geometry, getTube, spacingFor, getPanel, defaultPanel, diagonalTubeId, slideKindLabel, slideKindName, isCurvedTube, gridSpacing, partName, partForFitting, getPartById, getConnector, poolLinerFor, reinforcementPart, textilePart } from "./catalog.js";
 import { CLASSIC_COLOR_IDS, officialColorId } from "./colors.js";
 import { computeBuildPlan, connectorLabelInfo } from "./buildplan.js";
 import { infeasibleConnectors, inferConnectorType } from "./bom.js";
@@ -320,8 +320,8 @@ export class Builder {
       return;
     }
     if (RAIL_FITTINGS.has(this.fittingKind)
-      && !this.model.railFittingMounts(this.fittingKind).length) {
-      this.onNotice(t("notice_textile_no_cell"), "info");
+      && !this.model.railFittingMounts(this.fittingKind, this._railSize()).length) {
+      this.onNotice(t(this._railSize() ? "notice_short_textile_no_cell" : "notice_textile_no_cell"), "info");
       return;
     }
     if (POOL_KINDS.has(this.fittingKind)) {
@@ -342,7 +342,7 @@ export class Builder {
   _countFittingPlaces() {
     const kind = this.fittingKind;
     const cs = geometry().connectorSize;
-    if (RAIL_FITTINGS.has(kind)) return this.model.railFittingMounts(kind).length;
+    if (RAIL_FITTINGS.has(kind)) return this.model.railFittingMounts(kind, this._railSize()).length;
     if (ROOF_KINDS.has(kind)) return this.model.roofMounts(kind).length;
     if (kind === "textil-round2") return this.model.fittingMounts(kind).length;
     if (HOLE_MASKS[kind]) return this.model.holeArmMounts(cs).length;
@@ -1556,14 +1556,15 @@ export class Builder {
       return def ? partName(def) : null;
     }
     if (kind === "textile") {
-      // Ein Tuch hat kein Katalogteil je Groesse -- es gibt EINES, seine Masse
-      // stehen am Teil. Ohne diesen Zweig suchte der Name ein `panelId`, das es
-      // hier nicht gibt, und die Auswahl zeigte "null".
+      // Das gewoehnliche Tuch hat kein Katalogteil je Groesse, seine Masse
+      // stehen am Teil; das Tuch fester Groesse traegt sie schon im Namen.
+      // Ohne diesen Zweig suchte der Name ein `panelId`, das es hier nicht
+      // gibt, und die Auswahl zeigte "null".
       const x = m.textiles.get(id);
       if (!x) return null;
-      const def = accessories().find((a) => a.qdf === "textil2");
+      const def = textilePart(m.textileSpan(x), x.variant);
       const name = def ? partName(def) : t("bom_textile");
-      return x.w && x.h ? `${name} ${x.w}×${x.h} cm` : name;
+      return x.w && x.h && !(def && def.rail) ? `${name} ${x.w}×${x.h} cm` : name;
     }
     if (kind === "clamp") {
       const c = m.clamps.get(id);
@@ -3894,7 +3895,14 @@ export class Builder {
   _railPartners(railId) {
     return this.fittingKind === "bag2"
       ? this.model.bagPartners(railId)
-      : this.model.latticePartners(railId);   // Netz und Textil: gleiche Regel
+      : this.model.latticePartners(railId, 1.5, this._railSize());   // Netz und Textil: gleiche Regel
+  }
+
+  /** Gewaehltes Tuch fester Groesse: { along, gap } aus dem Katalog, sonst null. */
+  _railSize() {
+    if (this.fittingKind !== "textil2" || !this.fittingPart) return null;
+    const def = getPartById(this.fittingPart);
+    return (def && def.rail) || null;
   }
 
   /**
@@ -4127,7 +4135,10 @@ export class Builder {
     }
     const at = this._alongTube(id, point);
     const partners = this._freePartners(id, at);
-    if (!partners.length) { this.onNotice(t("notice_textile_no_partner"), "warn"); return; }
+    if (!partners.length) {
+      this.onNotice(t(this._railSize() ? "notice_short_textile_no_partner" : "notice_textile_no_partner"), "warn");
+      return;
+    }
     this.panelRail = { id, at };
     this.highlight = new Set([id, ...partners.map((c) => c.id)]);
     this.onNotice(t("notice_panel_pick_second", partners.length), "info");

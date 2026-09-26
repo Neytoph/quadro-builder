@@ -73,7 +73,7 @@ const items = await page.evaluate(async (files) => {
     ['connectors', '6way'], ['tubes', 'T52'], ['panels', 'panel_30x30'],
     ['connectors', 'hole_1'], ['connectors', 'hole_2'], ['connectors', 'hole_t'], ['connectors', 'bearing'],
     ['connectors', 'flexi_bolt'], ['connectors', 'flexi_hinge'], ['connectors', 'flexi'],
-    ['fittings', 'lattice'], ['textiles', 'textile_rainbow'], ['textiles', 'textile_bridge'], ['fittings', 'sleeve'],
+    ['fittings', 'lattice'], ['textiles', 'textile_20x40'], ['textiles', 'textile_rainbow'], ['textiles', 'textile_bridge'], ['fittings', 'sleeve'],
     ['fittings', 'pool_liner_xs'], ['fittings', 'pool_liner_s'], ['fittings', 'balls'],
     ['fittings', 'wheel_floating'], ['fittings', 'hub_cap'], ['fittings', 'roof_large'],
   ]
@@ -138,7 +138,12 @@ for (const it of items) {
           ids = [mt.nodeId]
         }
       } else if (r === 'lattice') { const [a, b] = cells(); ids = one(m.addLattice(a.id, b.id, 0, 40, 'green')) }
-      else if (r.startsWith('textile_')) { const [a, b] = cells(); const t = m.addTextile(a.id, b.id, 0, 40, 'red'); if (t) { t.variant = r.slice(8); ids = [t.id] } }
+      else if (r === 'textile_20x40') {
+        // 短布面：两根 15 管相距 40，布套在这两根管上
+        const a = node(0, 0, 0), b = node(20, 0, 0), c = node(0, 0, 40), d = node(20, 0, 40)
+        const r0 = tube(a, b, 'T15', 15), r1 = tube(c, d, 'T15', 15); tube(a, c); tube(b, d)
+        ids = one(m.addTextile(r0.id, r1.id, 0, 20, 'red'))
+      } else if (r.startsWith('textile_')) { const [a, b] = cells(); const t = m.addTextile(a.id, b.id, 0, 40, 'red'); if (t) { t.variant = r.slice(8); ids = [t.id] } }
       else if (r === 'sleeve') { const [a] = cells(); const f = m.addFitting('sleeve', 0, 0, 0, { color: 'green' }); f.tube = a.id; ids = [f.id] }
       else if (r.startsWith('pool_liner') || r === 'balls') {
         const spec = POOL_SETS[r === 'balls' ? 'pool_liner_xs' : r]
