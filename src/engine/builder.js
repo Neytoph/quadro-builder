@@ -12,6 +12,7 @@ import { TUBE_FITTINGS, POOL_KINDS, isHolePart, holeArmDirs, holeClampDirsAt, HO
   POOL_SETS, ARM_FITTINGS, armFittingDirsAt, fixedFittingColor } from "./model.js";
 import { CONNECTOR_ARM_BITS } from "./qdfimport.js";
 import { ACCESSORY_IDS } from './accessoryPack.js';
+import { pickStepAnchor, stepCandidates, stepCandidatesFromSelection } from "./stepAnchor.js";
 
 // Kupplungen, die auf einem Rohr sitzen statt im Raster: QDF-Art -> Katalogteil.
 // Teile, die sich um ein Rohr klemmen lassen. Die Lochzapfenkupplung gehört
@@ -104,6 +105,9 @@ export class Builder {
     // Schrittweite beim Verschieben (Pfeiltasten, Ziehen, Einfuegen).
     this.moveStep = DEFAULT_MOVE_STEP;
     this.selectedNodeId = null;
+    // 方向键接管的候选接头（没有点选接头时用）：鼠标刚加完一根管的新端点，
+    // 或者从选择模式切过来时选中的接头、选中的管子两头。不高亮。
+    this.stepFrom = [];
     // Cursor-Modus: id -> kind ("tube"/"panel"/"node"/...). Die ids sind ueber
     // alle Kategorien hinweg eindeutig (gemeinsamer Zaehler in model._id).
     this.selection = new Map();
@@ -180,6 +184,7 @@ export class Builder {
     if (this.selectedNodeId && !this.model.nodes.has(this.selectedNodeId)) {
       this.selectedNodeId = null;
     }
+    this.stepFrom = this.stepFrom.filter((id) => this.model.nodes.has(id));
     this._pruneSelection();
     if (this.mode === "assembly") this.enterAssembly();
     this.refresh();
@@ -256,6 +261,11 @@ export class Builder {
     // selbst auf "select" und setzt seinen Zustand danach).
     if (this._paste && mode !== "select") this.cancelPaste();
     if (mode !== "add") this.placeConnectorId = null;
+    // 带着选中的接头或管子离开选择模式：方向键从它们合适的那一头接
+    if (this.mode === "select" && mode !== "select" && this.selection.size) {
+      const from = stepCandidatesFromSelection(this.model, this.selection);
+      if (from.length) this.stepFrom = from;
+    }
     this.mode = mode;
     if (this.panelRail) { this.panelRail = null; this.highlight = null; }
     if (this.reinforceRail) { this.reinforceRail = null; this.highlight = null; }
@@ -1307,6 +1317,7 @@ export class Builder {
   modelReplaced() {
     this.selection.clear();
     this.selectedNodeId = null;
+    this.stepFrom = [];
     this.scene.markModelReplaced();
   }
 
@@ -1340,6 +1351,7 @@ export class Builder {
     this.assemblyStep = s.assemblyStep || 0;
     this.selection.clear();
     this.selectedNodeId = null;
+    this.stepFrom = [];
     this.highlight = null;
     this.panelRail = null;
     this.reinforceRail = null;
@@ -1432,6 +1444,7 @@ export class Builder {
 
   // Ein Bau-Schritt per Tastatur: vom ausgewaehlten Knoten in Richtung dirVec.
   buildStep(dirVec) {
+    if (this.readOnly) { this.onNotice(t("notice_read_only"), "warn"); return; }
     if (this.model.isEmpty()) {
       this.recordHistory(() => {
         // Erste Kupplung auf y = 0, genau wie beim Klick auf den Ursprung --
@@ -1441,8 +1454,10 @@ export class Builder {
       this.refresh();
       return;
     }
-    const node = this.selectedNodeId && this.model.nodes.get(this.selectedNodeId);
-    if (!node) return;
+    const from = stepCandidates(this.model, this.selectedNodeId, this.stepFrom);
+    const node = pickStepAnchor(this.model, from, dirVec,
+      (n, d) => !this._armOccupied(n, d));
+    if (!node) { this.onNotice(t("notice_step_pick"), "warn"); return; }
     const tube = getTube(this.tubeId);
     let res;
     this.recordHistory(() => {
@@ -1455,9 +1470,13 @@ export class Builder {
     if (res && res.ground) this.onNotice(t("notice_ground"), "warn");
     else if (res && res.collision) this.onNotice(t("notice_collision"), "warn");
     else if (res && res.tube) this._notePlaced(res.tube.id, "tube");
+    else if (!res) this.onNotice(t("notice_step_blocked"), "warn");
     // Der Ankerpunkt wandert ans neue Rohrende -- sonst müsste man jede
     // Richtung zweimal drücken: einmal bauen, einmal hinlaufen.
-    if (res && res.node) this.selectedNodeId = res.node.id;
+    if (res && res.node) {
+      this.selectedNodeId = res.node.id;
+      this.stepFrom = [res.node.id];
+    }
     this.refresh();
   }
 
@@ -4381,15 +4400,17 @@ export class Builder {
       else if (res && res.tube) {
         this._notePlaced(res.tube.id, "tube");
         this.selectedNodeId = null;
+        this.stepFrom = [res.node.id];
       }
-      // 鼠标加管不锁到新端点：所有合法接头继续可加。键盘步进仍用 selectedNodeId。
+      // 鼠标加管不锁到新端点：所有合法接头继续可加，方向键从新端点接着长（stepFrom）。
       this.refresh();
       return;
     }
-    // 点接头只作为键盘步进的锚，不收起其它位置的锚点。
+    // 点接头只作为键盘步进的锚，不收起其它位置的锚点。同一个接头再点一次取消。
     const pick = front;
     if (pick && pick.data.kind === "node" && this._isBuildable(pick.data.id)) {
       this.selectedNodeId = pick.data.id === this.selectedNodeId ? null : pick.data.id;
+      this.stepFrom = [];
       this.refresh();
       return;
     }
