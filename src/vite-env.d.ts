@@ -21,6 +21,18 @@ interface ImportMetaEnv {
    */
   readonly VITE_SHARE_API?: string
   /**
+   * 托管版每种界面语言的发布页地址，写成 JSON，例如
+   * '{"zh":"/publish.html","en":"/en/publish.html","de":"/de/publish.html"}'。
+   * 和 VITE_PUBLISH_API 一起设了，「我的设计」里每一座才有「发布到广场」。
+   * 点了先把这一座送上去，再去 <发布页>?model=<doc id>。开源本地版不设。
+   */
+  readonly VITE_PUBLISH_PAGE?: string
+  /**
+   * 托管版的发布状态接口，例如 '/quadro/plaza/designs'。契约见 src/publish.ts：
+   * 哪几座已经发布、改过没有，撤下走同一个前缀。开源本地版不设。
+   */
+  readonly VITE_PUBLISH_API?: string
+  /**
    * 托管版的注册页，例如 '/register'。设了之后，导出文件和保存到账号要先有账号：
    * 没登录的人点导出，先去这个地址注册，带着 ?next= 回到 Builder 接着导出。
    * 开源本地版不设，导出不拦。

@@ -11,6 +11,7 @@ import { syncNow, syncProbe, syncStarted } from '../sync/bootstrap'
 import { tabOpenedFrom, tabSavedAs } from '../sync/origin'
 import { bootEntry, SESSIONLESS, VIEW_ONLY, type ResumeExport } from '../entry'
 import { publishSharePage, sharePagesEnabled, stampFor, type ExportKind, type Stamp } from '../sharePage'
+import { statsOfModel } from '../designStats'
 import { geometricPreset, jsonToFragment } from '../data/presets'
 import pyramidQdf from '../data/A0128.qdf?raw'
 import { clearSharePayload, decodeShare, peekSharePayload, shareUrl } from '../share'
@@ -570,6 +571,14 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const eng = useRef<{ scene: E; model: E; builder: E } | null>(null)
   const thumbBatch = useRef<{ json: unknown; camera: unknown; sceneOn: boolean; mode: string } | null>(null)
+  // 截图一次只做一件：存下时截的封面、开启共享时截的封面、发布前截的画面可能同时来，
+  // 两批叠在一起，先结束的那一批会把场景复位，后一批截到的就是错的
+  const shotTurn = useRef<Promise<unknown>>(Promise.resolve())
+  function inTurn<T>(job: () => Promise<T>): Promise<T> {
+    const run = shotTurn.current.then(job)
+    shotTurn.current = run.then(() => undefined, () => undefined)
+    return run
+  }
   const tabsRef = useRef<Tab[]>([])
   const activeRef = useRef<string | null>(null)
   // 料表导出在回调里跑，用 ref 取当下的料表、尺寸、库存和语言
@@ -1231,9 +1240,35 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     // 存下就推上去。等一个同步周期的话，这中间关掉页面这一座就只在这台
     // 机器上；社区发帖页更是当场就要读服务器那张列表。不挡着上面那句提示：
     // 存进本地这件事已经成了，网络慢不该让用户对着按钮等。
-    void syncNow()
+    await coverSaved(String(saved.id))
+    void pushSaved(String(saved.id), String(saved.name), data)
     return { docId: String(saved.id), name: String(saved.name), data }
+    // coverSaved、pushSaved 每次渲染重建，只在回调里调用，不进依赖表
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [askName, exportTab, notify, syncTabs, t])
+
+  /**
+   * 登录着（同步在跑）的时候，存下的这一座截一张画面记成封面，跟着这一版交上去，
+   * 「我的设计」和发布出去的方案用的就是它。截完才算存完：存下之后紧接着的事
+   * （比如开启共享）也要截图，两次截图不能叠在一起。
+   */
+  async function coverSaved(docId: string) {
+    if (!syncStarted()) return
+    const cover = await coverShot()
+    if (cover) await docs.setDocCover(docId, cover)
+  }
+
+  /**
+   * 存下以后推上去；送到服务器以后发一个 quadro:design-saved 事件，
+   * 托管页面接着做它的事（比如提示去发布），Builder 自己不管。
+   */
+  async function pushSaved(docId: string, name: string, data: ModelJSON) {
+    if (!syncStarted()) { void syncNow(); return }
+    if (!await pushDoc(docId)) return
+    window.dispatchEvent(new CustomEvent('quadro:design-saved', {
+      detail: { docId, name, parts: modelPartCount(data) },
+    }))
+  }
 
   /** 存档里没人用的名字：原名空着就用原名，否则在后面加「副本」，还重名就往后编号。 */
   const freeDocName = useCallback(async (name: string) => {
@@ -1268,7 +1303,10 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     syncTabs()
     track('builder.design.saveAs', { ...modelShape(data) })
     notify(t('toast.saved', { name: saved.name }))
-    void syncNow()
+    await coverSaved(String(saved.id))
+    void pushSaved(String(saved.id), String(saved.name), data)
+    // coverSaved、pushSaved 每次渲染重建，只在回调里调用，不进依赖表
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [askName, freeDocName, notify, syncTabs, t])
 
   const duplicateDoc = useCallback(async (docId: string) => {
@@ -1604,17 +1642,26 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   }
 
   /** 成品图：空背景、3/4 视角，和模型库封面同一条截图通路，截完复位。 */
-  async function coverShot(): Promise<string | null> {
-    const e2 = eng.current
-    if (!e2) return null
-    startThumbBatch()
-    try {
-      await waitSceneReady(e2.scene)
-      const url = await takeModelThumb(e2.scene, e2.model)
-      return typeof url === 'string' && url.startsWith('data:image') ? url : null
-    } finally {
-      endThumbBatch()
-    }
+  function coverShot(): Promise<string | null> {
+    return inTurn(async () => {
+      const e2 = eng.current
+      if (!e2) return null
+      // 选中的零件画成高亮色：截图前清掉重画（startThumbBatch 已经清了选择），截完把选择还回去
+      const kept = new Map(e2.builder.selection)
+      const keptNode = e2.builder.selectedNodeId
+      startThumbBatch()
+      try {
+        e2.builder.refresh()
+        await waitSceneReady(e2.scene)
+        const url = await takeModelThumb(e2.scene, e2.model)
+        return typeof url === 'string' && url.startsWith('data:image') ? url : null
+      } finally {
+        endThumbBatch()
+        for (const [id, kind] of kept) e2.builder.selection.set(id, kind)
+        e2.builder.selectedNodeId = keptNode
+        e2.builder.refresh()
+      }
+    })
   }
 
   /**
@@ -1635,6 +1682,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       size: [Math.round(b.size[0]), Math.round(b.size[2]), Math.round(b.size[1])],
       steps: (computeBuildPlan(e2.model, e2.builder.assemblyOrder || 'y+') as { steps: unknown[] }).steps.length,
       cover,
+      stats: statsOfModel(e2.model),
     })
     return stampFor(url, kind)
   }
@@ -1830,6 +1878,45 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const shareCurrent = useCallback(async () => {
     const e2 = eng.current
     if (!e2) return
+    // 托管版：存成方案页，复制它的短地址。没登录和导出文件一样先去注册
+    if (sharePagesEnabled()) {
+      if (needAccount('link')) return
+      if (modelPartCount(e2.model.toJSON()) === 0) { notify(t('toast.linkEmpty'), 'warn'); return }
+      // 剪贴板要在这一次点击里就开始写（Safari 过了这一下就不让写），地址还在路上，
+      // 先交给它一个会兑现的 Promise
+      const link = (async () => {
+        const cover = await coverShot()
+        if (!cover) throw new Error('cover shot failed')
+        const stamp = await makeStamp('link', cover)
+        if (!stamp) throw new Error('share pages disabled')
+        return stamp.url
+      })()
+      const wrote = navigator.clipboard.write([new ClipboardItem({
+        'text/plain': link.then(u => new Blob([u], { type: 'text/plain' })),
+      })])
+      // 方案页没存上和剪贴板不让写是两回事，分开说。方案页没存上时浏览器那头的写入
+      // 可能一直不结束，所以先等地址，不等剪贴板
+      let url: string
+      try {
+        url = await link
+      } catch {
+        notify(t('toast.linkFailed'), 'err')
+        // 已经说过没存上；剪贴板那头随后被拒是同一件事，不再另报
+        void wrote.then(() => undefined, () => undefined)
+        return
+      }
+      try {
+        await wrote
+      } catch {
+        notify(t('toast.shareFailed'), 'err')
+        return
+      }
+      track('builder.design.share', { short: true })
+      notify(t('toast.linkCopied'))
+      // 托管页面接这一声（例如提示去发布），Builder 自己不管后面的事
+      window.dispatchEvent(new CustomEvent('quadro:share-link', { detail: { url } }))
+      return
+    }
     try {
       const url = await shareUrl(e2.model.toJSON())
       if (!url) { notify(t('toast.shareTooBig'), 'warn'); return }
@@ -1839,6 +1926,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     } catch {
       notify(t('toast.shareFailed'), 'err')
     }
+    // needAccount、coverShot、makeStamp 每次渲染重建，只在回调里调用，不进依赖表
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notify, t])
 
   /**
@@ -1916,6 +2005,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     shareimg: () => { void exportPng() },
     qdf: () => exportQdf(),
     json: () => exportJson(),
+    link: () => { void shareCurrent() },
   }
 
   const answerAccount = useCallback((go: boolean) => {
@@ -1987,7 +2077,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     bump()
   }, [bump])
 
-  const captureThumb = useCallback(async (job: ThumbJob) => {
+  const captureThumb = useCallback((job: ThumbJob) => inTurn(async () => {
     const e = eng.current
     if (!e) return null
     let data: unknown = null
@@ -2029,7 +2119,9 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     } finally {
       if (!batched) endThumbBatch()
     }
-  }, [endThumbBatch, startThumbBatch])
+    // inTurn 只碰 ref，不进依赖表
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [endThumbBatch, startThumbBatch])
 
   const value: EngineApi = {
     ready, error, hostRef, tick,

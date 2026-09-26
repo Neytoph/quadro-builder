@@ -6,6 +6,7 @@ import { docs, partForFitting, partName } from '../../engine-api'
 import { syncConfigured, syncNow } from '../../sync/bootstrap'
 import { useCollab } from '../CollabContext'
 import { importOne, isQdfFile, MAX_IMPORT, type ImportResult } from '../batchImport'
+import { publishEnabled, publishPage } from '../../publish'
 import { useSignedIn } from './bits'
 import { Modal } from './Modals'
 
@@ -17,19 +18,19 @@ type Row = ImportResult & { thumb: string | null }
 
 /**
  * 批量导入官方软件的 .qdf：一次拖进来多个，每个文件存成一座造型，放进「我的设计」。
- * 结果一个文件一张卡：缩略图、件数、导入不了的零件；「发到广场」打开发布页补全再发。
+ * 结果一个文件一张卡：缩略图、件数、导入不了的零件；「发到广场」打开发布页确认再发。
  */
 export default function BatchImport({ onClose }: { onClose: () => void }) {
   const api = useEngine()
   const collab = useCollab()
   const signedIn = useSignedIn()
-  const { t } = useI18n()
+  const { t, lang } = useI18n()
   const [rows, setRows] = useState<Row[]>([])
   const [busy, setBusy] = useState<{ k: number; n: number } | null>(null)
   const [over, setOver] = useState(0)
   const [dropping, setDropping] = useState(true)
   const input = useRef<HTMLInputElement>(null)
-  const publish = collab.enabled && signedIn
+  const publish = collab.enabled && signedIn && publishEnabled()
 
   const run = async (list: File[]) => {
     const files = list.filter(isQdfFile).slice(0, MAX_IMPORT)
@@ -51,7 +52,7 @@ export default function BatchImport({ onClose }: { onClose: () => void }) {
 
   const toPlaza = async (docId: string) => {
     if (!await api.pushDoc(docId)) { api.notify(t('saves.shareNotYet'), 'warn'); return }
-    window.open(`/publish.html?model=${encodeURIComponent(docId)}`, '_blank', 'noopener')
+    window.open(publishPage(lang, docId), '_blank', 'noopener')
   }
 
   const ok = rows.filter(r => r.ok).length
