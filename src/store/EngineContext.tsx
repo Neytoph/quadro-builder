@@ -1646,13 +1646,20 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     return inTurn(async () => {
       const e2 = eng.current
       if (!e2) return null
+      // 选中的零件画成高亮色：截图前清掉重画（startThumbBatch 已经清了选择），截完把选择还回去
+      const kept = new Map(e2.builder.selection)
+      const keptNode = e2.builder.selectedNodeId
       startThumbBatch()
       try {
+        e2.builder.refresh()
         await waitSceneReady(e2.scene)
         const url = await takeModelThumb(e2.scene, e2.model)
         return typeof url === 'string' && url.startsWith('data:image') ? url : null
       } finally {
         endThumbBatch()
+        for (const [id, kind] of kept) e2.builder.selection.set(id, kind)
+        e2.builder.selectedNodeId = keptNode
+        e2.builder.refresh()
       }
     })
   }
@@ -1884,16 +1891,26 @@ export function EngineProvider({ children }: { children: ReactNode }) {
         if (!stamp) throw new Error('share pages disabled')
         return stamp.url
       })()
+      const wrote = navigator.clipboard.write([new ClipboardItem({
+        'text/plain': link.then(u => new Blob([u], { type: 'text/plain' })),
+      })])
+      // 方案页没存上和剪贴板不让写是两回事，分开说。方案页没存上时浏览器那头的写入
+      // 可能一直不结束，所以先等地址，不等剪贴板
+      let url: string
       try {
-        await navigator.clipboard.write([new ClipboardItem({
-          'text/plain': link.then(u => new Blob([u], { type: 'text/plain' })),
-        })])
+        url = await link
       } catch {
-        // 方案页没存上和剪贴板不让写是两回事，分开说
-        notify(t(await link.then(() => 'toast.shareFailed', () => 'toast.linkFailed')), 'err')
+        notify(t('toast.linkFailed'), 'err')
+        // 已经说过没存上；剪贴板那头随后被拒是同一件事，不再另报
+        void wrote.then(() => undefined, () => undefined)
         return
       }
-      const url = await link
+      try {
+        await wrote
+      } catch {
+        notify(t('toast.shareFailed'), 'err')
+        return
+      }
       track('builder.design.share', { short: true })
       notify(t('toast.linkCopied'))
       // 托管页面接这一声（例如提示去发布），Builder 自己不管后面的事
