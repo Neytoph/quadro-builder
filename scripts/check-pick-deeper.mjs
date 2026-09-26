@@ -23,19 +23,19 @@ await loadCatalog()
 let n = 0
 const ok = (cond, msg) => { assert.ok(cond, msg); n++ }
 
-// 一座两层的护栏平台：拿它的两块板当「前面那块」和「后面那块」
+// 一座两层的护栏平台：拿它的一根管当「前面那件」、一个接头当「后面那件」
 const m = new BuildModel()
 m.loadJSON(geometricPreset('rail_deck_tall'))
 const panelIds = [...m.panels.values()].filter((p) => !p.poolPart).map((p) => p.id)
 ok(panelIds.length >= 1, `该有板，得到 ${panelIds.length}`)
-const front = panelIds[0]
-const back = [...m.tubes.values()][0].id   // 后面那件拿一根管代替也一样
+const front = [...m.tubes.values()][0].id
+const back = [...m.nodes.values()][0].id
 const hits = [
-  { data: { kind: 'panel', id: front }, distance: 100, point: null },
-  { data: { kind: 'tube', id: back }, distance: 140, point: null },
+  { data: { kind: 'tube', id: front }, distance: 100, point: null },
+  { data: { kind: 'node', id: back }, distance: 140, point: null },
 ]
 
-// 假场景：指针下面总是这两件，前面那块在前
+// 假场景：指针下面总是这两件，前面那件在前
 function fakeScene() {
   const el = { addEventListener() {}, removeEventListener() {}, style: {}, getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }) }
   const base = {
@@ -59,21 +59,21 @@ b.mode = 'select'
 const click = (x, y) => b._clickSelectRaw({ clientX: x, clientY: y })
 const sel = () => [...b.selection.keys()]
 
-// 1. 第一下：最近的那块
+// 1. 第一下：最近的那件
 click(100, 100)
-ok(sel().length === 1 && sel()[0] === front, `第一下选前面那块，得到 ${sel()}`)
+ok(sel().length === 1 && sel()[0] === front, `第一下选前面那件，得到 ${sel()}`)
 
 // 2. 隔一会儿同一处再点：后面那件
 clock += 1500
 click(102, 101)
 ok(sel().length === 1 && sel()[0] === back, `隔一会儿再点该选后面那件，得到 ${sel()}`)
 
-// 3. 再来一次：绕回前面那块
+// 3. 再来一次：绕回前面那件
 clock += 1500
 click(101, 100)
-ok(sel().length === 1 && sel()[0] === front, `再点绕回前面那块，得到 ${sel()}`)
+ok(sel().length === 1 && sel()[0] === front, `再点绕回前面那件，得到 ${sel()}`)
 
-// 4. 换了位置：又从最近的开始（先清掉选中，不然点已选中的那块是取消选中）
+// 4. 换了位置：又从最近的开始（先清掉选中，不然点已选中的那件是取消选中）
 clock += 1500
 b.clearSelection()
 click(300, 300)

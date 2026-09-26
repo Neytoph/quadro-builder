@@ -125,6 +125,8 @@ export class Builder {
     this._externalPending = false;
     // 只能看（共享方案的评论者和访客、交付查看）：能选、能转视角，改动一律不收
     this.readOnly = false;
+    // 选择模式里再点选中的面板、排着等执行的翻面（见 _queueSelectFlip）
+    this._selectFlip = null;
     // 外壳借模型去截缩略图、封面：这段时间模型里放的是别的东西
     this.held = false;
     // 按零件上色（id -> 颜色）：共享方案里别人选中的零件
@@ -243,13 +245,16 @@ export class Builder {
 
   // 撤销和重做改的是文档；文档一变，_externalChange 把结果读回模型。
   // 粘贴中撤销先放下手上的副本；拖动中（按键还按着）不撤销。
+  // 刚点过、还排着的翻面先做完，撤销撤的就是它。
   undo() {
+    this._runSelectFlip();
     if (this._paste) this.cancelPaste();
     if (this.busy() || !this.canUndo()) return;
     this.history.undo();
   }
 
   redo() {
+    this._runSelectFlip();
     if (this._paste) this.cancelPaste();
     if (this.busy() || !this.canRedo()) return;
     this.history.redo();
@@ -257,6 +262,7 @@ export class Builder {
 
   // --- oeffentliche Steuerung --------------------------------------------
   setMode(mode) {
+    this._runSelectFlip();
     // Ein Moduswechsel beendet ein laufendes Einfuegen (startPaste schaltet
     // selbst auf "select" und setzt seinen Zustand danach).
     if (this._paste && mode !== "select") this.cancelPaste();
@@ -536,8 +542,44 @@ export class Builder {
     const now = performance.now();
     const last = this._selectClick;
     this._selectClick = { t: now, id: seedId, x: e.clientX, y: e.clientY };
-    return !!(last && now - last.t < SELECT_BLOCK_MS && last.id === seedId
+    const block = !!(last && now - last.t < SELECT_BLOCK_MS && last.id === seedId
       && Math.hypot(e.clientX - last.x, e.clientY - last.y) < CLICK_TOLERANCE);
+    // 快的第二下是选整块：前一下排着的翻面作废
+    if (block) this._cancelSelectFlip();
+    return block;
+  }
+
+  // 选择模式里再点一下就翻面的，只有单独选着的这块面板（或者只选着它所在的那一组）。
+  // 选着好几件时点其中一块，先变成只选它，再点才翻。
+  _panelFlipsOnClick(id) {
+    if (this.readOnly || !this.selection.has(id)) return false;
+    const gid = this.model.groupOf(id);
+    const members = gid ? this.model.groups.get(gid) : new Set([id]);
+    return this.selection.size === members.size && [...this.selection.keys()].every((x) => members.has(x));
+  }
+
+  // 翻面等过选整块的时间窗口再执行：这段时间里在同一处再点一下是选整块，不能先翻了。
+  _queueSelectFlip(id, e) {
+    this._cancelSelectFlip();
+    const timer = setTimeout(() => this._runSelectFlip(), SELECT_BLOCK_MS);
+    this._selectFlip = { id, x: e.clientX, y: e.clientY, timer };
+  }
+
+  _cancelSelectFlip() {
+    if (!this._selectFlip) return;
+    clearTimeout(this._selectFlip.timer);
+    this._selectFlip = null;
+  }
+
+  // 排着的翻面现在执行（等到了时间，或者接下来要做别的事，先把它做完）
+  _runSelectFlip() {
+    const f = this._selectFlip;
+    if (!f) return;
+    this._cancelSelectFlip();
+    let side = null;
+    this.recordHistory(() => { side = this.model.flipPanelSide(f.id); });
+    if (side != null) this.onNotice(t(side < 0 ? "notice_panel_below" : "notice_panel_above"), "info");
+    this.refresh();
   }
 
   _selectConnectedFromPick(pick, add) {
@@ -2621,6 +2663,7 @@ export class Builder {
       // Der erste Klick hat einen Seitenwechsel vorgemerkt; der gilt nicht mehr.
       clearTimeout(this._panelFlipTimer);
       this._panelFlipTimer = null;
+      this._cancelSelectFlip();
       if (this.mode === "select" && !this._paste) {
         const pick = this.scene.pickForDelete(e.clientX, e.clientY);
         if (pick) this._selectConnectedFromPick(pick, e.ctrlKey || e.metaKey || e.shiftKey);
@@ -2639,6 +2682,13 @@ export class Builder {
       const art = (e.pointerType === "touch" || e.pointerType === "pen") ? "touch" : "mouse";
       if (art !== this.inputType) { this.inputType = art; this.onInputTypeChange(); }
       if (this._pointerId !== null) { this._abortGesture(); return; }
+      // 还排着翻面：同一处又按下去是快点两下的第二下（选整块），翻面作废；
+      // 按在别处就先把它翻完，免得在接下来的拖动中间才翻
+      if (this._selectFlip) {
+        const f = this._selectFlip;
+        if (Math.hypot(e.clientX - f.x, e.clientY - f.y) < CLICK_TOLERANCE) this._cancelSelectFlip();
+        else this._runSelectFlip();
+      }
       this._pointerId = e.pointerId;
       this._down = {
         x: e.clientX, y: e.clientY,
@@ -2696,6 +2746,11 @@ export class Builder {
               // sonst kaeme das Halten auf einem gewaehlten Teil nie an, weil der
               // Zug schon begonnen haette.
               this._dragKandidat = { e, pick };
+            } else if (pick.data.kind === "panel") {
+              // 选着的面板：原地点一下是翻面（见 _clickSelectRaw），挪过点击的范围才开始拖。
+              // 不先转视角，免得开始拖之前画面跟着晃
+              this._dragKandidat = { e, pick };
+              return;
             } else {
               this._beginMoveDrag(e, pick);
               return;
@@ -3295,13 +3350,14 @@ export class Builder {
     const clampHit = this.scene.pickClamp(x, y);
     const hits = this.scene.pickAllForDelete ? this.scene.pickAllForDelete(x, y) : [];
     let allHit = hits.length ? hits[0] : this.scene.pickForDelete(x, y);
-    // 同一个位置、隔一会儿再点一次：选它后面那一件。密闭的盒子里底板被侧板
-    // 挡着，点不到，就靠这个一层层往里选。快的两下还是选整块，不冲突。
+    // 同一个位置、隔一会儿再点一次：选它后面那一件。选着的是面板时这样再点是翻面
+    // （见 _clickSelectRaw），不往里选。快的两下还是选整块，不冲突。
     const last = this._selectClick;
-    if (hits.length > 1 && last && Math.hypot(x - last.x, y - last.y) < CLICK_TOLERANCE
+    const cur = this.selection.size === 1 ? [...this.selection][0] : null;
+    if (hits.length > 1 && cur && cur[1] !== "panel" && last
+        && Math.hypot(x - last.x, y - last.y) < CLICK_TOLERANCE
         && performance.now() - last.t >= SELECT_BLOCK_MS) {
-      const cur = this.selection.size === 1 ? [...this.selection.keys()][0] : null;
-      const idx = cur != null ? hits.findIndex((h) => h.data && h.data.id === cur) : -1;
+      const idx = hits.findIndex((h) => h.data && h.data.id === cur[0]);
       if (idx >= 0) allHit = hits[(idx + 1) % hits.length];
     }
     if (clampHit && (!allHit || allHit.data.kind === "clamp"
@@ -4605,6 +4661,11 @@ export class Builder {
       ? pick.data.tubes : [id];
     if (this._isBlockClick(e, ids[0])) {
       this._selectConnectedFromPick(pick, add);
+      return;
+    }
+    // 再点一下选着的面板：翻到这对管的另一面，和面板模式里单击一样
+    if (kind === "panel" && !add && this._panelFlipsOnClick(id)) {
+      this._queueSelectFlip(id, e);
       return;
     }
     // Kam der Klick vom Profil, merken wir uns genau diese Rohre. Stimmt die

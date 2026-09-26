@@ -74,7 +74,7 @@ function rowsFor(
         { chord: 'Q / E', action: t('keys.rotate') },
         { chord: 'M / ⇧M', action: t('keys.mirror') },
         { chord: `${t('keys.chord.group')} / ${t('keys.chord.ungroup')}`, action: t('keys.group') },
-        { chord: t('keys.chord.again'), action: t('keys.pickDeeper') },
+        { chord: t('keys.chord.again'), action: t('keys.clickAgain') },
         { chord: 'D', action: t('keys.deleteMode') },
       ]
   }
