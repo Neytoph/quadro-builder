@@ -2,6 +2,14 @@ import { describe, expect, it } from 'vitest'
 import { dropParam, readEntry } from './entry'
 import { appendTab } from './store/tabs'
 
+describe('?export= 注册完回来接着做', () => {
+  it('复制分享链接（link）和导出文件一样认', () => {
+    expect(readEntry('?export=link', '', true).resume).toBe('link')
+    expect(readEntry('?export=manual', '', true).resume).toBe('manual')
+    expect(readEntry('?export=nope', '', true).resume).toBeNull()
+  })
+})
+
 describe('?new=1 新开一个空白标签页', () => {
   it('托管版带 ?new=1 要新开', () => {
     expect(readEntry('?new=1', '', true).blank).toBe(true)

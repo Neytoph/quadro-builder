@@ -8,6 +8,7 @@
 // 不传 baseUrl 就什么都不做——开源本地版的默认状态，行为与从前完全一致。
 
 import { docs, storage, partsOfData } from '../engine-api'
+import { statsOfData } from '../designStats'
 import { forgetOrigin, originOf } from './origin'
 import type {
   DesignParts, DocRecord, PullResponse, PushResponse, RemoteDoc, RemoteInventory,
@@ -109,11 +110,12 @@ export function createSync(opts: SyncOptions = {}) {
           await docs.markDocSynced(doc.id, r.rev, stamp)
         } else {
           const parts = partsOfData(doc.data) as DesignParts | null
+          // stats：这一版的量（../designStats.ts），服务端拿它当客观量，和 parts 一样由引擎算
           // origin：这一座是从哪个方案打开的（见 ./origin.ts），第一次推上去时带上
           const r = await call<PushResponse>(`/models/${encodeURIComponent(doc.id)}`, {
             method: 'PUT',
             body: JSON.stringify({
-              name: doc.name, data: doc.data, parts, baseRev: doc.rev, origin: originOf(doc.id),
+              name: doc.name, data: doc.data, parts, stats: statsOfData(doc.data), baseRev: doc.rev, origin: originOf(doc.id),
               ...(doc.cover ? { cover: doc.cover } : {}),
             }),
           })
