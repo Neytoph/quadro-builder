@@ -1679,7 +1679,7 @@ export class Builder {
         // eine volle Lochweite daneben.
         const center = [c.x + c.off[0], c.y + c.off[1], c.z + c.off[2]];
         if (this._openingOccupied(center, c.dir)) continue;
-        this.scene.addHandle(center, { clampOpening: true, center, dir: c.dir }, "dir");
+        this.scene.addHandle(center, { clampOpening: true, center, dir: c.dir, clampId: c.id }, "dir");
       }
       // Dasselbe fuer das noch leere Maul einer Lagerkupplung: der Punkt liegt
       // GENAU auf der Achse, auf der das Rohr durchlaeuft.
@@ -2538,22 +2538,16 @@ export class Builder {
     this.refresh();
   }
 
-  // Zweite, parallele Tube in die leere Oeffnung setzen (mittig an der Klemme).
-  _placeSecondTube(center, dir, bearingNode = null) {
+  // Zweite, parallele Tube in die leere Oeffnung setzen. Im Doppelrohrverbinder
+  // richtet sie sich nach dem gehaltenen Rohr aus (Regel: model.secondTubeEnds);
+  // im Maul einer Lagerkupplung liegt sie mittig.
+  _placeSecondTube(center, dir, bearingNode = null, clampId = null) {
     const tube = getTube(this.tubeId);
     if (!tube) return;
     const span = spacingFor(tube.length_cm);
-    const dl = Math.hypot(dir[0], dir[1], dir[2]) || 1;
-    const u = [dir[0] / dl, dir[1] / dl, dir[2] / dl];
-    const h = span / 2;
-    const p1 = [center[0] - u[0] * h, center[1] - u[1] * h, center[2] - u[2] * h];
-    // Mittig zur Klemme ist die grobe Lage -- entlang des Rohrs wird auf das
-    // Raster gerastet, damit das neue Rohr zu allem anderen passt. Quer dazu
-    // bleibt es, wo die Klemme es haelt.
-    const achse = [Math.abs(u[0]), Math.abs(u[1]), Math.abs(u[2])];
-    const gr = achse.indexOf(Math.max(...achse));
-    if (achse[gr] > 0.99) p1[gr] = Math.round(p1[gr] / SNAP_STEP) * SNAP_STEP;
-    const p2 = [p1[0] + u[0] * span, p1[1] + u[1] * span, p1[2] + u[2] * span];
+    const { p1, p2 } = clampId
+      ? this.model.secondTubeEnds(clampId, span, { step: SNAP_STEP, cs: geometry().connectorSize })
+      : this.model.centeredTubeEnds(center, dir, span, SNAP_STEP);
     this.recordHistory(() => {
       const n1 = this.model.addNode(round2(p1[0]), round2(p1[1]), round2(p1[2]));
       const n2 = this.model.addNode(round2(p2[0]), round2(p2[1]), round2(p2[2]));
@@ -4347,7 +4341,7 @@ export class Builder {
       return;
     }
     if (h) {
-      if (h.data.clampOpening) { this._placeSecondTube(h.data.center, h.data.dir, h.data.bearingNode); return; }
+      if (h.data.clampOpening) { this._placeSecondTube(h.data.center, h.data.dir, h.data.bearingNode, h.data.clampId); return; }
       if (h.data.origin) {
         this.recordHistory(() => {
           // Erste Kupplung auf y = 0 -- genau wie in den Herstellerdateien, wo
