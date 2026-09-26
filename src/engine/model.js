@@ -79,6 +79,8 @@ const ROUND_COVER_SPAN = 80;
 const LATTICE_GAPS = [40, 80, 120, 160];
 const LATTICE_STEP = 40;
 const LATTICE_MAX = 160;
+// 双管连接的第二根管和第一根节点间距相差不到这个值（cm）就算一样长。
+const SECOND_TUBE_TOL = 0.5;
 
 // Breite der Teile entlang ihrer Achse (cm) -- so breit wie in scene.js
 // gezeichnet. Gebraucht wird sie, um zu pruefen, ob ein Rad auf sein Rohr passt
@@ -3260,6 +3262,63 @@ export class BuildModel {
     return this._clampTubeAt([c.x + c.off[0], c.y + c.off[1], c.z + c.off[2]], c.dir);
   }
 
+  // 一根管两端的节点在方向 u 上相对 origin 的位置。
+  _tubeEndsAlong(tubeId, origin, u) {
+    const t = this.tubes.get(tubeId);
+    const out = [];
+    for (const nid of [t.a, t.b]) {
+      const n = this.nodes.get(nid);
+      if (n) out.push(dot3([n.x - origin[0], n.y - origin[1], n.z - origin[2]], u));
+    }
+    return out;
+  }
+
+  /**
+   * 放进双管连接空孔里的第二根管，两端节点放在哪里（节点间距 span）。
+   *
+   * 夹子夹着第一根管，空孔在它旁边一个孔距，第二根管和第一根平行。规则：
+   * - 两根一样长（节点间距相差不到 SECOND_TUBE_TOL）：两端和第一根的两端对齐。
+   * - 长度不同：一端和第一根离夹子近的那一端对齐（夹子正好在中间时取坐标
+   *   较小的一端，竖管就是下端），前提是夹子仍然夹在第二根管的管身上：离两端
+   *   节点都至少半个连接件（cs / 2），节点上是连接件，没有管身。较长的管这样
+   *   总能夹住；较短的管夹不住说明离夹子远的那一端更夹不住，不必再试。
+   * - 夹不住，或者找不到第一根管：按 centeredTubeEnds 以夹子为中心摆。
+   */
+  secondTubeEnds(clampId, span, { step, cs }) {
+    const c = this.clamps.get(clampId);
+    if (!c) throw new Error(`secondTubeEnds: Klemme ${clampId} fehlt`);
+    const u = norm3(c.dir);
+    const hole = [c.x + c.off[0], c.y + c.off[1], c.z + c.off[2]];
+    const at = (s) => [hole[0] + u[0] * s, hole[1] + u[1] * s, hole[2] + u[2] * s];
+    const base = this._clampBaseTube(c);
+    const ends = base ? this._tubeEndsAlong(base.id, [c.x, c.y, c.z], u) : [];
+    if (ends.length === 2) {
+      const lo = Math.min(ends[0], ends[1]), hi = Math.max(ends[0], ends[1]);
+      if (Math.abs(hi - lo - span) < SECOND_TUBE_TOL) return { p1: at(lo), p2: at(hi), align: "both" };
+      // 夹子在第二根管上的位置是 0。坐标和较小的一端排在前面，作为平局时的选择。
+      const sum = (s) => { const p = at(s); return p[0] + p[1] + p[2]; };
+      const [first, second] = sum(lo) <= sum(hi) ? [lo, hi] : [hi, lo];
+      const near = Math.abs(first) < Math.abs(second) + SECOND_TUBE_TOL ? first : second;
+      const start = near === lo ? lo : hi - span;
+      const halbeKupplung = cs / 2 - 1e-6;
+      if (start <= -halbeKupplung && start + span >= halbeKupplung) return { p1: at(start), p2: at(start + span), align: "end" };
+    }
+    return { ...this.centeredTubeEnds(hole, c.dir, span, step), align: "center" };
+  }
+
+  /**
+   * 以 center 为中心沿 dir 摆一根管（节点间距 span）。沿管子方向的坐标对齐到
+   * step 的网格，让它和其他部分对得上；横向保持在 center 上。
+   */
+  centeredTubeEnds(center, dir, span, step) {
+    const u = norm3(dir);
+    const p1 = [center[0] - u[0] * span / 2, center[1] - u[1] * span / 2, center[2] - u[2] * span / 2];
+    const achse = [Math.abs(u[0]), Math.abs(u[1]), Math.abs(u[2])];
+    const gr = achse.indexOf(Math.max(...achse));
+    if (achse[gr] > 0.99) p1[gr] = Math.round(p1[gr] / step) * step;
+    return { p1, p2: [p1[0] + u[0] * span, p1[1] + u[1] * span, p1[2] + u[2] * span] };
+  }
+
   /**
    * Klemmen, die zusammen eine Klappe bilden: dieselbe gehaltene Tube, oder
    * zweite Tubes, die ueber eine Platte/ein Netz verbunden sind.
@@ -3476,12 +3535,7 @@ export class BuildModel {
       const base = this._clampBaseTube(this.clamps.get(cid));
       if (!base || seen.has(base.id)) continue;
       seen.add(base.id);
-      const t = this.tubes.get(base.id);
-      if (!t) continue;
-      for (const nid of [t.a, t.b]) {
-        const n = this.nodes.get(nid);
-        if (n) anchors.push(dot3([n.x - origin[0], n.y - origin[1], n.z - origin[2]], u));
-      }
+      anchors.push(...this._tubeEndsAlong(base.id, origin, u));
     }
     if (!anchors.length) return d;
     let best = d, bestErr = snapDist;
