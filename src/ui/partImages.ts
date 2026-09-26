@@ -65,6 +65,7 @@ export const PART_IMAGES: ReadonlySet<string> = new Set([
   'straight',
   't',
   'textile',
+  'textile_20x40',
   'textile_bridge',
   'textile_rainbow',
   'textile_round',

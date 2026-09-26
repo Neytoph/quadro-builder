@@ -689,8 +689,11 @@ export function buildQDF(model, opts = {}) {
     if (line) { lines.push(line); stats.panels++; }
   }
   for (const x of (model.textiles ? model.textiles.values() : [])) {
-    // 彩虹带、彩虹桥是布件的变体：材质名带标记，官方软件里是普通布件
-    const line = rectLine("textil2", model.panelCorners(x), panelMat(x.color, x.variant || null), [x.w, x.h], x.side);
+    // 彩虹带、彩虹桥是布件的变体：材质名带标记，官方软件里是普通布件。
+    // 原件的套筒在局部 X 的两头、顺着局部 Y 套在管上（抓来的 textil2_350x750：
+    // 沿管 35、两管之间 75）：局部 X 要横过两根承重管，所以按「转过」的写法，
+    // 第一个尺寸是沿管的长度。短布面照这样写成 150 × 350。
+    const line = rectLine("textil2", model.panelCorners(x), panelMat(x.color, x.variant || null), [x.w, x.h], x.side, true);
     if (line) { lines.push(line); stats.textiles++; }
   }
 

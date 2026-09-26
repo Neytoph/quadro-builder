@@ -315,8 +315,8 @@ export default function TopToolbar() {
           <>
             {textiles.map(a => (
               <DropItem key={a.id}
-                on={!!a.qdf && api.fittingKind === a.qdf && api.mode === 'fitting' && (a.variant ? api.fittingPart === a.id : !api.fittingPart)}
-                onClick={() => { if (a.qdf) api.setFitting(a.qdf, a.variant ? a.id : undefined); close() }}
+                on={!!a.qdf && api.fittingKind === a.qdf && api.mode === 'fitting' && (a.variant || a.rail ? api.fittingPart === a.id : !api.fittingPart)}
+                onClick={() => { if (a.qdf) api.setFitting(a.qdf, a.variant || a.rail ? a.id : undefined); close() }}
                 img={<PartImg id={a.id} svg={(a.qdf && ACC_CAT_ICON[a.qdf]) || TOOL_ICON.textile} size={ICON} />}
                 label={labelOf(a.id, a.name)} />
             ))}

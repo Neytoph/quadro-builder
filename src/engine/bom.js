@@ -1,6 +1,6 @@
 // Stueckliste (BOM) + Kupplungstyp-Heuristik + Bestands-/Machbarkeitscheck.
 
-import { getTube, getConnector, getPanel, colorName, partName, reinforcementPart, partForFitting, getPartById, getScrew, poolLinerFor, geometry, slideKindName } from "./catalog.js";
+import { getTube, getConnector, getPanel, colorName, partName, reinforcementPart, partForFitting, getPartById, getScrew, poolLinerFor, geometry, slideKindName, textilePart } from "./catalog.js";
 import { round2, xAxisOf, yAxisOf, zAxisOf } from "./util.js";
 import { POOL_KINDS, isHolePart, isBoltPart, BOLT_PART, HINGE_PART, ARM_FITTINGS } from "./model.js";
 
@@ -647,6 +647,19 @@ export function ballBagsFor(f) {
   return Math.max(1, Math.ceil(wIn * dIn * fill / 180 / 500));
 }
 
+/**
+ * 一块布在料表里归哪一行。彩虹带、彩虹桥有自己的目录条目（兼容件），固定尺寸的
+ * 布面（短布面）按位置认出来、一种颜色一行；普通布面按尺寸和颜色分行。拼装说明的
+ * 分步料表和图上的编号用同一个 key。
+ */
+export function textileRow(model, tx) {
+  const def = textilePart(model.textileSpan(tx), tx.variant);
+  const id = (def && def.id) || "textile";
+  const fest = !!(def && def.rail);
+  const key = (fest ? id : tx.w + "x" + tx.h) + "|" + tx.color + "|" + (tx.variant || "");
+  return { def, id, fest, key };
+}
+
 export function computeBOM(model) {
   // --- Rohre nach Typ + Farbe ---
   const tubeMap = new Map();
@@ -725,29 +738,33 @@ export function computeBOM(model) {
   const panelCount = panels.reduce((s, r) => s + r.count, 0);
 
   // --- Netze/Stoffe (textil2) nach Groesse + Farbe ---
-  // Ein Tuch hat kein Katalogteil je Groesse -- es gibt EINES (`textile`).
+  // Das gewoehnliche Tuch hat kein Katalogteil je Groesse -- es gibt EINES
+  // (`textile`), seine Masse stehen in der Zeile. Das Tuch fester Groesse
+  // (`textile_20x40`) erkennt textilePart an der Lage und hat eine eigene Zeile.
   // Name + Masse muessen hier schon stehen, sonst wird in der Stueckliste
   // aus fehlendem id/name das Wort "undefined".
-  const textileDef = getPartById("textile");
   const textileMap = new Map();
   for (const tx of (model.textiles ? model.textiles.values() : [])) {
-    const key = tx.w + "x" + tx.h + "|" + tx.color + "|" + (tx.variant || "");
-    if (!textileMap.has(key)) textileMap.set(key, { w: tx.w, h: tx.h, color: tx.color, variant: tx.variant || "", count: 0 });
+    const { def, id, fest, key } = textileRow(model, tx);
+    if (!textileMap.has(key)) {
+      textileMap.set(key, {
+        key, def, id, color: tx.color, count: 0,
+        w: fest ? def.rail.along : tx.w, h: fest ? def.rail.gap : tx.h, size: !fest,
+      });
+    }
     textileMap.get(key).count++;
   }
   const textiles = [...textileMap.values()].map((r) => {
-    // 彩虹带、彩虹桥有自己的目录条目（兼容件），普通布件用 textile
-    const def = (r.variant && getPartById("textile_" + r.variant)) || textileDef;
-    const base = def ? partName(def) : "textile";
-    const size = r.w && r.h ? ` ${r.w}×${r.h} cm` : "";
+    const base = r.def ? partName(r.def) : "textile";
+    const size = r.size && r.w && r.h ? ` ${r.w}×${r.h} cm` : "";
     return {
-      key: r.w + "x" + r.h + "|" + r.color + "|" + r.variant,
-      id: (def && def.id) || "textile",
+      key: r.key,
+      id: r.id,
       kind: "textil2",
       w: r.w, h: r.h,
       name: `${base}${size}`,
       color: r.color, colorName: colorName(r.color), count: r.count,
-      price: (textileDef && textileDef.price) || 0,
+      price: (r.def && r.def.price) || 0,
       subtotal: 0,
     };
   }).sort((a, b) => b.count - a.count);
@@ -917,7 +934,7 @@ export function computeBOM(model) {
 // Netz, Rundwand, Spielsack, Dachtextil -- ist Zubehoer: es fehlt vielleicht,
 // aber das Modell steht trotzdem. Die Zeilen bleiben in der Liste und faerben
 // sich rot, nur der Haken bleibt gruen.
-export const SOFT_PARTS = new Set(["textile", "lattice", "textile_round", "bag", "roof", "roof_large"]);
+export const SOFT_PARTS = new Set(["textile", "textile_20x40", "lattice", "textile_round", "bag", "roof", "roof_large"]);
 
 export function neededParts(bom) {
   const tubes = new Map();   // tubeId -> count

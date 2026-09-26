@@ -840,8 +840,14 @@ export function parseQDF(text, opts = {}) {
       // Spannweite mit Zuschlag (siehe padOf); die Netzgroesse selbst rundet
       // weiter auf das Rastermass.
       const wGrid = dimW + padOf(p.rest, 4) + conn, hGrid = dimH + padOf(p.rest, 6) + conn;
-      const nodesFound = findPanelCorners(q, cx, cy, cz, wGrid / 2, hGrid / 2);
-      if (!nodesFound) { skipped[p.name] = (skipped[p.name] || 0) + 1; continue; }
+      const found = findPanelCorners(q, cx, cy, cz, wGrid / 2, hGrid / 2);
+      if (!found) { skipped[p.name] = (skipped[p.name] || 0) + 1; continue; }
+      // 套筒顺着局部 Y 套在管上：让 A→B 顺着局部 Y，模型就把这两条边上的管
+      // 当承重管（_panelRecord 先试 A-B / D-C 这一对）。
+      const [A, B, C, D] = found;
+      const ey = rotateByQuat(q, [0, 1, 0]);
+      const along = (m, n) => Math.abs((n.x - m.x) * ey[0] + (n.y - m.y) * ey[1] + (n.z - m.z) * ey[2]);
+      const nodesFound = along(A, B) >= along(A, D) ? found : [A, D, C, B];
       const mat = typeof p.rest[0] === "number" ? p.rest[0] : null;
       const variant = mat != null && featureMaterials.has(mat) ? featureMaterials.get(mat) : null;
       textiles.push({

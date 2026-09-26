@@ -109,6 +109,7 @@ const BY_ID: Record<string, string> = {
   wheel_adapter: ACC_CAT_ICON['adapter2'],
   'bearing-clamp': CONN_CAT_ICON.bearing,
   textile: ACC_CAT_ICON.textil2,
+  textile_20x40: ACC_CAT_ICON.textil2,
   textile_round: ACC_CAT_ICON['textil-round2'],
   roof: ACC_CAT_ICON.roof2,
   roof_large: ACC_CAT_ICON['roof-large2'],

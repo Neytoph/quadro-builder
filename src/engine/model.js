@@ -2174,8 +2174,18 @@ export class BuildModel {
    * Rohrabstand des Rasters. Die Laenge ist die Ueberdeckung der beiden Rohre,
    * auf volle Felder abgerundet und bei vier Feldern gedeckelt (so gross ist
    * das Netz im Ball Cage).
+   *
+   * `size` gibt es fuer Tuecher fester Groesse ({ along, gap } in cm, siehe
+   * railTextiles im Katalog): dann passt nur genau dieser Rohrabstand, und die
+   * Abschnitte sind so lang wie die Schlaufe.
+   * @param {string} railId
+   * @param {number} [tol]
+   * @param {{ along: number, gap: number } | null} [size]
    */
-  latticePartners(railId, tol = 1.5) {
+  latticePartners(railId, tol = 1.5, size = null) {
+    const gaps = size ? [size.gap] : LATTICE_GAPS;
+    const step = size ? size.along : LATTICE_STEP;
+    const max = size ? size.along : LATTICE_MAX;
     const ra = this._rail(railId);
     if (!ra) return [];
     const out = [];
@@ -2189,13 +2199,13 @@ export class BuildModel {
       const along = off[0] * ra.dir[0] + off[1] * ra.dir[1] + off[2] * ra.dir[2];
       const perp = [off[0] - ra.dir[0] * along, off[1] - ra.dir[1] * along, off[2] - ra.dir[2] * along];
       const gap = Math.hypot(perp[0], perp[1], perp[2]);
-      if (!LATTICE_GAPS.some((g) => Math.abs(g - gap) <= tol)) continue;
+      if (!gaps.some((g) => Math.abs(g - gap) <= tol)) continue;
       const e = along + rb.len * dot;
       const lo = Math.max(0, Math.min(along, e));
       const hi = Math.min(ra.len, Math.max(along, e));
       const span = hi - lo;
-      if (span < LATTICE_STEP - tol) continue;
-      const len = Math.min(LATTICE_MAX, Math.floor((span + tol) / LATTICE_STEP) * LATTICE_STEP);
+      if (span < step - tol) continue;
+      const len = Math.min(max, Math.floor((span + tol) / step) * step);
       out.push({ id: t.id, gap: round(gap), len, lo: round(lo), hi: round(hi) });
     }
     return out;
@@ -2203,15 +2213,17 @@ export class BuildModel {
 
   /**
    * 布面 / 网 / 袋可点的格子：一对承重管 + 一段重叠。同一块开口只出一次，
-   * 避免竖管对和横管对在同一面上叠两块绿。
+   * 避免竖管对和横管对在同一面上叠两块绿。size 是固定尺寸布面的 { along, gap }。
+   * @param {string} kind
+   * @param {{ along: number, gap: number } | null} [size]
    */
-  railFittingMounts(kind) {
+  railFittingMounts(kind, size = null) {
     const out = [];
     const seenPair = new Set();
     const seenFace = new Set();
     for (const t of this.tubes.values()) {
       if (t.arm || t.link || t.bow) continue;
-      const partners = kind === "bag2" ? this.bagPartners(t.id) : this.latticePartners(t.id);
+      const partners = kind === "bag2" ? this.bagPartners(t.id) : this.latticePartners(t.id, 1.5, size);
       for (const p of partners) {
         const count = Math.max(1, Math.floor((p.hi - p.lo + 0.5) / p.len));
         for (let k = 0; k < count; k++) {
@@ -2288,6 +2300,20 @@ export class BuildModel {
   }
 
   /**
+   * Wie liegt ein Tuch: Schlaufenlaenge laengs der Tragrohre (`len`) und
+   * Abstand der beiden Tragrohre (`gap`), in cm. Daran erkennt der Katalog das
+   * Tuch fester Groesse (textilePart). null, wenn ein Tragrohr fehlt.
+   */
+  textileSpan(tx) {
+    const ra = this._rail(tx.a), rb = this._rail(tx.b);
+    if (!ra || !rb) return null;
+    const off = [rb.p0[0] - ra.p0[0], rb.p0[1] - ra.p0[1], rb.p0[2] - ra.p0[2]];
+    const along = off[0] * ra.dir[0] + off[1] * ra.dir[1] + off[2] * ra.dir[2];
+    const perp = [off[0] - ra.dir[0] * along, off[1] - ra.dir[1] * along, off[2] - ra.dir[2] * along];
+    return { len: round(tx.len), gap: round(Math.hypot(perp[0], perp[1], perp[2])) };
+  }
+
+  /**
    * Textil zwischen zwei parallele Rohre spannen -- gesetzt wie das Netz, nur
    * dass daraus kein Anbauteil wird, sondern ein Eintrag in `textiles`: dieselbe
    * Sorte Fläche wie eine Platte (zwei Tragrohre, Versatz, Länge) und genau das,
@@ -2301,10 +2327,7 @@ export class BuildModel {
     const perp = [off[0] - ra.dir[0] * along, off[1] - ra.dir[1] * along, off[2] - ra.dir[2] * along];
     const gap = Math.hypot(perp[0], perp[1], perp[2]);
     if (gap < 1) return null;
-    for (const x of this.textiles.values()) {
-      if (((x.a === aId && x.b === bId) || (x.a === bId && x.b === aId))
-        && Math.abs((x.t0 || 0) - t0) < 2) return null;      // dort hängt schon eins
-    }
+    if (this.panelAt(aId, bId, t0, len)) return null;        // dort liegt schon ein Tuch oder eine Platte
     const tx = {
       id: this._id("x"), a: aId, b: bId, t0: round(t0), len: round(len),
       w: round(len - 5), h: round(gap - 5), color: color || null, side: 1,
