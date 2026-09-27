@@ -3153,6 +3153,25 @@ export class BuildModel {
       if (this.isBelowGround(p[1])) return false;
       neu.push({ n, p, ax });
     }
+    const nodeMoves = new Map(neu.map((e) => [e.n.id, e.p]));
+    const bowMoves = [];
+    for (const t of this.tubes.values()) {
+      if (!t.bow || !t.bowCenter) continue;
+      const a = this.nodes.get(t.a), b = this.nodes.get(t.b);
+      if (!a || !b || (!nodeMoves.has(a.id) && !nodeMoves.has(b.id))) continue;
+      const ax = tagged.get(a.id) || tagged.get(b.id);
+      const p = rodriguesAt(t.bowCenter, ax.o, ax.u, co, si);
+      // 一端留在转轴上的弯管也能转动；其余情况必须保持整根弯管刚性。
+      for (const n of [a, b]) {
+        const actual = nodeMoves.get(n.id) || [n.x, n.y, n.z];
+        const rigid = rodriguesAt([n.x, n.y, n.z], ax.o, ax.u, co, si);
+        if (Math.hypot(...actual.map((v, i) => v - rigid[i])) > 0.02) return false;
+      }
+      const pa = nodeMoves.get(a.id) || [a.x, a.y, a.z];
+      const pb = nodeMoves.get(b.id) || [b.x, b.y, b.z];
+      if (this.isBelowGround(this._bowLowestY(pa, pb, p))) return false;
+      bowMoves.push({ t, p });
+    }
     const clampMove = [];
     for (const cid of flap.clampIds) {
       const k = this.clamps.get(cid);
@@ -3198,6 +3217,7 @@ export class BuildModel {
       e.n.x = round(e.p[0]); e.n.y = round(e.p[1]); e.n.z = round(e.p[2]);
       this._spinNodeAround(e.n, e.ax, co, si, radians);
     }
+    for (const e of bowMoves) e.t.bowCenter = e.p.map(round);
     const moved = new Set(neu.map((e) => e.n.id));
     for (const e of clampMove) {
       e.k.x = round(e.pos[0]); e.k.y = round(e.pos[1]); e.k.z = round(e.pos[2]);
@@ -3214,6 +3234,28 @@ export class BuildModel {
     this._moveTubeGeom(moved);
     this._movePanelGeom(moved);
     return true;
+  }
+
+  /** 弯管圆弧的最低轴心位置，包括两端之间可能低于端点的部分。 */
+  _bowLowestY(a, b, center) {
+    const u = a.map((v, i) => v - center[i]);
+    const v = b.map((value, i) => value - center[i]);
+    const ra = Math.hypot(...u), rb = Math.hypot(...v);
+    if (ra < 1e-6 || rb < 1e-6) return Math.min(a[1], b[1]);
+    const un = u.map((value) => value / ra);
+    const vn = v.map((value) => value / rb);
+    const cos = Math.max(-1, Math.min(1, dot3(un, vn)));
+    const angle = Math.acos(cos);
+    const transverse = vn.map((value, i) => value - un[i] * cos);
+    const width = Math.hypot(...transverse);
+    if (width < 1e-6) return Math.min(a[1], b[1]);
+    const wn = transverse.map((value) => value / width);
+    const minimumAngle = (Math.atan2(wn[1], un[1]) + Math.PI + 2 * Math.PI) % (2 * Math.PI);
+    const radius = (ra + rb) / 2;
+    const interior = minimumAngle <= angle
+      ? center[1] + radius * (un[1] * Math.cos(minimumAngle) + wn[1] * Math.sin(minimumAngle))
+      : Infinity;
+    return Math.min(a[1], b[1], interior);
   }
 
   /** Ausrichtung eines Knotens um Achse `ax.u` mitdrehen (Stutzen, Quaternion). */
