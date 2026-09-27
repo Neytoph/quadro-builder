@@ -31,7 +31,7 @@ function tubeXAt(m, z, x0, y = 40) {
   return m.addTube(a.id, b.id, "T35", "blue", 35);
 }
 
-function slopedPanelWithBow() {
+function slopedPanelWithBow(bowAtFoot = false) {
   const m = new BuildModel();
   const hinge = tubeX(m, 0);
   const flap = tubeX(m, CS);
@@ -42,7 +42,9 @@ function slopedPanelWithBow() {
   m.addLink(hinge.b, flap.b);
   m.addTube(flap.a, foot.a, "T35", "yellow", 35);
   m.addTube(flap.b, foot.b, "T35", "yellow", 35);
-  const bow = m.extendBow(flap.a, [0, 1, 0], [0, 0, 1], "round-tube2", "green", 10).tube;
+  const bow = bowAtFoot
+    ? m.extendBow(foot.a, [0, 0, -1], [0, 1, 0], "TC1", "green", 40).tube
+    : m.extendBow(flap.a, [0, 1, 0], [0, 0, 1], "round-tube2", "green", 10).tube;
   return { m, c, foot, bow };
 }
 
@@ -53,6 +55,25 @@ function bowGeometry(m, bow) {
 }
 
 describe("rotateClamp", () => {
+  it("rotates a full-size TC1 bow at the panel foot to ground contact", () => {
+    const { m, c, foot, bow } = slopedPanelWithBow(true);
+    const before = bowGeometry(m, bow);
+    const angle = Math.asin(40 / 45);
+    assert.equal(bow.tubeId, "TC1");
+    assert.ok(Math.abs(before.ra - 40) < 0.01);
+    assert.ok(Math.abs(before.rb - 40) < 0.01);
+    assert.equal(m.rotateClamp(c.id, angle), true);
+    const after = bowGeometry(m, bow);
+    assert.ok(Math.abs(m.nodes.get(foot.a).y) < 0.01);
+    assert.ok(Math.abs(after.ra - 40) < 0.02);
+    assert.ok(Math.abs(after.rb - 40) < 0.02);
+    assert.ok(Math.abs(after.dot) < 0.2);
+    assert.ok(Math.abs(m._bowLowestY(after.a, after.b, after.c)) < 0.02);
+    const state = JSON.stringify(m.toJSON());
+    assert.equal(m.rotateClamp(c.id, 0.02), false);
+    assert.equal(JSON.stringify(m.toJSON()), state);
+  });
+
   it("rotates a sloped panel and its bow to the ground as one rigid assembly", () => {
     const { m, c, foot, bow } = slopedPanelWithBow();
     const before = bowGeometry(m, bow);
