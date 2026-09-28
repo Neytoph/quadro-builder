@@ -1,13 +1,38 @@
 // Datenmodell des Bauwerks: Graph aus Knoten (Kupplungen) und Kanten (Rohren).
 // Bewusst ohne Three.js-Abhaengigkeit, damit es testbar und Backend-tauglich bleibt.
 
-import { MERGE_EPS, FORMAT_VERSION, DIAGONAL_SNAP_TOL, DIRECTIONS, DIAGONAL_DIRECTIONS, ARM_ALIGN_TOL, CONN_TYPE_MASK, anchorGap } from "./config.js";
+import { MERGE_EPS, FORMAT_VERSION, DIAGONAL_SNAP_TOL, DIRECTIONS, DIAGONAL_DIRECTIONS, DIR_ALIGN_TOL, ARM_ALIGN_TOL, CONN_TYPE_MASK, anchorGap } from "./config.js";
 import { ACCESSORY_IDS, accessoryMount } from './accessoryPack.js';
 
 // Zellweite des Rasters, mit dem die Kollisionspruefung Nachbarn sucht. Etwas
 // groesser als das laengste Rohr (75 cm + Kupplung): ein Rohr liegt damit in
 // hoechstens zwei Zellen je Achse.
 const COLL_CELL = 100;
+
+export function slopeArmDirsAt(model, node) {
+  let direction = null;
+  for (const tube of model.tubes.values()) {
+    if (tube.arm || tube.link) continue;
+    const other = tube.a === node.id ? model.nodes.get(tube.b)
+      : tube.b === node.id ? model.nodes.get(tube.a) : null;
+    if (!other) continue;
+    const tangent = model._tubeDirAt(tube, node, other);
+    const length = Math.hypot(...tangent);
+    if (length < 1e-6) continue;
+    const unit = tangent.map((component) => component / length);
+    if (Math.max(...unit.map(Math.abs)) < DIR_ALIGN_TOL) { direction = unit; break; }
+  }
+  if (!direction) return null;
+  const active = [0, 1, 2].filter((axis) => Math.abs(direction[axis]) > 0.3);
+  if (active.length !== 2) return null;
+  const rotationAxis = [0, 1, 2].find((axis) => !active.includes(axis));
+  return [
+    ...DIAGONAL_DIRECTIONS.filter((entry) =>
+      Math.abs(entry.vec[rotationAxis]) < 0.01 &&
+      Math.abs(entry.vec[active[0]]) > 0.3 && Math.abs(entry.vec[active[1]]) > 0.3),
+    ...DIRECTIONS.filter((entry) => Math.abs(entry.vec[rotationAxis]) > DIR_ALIGN_TOL),
+  ];
+}
 import { round2 as round, quatFromXAxis, quatFromBasis, xAxisOf, yAxisOf, zAxisOf } from "./util.js";
 
 // Wohin ein Anbauteil gehoert, gemessen an den 799 Vorkommen in den Dateien des
@@ -5701,6 +5726,14 @@ export class BuildModel {
   // normal die Richtung zum Kreismittelpunkt (senkrecht dazu), R der Radius.
   // Endpunkt = from + R * (dir + normal); der Mittelpunkt wird mitgespeichert,
   // damit die Szene denselben Bogen zeichnet wie beim QDF-Import.
+  bowBelowGround(from, dir, normal, R) {
+    const endY = from.y + R * (dir[1] + normal[1]);
+    let minY = Math.min(from.y, endY);
+    if (dir[1] < 0 && normal[1] > 0)
+      minY = Math.min(minY, from.y + R * (normal[1] - Math.hypot(dir[1], normal[1])));
+    return this.isBelowGround(minY);
+  }
+
   extendBow(fromNodeId, dirVec, normal, tubeId, color, R) {
     const from = this.nodes.get(fromNodeId);
     if (!from) return null;
@@ -5711,9 +5744,7 @@ export class BuildModel {
       y: from.y + R * (dirVec[1] + normal[1]),
       z: from.z + R * (dirVec[2] + normal[2]),
     };
-    // Der Bogen haengt zwischen Start und Ziel durch: der tiefste Punkt liegt
-    // bei einem abwaerts fuehrenden Viertelkreis am Mittelpunkt der Sehne.
-    if (this.isBelowGround(target.y) || this.isBelowGround(cy)) return { ground: true };
+    if (this.bowBelowGround(from, dirVec, normal, R)) return { ground: true };
     const existing = this.findNodeNear(target.x, target.y, target.z);
     if (existing && this.tubeBetween(from.id, existing.id)) {
       return { node: existing, tube: null, duplicate: true };
@@ -5769,7 +5800,7 @@ export class BuildModel {
         z: round(a.z + R * (t0[2] + n2[2])),
       };
       const cy = a.y + n2[1] * R;
-      if (this.isBelowGround(target.y) || this.isBelowGround(cy)) { blocked = { ground: true }; continue; }
+      if (this.bowBelowGround(a, t0, n2, R)) { blocked = { ground: true }; continue; }
       const hit = this.findNodeNear(target.x, target.y, target.z);
       if (hit && hit.id !== t.b && this.tubeBetween(t.a, hit.id)) { blocked = { duplicate: true }; continue; }
 

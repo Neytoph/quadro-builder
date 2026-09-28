@@ -9,7 +9,7 @@ import { t } from "./i18n.js";
 import { round2, panelNormal, modelMiddle, xAxisOf, yAxisOf, zAxisOf, quatFromBasis } from "./util.js";
 import { TUBE_FITTINGS, POOL_KINDS, isHolePart, holeArmDirs, holeClampDirsAt, HOLE_MASKS,
   BOLT_PART, HINGE_PART, isBoltPart, boltArmDirs, boltDepth, hingeDir, hingeKey, splitHingeKey,
-  POOL_SETS, ARM_FITTINGS, armFittingDirsAt, fixedFittingColor } from "./model.js";
+  POOL_SETS, ARM_FITTINGS, armFittingDirsAt, fixedFittingColor, slopeArmDirsAt } from "./model.js";
 import { CONNECTOR_ARM_BITS } from "./qdfimport.js";
 import { ACCESSORY_IDS } from './accessoryPack.js';
 import { pickStepAnchor, stepCandidates, stepCandidatesFromSelection } from "./stepAnchor.js";
@@ -1520,12 +1520,16 @@ export class Builder {
     this.refresh();
   }
 
-  // Krummungsrichtung (zum Kreismittelpunkt) eines neu gesetzten Bogenrohrs:
-  // waagerecht angesetzt krummt der Bogen nach UNTEN (der ueblichste Fall --
-  // Geruestkante, Dachbogen), senkrecht angesetzt in die Blickrichtung, damit
-  // der Bogen vom Betrachter weg schwingt statt zufaellig zur Seite.
+  // 弯管从水平接头向下弯；从斜坡接头弯向水平方向；从竖直接头按视角弯向侧面。
   _bowNormal(dirVec) {
+    const horizontal = Math.hypot(dirVec[0], dirVec[2]);
     if (Math.abs(dirVec[1]) < 0.5) return [0, -1, 0];
+    if (horizontal > 0.01) {
+      const sign = Math.sign(dirVec[1]);
+      return [dirVec[0] * Math.abs(dirVec[1]) / horizontal,
+        -sign * horizontal,
+        dirVec[2] * Math.abs(dirVec[1]) / horizontal];
+    }
     const ax = this.scene.getHorizontalAxes ? this.scene.getHorizontalAxes() : null;
     const f = (ax && (ax.forward || ax.f)) || [0, 0, -1];
     return Math.abs(f[0]) >= Math.abs(f[2])
@@ -1976,11 +1980,11 @@ export class Builder {
   }
 
   _targetBelowGround(node, vec) {
+    if (isCurvedTube(this.tubeId))
+      return this.model.bowBelowGround(node, vec, this._bowNormal(vec), gridSpacing());
     if (vec[1] >= 0) return false;
     const tube = getTube(this.tubeId);
-    const span = isCurvedTube(this.tubeId)
-      ? gridSpacing()
-      : spacingFor(tube ? tube.length_cm : 35);
+    const span = spacingFor(tube ? tube.length_cm : 35);
     return this.model.isBelowGround(node.y + vec[1] * span);
   }
 
@@ -1990,27 +1994,7 @@ export class Builder {
   // -- alle 90° zueinander. (Aus DIRECTIONS/DIAGONAL_DIRECTIONS gefiltert, damit
   // die Namen zur Belegungspruefung passen.)
   _slopeArmDirs(node) {
-    let d = null;
-    for (const t of this.model.tubes.values()) {
-      if (t.arm || t.link) continue;
-      const o = t.a === node.id ? this.model.nodes.get(t.b)
-        : t.b === node.id ? this.model.nodes.get(t.a) : null;
-      if (!o) continue;
-      const v = [o.x - node.x, o.y - node.y, o.z - node.z], L = Math.hypot(...v) || 1, u = v.map((c) => c / L);
-      if (Math.max(...u.map(Math.abs)) < DIR_ALIGN_TOL) { d = u; break; }
-    }
-    if (!d) return null;
-    const act = [0, 1, 2].filter((a) => Math.abs(d[a]) > 0.3);
-    if (act.length !== 2) return null;
-    const k = [0, 1, 2].find((a) => !act.includes(a)); // Drehachse
-    const out = [];
-    for (const dd of DIAGONAL_DIRECTIONS) {
-      if (Math.abs(dd.vec[k]) < 0.01 && Math.abs(dd.vec[act[0]]) > 0.3 && Math.abs(dd.vec[act[1]]) > 0.3) out.push(dd);
-    }
-    for (const cd of DIRECTIONS) {
-      if (Math.abs(cd.vec[k]) > DIR_ALIGN_TOL) out.push(cd);
-    }
-    return out.length ? out : null;
+    return slopeArmDirsAt(this.model, node);
   }
 
   // Hat der Knoten schon ein nicht-kardinales (45-Grad) Rohr? Dann liegt er auf
@@ -4420,7 +4404,13 @@ export class Builder {
         return;
       }
       let res;
-      if (h.data.slope) {
+      if (isCurvedTube(this.tubeId)) {
+        const tube = getTube(this.tubeId);
+        this.recordHistory(() => {
+          res = this.model.extendBow(h.data.nodeId, h.data.dir, this._bowNormal(h.data.dir),
+            tube.id, this.colorFor("tube", h.data.nodeId), gridSpacing());
+        });
+      } else if (h.data.slope) {
         // Schräg-Konnektor (schon 45-Grad gedreht): Diagonalrohr weiterbauen,
         // OHNE neuen C45-Adapter; snappt an vorhandene Schräg-Kupplungen.
         const dt = this._diagonalTube();
@@ -4435,11 +4425,9 @@ export class Builder {
         // model.extend() braucht das nicht zu unterscheiden.
         const tube = getTube(this.tubeId);
         this.recordHistory(() => {
-          res = isCurvedTube(this.tubeId)
-            ? this.model.extendBow(h.data.nodeId, h.data.dir, this._bowNormal(h.data.dir), tube.id, this.colorFor("tube", h.data.nodeId), gridSpacing())
-            : this.model.extend(
-                h.data.nodeId, h.data.dir, tube.id, this.colorFor("tube", h.data.nodeId), tube.length_cm, spacingFor(tube.length_cm)
-              );
+          res = this.model.extend(
+            h.data.nodeId, h.data.dir, tube.id, this.colorFor("tube", h.data.nodeId), tube.length_cm, spacingFor(tube.length_cm)
+          );
         });
       }
       if (res && res.ground) this.onNotice(t("notice_ground"), "warn");
