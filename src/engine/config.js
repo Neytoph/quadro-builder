@@ -18,6 +18,11 @@ export const DIRECTIONS = [
   { name: "-Z", vec: [0, 0, -1] },
 ];
 
+export const CONN_TYPE_MASK = {
+  straight: 0x03, elbow: 0x05, t: 0x07, cross: 0x0f,
+  "3way": 0x15, "4way": 0x17, "5way": 0x1f, "6way": 0x3f,
+};
+
 // Schraege Rampen-/Dach-Richtungen. Projektvorgabe: alle Schraegen sind immer
 // 45 Grad (eine waagerechte Achse kombiniert mit hoch/runter, normiert) -- auch
 // wenn importierte QDF-Modelle andere Winkel angeben. 8 vertikale Diagonalen.

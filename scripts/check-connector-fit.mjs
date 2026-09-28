@@ -110,23 +110,23 @@ const fourWay = (m) => [...m.nodes.values()].find((n) => plain(m, n) && n.arms.l
   ok(same(r) && r[0] === 4, `撤销以后回到四臂，得到 ${r}`)
 }
 
-// 4. 往空着的方向加一根管：三处一起多一臂
+// 4. 往已有空插口加一根管：三处都显示填满后的连接件
 {
-  const m = load('A0006.qdf')
-  const axes = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, 0, 1], [0, 0, -1]]
+  const m = load('A0043.qdf')
   let done = false
   for (const n of m.nodes.values()) {
-    if (!plain(m, n) || n.arms.length !== 3) continue
-    const free = axes.find((a) => !tubeDirs(m, n).some((d) => dot(d, a) > 0.9))
+    if (!n.arms || n.part || n.c45 || n.c45body || n.unused) continue
+    if (tubeDirs(m, n).length !== n.arms.length - 1) continue
+    const free = n.arms.find((a) => !tubeDirs(m, n).some((d) => dot(d, a) > 0.9))
     if (!free) continue
     const res = m.extend(n.id, free, 'T35', 'red', 35, spacingFor(35))
     if (!res || !res.tube) continue
     const r = arms3(m, n)
-    ok(same(r) && r[0] === 4, `三通加一根管以后三处都是四臂，得到 ${r}`)
+    ok(same(r) && r[0] === n.arms.length, `空插口加管以后三处都是 ${n.arms.length} 臂，得到 ${r}`)
     done = true
     break
   }
-  ok(done, 'A0006 里找到能加管的三通')
+  ok(done, 'A0043 里找到能加管的空插口')
 }
 
 // 5. 把一个通拖走：拖走的通不留空臂，留在原地接住管子的通照旧

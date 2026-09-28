@@ -1,6 +1,6 @@
 // Bau-Interaktion: Auswahl, Anbau ueber Richtungs-Handles, Loeschen.
 
-import { DIRECTIONS, DIAGONAL_DIRECTIONS, DIR_ALIGN_TOL, ARM_ALIGN_TOL, CLAMP_LINK_DIST, C45_SLEEVE_LEN, C45_ARM_LEN } from "./config.js";
+import { DIRECTIONS, DIAGONAL_DIRECTIONS, DIR_ALIGN_TOL, ARM_ALIGN_TOL, CLAMP_LINK_DIST, C45_SLEEVE_LEN, C45_ARM_LEN, CONN_TYPE_MASK } from "./config.js";
 import { buildableTubes, geometry, getTube, spacingFor, getPanel, defaultPanel, diagonalTubeId, slideKindLabel, slideKindName, isCurvedTube, gridSpacing, partName, partForFitting, getPartById, getConnector, poolLinerFor, reinforcementPart, textilePart } from "./catalog.js";
 import { CLASSIC_COLOR_IDS, officialColorId } from "./colors.js";
 import { computeBuildPlan, connectorLabelInfo } from "./buildplan.js";
@@ -47,12 +47,6 @@ const SELECT_BLOCK_MS = 500;
 export const RANDOM_COLOR = "random";
 // 随机色只走经典四色。黑是厂家面板色，会出现在导入文件里，但不进随机池，
 // 免得工具栏没有黑色色块时突然铺出一块黑面板。
-
-// 普通通型的臂位掩码（与 scene.js / connectors.json 同一套 bit）。
-const CONN_TYPE_MASK = {
-  straight: 0x03, elbow: 0x05, t: 0x07, cross: 0x0f,
-  "3way": 0x15, "4way": 0x17, "5way": 0x1f, "6way": 0x3f,
-};
 
 // Verschieben im Cursor-Modus (und beim Einfuegen) laeuft im 5-cm-Raster --
 // die Kupplungslaenge. Groebere Schritte wie das halbe 35er-Raster (20 cm)
@@ -1498,8 +1492,12 @@ export class Builder {
     }
     const from = stepCandidates(this.model, this.selectedNodeId, this.stepFrom);
     const node = pickStepAnchor(this.model, from, dirVec,
-      (n, d) => !this._armOccupied(n, d));
+      (n, d) => this.model.canExtendFrom(n, d) && !this._armOccupied(n, d));
     if (!node) { this.onNotice(t("notice_step_pick"), "warn"); return; }
+    if (!this.model.canExtendFrom(node, dirVec) || this._armOccupied(node, dirVec)) {
+      this.onNotice(t("notice_step_blocked"), "warn");
+      return;
+    }
     const tube = getTube(this.tubeId);
     let res;
     this.recordHistory(() => {
@@ -1883,26 +1881,7 @@ export class Builder {
    * die Richtung.
    */
   _c45ArmDir(body) {
-    if (!body.c45body || !body.c45axis) return null;
-    let base = null;
-    for (const t of this.model.tubes.values()) {
-      if (!t.arm) continue;
-      const id = t.a === body.id ? t.b : t.b === body.id ? t.a : null;
-      if (id) { base = this.model.nodes.get(id); break; }
-    }
-    if (!base) return null;
-    const u = body.c45axis;
-    const v = [body.x - base.x, body.y - base.y, body.z - base.z];
-    const laengs = v[0] * u[0] + v[1] * u[1] + v[2] * u[2];
-    const rest = [v[0] - u[0] * laengs, v[1] - u[1] * laengs, v[2] - u[2] * laengs];
-    const L = Math.hypot(rest[0], rest[1], rest[2]);
-    if (L < 1e-6) return null;
-    // Die Schraege knickt ZURUECK ueber die Kupplung: quer zur Huelse plus die
-    // GEGENrichtung der Huelsenachse -- beide zu gleichen Teilen, das sind die
-    // 45 Grad.
-    const d = [rest[0] / L - u[0], rest[1] / L - u[1], rest[2] / L - u[2]];
-    const dl = Math.hypot(d[0], d[1], d[2]) || 1;
-    return [d[0] / dl, d[1] / dl, d[2] / dl];
+    return this.model.c45ArmDir(body);
   }
 
   /** Ankerpunkte einer einzelnen Kupplung (Bau-Modus). */
@@ -1973,6 +1952,7 @@ export class Builder {
     const previewColor = this.color === RANDOM_COLOR ? null : this.color;
     for (const d of dirs) {
       if (occupied.has(d.name)) continue;
+      if (!this.model.canExtendFrom(node, d.vec)) continue;
       if (lagerArm && (lagerArm[0] * d.vec[0] + lagerArm[1] * d.vec[1] + lagerArm[2] * d.vec[2]) > 0.9) continue;
       // Die Schraege der Winkelkupplung traegt keinen Namen aus DIRECTIONS, ihre
       // Belegung muss ueber die Richtung geprueft werden -- sonst bietet sie den
