@@ -4,5 +4,5 @@ dist
 *.tsbuildinfo
 .vite
 .playwright-mcp
+.work/
 *.pdf
-

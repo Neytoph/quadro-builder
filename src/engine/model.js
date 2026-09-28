@@ -1,7 +1,7 @@
 // Datenmodell des Bauwerks: Graph aus Knoten (Kupplungen) und Kanten (Rohren).
 // Bewusst ohne Three.js-Abhaengigkeit, damit es testbar und Backend-tauglich bleibt.
 
-import { MERGE_EPS, FORMAT_VERSION, DIAGONAL_SNAP_TOL, DIRECTIONS, DIAGONAL_DIRECTIONS, anchorGap } from "./config.js";
+import { MERGE_EPS, FORMAT_VERSION, DIAGONAL_SNAP_TOL, DIRECTIONS, DIAGONAL_DIRECTIONS, ARM_ALIGN_TOL, CONN_TYPE_MASK, anchorGap } from "./config.js";
 import { ACCESSORY_IDS, accessoryMount } from './accessoryPack.js';
 
 // Zellweite des Rasters, mit dem die Kollisionspruefung Nachbarn sucht. Etwas
@@ -5191,6 +5191,61 @@ export class BuildModel {
     return false;
   }
 
+  c45ArmDir(body) {
+    if (!body?.c45body || !body.c45axis) return null;
+    let base = null;
+    for (const tube of this.tubes.values()) {
+      if (!tube.arm) continue;
+      const id = tube.a === body.id ? tube.b : tube.b === body.id ? tube.a : null;
+      if (id) { base = this.nodes.get(id); break; }
+    }
+    if (!base) return null;
+    const axis = body.c45axis;
+    const delta = [body.x - base.x, body.y - base.y, body.z - base.z];
+    const along = delta[0] * axis[0] + delta[1] * axis[1] + delta[2] * axis[2];
+    const across = delta.map((value, i) => value - along * axis[i]);
+    const width = Math.hypot(...across);
+    if (width < 1e-6) return null;
+    const direction = across.map((value, i) => value / width - axis[i]);
+    const length = Math.hypot(...direction);
+    return direction.map((value) => value / length);
+  }
+
+  // 导入文件的 arms 与指定通型的 preferType 记录了实体插口。只有实体上存在且空着的插口才能接管。
+  canExtendFrom(node, dir) {
+    if (!node || node.unused || this.hasWheelCap(node)) return false;
+    let ports = node.c45body ? [this.c45ArmDir(node)].filter(Boolean)
+      : isHolePart(node.part) ? holeArmDirs(node)
+      : isBoltPart(node.part) ? boltArmDirs(node)
+      : node.arms;
+    if (!ports && node.preferType && CONN_TYPE_MASK[node.preferType]) {
+      const axes = node.quat
+        ? [xAxisOf(node.quat), yAxisOf(node.quat), zAxisOf(node.quat)]
+        : [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+      ports = DIRECTIONS.filter((_, i) => CONN_TYPE_MASK[node.preferType] & (1 << i))
+        .map((entry) => {
+          const v = entry.vec;
+          return [0, 1, 2].map((i) => axes[0][i] * v[0] + axes[1][i] * v[1] + axes[2][i] * v[2]);
+        });
+    }
+    if (!ports) return true;
+    const length = Math.hypot(...dir);
+    if (!length) return false;
+    const unit = dir.map((v) => v / length);
+    if (!ports.some((port) => port[0] * unit[0] + port[1] * unit[1] + port[2] * unit[2] > ARM_ALIGN_TOL)) return false;
+    for (const tube of this.tubes.values()) {
+      if (tube.link) continue;
+      const otherId = tube.a === node.id ? tube.b : tube.b === node.id ? tube.a : null;
+      if (!otherId) continue;
+      const other = this.nodes.get(otherId);
+      if (!other) continue;
+      const occupied = tube.arm && other.c45axis ? other.c45axis : this._tubeDirAt(tube, node, other);
+      const usedLength = Math.hypot(...occupied);
+      if (usedLength && occupied.reduce((sum, value, i) => sum + value * unit[i], 0) / usedLength > ARM_ALIGN_TOL) return false;
+    }
+    return true;
+  }
+
   // Baut von einem bestehenden Knoten in eine Richtung ein Rohr an und legt
   // (falls noetig) den Zielknoten an. spacing = Rohrlaenge + Kupplungsgroesse.
   // Rueckgabe:
@@ -5200,6 +5255,7 @@ export class BuildModel {
   extend(fromNodeId, dirVec, tubeId, color, length, spacing) {
     const from = this.nodes.get(fromNodeId);
     if (!from) return null;
+    if (!this.canExtendFrom(from, dirVec)) return null;
     const target = {
       x: from.x + dirVec[0] * spacing,
       y: from.y + dirVec[1] * spacing,
@@ -5234,6 +5290,7 @@ export class BuildModel {
   extendC45Diagonal(fromId, dir, c45axis, tubeId, color, length, spacing, sleeveLen, armLen) {
     const from = this.nodes.get(fromId);
     if (!from) return null;
+    if (!this.canExtendFrom(from, c45axis)) return null;
     const bx = from.x + c45axis[0] * sleeveLen + dir[0] * armLen;
     const by = from.y + c45axis[1] * sleeveLen + dir[1] * armLen;
     const bz = from.z + c45axis[2] * sleeveLen + dir[2] * armLen;
@@ -5604,6 +5661,7 @@ export class BuildModel {
   extendDiagonalSnap(fromId, dir, tubeId, color, length, spacing, snapTol = DIAGONAL_SNAP_TOL) {
     const from = this.nodes.get(fromId);
     if (!from) return null;
+    if (!this.canExtendFrom(from, dir)) return null;
     const tx = from.x + dir[0] * spacing, ty = from.y + dir[1] * spacing, tz = from.z + dir[2] * spacing;
     let best = null, bestD = snapTol;
     for (const n of this.nodes.values()) {
@@ -5628,6 +5686,7 @@ export class BuildModel {
   extendBow(fromNodeId, dirVec, normal, tubeId, color, R) {
     const from = this.nodes.get(fromNodeId);
     if (!from) return null;
+    if (!this.canExtendFrom(from, dirVec)) return null;
     const cx = from.x + normal[0] * R, cy = from.y + normal[1] * R, cz = from.z + normal[2] * R;
     const target = {
       x: from.x + R * (dirVec[0] + normal[0]),
