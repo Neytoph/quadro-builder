@@ -1334,7 +1334,25 @@ export class BuildModel {
     };
     const branch = this._branchFrom(nodeId).map((n) => ({ n, p: turn([n.x, n.y, n.z]) }));
     if (branch.some((e) => this.isBelowGround(e.p[1]))) return false;
+    const nodeMoves = new Map(branch.map((e) => [e.n.id, e.p]));
+    const bowMoves = [];
+    for (const t of this.tubes.values()) {
+      if (!t.bow || !t.bowCenter) continue;
+      const a = this.nodes.get(t.a), b = this.nodes.get(t.b);
+      if (!a || !b || (!nodeMoves.has(a.id) && !nodeMoves.has(b.id))) continue;
+      const p = turn(t.bowCenter);
+      for (const n of [a, b]) {
+        const actual = nodeMoves.get(n.id) || [n.x, n.y, n.z];
+        const rigid = turn([n.x, n.y, n.z]);
+        if (Math.hypot(...actual.map((v, i) => v - rigid[i])) > 0.02) return false;
+      }
+      const pa = nodeMoves.get(a.id) || [a.x, a.y, a.z];
+      const pb = nodeMoves.get(b.id) || [b.x, b.y, b.z];
+      if (this.isBelowGround(this._bowLowestY(pa, pb, p))) return false;
+      bowMoves.push({ t, p });
+    }
     for (const e of branch) { e.n.x = round(e.p[0]); e.n.y = round(e.p[1]); e.n.z = round(e.p[2]); }
+    for (const e of bowMoves) e.t.bowCenter = e.p.map(round);
     const gedreht = new Set(branch.map((e) => e.n.id));
     this._moveTubeGeom(gedreht);
     this._movePanelGeom(gedreht);

@@ -500,3 +500,23 @@ describe("rotateClamp", () => {
     }
   });
 });
+
+describe("rotateTubeClamp", () => {
+  it("dreht die Bogenroehre samt ihrer Mitte um das umschlossene Rohr", () => {
+    const m = new BuildModel();
+    const holder = tubeX(m, 0);
+    const clamp = m.addTubeClamp(holder.id, [20, 41, 0], "hole-connector4");
+    assert.ok(clamp);
+    const end = m.addNode(clamp.x, clamp.y + 40, clamp.z + 40);
+    const bow = m.addTube(clamp.id, end.id, "B40", "green", 40);
+    bow.bow = true;
+    bow.bowCenter = [clamp.x, clamp.y + 40, clamp.z];
+    const axis = [clamp.x, clamp.y - clamp.stub[1] * CS, clamp.z - clamp.stub[2] * CS];
+    const oldCenter = bow.bowCenter.slice();
+    assert.equal(m.rotateTubeClamp(clamp.id), true);
+    const relY = oldCenter[1] - axis[1], relZ = oldCenter[2] - axis[2];
+    assert.ok(near(bow.bowCenter, [oldCenter[0], axis[1] + (relY - relZ) * Math.SQRT1_2,
+      axis[2] + (relY + relZ) * Math.SQRT1_2], 0.02));
+    assert.ok(Math.abs(Math.hypot(...xyz(end).map((v, i) => v - bow.bowCenter[i])) - 40) < 0.02);
+  });
+});
