@@ -1864,6 +1864,7 @@ export class Builder {
     if (!occ) {
       node.preferType = typeId;
       node.quat = null;
+      node.arms = CONNECTOR_ARM_BITS.filter(([bit]) => mask & bit).map(([, dir]) => dir.slice());
       return true;
     }
     const orients = this._connectorOrients(mask, occ);
@@ -1875,6 +1876,9 @@ export class Builder {
     }
     node.preferType = typeId;
     node.quat = pick;
+    const axes = [xAxisOf(pick), yAxisOf(pick), zAxisOf(pick)];
+    node.arms = CONNECTOR_ARM_BITS.filter(([bit]) => mask & bit).map(([, dir]) =>
+      [0, 1, 2].map((i) => axes[0][i] * dir[0] + axes[1][i] * dir[1] + axes[2][i] * dir[2]));
     return true;
   }
 

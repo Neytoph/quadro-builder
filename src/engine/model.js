@@ -5254,13 +5254,14 @@ export class BuildModel {
     return direction.map((value) => value / length);
   }
 
-  // 导入文件的 arms 与指定通型的 preferType 记录了实体插口。只有实体上存在且空着的插口才能接管。
+  // 导入文件的 arms 记录原有接头的外观。继续加管时可以更换接头，
+  // 因此只用用户明确指定的 preferType 限制普通接头的插口方向。
   canExtendFrom(node, dir) {
     if (!node || node.unused || this.hasWheelCap(node)) return false;
     let ports = node.c45body ? [this.c45ArmDir(node)].filter(Boolean)
       : isHolePart(node.part) ? holeArmDirs(node)
       : isBoltPart(node.part) ? boltArmDirs(node)
-      : node.arms;
+      : null;
     if (!ports && node.preferType && CONN_TYPE_MASK[node.preferType]) {
       const axes = node.quat
         ? [xAxisOf(node.quat), yAxisOf(node.quat), zAxisOf(node.quat)]
