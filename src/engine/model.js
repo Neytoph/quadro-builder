@@ -5272,11 +5272,10 @@ export class BuildModel {
           return [0, 1, 2].map((i) => axes[0][i] * v[0] + axes[1][i] * v[1] + axes[2][i] * v[2]);
         });
     }
-    if (!ports) return true;
     const length = Math.hypot(...dir);
     if (!length) return false;
     const unit = dir.map((v) => v / length);
-    if (!ports.some((port) => port[0] * unit[0] + port[1] * unit[1] + port[2] * unit[2] > ARM_ALIGN_TOL)) return false;
+    if (ports && !ports.some((port) => port[0] * unit[0] + port[1] * unit[1] + port[2] * unit[2] > ARM_ALIGN_TOL)) return false;
     for (const tube of this.tubes.values()) {
       if (tube.link) continue;
       const otherId = tube.a === node.id ? tube.b : tube.b === node.id ? tube.a : null;
