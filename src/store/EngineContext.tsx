@@ -364,7 +364,7 @@ function pickPart(kind: string, id: string) {
 // 存盘时的构成快照。比"每放一根管发一条"便宜几百倍，回答的还是更该问的
 // 那个问题：什么件真的被留下了——试了又删的不算数，那才是定价和二手
 // 该看的口径。props 最多 8 个（gateway/internal/events 的 maxProps），
-// 下面 7 个正好卡住。
+// 保存时加上 named 和访问标识，正好是 8 个。
 function modelShape(model: unknown) {
   const rec = (model && typeof model === 'object' ? model : {}) as AnyRec
   const n = (v: unknown) => Array.isArray(v) ? v.length : (v && typeof v === 'object' ? Object.keys(v).length : 0)
@@ -1864,6 +1864,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
           gScrews: t('bom.screws'),
         },
       })
+      track('builder.export.manual.done')
       notify(t('toast.manualSaved'))
     } catch (err) {
       if ((err as { code?: string })?.code === 'empty') notify(t('toast.manualEmpty'), 'warn')

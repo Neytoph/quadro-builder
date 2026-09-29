@@ -39,6 +39,9 @@ const FROM_KEY = 'qh_from'
 const FROM_RE = /[?&]from=([A-Za-z0-9_-]{1,32})(?:[&#]|$)/
 const BATCH_MS = 4000
 const MAX_BATCH = 20
+const TIME_TICK_MS = 5000
+const TIME_REPORT_MS = 15000
+const ACTIVE_WINDOW_MS = 30000
 
 type Props = Record<string, string | number | boolean>
 type Queued = { name: string; props?: Props }
@@ -49,6 +52,8 @@ let timer: ReturnType<typeof setTimeout> | null = null
 // 一条一条发的话，一次正经的搭建能刷出几百条记录，既淹掉别的动作，
 // 也回答不了任何问题——真正想知道的是"这一程搭了多少步"。
 const rolled = new Map<string, number>()
+// 每次加载页面换一个标识。同一标签页内重新打开设计器也能分成两次访问。
+const visit = rid()
 
 function rid(): string {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36)
@@ -92,7 +97,7 @@ export function landedFrom(): string {
 }
 
 function drainRolled(): void {
-  for (const [name, n] of rolled) queue.push({ name, props: { n } })
+  for (const [name, n] of rolled) queue.push({ name, props: { n, visit } })
   rolled.clear()
 }
 
@@ -104,13 +109,15 @@ function flush(beacon = false): void {
   if (timer) { clearTimeout(timer); timer = null }
   // 一次只发 MAX_BATCH 条，超出的留在队列里。不在这儿重排定时器的话，
   // 剩下的要等下一次 track 或者 pagehide 才走。
-  if (queue.length > 0) timer = setTimeout(() => flush(), BATCH_MS)
+  if (queue.length > 0 && !beacon) timer = setTimeout(() => flush(), BATCH_MS)
   try {
     // 页面要走的时候必须用 sendBeacon：fetch 的请求会在卸载那一下
     // 被浏览器掐掉，而"用完就走"恰恰是最该记下来的一批。
     if (beacon && navigator.sendBeacon) {
-      navigator.sendBeacon(URL_, new Blob([body], { type: 'application/json' }))
-      return
+      if (navigator.sendBeacon(URL_, new Blob([body], { type: 'application/json' }))) {
+        if (queue.length > 0) flush(true)
+        return
+      }
     }
     void fetch(URL_, {
       method: 'POST',
@@ -120,12 +127,13 @@ function flush(beacon = false): void {
       headers: { 'Content-Type': 'application/json' },
     }).catch(() => {})
   } catch { /* 见规矩 3 */ }
+  if (beacon && queue.length > 0) flush(true)
 }
 
 /** 记一个动作。名字要分层：`builder.对象.动作`。 */
 export function track(name: string, props?: Props): void {
   if (!URL_) return
-  queue.push(props ? { name, props } : { name })
+  queue.push({ name, props: { ...props, visit } })
   if (queue.length >= MAX_BATCH) { flush(); return }
   if (!timer) timer = setTimeout(() => flush(), BATCH_MS)
 }
@@ -146,9 +154,57 @@ export function flushNow(): void {
 /** 挂在页面生命周期上。App 挂载时调一次就够。 */
 export function startAnalytics(): void {
   if (!URL_) return
+  let lastTick = performance.now()
+  let lastInput = -Infinity
+  let wasVisible = document.visibilityState === 'visible'
+  let visibleMs = 0
+  let activeMs = 0
+  let reportedVisibleSec = 0
+  let reportedActiveSec = 0
+  let lastReport = lastTick
+
+  const tick = () => {
+    const now = performance.now()
+    // 休眠或浏览器节流后不把整段间隔算成前台时长。
+    const elapsed = Math.max(0, Math.min(now - lastTick, TIME_TICK_MS * 2))
+    if (wasVisible) {
+      visibleMs += elapsed
+      activeMs += Math.min(elapsed, Math.max(0, lastInput + ACTIVE_WINDOW_MS - (now - elapsed)))
+    }
+    lastTick = now
+  }
+  const report = (beacon = false) => {
+    tick()
+    const visibleSec = Math.floor(visibleMs / 1000)
+    const activeSec = Math.floor(activeMs / 1000)
+    const visible = visibleSec - reportedVisibleSec
+    const active = activeSec - reportedActiveSec
+    if (visible > 0 || active > 0) {
+      track('builder.app.time', { visible, active })
+      reportedVisibleSec = visibleSec
+      reportedActiveSec = activeSec
+    }
+    lastReport = performance.now()
+    if (beacon) flush(true)
+  }
+  const input = () => { lastInput = performance.now() }
+  for (const name of ['pointerdown', 'pointermove', 'keydown', 'wheel', 'touchstart', 'scroll']) {
+    window.addEventListener(name, input, { passive: true })
+  }
+  window.setInterval(() => {
+    tick()
+    if (performance.now() - lastReport >= TIME_REPORT_MS) report()
+  }, TIME_TICK_MS)
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') flush(true)
+    if (document.visibilityState === 'hidden') {
+      report(true)
+      wasVisible = false
+    } else {
+      lastTick = performance.now()
+      wasVisible = true
+    }
   })
   // pagehide 比 unload 可靠：手机上从 Safari 切走走的是这条。
-  window.addEventListener('pagehide', () => flush(true))
+  window.addEventListener('pagehide', () => { report(true); wasVisible = false })
+  window.addEventListener('pageshow', () => { lastTick = performance.now(); wasVisible = document.visibilityState === 'visible' })
 }
