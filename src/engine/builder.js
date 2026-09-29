@@ -1502,7 +1502,7 @@ export class Builder {
     let res;
     this.recordHistory(() => {
       res = isCurvedTube(this.tubeId)
-        ? this.model.extendBow(node.id, dirVec, this._bowNormal(dirVec), this.tubeId, this.colorFor("tube", node.id), gridSpacing())
+        ? this.model.extendBow(node.id, dirVec, this._bowNormal(dirVec, node), this.tubeId, this.colorFor("tube", node.id), gridSpacing())
         : this.model.extend(
             node.id, dirVec, this.tubeId, this.colorFor("tube", node.id), tube.length_cm, spacingFor(tube.length_cm)
           );
@@ -1521,20 +1521,28 @@ export class Builder {
   }
 
   // 弯管从水平接头向下弯；从斜坡接头弯向水平方向；从竖直接头按视角弯向侧面。
-  _bowNormal(dirVec) {
+  // 默认弯曲会进入地下时，改用反方向；两边都会进入地下时仍由地面检查拦住。
+  _bowNormal(dirVec, node = null) {
     const horizontal = Math.hypot(dirVec[0], dirVec[2]);
-    if (Math.abs(dirVec[1]) < 0.5) return [0, -1, 0];
-    if (horizontal > 0.01) {
+    let normal;
+    if (Math.abs(dirVec[1]) < 0.5) normal = [0, -1, 0];
+    else if (horizontal > 0.01) {
       const sign = Math.sign(dirVec[1]);
-      return [dirVec[0] * Math.abs(dirVec[1]) / horizontal,
+      normal = [dirVec[0] * Math.abs(dirVec[1]) / horizontal,
         -sign * horizontal,
         dirVec[2] * Math.abs(dirVec[1]) / horizontal];
+    } else {
+      const ax = this.scene.getHorizontalAxes ? this.scene.getHorizontalAxes() : null;
+      const f = (ax && (ax.forward || ax.f)) || [0, 0, -1];
+      normal = Math.abs(f[0]) >= Math.abs(f[2])
+        ? [Math.sign(f[0]) || 1, 0, 0]
+        : [0, 0, Math.sign(f[2]) || -1];
     }
-    const ax = this.scene.getHorizontalAxes ? this.scene.getHorizontalAxes() : null;
-    const f = (ax && (ax.forward || ax.f)) || [0, 0, -1];
-    return Math.abs(f[0]) >= Math.abs(f[2])
-      ? [Math.sign(f[0]) || 1, 0, 0]
-      : [0, 0, Math.sign(f[2]) || -1];
+    if (node && this.model.bowBelowGround(node, dirVec, normal, gridSpacing())) {
+      const opposite = normal.map((value) => -value);
+      if (!this.model.bowBelowGround(node, dirVec, opposite, gridSpacing())) return opposite;
+    }
+    return normal;
   }
 
   // Steckt am Knoten schon etwas in Arm-Richtung `axis`? Zaehlt echte Rohre UND
@@ -1981,7 +1989,7 @@ export class Builder {
 
   _targetBelowGround(node, vec) {
     if (isCurvedTube(this.tubeId))
-      return this.model.bowBelowGround(node, vec, this._bowNormal(vec), gridSpacing());
+      return this.model.bowBelowGround(node, vec, this._bowNormal(vec, node), gridSpacing());
     if (vec[1] >= 0) return false;
     const tube = getTube(this.tubeId);
     const span = spacingFor(tube ? tube.length_cm : 35);
@@ -2047,9 +2055,13 @@ export class Builder {
     // Arm-Richtungen pruefen (nicht gegen DIRECTIONS/DIAGONAL_DIRECTIONS).
     const eigene = node.c45body ? null : this._armDirsOf(node);
     if (eigene) {
-      for (const nb of this.model.neighbors(node.id)) {
-        if (!nb) continue;
-        const dx = nb.x - node.x, dy = nb.y - node.y, dz = nb.z - node.z;
+      for (const tube of this.model.tubes.values()) {
+        if (tube.link) continue;
+        const otherId = tube.a === node.id ? tube.b : tube.b === node.id ? tube.a : null;
+        if (!otherId) continue;
+        const other = this.model.nodes.get(otherId);
+        if (!other) continue;
+        const [dx, dy, dz] = this.model._tubeDirAt(tube, node, other);
         const len = Math.hypot(dx, dy, dz) || 1;
         for (const d of eigene) {
           if ((dx * d.vec[0] + dy * d.vec[1] + dz * d.vec[2]) / len > ARM_ALIGN_TOL) {
@@ -4407,7 +4419,7 @@ export class Builder {
       if (isCurvedTube(this.tubeId)) {
         const tube = getTube(this.tubeId);
         this.recordHistory(() => {
-          res = this.model.extendBow(h.data.nodeId, h.data.dir, this._bowNormal(h.data.dir),
+          res = this.model.extendBow(h.data.nodeId, h.data.dir, this._bowNormal(h.data.dir, this.model.nodes.get(h.data.nodeId)),
             tube.id, this.colorFor("tube", h.data.nodeId), gridSpacing());
         });
       } else if (h.data.slope) {
