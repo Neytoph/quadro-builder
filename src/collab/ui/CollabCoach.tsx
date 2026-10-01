@@ -14,7 +14,7 @@ import { coachKind, coachSeen, coachSteps, markCoachSeen, type CoachKind } from 
 export default function CollabCoach() {
   const collab = useCollab()
   const plan = collab.plan
-  const ready = collab.enabled && collab.mode === 'plan' && !!plan && !collab.compare && !collab.joinAsk && !collab.error
+  const ready = collab.enabled && collab.mode === 'plan' && !!plan && !collab.compare && !collab.coachBlocked && !collab.joinAsk && !collab.inviteError && !collab.inviteOpenId && !collab.error
   const kind = ready && plan ? coachKind(plan) : null
   // 看过以后重新渲染一次，让 coachSeen 读到新值
   const [, setSeenRev] = useState(0)

@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { setLang as syncEngineLang } from './engine/i18n.js'
 import { detectOsFamily, type OsFamily } from './platform'
 import { bootEntry } from './entry'
+import { sharedStrings } from './collab/sharedStrings'
 
 export type Lang = 'zh' | 'en' | 'de'
 
@@ -2040,7 +2041,7 @@ const de: Dict = {
   'room.closeFirst': 'Erst den Umriss schließen, dann Türen und Fenster setzen',
 }
 
-export const dicts: Record<Lang, Dict> = { zh, en, de }
+export const dicts: Record<Lang, Dict> = { zh: { ...zh, ...sharedStrings.zh }, en: { ...en, ...sharedStrings.en }, de: { ...de, ...sharedStrings.de } }
 
 /** 打开时用哪种语言：网址里带了的优先，其次是用户选过的，都没有按浏览器语言。 */
 export function detect(): Lang {

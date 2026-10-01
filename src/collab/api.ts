@@ -5,6 +5,9 @@
 import type { ModelJSON } from './ymodel'
 
 export type Role = 'owner' | 'editor' | 'commenter' | 'guest'
+export type InviteRole = 'editor' | 'commenter'
+export interface Invite { token: string; url: string; role: InviteRole }
+export interface InviteInfo { planId: string; role: InviteRole; planName: string; ownerName: string }
 
 export interface Member {
   userId: number
@@ -26,6 +29,7 @@ export interface Plan {
   id: string
   name: string
   data: ModelJSON | null
+  sourceName?: string
   qdf: string
   members: Member[]
   myRole: Role
@@ -163,11 +167,14 @@ const enc = encodeURIComponent
 // 列表接口返回 {复数名词:[...]}，新建东西的接口返回 {id}
 export const collabApi = {
   plan: (id: string) => call<Plan>('GET', `/collab/plans/${enc(id)}`),
-  createPlan: (body: { id: string; name: string } & Omit<ExportBody, 'name'>) =>
-    call<{ id: string }>('POST', '/collab/plans', body),
+  createPlan: (body: ExportBody & { sourceName?: string }) =>
+    call<{ id: string; coverError?: string }>('POST', '/collab/plans', body),
   mine: async () => (await call<{ plans: Array<{ id: string; name: string; role: Role; briefId: number | null; unread: number; updatedAt: number }> }>('GET', '/collab/plans/mine')).plans,
   exportPlan: (id: string, body: ExportBody) => call<unknown>('PUT', `/collab/plans/${enc(id)}/export`, body),
-  invite: (id: string) => call<{ token: string; url: string }>('POST', `/collab/plans/${enc(id)}/invites`),
+  invites: async (id: string) => (await call<{ invites: Invite[] }>('GET', `/collab/plans/${enc(id)}/invites`)).invites,
+  invite: (id: string, role: InviteRole = 'editor') => call<Invite>('POST', `/collab/plans/${enc(id)}/invites`, { role }),
+  disableInvite: (id: string, token: string) => call<unknown>('DELETE', `/collab/plans/${enc(id)}/invites/${enc(token)}`),
+  inviteInfo: (token: string) => call<InviteInfo>('GET', `/collab/invites/${enc(token)}`),
   join: (token: string) => call<{ planId: string }>('POST', `/collab/invites/${enc(token)}/join`),
   setRole: (id: string, userId: number, role: Role) => call<unknown>('PUT', `/collab/plans/${enc(id)}/members/${userId}`, { role }),
   removeMember: (id: string, userId: number) => call<unknown>('DELETE', `/collab/plans/${enc(id)}/members/${userId}`),

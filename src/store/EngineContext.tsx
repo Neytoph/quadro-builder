@@ -117,6 +117,8 @@ export interface Inventory {
 
 interface EngineApi {
   ready: boolean
+  entryReady: boolean
+  completeEntry: () => void
   error: string | null
   hostRef: React.RefObject<HTMLDivElement | null>
   tick: number
@@ -262,9 +264,7 @@ interface EngineApi {
   /** 交付查看：把一份外面取来的文档换进来当唯一的标签页，只能看。 */
   attachDoc: (o: { local: LocalDoc; name: string; readOnly: boolean }) => void
   /** 打开共享方案的标签页（已开着就切过去），返回标签页 id */
-  openPlanTab: (planId: string, name: string) => string
-  /** 自己的造型开启共享：标签页原地变成共享方案 */
-  convertToPlan: (tabId: string, planId: string, name: string) => void
+  openPlanTab: (planId: string, name: string, preserveOriginal?: boolean) => string
   /** 共享方案标签页的权限：能不能改、新建零件 id 的本端标记（见 BuildModel.idTag） */
   setTabAccess: (tabId: string, o: { readOnly: boolean; idTag: string }) => void
   tabLocal: (tabId: string) => LocalDoc | null
@@ -595,6 +595,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const highlightKey = useRef<string | null>(null)
 
   const [ready, setReady] = useState(false)
+  const [entryReady, setEntryReady] = useState(false)
+  const completeEntry = useCallback(() => setEntryReady(true), [])
   const [error, setError] = useState<string | null>(null)
   const [tick, setTick] = useState(0)
   const [toast, setToast] = useState<{ message: string; kind: ToastKind } | null>(null)
@@ -1107,7 +1109,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   }, [applyTab, snapshotActive, syncTabs, t])
 
   /** 打开共享方案：已经有这个方案的标签页就切过去，没有就新开一个。 */
-  const openPlanTab = useCallback((planId: string, name: string) => {
+  const openPlanTab = useCallback((planId: string, name: string, preserveOriginal = false) => {
     const existing = tabsRef.current.find(x => x.planId === planId)
     if (existing) {
       if (name && existing.name !== name) existing.name = name
@@ -1123,7 +1125,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const tab = makePlanTab(planId, name)
     // 刚打开的空白「未命名」页让给方案，不多留一个空标签
     const active = tabsRef.current.find(x => x.tabId === activeRef.current)
-    const reuse = active && !active.planId && !active.docId && !active.dirty && tabParts(active) === 0 && isUntitledName(active.name)
+    const reuse = !preserveOriginal && active && !active.planId && !active.docId && !active.dirty && tabParts(active) === 0 && isUntitledName(active.name)
     tabsRef.current = reuse
       ? tabsRef.current.map(x => (x === active ? tab : x))
       : [...tabsRef.current, tab]
@@ -1133,16 +1135,6 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     syncTabs()
     return tab.tabId
   }, [applyTab, snapshotActive, syncTabs])
-
-  /** 自己的造型开启共享：这个标签页原地变成共享方案，文档不换。 */
-  const convertToPlan = useCallback((tabId: string, planId: string, name: string) => {
-    const tab = tabsRef.current.find(x => x.tabId === tabId)
-    if (!tab) throw new Error(`convertToPlan: no tab ${tabId}`)
-    tab.planId = planId
-    tab.name = name
-    tab.dirty = false
-    syncTabs()
-  }, [syncTabs])
 
   /** 共享方案标签页的权限：能不能改、新建零件 id 的本端标记。 */
   const setTabAccess = useCallback((tabId: string, o: { readOnly: boolean; idTag: string }) => {
@@ -1962,7 +1954,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     if (!ready || entryOpened.current) return
     const ent = bootEntry()
     const payload = peekSharePayload()
-    if (!payload && !ent.src) return
+    if (!payload && !ent.src) { if (!ent.doc) setEntryReady(true); return }
     entryOpened.current = true
     void (async () => {
       let data: unknown = null
@@ -1988,7 +1980,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       if (tab && ent.origin) tabOpenedFrom(tab.tabId, ent.origin)
       track('builder.design.open', { from: payload ? 'share' : 'src', view: VIEW_ONLY, copy: ent.copy })
       if (ent.copy && !VIEW_ONLY) await copyToAccount()
-    })()
+      setEntryReady(true)
+    })().catch(err => notify(err instanceof Error ? err.message : String(err), 'err'))
   }, [ready, applyModelJson, copyToAccount, newTab, notify, syncTabs, t])
 
   // 注册完从注册页回来（?export=）：确认登录上了，问一句要不要接着导出。
@@ -2129,7 +2122,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   }), [endThumbBatch, startThumbBatch])
 
   const value: EngineApi = {
-    ready, error, hostRef, tick,
+    ready, entryReady, completeEntry, error, hostRef, tick,
     mode: (builder?.mode as string) || 'select',
     color: (builder?.color as string) || 'random',
     recolorAll: (colors) => { track('builder.color.all', { n: colors.length }); builder?.recolorAll?.(colors); bump() },
@@ -2219,7 +2212,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     startThumbBatch, endThumbBatch, captureThumb,
     // 正在给模型库、批量导入截图时，画面上是别的造型，这一张不截
     coverShot: async () => (thumbBatch.current ? null : coverShot()),
-    attachDoc, openPlanTab, convertToPlan, setTabAccess, tabLocal,
+    attachDoc, openPlanTab, setTabAccess, tabLocal,
     readOnly: !!builder?.readOnly,
     engine,
   }

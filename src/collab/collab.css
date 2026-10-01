@@ -334,7 +334,7 @@
   .cb-toast { bottom: 20px; max-width: calc(100% - 16px); }
   .cb-cluster { gap: 6px; margin-left: 4px; }
   .cb-people .cb-face:nth-child(n+3) { display: none; }
-  .cb-share span { display: none; }
+  .cb-share span { display: inline; }
   .cb-share { padding: 6px 8px; }
   .cb-bubble, .cb-bubble.left { position: fixed; left: 0; right: 0; top: auto; bottom: 0; width: auto; margin: 0; z-index: 70; }
   .cb-bubble > .inner { border-radius: 22px 22px 0 0; }
@@ -352,4 +352,75 @@
   .cb-metrics { grid-template-columns: 1fr 1fr; }
   .cb-file { grid-template-columns: 72px minmax(0, 1fr); }
   .cb-file img, .cb-file .ph { width: 72px; height: 54px; }
+}
+
+/* XMF-015 确认稿：独立创建、邀请、成员与分享查看。 */
+.cb-shared-dialog.qb-card { background: #fff; border: 1px solid #e6e9e1; border-radius: 16px; padding: 25px; box-shadow: 0 22px 65px #26332626; }
+.cb-shared-dialog h3 { font-size: 21px; font-weight: 600; letter-spacing: -.4px; }
+.cb-shared-dialog .s { color: #7c8387; font-size: 12px; line-height: 1.7; }
+.cb-dialog-icon { width: 36px; height: 36px; display: grid; place-items: center; color: #bd5a28; background: #fff3e8; border-radius: 9px; margin-bottom: 12px; }
+.cb-dialog-icon svg { width: 20px; height: 20px; }
+.cb-create-options { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 22px 0 12px; }
+.cb-create-options button { text-align: left; border: 1px solid #e1e6df; border-radius: 10px; padding: 14px; display: grid; gap: 6px; background: #fff; color: #3c443f; cursor: pointer; }
+.cb-create-options button.active { border-color: #de7b45; background: #fff9f2; }
+.cb-create-options svg { width: 19px; height: 19px; color: #748076; margin-bottom: 4px; }
+.cb-create-options .active svg { color: #c56430; }
+.cb-create-options b { font-size: 13px; font-weight: 550; }
+.cb-create-options small { font-size: 11px; color: #858c87; }
+.cb-source { display: flex; gap: 12px; align-items: center; padding: 12px; background: #f6f7f3; border-radius: 8px; margin-bottom: 18px; }
+.cb-source > svg { width: 24px; height: 24px; color: #84907f; flex: none; }
+.cb-source b { font-size: 12px; font-weight: 550; overflow-wrap: anywhere; }
+.cb-source p { font-size: 11px; color: #7c8387; margin: 3px 0 0; }
+.cb-shared-dialog .cb-field { margin: 18px 0 12px; }
+.cb-shared-dialog .cb-field input, .cb-url-input { width: 100%; border: 1px solid #dde4da; border-radius: 8px; padding: 11px 12px; font: inherit; font-size: 13px; color: #49584a; background: #fff; }
+.cb-shared-dialog .cb-field input:focus { outline: 2px solid #f5d4b9; outline-offset: 1px; }
+.cb-independent { display: flex; align-items: flex-start; gap: 7px; color: #879087; font-size: 11px; line-height: 1.8; margin: 10px 0 20px; }
+.cb-independent svg { width: 14px; height: 14px; flex: none; margin-top: 3px; }
+.cb-wide { display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%; min-height: 42px; }
+.cb-wide svg { width: 16px; height: 16px; }
+.cb-shared-dialog .qb-btn { border-radius: 8px; font-weight: 550; }
+.cb-modal-tabs { display: flex; gap: 24px; border-bottom: 1px solid #e5e9e0; margin: 22px -25px 20px; padding: 0 25px; }
+.cb-modal-tabs button { position: relative; border: 0; background: none; color: #7c828a; font: inherit; font-size: 12px; padding: 0 0 13px; cursor: pointer; }
+.cb-modal-tabs button.active { color: #b75b2d; font-weight: 600; }
+.cb-modal-tabs button.active::after { content: ''; position: absolute; height: 2px; left: 0; right: 0; bottom: -1px; background: #dc7c46; }
+.cb-invite-banner { display: flex; gap: 11px; padding: 13px; background: #fff7f0; border-radius: 10px; margin-bottom: 20px; align-items: center; }
+.cb-invite-banner > svg { width: 35px; height: 35px; padding: 8px; background: #fde7d6; color: #ce7140; border-radius: 9px; flex: none; }
+.cb-invite-banner b { font-size: 13px; font-weight: 550; }
+.cb-invite-banner p { font-size: 11px; color: #9a725a; margin: 3px 0 0; }
+.cb-field-label { display: block; font-size: 12px; color: #65705f; margin: 0 0 10px; }
+.cb-role-options { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+.cb-role-options button { border: 1px solid #e2e6dd; background: #fff; border-radius: 8px; padding: 12px 10px; display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #697366; font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.cb-role-options button.active { background: #fff7f0; border-color: #dc824f; color: #a8582d; }
+.cb-role-options i { display: block; width: 14px; height: 14px; border-radius: 50%; border: 1px solid #cfd6ca; flex: none; }
+.cb-role-options .active i { border: 4px solid #dc824f; }
+.cb-url-input { background: #f7f8f5; font-size: 12px; color: #778176; margin-bottom: 10px; text-overflow: ellipsis; }
+.cb-text-action { display: inline-flex; align-items: center; gap: 6px; font: inherit; font-size: 11px; color: #848c82; background: none; border: 0; padding: 5px 0; cursor: pointer; text-decoration: none; }
+.cb-text-action.danger { color: #bd7264; }
+.cb-link-tools { display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 10px; margin: 10px 0 21px; }
+.cb-status-box { padding: 13px; font-size: 12px; line-height: 1.7; color: #7e887b; background: #f6f7f2; border: 1px solid #e3e7dd; border-radius: 8px; margin-bottom: 12px; }
+.cb-shared-dialog .cb-members { border: 0; background: #fff; }
+.cb-shared-dialog .cb-mem { padding: 13px 0; gap: 10px; border-bottom: 1px solid #edf0e9; }
+.cb-shared-dialog .cb-mem .t b { font-size: 12px; font-weight: 550; }
+.cb-shared-dialog .cb-role.lock { font-size: 11px; color: #8b918b; background: none; }
+.cb-role-select { border: 1px solid #e1e6dc; border-radius: 7px; padding: 7px; background: #fff; font: inherit; font-size: 12px; color: #626d5e; max-width: 145px; }
+.cb-remove { border: 0; background: none; color: #a7aea4; padding: 3px 4px; font-size: 19px; cursor: pointer; }
+.cb-member-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.cb-view-pane { text-align: center; }
+.cb-view-pane > svg { width: 35px; height: 35px; color: #85987a; margin: 10px auto 16px; }
+.cb-view-pane h3 { padding: 0; font-size: 17px; }
+.cb-view-pane .s { margin: 12px 0 24px; }
+.cb-action-error { color: #af4a3c; background: #fff2ef; padding: 10px 12px; font-size: 12px; line-height: 1.6; border-radius: 8px; margin: 12px 0; overflow-wrap: anywhere; }
+.cb-join-role { display: inline-block; color: #a75c35; font-size: 12px; padding: 5px 10px; border-radius: 6px; background: #fff1e6; margin: 12px 0 4px; }
+@media (max-width: 600px) {
+  .cb-shared-dialog.qb-card { border-radius: 12px; padding: 21px 18px; max-height: calc(100dvh - 24px); }
+  .cb-mask:has(.cb-shared-dialog) { place-items: center; padding: 12px 8px; }
+  .cb-modal-tabs { margin-left: -18px; margin-right: -18px; padding: 0 18px; gap: 21px; }
+  .cb-create-options button { padding: 11px; }
+  .cb-shared-dialog .cb-field input { font-size: 16px; }
+  .cb-shared-dialog h3 { font-size: 19px; }
+  .cb-share { padding: 8px 9px; font-size: 11px; min-height: 36px; white-space: normal; max-width: 178px; }
+  .cb-cluster .cb-people .cb-face:nth-child(n+3) { display: none; }
+  .cb-shared-dialog .cb-mem .t { min-width: 0; }
+  .cb-shared-dialog .cb-mem .t b { overflow-wrap: anywhere; }
+  .cb-shared-dialog .cb-member-actions { grid-column: 2 / -1; justify-self: end; }
 }

@@ -2,6 +2,28 @@ import { describe, expect, it } from 'vitest'
 import { dropParam, readEntry } from './entry'
 import { appendTab } from './store/tabs'
 
+describe('创建共享方案入口', () => {
+  it('带 src 的创建保留真实导入来源和名称', () => {
+    const entry = readEntry('?src=/quadro/models/d1.json&name=双层小屋&createShared=1', '', true)
+    expect(entry.createShared).toBe(true)
+    expect(entry.src).toBe('/quadro/models/d1.json')
+    expect(entry.name).toBe('双层小屋')
+    expect(entry.plan).toBeNull()
+  })
+  it('空白入口独立打开，开源版不启用协作', () => {
+    const entry = readEntry('?new=1&createShared=1', '', true)
+    expect(entry.blank).toBe(true)
+    expect(entry.createShared).toBe(true)
+    expect(readEntry('?createShared=1', '', false).createShared).toBe(false)
+  })
+  it('邀请链接允许仅提供 token，由服务端元数据决定方案和权限', () => {
+    const entry = readEntry('?invite=token1&role=owner', '', true)
+    expect(entry.invite).toBe('token1')
+    expect(entry.plan).toBeNull()
+    expect('role' in entry).toBe(false)
+  })
+})
+
 describe('?export= 注册完回来接着做', () => {
   it('复制分享链接（link）和导出文件一样认', () => {
     expect(readEntry('?export=link', '', true).resume).toBe('link')

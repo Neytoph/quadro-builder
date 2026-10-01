@@ -14,7 +14,7 @@
 // 共享方案（托管版设了 VITE_SYNC_BASE 才认）：
 //
 //	?plan=<id>                     在标签页里打开共享方案，按自己的角色决定能不能编辑
-//	&invite=<token>                成员邀请：登录后加入成为评论者
+//	&invite=<token>                成员邀请：按服务端链接权限加入
 //	&compare=<版本 id>,<版本 id>    版本对照，版本 id 可以写 current
 //	?delivery=<token>              交付页里嵌入的只读查看，嵌在 iframe 里时只有可拖动的三维画面
 //	&assembly=1                    交付页「开始拼」：直接进这一版的逐层拼装
@@ -47,6 +47,7 @@ export interface Entry {
   hash: string
   plan: string | null
   invite: string | null
+  createShared: boolean
   compare: [string, string] | null
   delivery: string | null
   /** 交付查看打开就进逐层拼装 */
@@ -91,6 +92,7 @@ export function readEntry(search: string, hash: string, collab: boolean): Entry 
     hash,
     plan: collab ? q.get('plan') : null,
     invite: collab ? q.get('invite') : null,
+    createShared: collab && q.get('createShared') === '1',
     compare: collab && cmp.length === 2 ? [cmp[0], cmp[1]] : null,
     delivery: collab ? q.get('delivery') : null,
     assembly: collab && !!q.get('delivery') && q.get('assembly') === '1',

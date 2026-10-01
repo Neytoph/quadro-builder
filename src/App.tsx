@@ -19,7 +19,6 @@ import { usePresence } from './ui/motion'
 import { bootEntry, DELIVERY_EMBED, dropParam, fullBuilderUrl, VIEW_ONLY } from './entry'
 import { syncNow, syncProbe } from './sync/bootstrap'
 import { pullDoc } from './sync/docEntry'
-import { collabApi } from './collab/api'
 import { CollabProvider, useCollab } from './collab/CollabContext'
 import './collab/collab.css'
 import { JoinModal } from './collab/ui/Modals'
@@ -257,7 +256,7 @@ function ImportOnEntry() {
 
 /**
  * ?doc=<doc id>：打开自己「我的设计」里的这一座。没登录先去登录；登录了等同步跑完一轮，
- * 开启过共享的这一座打开方案标签页，其余的打开它的标签页；本机没有就从 /models 拉下来，
+ * 打开个人设计的独立标签页；本机没有就从 /models 拉下来，
  * 服务端也没有（不是自己的、删掉了）就说找不到。
  */
 function DocOnEntry() {
@@ -265,8 +264,8 @@ function DocOnEntry() {
   const collab = useCollab()
   const { t } = useI18n()
   const done = useRef(false)
-  const { ready, openDoc, notify } = api
-  const { openPlan, loginUrl, report } = collab
+  const { ready, openDoc, notify, completeEntry } = api
+  const { loginUrl, report } = collab
 
   useEffect(() => {
     const id = bootEntry().doc
@@ -277,12 +276,12 @@ function DocOnEntry() {
       if (signedIn === false) { location.href = loginUrl(); return }
       if (signedIn !== true) throw new Error('?doc=: sync server did not answer')
       await syncNow()
-      dropParam('doc')
-      if ((await collabApi.mine()).some(p => p.id === id)) { await openPlan(id); return }
       if (!await pullDoc(import.meta.env.VITE_SYNC_BASE as string, id)) { notify(t('doc.notFound'), 'err'); return }
       await openDoc(id)
+      dropParam('doc')
+      completeEntry()
     })().catch(report)
-  }, [ready, openDoc, notify, openPlan, loginUrl, report, t])
+  }, [ready, openDoc, notify, completeEntry, loginUrl, report, t])
 
   return null
 }
@@ -456,7 +455,7 @@ function AppInner() {
       <AccountDialog />
       <NameDialog />
       <ManualProgress />
-      {collab.mode === 'off' && <Onboarding />}
+      {collab.mode === 'off' && !bootEntry().plan && !bootEntry().invite && !bootEntry().createShared && <Onboarding />}
       {collab.mode === 'plan' && <CollabCoach />}
       <ThumbCapture />
       <ImportOnEntry />

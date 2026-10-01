@@ -11,7 +11,7 @@ import { useEngine } from '../store/EngineContext'
 import { bootEntry, dropParam } from '../entry'
 import { computeMetrics, BuildModel } from '../engine-api'
 import { useI18n } from '../i18n'
-import { ApiError, collabApi, collabEnabled, type Anchor, type Metrics, type Plan, type Post, type Ref, type Role, type Room, type Thread, type VersionInfo } from './api'
+import { ApiError, collabApi, collabEnabled, type Anchor, type InviteInfo, type InviteRole, type Metrics, type Plan, type Post, type Ref, type Role, type Room, type Thread, type VersionInfo } from './api'
 import { canEditRole, docFromBase64, exportOf, memberColor, PlanSession, type Peer } from './planSession'
 import { memoryDoc } from './localDocs'
 import { docToJSON, type ModelJSON } from './ymodel'
@@ -44,6 +44,7 @@ export interface RoomState {
 export interface JoinAsk {
   plan: Plan
   invite: string
+  info: InviteInfo
 }
 
 export const DIFF_COLORS = { added: '#1FA85A', removed: '#E11D48' }
@@ -89,7 +90,7 @@ interface CollabApi {
   /** 方案改名：名字写进文档同步给成员，立即交一次导出 */
   renamePlan: (planId: string, name: string) => void
   saveVersion: (name: string) => Promise<{ id: number }>
-  inviteUrl: () => Promise<string>
+  inviteUrl: (role?: InviteRole) => Promise<string>
   viewUrl: () => string
   setRole: (userId: number, role: Role) => Promise<void>
   removeMember: (userId: number) => Promise<void>
@@ -104,12 +105,20 @@ interface CollabApi {
   delivery: DeliveryState | null
   room: RoomState | null
   saveRoom: (room: Room) => Promise<void>
-  /** 自己的造型开启共享：当前标签页原地变成共享方案 */
-  enableSharing: () => Promise<void>
-  /** 打开「我的设计」里的一份：开启过共享的，打开方案标签页 */
-  planOfDoc: (docId: string) => boolean
+  /** 点击时复制当前实际造型，服务端创建独立方案。 */
+  enableSharing: (name: string, blank: boolean) => Promise<void>
+  createdPlan: { id: string; name: string; coverError?: string } | null
+  recoverCreatedPlan: () => void
+  retryCover: () => Promise<void>
+  inviteOpenId: string | null
+  closeInvite: () => void
+  coachBlocked: boolean
+  setSharingDialogOpen: (open: boolean) => void
+  holdModal: () => () => void
   openPlan: (planId: string) => Promise<void>
   joinAsk: JoinAsk | null
+  inviteError: string | null
+  dismissInviteError: () => void
   joinAsGuest: () => void
   loginUrl: () => string
   report: (err: unknown) => void
@@ -146,13 +155,28 @@ export function CollabProvider({ children }: { children: ReactNode }) {
   const [readAt, setReadAt] = useState<Record<string, number>>({})
   const [myPlans, setMyPlans] = useState<Array<{ id: string; name: string; role: Role }>>([])
   const [joinAsk, setJoinAsk] = useState<JoinAsk | null>(null)
+  const [inviteError, setInviteError] = useState<string | null>(null)
+  const [inviteOpenId, setInviteOpenId] = useState<string | null>(null)
+  // 入口弹窗加载期间也先保留首次引导，避免方案先到而邀请窗尚未打开。
+  const [sharingDialogOpen, setSharingDialogOpen] = useState(() => !!entry.createShared || (!!entry.plan && new URLSearchParams(location.search).get('inviteManage') === '1'))
+  const [modalCount, setModalCount] = useState(0)
+  const holdModal = useCallback(() => {
+    setModalCount(count => count + 1)
+    return () => setModalCount(count => count - 1)
+  }, [])
+  const [createdPlan, setCreatedPlan] = useState<{ id: string; name: string; coverError?: string } | null>(() => {
+    const pending = localStorage.getItem('quadro.shared.created')
+    return pending ? JSON.parse(pending) : null
+  })
+  const createdRef = useRef(createdPlan)
+  const creating = useRef(false)
   // 地址上带着邀请：加入以前先不连这个方案。上次看过它的话标签页会恢复出来，
   // 抢在加入之前按访客连上，加入以后还是只读
-  const [joining, setJoining] = useState(!!(entry.plan && entry.invite))
+  const [joining, setJoining] = useState(!!entry.invite)
   const nudgeSeen = useRef(new Map<number, number>())
 
   // 引擎那边这几样是稳定的，下面的回调和副作用只依赖它们，不依赖每次渲染都换新的 api
-  const { notify, tabLocal, setTabAccess, setTabName, openPlanTab, saveCurrent, convertToPlan, engine, tick } = api
+  const { notify, tabLocal, setTabAccess, setTabName, openPlanTab, engine, tick } = api
   const report = useCallback((err: unknown) => { notify(errText(err), 'err') }, [notify])
 
   const activeTab = api.tabs.find(x => x.tabId === api.activeTabId) || null
@@ -181,7 +205,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
     }
     for (const [planId, tabId] of wanted) {
       if (sessions.current.has(planId) || loading.current.has(planId)) continue
-      if (joining && planId === entry.plan) continue
+      if (joining && (!entry.plan || planId === entry.plan)) continue
       loading.current.add(planId)
       collabApi.plan(planId).then((plan) => {
         const local = tabLocal(tabId)
@@ -191,6 +215,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
         s.cover = async () => (shotRef.current.activePlanId === planId && document.visibilityState === 'visible'
           ? shotRef.current.coverShot() : null)
         sessions.current.set(planId, s)
+        setErrors(e => { const next = { ...e }; delete next[planId]; return next })
         setReadAt(r => ({ ...r, [planId]: plan.me?.lastReadAt || 0 }))
         s.subscribe(bump)
         setTabAccess(tabId, { readOnly: !s.canEdit, idTag: s.idTag })
@@ -231,21 +256,22 @@ export function CollabProvider({ children }: { children: ReactNode }) {
   const renamePlan = useCallback((planId: string, name: string) => {
     const s = sessions.current.get(planId)
     if (!s) throw new Error(`renamePlan: plan ${planId} is not open`)
+    if (!name.trim() || Array.from(name.trim()).length > 40) { notify(t('collab.create.nameLimit'), 'err'); return }
     s.rename(name)
-  }, [])
+  }, [notify, t])
 
   // 地址栏跟着当前标签页：共享方案显示它的地址，刷新以后还是这个方案
   useEffect(() => {
-    if (!enabled || !api.ready || mode === 'delivery' || mode === 'room') return
+    if (!enabled || !api.ready || joining || joinAsk || mode === 'delivery' || mode === 'room') return
     const q = new URLSearchParams(location.search)
     if (activePlanId) {
       if (q.get('plan') === activePlanId) return
-      history.replaceState(null, '', planUrl(activePlanId))
+      history.replaceState(null, '', planUrl(activePlanId, q.get('inviteManage') === '1' ? { inviteManage: '1' } : {}))
     } else if (q.has('plan') || q.has('compare')) {
       dropParam('plan')
       dropParam('compare')
     }
-  }, [enabled, api.ready, activePlanId, mode])
+  }, [enabled, api.ready, activePlanId, mode, joining, joinAsk])
 
   // —— 打开：地址上带着方案（邀请、分享链接），交付查看，画房间 ——
   const opened = useRef(false)
@@ -268,18 +294,27 @@ export function CollabProvider({ children }: { children: ReactNode }) {
           setRoom({ briefId: entry.roomBrief, room: b.room || { w: 300, d: 400, h: 240 }, title: String(b.region || '') })
           return
         }
-        if (!entry.plan) return
-        const plan = await collabApi.plan(entry.plan)
         if (entry.invite) {
-          if (!plan.me) { setJoining(false); setJoinAsk({ plan, invite: entry.invite }); return }
-          await collabApi.join(entry.invite)
+          const info = await collabApi.inviteInfo(entry.invite)
+          const plan = await collabApi.plan(info.planId)
+          if (!plan.me) { setJoinAsk({ plan, invite: entry.invite, info }); setJoining(false); return }
+          const joined = await collabApi.join(entry.invite)
+          // 已作为访客打开过：加入后重新建立具有实际成员权限的连接。
+          const old = sessions.current.get(joined.planId)
+          if (old) { old.destroy(); sessions.current.delete(joined.planId) }
           setJoining(false)
           dropParam('invite')
-          api.notify(t('collab.join.joined'))
+          const actual = await collabApi.plan(joined.planId)
+          api.openPlanTab(actual.id, actual.name)
+          api.notify(t('collab.create.joined', { role: t(`collab.role.${actual.myRole}`) }))
+          return
         }
+        if (!entry.plan) return
+        const plan = await collabApi.plan(entry.plan)
         api.openPlanTab(plan.id, plan.name)
       } catch (err) {
         setJoining(false)
+        if (entry.invite) setInviteError(errText(err))
         if (entry.plan) setErrors(e => ({ ...e, [entry.plan as string]: errText(err) }))
         else report(err)
       }
@@ -294,6 +329,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
     openPlanTab(joinAsk.plan.id, joinAsk.plan.name)
     setJoinAsk(null)
   }, [joinAsk, openPlanTab])
+  const dismissInviteError = useCallback(() => { setInviteError(null); dropParam('invite') }, [])
 
   // 我参与的方案：「我的设计」里开启过共享的那几份打开方案标签页；留言引用复制件
   useEffect(() => {
@@ -512,9 +548,9 @@ export function CollabProvider({ children }: { children: ReactNode }) {
     return v
   }, [session, refreshVersions, nudge])
 
-  const inviteUrl = useCallback(async () => {
+  const inviteUrl = useCallback(async (role: InviteRole = 'editor') => {
     if (!session) throw new Error('no plan')
-    return (await collabApi.invite(session.id)).url
+    return (await collabApi.invite(session.id, role)).url
   }, [session])
 
   const viewUrl = useCallback(() => {
@@ -567,29 +603,77 @@ export function CollabProvider({ children }: { children: ReactNode }) {
     location.href = `/brief.html?id=${encodeURIComponent(room.briefId)}`
   }, [room])
 
-  // —— 自己的造型开启共享：原地变成共享方案 ——
-  const enableSharing = useCallback(async () => {
-    const tab = activeTab
-    if (!tab || tab.planId) return
-    // 先存一下：方案的 id 就是这份存档的 id
-    const saved = await saveCurrent()
-    if (!saved) return
-    const body = exportOf(saved.data, saved.name)
-    await collabApi.createPlan({ id: saved.docId, name: saved.name, data: body.data, qdf: body.qdf, parts: body.parts })
-    // 开启共享的这一刻画面上就是这一座：截一张交上去当方案封面
-    const cover = await shotRef.current.coverShot()
-    if (cover) await collabApi.exportPlan(saved.docId, { ...body, cover })
-    convertToPlan(tab.tabId, saved.docId, saved.name)
-    setMyPlans(list => [...list, { id: saved.docId, name: saved.name, role: 'owner' }])
-  }, [activeTab, saveCurrent, convertToPlan])
+  const recoverCreatedPlan = useCallback(() => {
+    const p = createdRef.current
+    if (!p) return
+    openPlanTab(p.id, p.name, true)
+    setInviteOpenId(p.id)
+  }, [openPlanTab])
 
-  const planOfDoc = useCallback((docId: string) => myPlans.some(p => p.id === docId), [myPlans])
+  useEffect(() => {
+    if (!session || session.id !== createdRef.current?.id || createdRef.current.coverError) return
+    localStorage.removeItem('quadro.shared.created')
+    createdRef.current = null
+    setCreatedPlan(null)
+  }, [session])
+
+  const retryCover = useCallback(async () => {
+    const pending = createdRef.current
+    if (!pending) return
+    const target = sessions.current.get(pending.id)
+    if (!target) throw new Error(t('collab.loading'))
+    const body = target.exportBody()
+    const cover = await shotRef.current.coverShot()
+    if (!cover) throw new Error(t('collab.create.coverFailed'))
+    await collabApi.exportPlan(pending.id, { ...body, cover })
+    localStorage.removeItem('quadro.shared.created')
+    createdRef.current = null
+    setCreatedPlan(null)
+    notify(t('collab.create.coverSaved'))
+  }, [notify, t])
+
+  const enableSharing = useCallback(async (name: string, blank: boolean) => {
+    if (creating.current) return
+    if (createdRef.current) { recoverCreatedPlan(); return }
+    const current = engine()
+    if (!activeTab || !current || !api.entryReady) throw new Error(t('collab.loading'))
+    const trimmed = name.trim()
+    if (!trimmed || Array.from(trimmed).length > 40) throw new Error(t('collab.create.nameLimit'))
+    // 任何 await 之前锁定实际引擎画面，包含未保存的编辑。
+    const data = structuredClone((blank ? new BuildModel() : current.model).toJSON()) as ModelJSON
+    const body = exportOf(data, trimmed)
+    creating.current = true
+    try {
+      const cover = blank ? null : await shotRef.current.coverShot()
+      const result = await collabApi.createPlan({ ...body, ...(blank ? {} : { sourceName: activeTab.name }), ...(cover ? { cover } : {}) })
+      const created = { id: result.id, name: trimmed, ...(result.coverError ? { coverError: result.coverError } : {}) }
+      createdRef.current = created
+      setCreatedPlan(created)
+      localStorage.setItem('quadro.shared.created', JSON.stringify(created))
+      if (result.coverError) notify(t('collab.create.coverFailed'), 'warn')
+      setMyPlans(list => [...list, { ...created, role: 'owner' }])
+      recoverCreatedPlan()
+    } finally { creating.current = false }
+  }, [activeTab, engine, api.entryReady, recoverCreatedPlan, notify, t])
 
   const loginUrl = useCallback(() => {
     const base = import.meta.env.VITE_LOGIN_URL
     if (!base) throw new Error('VITE_LOGIN_URL is not set')
-    return `${base}?next=${encodeURIComponent(location.pathname + location.search)}`
-  }, [])
+    const next = new URL(location.href)
+    if (entry.invite) { next.searchParams.set('invite', entry.invite); if (entry.plan) next.searchParams.set('plan', entry.plan) }
+    if (joinAsk) { next.searchParams.set('invite', joinAsk.invite); next.searchParams.set('plan', joinAsk.info.planId) }
+    if (entry.createShared) {
+      next.searchParams.set('createShared', '1')
+      if (entry.src) next.searchParams.set('src', entry.src)
+      if (entry.name) next.searchParams.set('name', entry.name)
+      if (entry.blank) next.searchParams.set('new', '1')
+      if (entry.doc) next.searchParams.set('doc', entry.doc)
+    }
+    const login = new URL(base, location.origin)
+    login.searchParams.set('next', next.pathname + next.search + next.hash)
+    return login.pathname + login.search
+  }, [joinAsk, entry])
+  const closeInvite = useCallback(() => setInviteOpenId(null), [])
 
   const value: CollabApi = {
     enabled, mode,
@@ -606,8 +690,9 @@ export function CollabProvider({ children }: { children: ReactNode }) {
     renamable, renamePlan,
     saveVersion, inviteUrl, viewUrl, setRole, removeMember, fork, metricsOf, deliver,
     compare, openCompare, closeCompare, versionModel,
-    delivery, room, saveRoom, enableSharing, planOfDoc, openPlan,
-    joinAsk, joinAsGuest, loginUrl, report,
+    delivery, room, saveRoom, enableSharing, createdPlan, recoverCreatedPlan, retryCover, inviteOpenId, closeInvite, openPlan,
+    coachBlocked: sharingDialogOpen || modalCount > 0, setSharingDialogOpen, holdModal,
+    joinAsk, inviteError, dismissInviteError, joinAsGuest, loginUrl, report,
   }
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }

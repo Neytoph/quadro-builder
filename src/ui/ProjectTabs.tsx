@@ -77,7 +77,7 @@ export default function ProjectTabs() {
         <div key={tab.tabId} data-plan-tab={tab.planId || undefined}
           className={`m-tab flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs shrink-0 ${tab.tabId === api.activeTabId ? 'bg-gray-800 border-teal-500 text-teal-700' : 'bg-transparent border-transparent text-gray-400 hover:text-gray-200 hover:bg-gray-900'}`}>
           {editing === tab.tabId ? (
-            <input autoFocus defaultValue={tab.name} className="bg-transparent w-24 outline-none"
+            <input autoFocus defaultValue={tab.name} maxLength={tab.planId ? 40 : undefined} className="bg-transparent w-24 outline-none"
               onBlur={e => {
                 if (tab.planId) collab.renamePlan(tab.planId, e.target.value)
                 else api.renameTab(tab.tabId, e.target.value)
