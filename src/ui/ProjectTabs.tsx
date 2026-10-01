@@ -69,7 +69,7 @@ export default function ProjectTabs() {
         <img src={`${import.meta.env.BASE_URL}favicon.svg`} alt="" width={32} height={32} draggable={false} />
       </a>
       {!narrow && (
-      <div className="flex items-center gap-1 min-w-0 flex-1 overflow-x-auto scrollbar-thin">
+      <div className="flex items-center gap-1 min-w-0 flex-1 overflow-x-auto scrollbar-none">
       {api.tabs.map(tab => {
         // 共享方案：创建人、编辑者改的是方案的名字，评论者和访客不能改
         const renamable = !tab.planId || collab.renamable(tab.planId)
@@ -99,7 +99,7 @@ export default function ProjectTabs() {
       </div>
       )}
 
-      <div ref={pillsRef} className={`relative flex items-center gap-1.5 ${narrow ? 'flex-1 overflow-x-auto scrollbar-thin' : 'shrink-0'}`}>
+      <div ref={pillsRef} className={`relative flex items-center gap-1.5 ${narrow ? 'flex-1 overflow-x-auto scrollbar-none' : 'shrink-0'}`}>
         {MOTION && <span ref={indRef} aria-hidden className="m-pill-ind" />}
         {(planMode ? (collab.plan && !collab.plan.me ? VISITOR_GROUPS : PLAN_GROUPS) : GROUPS).map((group, i) => (
           <div key={i} className="flex items-center gap-0.5 shrink-0">
