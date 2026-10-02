@@ -9,13 +9,15 @@ import { ACCESSORY_PACK, ACCESSORY_IDS } from '../engine/accessoryPack.js'
 import { MOTION, usePresence } from './motion'
 import { Pop } from './Pop'
 import StatusTip from './StatusTip'
-import { MessageSquarePlus } from 'lucide-react'
+import { MessageSquarePlus, Shapes } from 'lucide-react'
 import { useCollab } from '../collab/CollabContext'
+import { CUSTOM_COMPONENTS_EVENT } from './CustomComponentsMenu'
+import { customComponentStrings } from './customComponentStrings'
 
 /** 下拉菜单里零件图的边长（px）。渲染图太小看不出形状。 */
 const ICON = 44
 
-const TUBE_HOTKEY: Record<string, string> = { T15: '1', T25: '2', T35: '3', T10: '4', T20: '5', T75: '6' }
+const TUBE_HOTKEY: Record<string, string> = { T15: '1', T25: '2', T35: '3' }
 
 function DropItem({ on, onClick, title, img, label, compat }: {
   on: boolean
@@ -101,7 +103,7 @@ export default function TopToolbar() {
   // 共享方案的成员能放评论图钉；评论者只能用「选择」和「评论」
   const commenting = collab.mode === 'plan' && collab.role !== 'guest'
   const locked = collab.mode === 'plan' && !collab.canEdit
-  const { t } = useI18n()
+  const { t, lang } = useI18n()
   const { vw, left, setToolbarW } = usePanelLayout()
   const narrow = vw <= NARROW_MAX
   const barRef = useRef<HTMLDivElement>(null)
@@ -372,6 +374,15 @@ export default function TopToolbar() {
         <Svg16 inner={TOOL_ICON.textile} />
         <span>{t('tool.accessories')}</span>
       </ToolDrop>
+
+      <button className="m-tool qb-tool" data-ui="tool-custom-components" title={`${customComponentStrings[lang].title} · 4`}
+        onClick={e => {
+          close()
+          const r = e.currentTarget.getBoundingClientRect()
+          window.dispatchEvent(new CustomEvent(CUSTOM_COMPONENTS_EVENT, { detail: { x: r.left + r.width / 2, y: r.bottom + 180 } }))
+        }}>
+        <Shapes size={16} />{customComponentStrings[lang].title}<small>4</small>
+      </button>
 
       <button className="m-tool qb-tool" data-mode-on={api.mode === 'reinforce'} title={t('tool.reinforceHint')} onClick={() => { api.startReinforce(); close() }}>
         <Svg16 inner={TOOL_ICON.reinforce} />{t('tool.reinforce')}

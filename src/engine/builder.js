@@ -1351,6 +1351,10 @@ export class Builder {
    * Zaehler starten wieder bei 1) -- _pruneSelection findet das nicht.
    */
   modelReplaced() {
+    // 模型换入前结束旧模型的预览与手势，避免取消操作把旧快照写进新标签页。
+    this._cancelSelectFlip();
+    this._abortGesture();
+    this._externalPending = false;
     this.selection.clear();
     this.selectedNodeId = null;
     this.stepFrom = [];

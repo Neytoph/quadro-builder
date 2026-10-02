@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { LanguageProvider, useI18n } from './i18n'
 import { EngineProvider, useEngine } from './store/EngineContext'
 import CanvasHost from './ui/CanvasHost'
@@ -28,6 +28,7 @@ import CollabCoach from './collab/ui/CollabCoach'
 import CompareView from './collab/ui/CompareView'
 import BatchImport from './collab/ui/BatchImport'
 import RoomEditor from './collab/ui/RoomEditor'
+import CustomComponentsMenu, { CUSTOM_COMPONENTS_EVENT, type ComponentMenuPosition } from './ui/CustomComponentsMenu'
 
 function Toast() {
   const { toast: live, dismissToast } = useEngine()
@@ -324,9 +325,41 @@ function AppInner() {
   const api = useEngine()
   const collab = useCollab()
   const { handleEsc } = useDock()
+  const [componentPosition, setComponentPosition] = useState<ComponentMenuPosition | null>(null)
+  const pointer = useRef<ComponentMenuPosition | null>(null)
+  const closeComponents = useCallback(() => setComponentPosition(null), [])
+
+  useEffect(() => {
+    const move = (e: PointerEvent) => { pointer.current = { x: e.clientX, y: e.clientY } }
+    const open = (e: Event) => {
+      if (!api.ready || api.readOnly || api.nameAsk || api.exportManualConfirm || api.accountAsk) return
+      const position = (e as CustomEvent<ComponentMenuPosition>).detail
+      window.dispatchEvent(new Event(UI_ESCAPE_EVENT))
+      setComponentPosition(position || pointer.current || { x: window.innerWidth / 2, y: window.innerHeight / 2 })
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener(CUSTOM_COMPONENTS_EVENT, open)
+    return () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener(CUSTOM_COMPONENTS_EVENT, open)
+    }
+  }, [api.ready, api.readOnly, api.nameAsk, api.exportManualConfirm, api.accountAsk])
+
+  useEffect(() => { setComponentPosition(null) }, [api.readOnly, api.activeTabId])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.isComposing) return
+      const el = e.target as HTMLElement | null
+      const input = !!el?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')
+      if (componentPosition) {
+        if (e.key === 'Escape') {
+          e.preventDefault()
+          if (document.querySelector('.cc-configuration[data-dragging="true"]')) return
+          setComponentPosition(null)
+        }
+        return
+      }
       if (e.key === 'Escape') {
         e.preventDefault()
         if (api.nameAsk) {
@@ -349,10 +382,10 @@ function AppInner() {
         handleEsc()
         return
       }
-      // 起名框开着时，画布上的快捷键一律不响应
-      if (api.nameAsk) return
-      const el = e.target as HTMLElement | null
-      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return
+      // 输入控件和确认框占用键盘时，不触发画布操作。
+      if (api.nameAsk || api.exportManualConfirm || api.accountAsk || api.exportingManual) return
+      if (input || el?.closest('[role="dialog"][aria-modal="true"]') || document.querySelector('[role="dialog"][aria-modal="true"]')) return
+      if (e.altKey) return
       if (el?.closest?.('[data-panel-chrome]')) return
       const meta = e.metaKey || e.ctrlKey
       if (meta && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); e.shiftKey ? api.redo() : api.undo(); return }
@@ -423,7 +456,15 @@ function AppInner() {
         api.setAssembly(!api.assembly.active)
         return
       }
-      const TUBE_BY_KEY: Record<string, string> = { '1': 'T15', '2': 'T25', '3': 'T35', '4': 'T10', '5': 'T20', '6': 'T75' }
+      if (e.key === '4') {
+        if (!api.ready || api.readOnly || e.repeat) return
+        if (api.engine()?.builder.busy() && !api.pasting) return
+        e.preventDefault()
+        window.dispatchEvent(new Event(UI_ESCAPE_EVENT))
+        setComponentPosition({ ...(pointer.current || { x: window.innerWidth / 2, y: window.innerHeight / 2 }), held: true })
+        return
+      }
+      const TUBE_BY_KEY: Record<string, string> = { '1': 'T15', '2': 'T25', '3': 'T35' }
       if (TUBE_BY_KEY[e.key]) { api.setTube(TUBE_BY_KEY[e.key]); return }
       if (e.key === 'd' || e.key === 'D') {
         e.preventDefault()
@@ -438,7 +479,7 @@ function AppInner() {
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [api, collab, handleEsc])
+  }, [api, collab, handleEsc, componentPosition])
 
   // 共享方案里只能看的人没有颜色栏；访客连工具条也没有，评论者的工具条只剩「选择」「评论」
   const viewer = collab.mode === 'plan' && !collab.canEdit
@@ -449,6 +490,7 @@ function AppInner() {
       <SceneToggle />
       <ProjectTabs />
       {!visitor && !collab.compare && <TopToolbar />}
+      {componentPosition && !api.readOnly && <CustomComponentsMenu position={componentPosition} onClose={closeComponents} />}
       {!viewer && !collab.compare && <LeftStack />}
       <RightDock />
       {!collab.compare && <AssemblyBar />}

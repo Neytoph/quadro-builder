@@ -3,6 +3,7 @@ import { useI18n } from '../i18n'
 import type { CSSProperties } from 'react'
 import { FoldHeader } from './panelLayout'
 import { Collapse } from './MotionBits'
+import { customComponentStrings } from './customComponentStrings'
 
 type Row = { chord: string; action: string }
 
@@ -37,7 +38,7 @@ function rowsFor(
       ]
     case 'add':
       return [
-        { chord: '1 – 6', action: t('keys.tubeLen') },
+        { chord: '1 – 3', action: t('keys.tubeLen') },
         { chord: '↑ ↓ ← →', action: t('keys.buildDir') },
         { chord: 'Esc', action: t('keys.escSelect') },
         { chord: 'D', action: t('keys.deleteMode') },
@@ -111,12 +112,13 @@ function Kbd({ text }: { text: string }) {
 
 export default function ShortcutHint({ open, onToggle }: { open: boolean; onToggle: () => void }) {
   const api = useEngine()
-  const { t } = useI18n()
+  const { t, lang } = useI18n()
   const mode = api.pasting ? 'paste' : api.mode
   const titleKey = api.pasting
     ? 'lib.placing'
     : (MODE_TITLE[api.placingConnector ? 'fitting' : api.mode] || 'tool.select')
   const rows = rowsFor(t, api.mode, api.pasting, !!api.placingConnector)
+  if (!api.readOnly) rows.push({ chord: lang === 'zh' ? '按住 4' : lang === 'de' ? '4 halten' : 'Hold 4', action: customComponentStrings[lang].title })
   const cameraLines = t('hint.camera').split('\n').filter(Boolean)
 
   return (

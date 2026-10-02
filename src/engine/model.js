@@ -4448,6 +4448,11 @@ export class BuildModel {
       }
       this.fittings.set(rec.id, rec);
     }
+    // 承载接头跟随新轴承配件，删除副本时只能删除副本自己的配件。
+    for (const id of out.nodes) {
+      const n = this.nodes.get(id);
+      if (n.bearingOn) n.bearingOn = neu.get(n.bearingOn) || null;
+    }
     // 片段里的组换上新 id 再登记
     for (const g of frag.groups || []) {
       const ids = (g.ids || []).map((id) => neu.get(id)).filter(Boolean);
