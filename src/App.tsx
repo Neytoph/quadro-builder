@@ -17,6 +17,7 @@ import { UI_ESCAPE_EVENT } from './ui/events'
 import { DockProvider, useDock } from './ui/dock'
 import { usePresence } from './ui/motion'
 import { bootEntry, DELIVERY_EMBED, dropParam, fullBuilderUrl, VIEW_ONLY } from './entry'
+import { SnapshotInfo } from './collab/ui/SnapshotInfo'
 import { syncNow, syncProbe } from './sync/bootstrap'
 import { pullDoc } from './sync/docEntry'
 import { CollabProvider, useCollab } from './collab/CollabContext'
@@ -218,17 +219,21 @@ function ViewBar() {
 function ViewShell() {
   const { t } = useI18n()
   const collab = useCollab()
-  const { ready, setViewCubeEnabled } = useEngine()
+  const { ready, readOnly, setViewCubeEnabled } = useEngine()
   // 交付查看没有「在 Builder 里打开」；嵌在交付页里时连分步手册和视角方块也不画
   const delivery = collab.mode === 'delivery'
+  const snapshot = collab.mode === 'snapshot'
+  const snapshotEmbed = snapshot && VIEW_ONLY && window.top !== window
   useEffect(() => {
-    if (ready && DELIVERY_EMBED) setViewCubeEnabled(false)
-  }, [ready, setViewCubeEnabled])
+    if (ready && (DELIVERY_EMBED || snapshotEmbed)) setViewCubeEnabled(false)
+  }, [ready, setViewCubeEnabled, snapshotEmbed])
   return (
-    <div className="app-viewport w-screen flex bg-gray-950 overflow-hidden" data-ui={DELIVERY_EMBED ? 'delivery-embed' : undefined}>
+    <div className={`app-viewport w-screen flex bg-gray-950 overflow-hidden ${snapshot && !VIEW_ONLY ? 'cb-snapshot-shell' : ''}`} data-ui={DELIVERY_EMBED ? 'delivery-embed' : undefined}>
       <CanvasHost />
-      {!delivery && <a href={fullBuilderUrl()} target="_top" className="qb-btn qb-btn-sm fixed top-3 left-3 z-40 no-underline">{t('view.open')} ↗</a>}
-      {!DELIVERY_EMBED && <ViewBar />}
+      {!delivery && !snapshot && <a href={fullBuilderUrl()} target="_top" className="qb-btn qb-btn-sm fixed top-3 left-3 z-40 no-underline">{t('view.open')} ↗</a>}
+      {snapshot && !VIEW_ONLY && readOnly && !collab.error && <SnapshotInfo planId={bootEntry().plan!} versionId={Number(bootEntry().version)} />}
+      {snapshot && collab.error && <p role="alert" className="cb-snapshot-error cb-action-error">{collab.error}</p>}
+      {!DELIVERY_EMBED && !snapshotEmbed && <ViewBar />}
       <Toast />
     </div>
   )
@@ -491,7 +496,7 @@ function EngineShell() {
 
 function Shell() {
   const collab = useCollab()
-  if (VIEW_ONLY || collab.mode === 'delivery') return <ViewShell />
+  if (VIEW_ONLY || collab.mode === 'delivery' || collab.mode === 'snapshot') return <ViewShell />
   if (collab.mode === 'room') return <RoomShell />
   return <AppInner />
 }

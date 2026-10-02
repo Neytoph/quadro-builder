@@ -46,6 +46,7 @@ export interface Entry {
   /** 带进来的 #s= 分享链接内容（只看模式里「在 Builder 里打开」要原样带过去） */
   hash: string
   plan: string | null
+  version: string | null
   invite: string | null
   createShared: boolean
   compare: [string, string] | null
@@ -91,6 +92,7 @@ export function readEntry(search: string, hash: string, collab: boolean): Entry 
     lang: lang === 'zh' || lang === 'en' || lang === 'de' ? lang : null,
     hash,
     plan: collab ? q.get('plan') : null,
+    version: collab && q.get('plan') ? q.get('version') : null,
     invite: collab ? q.get('invite') : null,
     createShared: collab && q.get('createShared') === '1',
     compare: collab && cmp.length === 2 ? [cmp[0], cmp[1]] : null,
@@ -122,7 +124,7 @@ export const VIEW_ONLY = bootEntry().view
  * 只放一座、不读也不写这台设备上的标签页的打开方式：只看、交付查看、画房间。
  * 它们都不是这个人自己的标签页，不能盖掉。共享方案是标签页里的一个，照常读写。
  */
-export const SESSIONLESS = VIEW_ONLY || !!bootEntry().delivery || !!bootEntry().roomBrief
+export const SESSIONLESS = VIEW_ONLY || !!bootEntry().delivery || !!bootEntry().roomBrief || !!bootEntry().version
 
 /**
  * 交付查看嵌在交付页的 iframe 里：拖动旋转、逐层拼装、全屏和版本名都由交付页自己画，

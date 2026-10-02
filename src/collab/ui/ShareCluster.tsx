@@ -3,7 +3,7 @@ import { Users, UserPlus } from 'lucide-react'
 import { useI18n } from '../../i18n'
 import { useCollab } from '../CollabContext'
 import { Face } from './bits'
-import { EnableShareModal, ShareModal } from './Modals'
+import { DeliverModal, EnableShareModal, ShareModal } from './Modals'
 import { bootEntry, dropParam } from '../../entry'
 import { useEngine } from '../../store/EngineContext'
 
@@ -15,10 +15,10 @@ export default function ShareCluster() {
   const collab = useCollab()
   const { t } = useI18n()
   const api = useEngine()
-  const [open, setOpen] = useState<'enable' | 'share' | null>(null)
+  const [open, setOpen] = useState<'enable' | 'share' | 'deliver' | null>(null)
   const createOpened = useRef(false)
   const manageOpened = useRef(false)
-  const show = (dialog: 'enable' | 'share') => { collab.setSharingDialogOpen(true); setOpen(dialog) }
+  const show = (dialog: 'enable' | 'share' | 'deliver') => { collab.setSharingDialogOpen(true); setOpen(dialog) }
   useEffect(() => {
     if (!collab.enabled || !api.ready || !api.entryReady || createOpened.current || !bootEntry().createShared) return
     if (bootEntry().plan && (collab.plan?.id !== bootEntry().plan || !collab.session?.synced)) return
@@ -68,7 +68,8 @@ export default function ShareCluster() {
         </button>
       )}
       {!plan && collab.createdPlan && <button type="button" className="cb-text-action" onClick={collab.recoverCreatedPlan} data-ui="plan-recovery">{t('collab.create.recover')}</button>}
-      {open === 'share' && <ShareModal onClose={close} />}
+      {open === 'share' && <ShareModal onClose={close} onDeliver={() => { collab.closeInvite(); show('deliver') }} />}
+      {open === 'deliver' && <DeliverModal onClose={close} />}
       {open === 'enable' && <EnableShareModal onClose={closeCreate} />}
     </div>
   )

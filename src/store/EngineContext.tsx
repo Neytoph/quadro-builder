@@ -1953,6 +1953,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!ready || entryOpened.current) return
     const ent = bootEntry()
+    if (ent.version) { entryOpened.current = true; setEntryReady(true); return }
     const payload = peekSharePayload()
     if (!payload && !ent.src) { if (!ent.doc) setEntryReady(true); return }
     entryOpened.current = true

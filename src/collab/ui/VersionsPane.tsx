@@ -1,16 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Columns2, Save, ShieldCheck } from 'lucide-react'
+import { Columns2, Save } from 'lucide-react'
 import { useI18n } from '../../i18n'
 import { useEngine } from '../../store/EngineContext'
 import { useCollab } from '../CollabContext'
 import { diffModels } from '../compare'
 import { when } from './bits'
-import { DeliverModal } from './Modals'
 
 /**
  * 版本（右侧抽屉）：最上面存版本（编辑者才有），列表里「现在」标当前、锁定过交付的
- * 标「已交付」、参考方案排最后。每行「对照」选两版，底部「对照这两版」；可交付的
- * 编辑者底部多一颗「锁定交付」。
+ * 标「已交付」、参考方案排最后。每行「对照」选两版，底部「对照这两版」。
  */
 export default function VersionsPane() {
   const collab = useCollab()
@@ -21,7 +19,6 @@ export default function VersionsPane() {
   const refs = collab.versions.filter(v => v.kind === 'reference')
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
-  const [delivering, setDelivering] = useState(false)
   const [sinceLast, setSinceLast] = useState<number | null>(null)
   const nameOf = (userId: number) => collab.plan?.members.find(m => m.userId === userId)?.name || ''
 
@@ -110,12 +107,8 @@ export default function VersionsPane() {
       </div>
       <div className="cb-dockfoot">
         <span className="note">{pick.length ? t('collab.version.pickedN', { n: pick.length }) : t('collab.version.pickTwo')}</span>
-        {collab.canDeliver && own.length > 0 && (
-          <button type="button" className="qb-btn qb-btn-ghost qb-btn-sm" onClick={() => setDelivering(true)} data-ui="version-deliver"><ShieldCheck />{t('collab.deliver.open')}</button>
-        )}
         <button type="button" className="qb-btn qb-btn-sm" disabled={pick.length !== 2} onClick={compare} data-ui="version-compare"><Columns2 />{t('collab.version.compare')}</button>
       </div>
-      {delivering && <DeliverModal onClose={() => setDelivering(false)} />}
     </div>
   )
 }

@@ -17,7 +17,7 @@ import { memoryDoc } from './localDocs'
 import { docToJSON, type ModelJSON } from './ymodel'
 import { diffBom, diffModels, type BomDiffRow, type ModelDiff } from './compare'
 
-export type CollabMode = 'off' | 'plan' | 'delivery' | 'room'
+export type CollabMode = 'off' | 'plan' | 'delivery' | 'room' | 'snapshot'
 
 /** 版本对照：左右两边是哪两版、造型、差异。 */
 export interface CompareState {
@@ -96,7 +96,7 @@ interface CollabApi {
   removeMember: (userId: number) => Promise<void>
   fork: (versionId: number | null) => Promise<void>
   metricsOf: (versionId: number) => Promise<Metrics>
-  deliver: (o: { versionId: number; ageNote: string; loadNote: string; metrics: Metrics }) => Promise<string>
+  deliver: (o: { versionId: number; ageNote: string; loadNote: string; metrics: Metrics; renders: string[] }) => Promise<string>
   compare: CompareState | null
   openCompare: (a: string, b: string) => void
   closeCompare: () => void
@@ -189,6 +189,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
   void rev
 
   const mode: CollabMode = !enabled ? 'off'
+    : entry.version ? 'snapshot'
     : entry.delivery ? 'delivery'
       : entry.roomBrief ? 'room'
         : activePlanId ? 'plan' : 'off'
@@ -262,7 +263,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
 
   // 地址栏跟着当前标签页：共享方案显示它的地址，刷新以后还是这个方案
   useEffect(() => {
-    if (!enabled || !api.ready || joining || joinAsk || mode === 'delivery' || mode === 'room') return
+    if (!enabled || !api.ready || joining || joinAsk || mode === 'delivery' || mode === 'room' || mode === 'snapshot') return
     const q = new URLSearchParams(location.search)
     if (activePlanId) {
       if (q.get('plan') === activePlanId) return
@@ -280,6 +281,17 @@ export function CollabProvider({ children }: { children: ReactNode }) {
     opened.current = true
     void (async () => {
       try {
+        if (entry.version && entry.plan) {
+          const v = await collabApi.version(entry.plan, entry.version)
+          const m = new BuildModel()
+          if (!m.loadJSON(v.data).ok) throw new Error(t('collab.badModel'))
+          const scene = engine()?.scene
+          scene?.setMotion(false)
+          api.attachDoc({ local: memoryDoc(m.toJSON() as ModelJSON), name: v.name, readOnly: true })
+          scene?.setScene(false)
+          scene?.resetCamera(m, { animate: false })
+          return
+        }
         if (entry.delivery) {
           const d = await collabApi.delivery(entry.delivery)
           const m = new BuildModel()
@@ -587,7 +599,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
     return computeMetrics(m) as Metrics
   }, [versionModel, t])
 
-  const deliver = useCallback(async (o: { versionId: number; ageNote: string; loadNote: string; metrics: Metrics }) => {
+  const deliver = useCallback(async (o: { versionId: number; ageNote: string; loadNote: string; metrics: Metrics; renders: string[] }) => {
     if (!session) throw new Error('no plan')
     await session.exportNow()
     const { token } = await collabApi.deliver(session.id, o)

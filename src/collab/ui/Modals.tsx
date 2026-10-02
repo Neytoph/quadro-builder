@@ -5,7 +5,11 @@ import { useI18n } from '../../i18n'
 import { useEngine } from '../../store/EngineContext'
 import { UI_ESCAPE_EVENT } from '../../ui/events'
 import { isDesigner, useCollab } from '../CollabContext'
-import { collabApi, type Invite, type InviteRole, type Metrics } from '../api'
+import { collabApi, mediaUrl, type Invite, type InviteRole, type Metrics } from '../api'
+import { snapshotURL, useFlowText } from '../flowStrings'
+import { diffBom, type BomDiffRow } from '../compare'
+import { BuildModel } from '../../engine-api'
+import type { ModelJSON } from '../ymodel'
 import { bootEntry } from '../../entry'
 import { errText, Face, useSignedIn, when } from './bits'
 
@@ -96,10 +100,11 @@ export function EnableShareModal({ onClose }: { onClose: () => void }) {
 }
 
 /** 共享：邀请链接、只看链接、成员和角色。创建人能改别人的角色、移出方案。 */
-export function ShareModal({ onClose }: { onClose: () => void }) {
+export function ShareModal({ onClose, onDeliver }: { onClose: () => void; onDeliver?: () => void }) {
   const collab = useCollab()
   const api = useEngine()
   const { t } = useI18n()
+  const f = useFlowText()
   const plan = collab.plan
   const [invites, setInvites] = useState<Invite[]>([])
   const [tab, setTab] = useState<'invite' | 'members' | 'view'>(collab.role === 'owner' ? 'invite' : 'members')
@@ -199,6 +204,10 @@ export function ShareModal({ onClose }: { onClose: () => void }) {
           <input className="cb-url-input" readOnly value={collab.viewUrl()} aria-label={t('collab.viewLink')} data-ui="view-url" />
           <button type="button" className="qb-btn qb-btn-ghost cb-wide" data-ui="view-copy" onClick={() => copy(collab.viewUrl(), t('collab.linkCopied'))}><Copy />{t('collab.create.copyView')}</button>
         </div> : <><p className="s">{t(owner ? 'collab.create.manageHint' : 'collab.create.memberHint')}</p>{memberRows(owner)}</>}
+        {!confirm && collab.canDeliver && onDeliver && <div className="cb-share-delivery">
+          <b>{f('deliveryOptional')}</b><p>{f('deliveryHint')}</p>
+          <button type="button" className="qb-btn qb-btn-ghost qb-btn-sm" disabled={busy} onClick={onDeliver} data-ui="share-deliver"><Link />{f('deliveryTitle')}</button>
+        </div>}
       </div>
     </Modal>
   )
@@ -242,93 +251,134 @@ export function ForkModal({ onClose }: { onClose: () => void }) {
   )
 }
 
-/**
- * 锁定交付：选一版，客观量按这一版算好，写适龄和承重说明。已经有交付页时说明旧页面
- * 会提示有更新。锁好以后给出交付页地址（复制出去的链接带来源标记）。
- */
+/** 可选交付：预览时自动保存当前共享模型，生成固定页面后继续原共享协作。 */
 export function DeliverModal({ onClose }: { onClose: () => void }) {
   const collab = useCollab()
   const api = useEngine()
   const { t, lang } = useI18n()
-  const own = collab.versions.filter(v => v.kind !== 'reference').sort((a, b) => b.createdAt - a.createdAt)
-  const [pick, setPick] = useState<number | null>(own[0]?.id ?? null)
-  const [metrics, setMetrics] = useState<Metrics | null>(null)
-  const [ageNote, setAgeNote] = useState('')
-  const [loadNote, setLoadNote] = useState('')
+  const f = useFlowText()
+  const [snapshot, setSnapshot] = useState<{ id: number; name: string; metrics: Metrics; parts: BomDiffRow[] } | null>(null)
+  const saved = useRef<{ id: number; name: string } | null>(null)
+  const running = useRef(false)
+  const [ageNote, setAgeNote] = useState<string>(() => f('ageDefault'))
+  const [loadNote, setLoadNote] = useState<string>(() => f('loadDefault'))
   const [busy, setBusy] = useState(false)
+  const [busyLabel, setBusyLabel] = useState('')
   const [token, setToken] = useState<string | null>(null)
-  const nameOf = (userId: number) => collab.plan?.members.find(m => m.userId === userId)?.name || ''
-  const chosen = own.find(v => v.id === pick) || null
-  const old = own.find(v => v.delivered && v.id !== pick) || null
+  const [failure, setFailure] = useState('')
+  const [renders, setRenders] = useState<string[]>([])
+  const [uploaded, setUploaded] = useState<string[]>([])
+  const [preview, setPreview] = useState(false)
+  const heading = useRef<HTMLHeadingElement>(null)
+  useLayoutEffect(() => {
+    heading.current?.focus({ preventScroll: true })
+    heading.current?.closest('.cb-modal')?.scrollTo({ top: 0 })
+  }, [preview, token])
+  const available = [...new Set([...uploaded, ...collab.threads.flatMap(th => th.posts.flatMap(p => p.photos))])]
+  const metrics = snapshot?.metrics
+  const parts = snapshot?.parts || []
 
-  const { metricsOf, report } = collab
-  useEffect(() => {
-    if (pick == null) return
-    setMetrics(null)
-    metricsOf(pick).then(setMetrics).catch(report)
-  }, [metricsOf, report, pick])
+  const prepare = async (refresh = false) => {
+    if (running.current || !collab.canDeliver) return
+    running.current = true; setBusy(true); setBusyLabel(f('preparing')); setFailure('')
+    try {
+      if (refresh) saved.current = null
+      if (!saved.current) {
+        const name = `${f('snapshotName')} · ${new Date().toLocaleString(lang === 'zh' ? 'zh-CN' : lang, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}`
+        const version = await collab.saveVersion(name)
+        saved.current = { id: version.id, name }
+        if (refresh) setRenders([])
+      }
+      const current = saved.current
+      const [data, measured] = await Promise.all([collab.versionModel(String(current.id)), collab.metricsOf(current.id)])
+      setSnapshot({ ...current, metrics: measured, parts: diffBom(new BuildModel().toJSON() as ModelJSON, data) })
+      setPreview(true)
+    } catch (error) { setFailure(errText(error)) }
+    finally { running.current = false; setBusy(false) }
+  }
 
   const url = token ? `${location.origin}/deliver.html?t=${encodeURIComponent(token)}&src=${encodeURIComponent(`delivery:${token}`)}` : ''
 
   const submit = async () => {
-    if (pick == null || !metrics || busy) return
-    setBusy(true)
+    if (!snapshot || running.current || !preview || !collab.canDeliver) return
+    running.current = true; setBusy(true); setBusyLabel(f('creating'))
+    setFailure('')
     try {
-      setToken(await collab.deliver({ versionId: pick, ageNote: ageNote.trim(), loadNote: loadNote.trim(), metrics }))
+      setToken(await collab.deliver({ versionId: snapshot.id, ageNote: ageNote.trim(), loadNote: loadNote.trim(), metrics: snapshot.metrics, renders }))
     } catch (err) {
-      api.notify(errText(err), 'err')
+      setFailure(errText(err))
     } finally {
-      setBusy(false)
+      running.current = false; setBusy(false)
     }
+  }
+
+  const upload = async (files: FileList | null) => {
+    if (!files?.length || !collab.plan || running.current) return
+    if (renders.length + files.length > 6) { setFailure(f('limit')); return }
+    running.current = true; setBusy(true); setBusyLabel(f('loading')); setFailure('')
+    try {
+      for (const file of Array.from(files)) {
+        const result = await collabApi.photo(collab.plan.id, file)
+        setUploaded(paths => [...paths, result.path]); setRenders(paths => [...paths, result.path])
+      }
+    } catch (e) { setFailure(errText(e)) }
+    finally { running.current = false; setBusy(false) }
   }
 
   const cell = (label: string, value: ReactNode) => <div><dt>{label}</dt><dd>{value}</dd></div>
 
   return (
-    <Modal onClose={onClose} wide label={t('collab.deliver.title')}>
+    <Modal onClose={busy ? () => {} : onClose} wide label={f('deliveryTitle')}>
       <div data-ui="deliver-dialog">
-        <h3>{t('collab.deliver.title')}</h3>
-        <p className="s">{t('collab.deliver.body')}</p>
+        <h3 ref={heading} tabIndex={-1}>{token ? f('done') : f('deliveryTitle')}</h3>
+        <p className="s">{token ? f('doneHint') : f('deliveryIntro')}</p>
+        {failure && <p role="alert" className="cb-action-error">{failure}</p>}
         {!token && (
           <>
-            <div className="cb-radio">
-              {own.map((v, i) => (
-                <label key={v.id} className={pick === v.id ? 'on' : ''} onClick={() => setPick(v.id)}><i />
-                  <span><b>{v.name}</b><br /><span>{nameOf(v.createdBy)} · {when(v.createdAt, lang)} · {t('collab.parts', { n: v.partsCount })}</span></span>
-                  {i === 0 ? <span className="cb-chip cur">{t('collab.deliver.latest')}</span> : v.delivered ? <span className="cb-chip dl">{t('collab.version.delivered')}</span> : <span />}
-                </label>
-              ))}
-            </div>
-            <div className="cb-sub">{t('collab.deliver.metrics')}<span>{chosen ? t('collab.deliver.metricsOf', { name: chosen.name }) : ''}</span></div>
-            {metrics ? (
+            {!preview && <div className="cb-delivery-source"><b>{snapshot?.name || collab.session?.name}</b><p>{snapshot ? f('frozenHint') : f('currentModel')}</p>
+              {snapshot && <><button type="button" className="cb-text-action" disabled={busy} onClick={() => void prepare(true)} data-ui="delivery-refresh">{f('refreshSnapshot')}</button><small>{f('resetImagesHint')}</small></>}
+            </div>}
+            {preview && snapshot && collab.plan && <section className="cb-delivery-preview" data-ui="delivery-preview">
+              <h4>{f('preview')}</h4><p className="cb-hint">{f('frozenHint')}</p>
+              <iframe title={snapshot.name} src={`${snapshotURL(collab.plan.id, snapshot.id, lang)}&view=1`} />
+              <p><b>{f('parts')}</b> · {t('collab.parts', { n: parts.reduce((sum, part) => sum + part.right, 0) })}</p>
+              <ul className="cb-parts-summary">{parts.map(part => <li key={part.key}><span>{part.name}{part.color ? ` · ${part.color}` : ''}</span><b>× {part.right}</b></li>)}</ul>
+            </section>}
+            {snapshot && <div className="cb-sub">{t('collab.deliver.metrics')}<span>{snapshot.name}</span></div>}
+            {metrics && (
               <dl className="cb-metrics" data-ui="deliver-metrics">
                 {cell(t('collab.metrics.maxDeckHeight'), <>{metrics.maxDeckHeight}<small>cm</small></>)}
                 {cell(t('collab.metrics.maxSpan'), <>{metrics.maxSpan}<small>cm</small></>)}
                 {cell(t('collab.metrics.hasGuard'), t(metrics.hasGuard ? 'collab.metrics.yes' : 'collab.metrics.no'))}
                 {cell(t('collab.metrics.footprint'), <>{metrics.footprint}<small>㎡</small></>)}
               </dl>
-            ) : <div className="cb-hint" style={{ padding: 0 }}>{t('collab.loading')}</div>}
-            <label className="cb-field"><span>{t('collab.deliver.ageNote')} <i>{t('collab.deliver.ageHint')}</i></span>
-              <textarea value={ageNote} onChange={e => setAgeNote(e.target.value)} data-ui="deliver-age" /></label>
-            <label className="cb-field"><span>{t('collab.deliver.loadNote')} <i>{t('collab.deliver.loadHint')}</i></span>
-              <textarea value={loadNote} onChange={e => setLoadNote(e.target.value)} data-ui="deliver-load" /></label>
-            <div className="cb-warn"><Info /><span>{old ? t('collab.deliver.hasOld', { old: old.name, name: chosen?.name || '' }) : ''}{t('collab.deliver.noShop')}</span></div>
+            )}
+            <label className="cb-field"><span>{f('ageNote')} <i>{!preview && f('defaultHint')}</i></span>
+              <textarea value={ageNote} readOnly={preview} disabled={busy} onChange={e => setAgeNote(e.target.value)} data-ui="deliver-age" /></label>
+            <label className="cb-field"><span>{f('loadNote')}</span>
+              <textarea value={loadNote} readOnly={preview} disabled={busy} onChange={e => setLoadNote(e.target.value)} data-ui="deliver-load" /></label>
+            <section className="cb-delivery-images">
+              <h4>{f('images')} · {renders.length}/6</h4><p className="cb-hint">{f('imageHint')}</p>
+              {!preview && <><label className="qb-btn qb-btn-ghost qb-btn-sm">{f('upload')}<input type="file" accept="image/*" multiple disabled={busy || renders.length >= 6} data-ui="delivery-upload" onChange={e => { void upload(e.target.files); e.target.value = '' }} /></label>
+              {available.length > 0 && <details><summary>{f('existing')}</summary><div className="cb-image-grid">{available.map(path => <label key={path}><img src={mediaUrl(path)} alt="" /><input type="checkbox" aria-label={f('existing')} checked={renders.includes(path)} disabled={busy || (!renders.includes(path) && renders.length >= 6)} onChange={e => setRenders(paths => e.target.checked ? [...paths, path] : paths.filter(p => p !== path))} /></label>)}</div></details>}</>}
+              {renders.length ? <div className="cb-image-grid" data-ui="delivery-images">{renders.map(path => <figure key={path}><a href={mediaUrl(path)} target="_blank" rel="noreferrer"><img src={mediaUrl(path)} alt={snapshot?.name || collab.session?.name || ''} /></a>{!preview && <button type="button" disabled={busy} onClick={() => setRenders(paths => paths.filter(p => p !== path))}>{f('remove')}</button>}</figure>)}</div> : <p>{f('noImages')}</p>}
+            </section>
+            <div className="cb-warn"><Info /><span>{t('collab.deliver.noShop')}</span></div>
             <div className="foot">
               <span className="note">{t('collab.deliver.disclaimer')}</span>
-              <button type="button" className="qb-btn qb-btn-ghost qb-btn-sm" onClick={onClose}>{t('confirm.cancel')}</button>
-              <button type="button" className="qb-btn qb-btn-sm" disabled={!metrics || busy || !ageNote.trim() || !loadNote.trim()} onClick={() => void submit()} data-ui="deliver-submit"><ShieldCheck />{t('collab.deliver.submit')}</button>
+              <button type="button" className="qb-btn qb-btn-ghost qb-btn-sm" disabled={busy} onClick={preview ? () => setPreview(false) : onClose}>{preview ? f('edit') : t('confirm.cancel')}</button>
+              <button type="button" className="qb-btn qb-btn-sm" disabled={busy || !collab.canDeliver || !ageNote.trim() || !loadNote.trim()} onClick={() => preview ? void submit() : void prepare()} data-ui={preview ? 'deliver-submit' : 'deliver-preview'}><ShieldCheck />{busy ? busyLabel : preview ? f('deliveryTitle') : f('preview')}</button>
             </div>
           </>
         )}
         {token && (
           <div data-ui="deliver-done">
-            <div className="cb-sub" style={{ marginTop: 4 }}>{t('collab.deliver.done')}</div>
             <div className="cb-link"><Link /><code>{url.replace(/^https?:\/\//, '')}</code>
               <button type="button" className="qb-btn qb-btn-sm" onClick={() => { navigator.clipboard.writeText(url).then(() => api.notify(t('collab.linkCopied'))).catch(collab.report) }}>{t('collab.copy')}</button></div>
             <input type="hidden" value={url} data-ui="deliver-url" readOnly />
             <div className="foot">
               <a href={url} target="_blank" rel="noreferrer" className="qb-btn qb-btn-ghost qb-btn-sm no-underline">{t('collab.deliver.openPage')}</a>
-              <button type="button" className="qb-btn qb-btn-sm" onClick={onClose}>{t('collab.done')}</button>
+              <button type="button" className="qb-btn qb-btn-sm" onClick={onClose} data-ui="delivery-continue">{f('continue')}</button>
             </div>
           </div>
         )}

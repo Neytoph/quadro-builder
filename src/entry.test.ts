@@ -2,6 +2,21 @@ import { describe, expect, it } from 'vitest'
 import { dropParam, readEntry } from './entry'
 import { appendTab } from './store/tabs'
 
+describe('固定版本查看入口', () => {
+  it('版本必须绑定方案，开源版本不启用', () => {
+    expect(readEntry('?plan=p1&version=17', '', true).version).toBe('17')
+    expect(readEntry('?version=17', '', true).version).toBeNull()
+    expect(readEntry('?plan=p1&version=17', '', false).version).toBeNull()
+  })
+  it('嵌入交付预览保留方案和固定版本', () => {
+    const entry = readEntry('?plan=p1&version=17&view=1&lang=de', '', true)
+    expect(entry.plan).toBe('p1')
+    expect(entry.version).toBe('17')
+    expect(entry.view).toBe(true)
+    expect(entry.lang).toBe('de')
+  })
+})
+
 describe('创建共享方案入口', () => {
   it('带 src 的创建保留真实导入来源和名称', () => {
     const entry = readEntry('?src=/quadro/models/d1.json&name=双层小屋&createShared=1', '', true)

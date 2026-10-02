@@ -55,6 +55,18 @@ export interface Version extends VersionInfo {
   qdf: string
 }
 
+export interface Review {
+  id: number
+  planId: string
+  versionId: number
+  versionName: string
+  summary: string
+  decision: '' | 'pending' | 'changes' | 'confirmed'
+  comment: string
+  createdAt: number
+  respondedAt: number
+}
+
 export interface Anchor {
   partId: string | null
   point: [number, number, number]
@@ -182,6 +194,9 @@ export const collabApi = {
   saveVersion: (id: string, body: { name: string; state: string } & Omit<ExportBody, 'name'>) =>
     call<{ id: number }>('POST', `/collab/plans/${enc(id)}/versions`, body),
   version: (id: string, vid: string | number) => call<Version>('GET', `/collab/plans/${enc(id)}/versions/${enc(String(vid))}`),
+  reviews: async (id: string) => (await call<{ reviews: Review[] }>('GET', `/collab/plans/${enc(id)}/reviews`)).reviews,
+  review: (id: string, body: { versionId: number; summary: string }) => call<Review>('POST', `/collab/plans/${enc(id)}/reviews`, body),
+  respond: (id: string, rid: number, body: { decision: 'changes' | 'confirmed'; comment: string }) => call<Review>('POST', `/collab/plans/${enc(id)}/reviews/${rid}/respond`, body),
   threads: async (id: string) => (await call<{ threads: Thread[] }>('GET', `/collab/plans/${enc(id)}/threads`)).threads,
   newThread: (id: string, body: { anchor: Anchor; versionId: number | null; body: string; photos: string[]; refs: Ref[] }) =>
     call<{ id: number }>('POST', `/collab/plans/${enc(id)}/threads`, body),
@@ -196,7 +211,7 @@ export const collabApi = {
   },
   read: (id: string) => call<unknown>('POST', `/collab/plans/${enc(id)}/read`),
   fork: (id: string, versionId: number | null) => call<{ planId: string }>('POST', `/collab/plans/${enc(id)}/fork`, { versionId }),
-  deliver: (id: string, body: { versionId: number; ageNote: string; loadNote: string; metrics: Metrics }) =>
+  deliver: (id: string, body: { versionId: number; ageNote: string; loadNote: string; metrics: Metrics; renders: string[] }) =>
     call<{ token: string }>('POST', `/collab/plans/${enc(id)}/deliver`, body),
   delivery: (token: string) => call<{ data: ModelJSON; qdf: string; supersededBy: string | null } & Record<string, unknown>>('GET', `/collab/deliveries/${enc(token)}`),
   brief: (id: string) => call<{ id: number; room: Room | null } & Record<string, unknown>>('GET', `/briefs/${enc(id)}`),
