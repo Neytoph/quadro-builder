@@ -1,0 +1,320 @@
+{
+  "format": 2,
+  "nodes": [
+    {
+      "id": "n1",
+      "x": 0,
+      "y": 2.5,
+      "z": 0
+    },
+    {
+      "id": "n2",
+      "x": 0,
+      "y": 22.5,
+      "z": 0
+    },
+    {
+      "id": "n3",
+      "x": 40,
+      "y": 2.5,
+      "z": 0
+    },
+    {
+      "id": "n4",
+      "x": 40,
+      "y": 22.5,
+      "z": 0
+    },
+    {
+      "id": "n5",
+      "x": 80,
+      "y": 2.5,
+      "z": 0
+    },
+    {
+      "id": "n6",
+      "x": 80,
+      "y": 22.5,
+      "z": 0
+    },
+    {
+      "id": "n7",
+      "x": 80,
+      "y": 2.5,
+      "z": 40
+    },
+    {
+      "id": "n8",
+      "x": 80,
+      "y": 22.5,
+      "z": 40
+    },
+    {
+      "id": "n9",
+      "x": 80,
+      "y": 2.5,
+      "z": 80
+    },
+    {
+      "id": "n10",
+      "x": 80,
+      "y": 22.5,
+      "z": 80
+    },
+    {
+      "id": "n11",
+      "x": 40,
+      "y": 2.5,
+      "z": 80
+    },
+    {
+      "id": "n12",
+      "x": 40,
+      "y": 22.5,
+      "z": 80
+    },
+    {
+      "id": "n13",
+      "x": 0,
+      "y": 2.5,
+      "z": 80
+    },
+    {
+      "id": "n14",
+      "x": 0,
+      "y": 22.5,
+      "z": 80
+    },
+    {
+      "id": "n15",
+      "x": 0,
+      "y": 2.5,
+      "z": 40
+    },
+    {
+      "id": "n16",
+      "x": 0,
+      "y": 22.5,
+      "z": 40
+    }
+  ],
+  "tubes": [
+    {
+      "id": "t17",
+      "a": "n1",
+      "b": "n3",
+      "tubeId": "T35",
+      "color": "blue",
+      "length": 35
+    },
+    {
+      "id": "t18",
+      "a": "n2",
+      "b": "n4",
+      "tubeId": "T35",
+      "color": "blue",
+      "length": 35
+    },
+    {
+      "id": "t19",
+      "a": "n3",
+      "b": "n5",
+      "tubeId": "T35",
+      "color": "blue",
+      "length": 35
+    },
+    {
+      "id": "t20",
+      "a": "n4",
+      "b": "n6",
+      "tubeId": "T35",
+      "color": "blue",
+      "length": 35
+    },
+    {
+      "id": "t21",
+      "a": "n5",
+      "b": "n7",
+      "tubeId": "T35",
+      "color": "blue",
+      "length": 35
+    },
+    {
+      "id": "t22",
+      "a": "n6",
+      "b": "n8",
+      "tubeId": "T35",
+      "color": "blue",
+      "length": 35
+    },
+    {
+      "id": "t23",
+      "a": "n7",
+      "b": "n9",
+      "tubeId": "T35",
+      "color": "blue",
+      "length": 35
+    },
+    {
+      "id": "t24",
+      "a": "n8",
+      "b": "n10",
+      "tubeId": "T35",
+      "color": "blue",
+      "length": 35
+    },
+    {
+      "id": "t25",
+      "a": "n9",
+      "b": "n11",
+      "tubeId": "T35",
+      "color": "blue",
+      "length": 35
+    },
+    {
+      "id": "t26",
+      "a": "n10",
+      "b": "n12",
+      "tubeId": "T35",
+      "color": "blue",
+      "length": 35
+    },
+    {
+      "id": "t27",
+      "a": "n11",
+      "b": "n13",
+      "tubeId": "T35",
+      "color": "blue",
+      "length": 35
+    },
+    {
+      "id": "t28",
+      "a": "n12",
+      "b": "n14",
+      "tubeId": "T35",
+      "color": "blue",
+      "length": 35
+    },
+    {
+      "id": "t29",
+      "a": "n13",
+      "b": "n15",
+      "tubeId": "T35",
+      "color": "blue",
+      "length": 35
+    },
+    {
+      "id": "t30",
+      "a": "n14",
+      "b": "n16",
+      "tubeId": "T35",
+      "color": "blue",
+      "length": 35
+    },
+    {
+      "id": "t31",
+      "a": "n15",
+      "b": "n1",
+      "tubeId": "T35",
+      "color": "blue",
+      "length": 35
+    },
+    {
+      "id": "t32",
+      "a": "n16",
+      "b": "n2",
+      "tubeId": "T35",
+      "color": "blue",
+      "length": 35
+    },
+    {
+      "id": "t33",
+      "a": "n1",
+      "b": "n2",
+      "tubeId": "T15",
+      "color": "blue",
+      "length": 15
+    },
+    {
+      "id": "t34",
+      "a": "n3",
+      "b": "n4",
+      "tubeId": "T15",
+      "color": "blue",
+      "length": 15
+    },
+    {
+      "id": "t35",
+      "a": "n5",
+      "b": "n6",
+      "tubeId": "T15",
+      "color": "blue",
+      "length": 15
+    },
+    {
+      "id": "t36",
+      "a": "n7",
+      "b": "n8",
+      "tubeId": "T15",
+      "color": "blue",
+      "length": 15
+    },
+    {
+      "id": "t37",
+      "a": "n9",
+      "b": "n10",
+      "tubeId": "T15",
+      "color": "blue",
+      "length": 15
+    },
+    {
+      "id": "t38",
+      "a": "n11",
+      "b": "n12",
+      "tubeId": "T15",
+      "color": "blue",
+      "length": 15
+    },
+    {
+      "id": "t39",
+      "a": "n13",
+      "b": "n14",
+      "tubeId": "T15",
+      "color": "blue",
+      "length": 15
+    },
+    {
+      "id": "t40",
+      "a": "n15",
+      "b": "n16",
+      "tubeId": "T15",
+      "color": "blue",
+      "length": 15
+    }
+  ],
+  "panels": [],
+  "clamps": [],
+  "textiles": [],
+  "fittings": [
+    {
+      "id": "f41",
+      "kind": "pool-small2",
+      "x": 40,
+      "y": 22.5,
+      "z": 0,
+      "quat": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "color": "blue",
+      "w": 80,
+      "h": 20,
+      "d": 80,
+      "balls": true
+    }
+  ],
+  "slides": [],
+  "groups": []
+}

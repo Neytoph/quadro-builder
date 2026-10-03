@@ -29,16 +29,20 @@ export function bomSections(bom: BomView, t: T): BomSection[] {
 
 function rowName(r: BomRow) {
   let label = labelOf(r.id || '', r.name)
-  if (r.kind === 'textiles' && r.w && r.h) {
+  if ((r.kind === 'textiles' || r.id === 'trampoline') && r.w && r.h) {
     const size = `${r.w}×${r.h}`
     if (!label.includes('×')) label = label ? `${label} ${size} cm` : `${size} cm`
   }
   return label
 }
 
+function rowNotes(r: BomRow, t: T) {
+  return [r.kitContents, r.designAssumption && r.loadVerified === false ? t('accessory.assumption') : ''].filter(Boolean).join(' · ')
+}
+
 function colorWord(color?: string | null) {
   if (!color) return ''
-  return color.startsWith('#') ? color : colorLabel(color)
+  return colorLabel(color)
 }
 
 function csvCell(v: string | number) {
@@ -66,7 +70,7 @@ export function bomToCsv({ bom, name, sizeCm, invRows, lang, t, stamp }: BomExpo
 
   const head = [t('bomx.col.section'), t('bomx.col.part'), t('bomx.col.color'), t('bomx.col.count')]
   if (withStock) head.push(t('bomx.col.owned'), t('bomx.col.short'))
-  head.push(t('bomx.col.subtotal'))
+  head.push(t('bomx.col.subtotal'), t('accessory.notes'))
 
   const lines = [head.map(csvCell).join(',')]
   // 库存不分颜色，料表按颜色分行：同一个零件只在第一行给拥有和还缺
@@ -79,7 +83,7 @@ export function bomToCsv({ bom, name, sizeCm, invRows, lang, t, stamp }: BomExpo
         if (r.id) counted.add(r.id)
         cells.push(s ? s.owned : '', s && s.need > s.owned ? s.need - s.owned : '')
       }
-      cells.push(r.subtotal ? formatCatalogPrice(r.subtotal, lang) : '')
+      cells.push(r.subtotal ? formatCatalogPrice(r.subtotal, lang) : '', rowNotes(r, t))
       lines.push(cells.map(csvCell).join(','))
     }
   }
@@ -102,11 +106,11 @@ const SEC_GAP = 18
 const SEC_HEAD = 26
 const FOOT_H = 64
 
-function layout(sections: BomSection[]) {
+function layout(sections: BomSection[], notesHeight: Map<string, number>) {
   // 一列排得下就一列，排不下分两列
-  const unit = (s: BomSection) => SEC_HEAD + s.rows.length * LINE + SEC_GAP
+  const unit = (s: BomSection) => SEC_HEAD + s.rows.reduce((sum, row) => sum + LINE + (notesHeight.get(row.key) || 0), 0) + SEC_GAP
   const total = sections.reduce((a, s) => a + unit(s), 0)
-  if (total <= 760) return { cols: 1 as const, height: total }
+  if (total <= 760 || notesHeight.size) return { cols: 1 as const, height: total }
   let half = 0
   let cut = 0
   for (let i = 0; i < sections.length; i++) {
@@ -124,17 +128,31 @@ export function bomToPngDataUrl(input: BomExportInput, thumb: HTMLImageElement |
   const { bom, name, sizeCm, lang, t, stamp } = input
   const sections = bomSections(bom, t)
   if (!sections.length) return null
-  const plan = layout(sections)
-  const height = HEAD_H + plan.height + FOOT_H
-  const dpr = 2
   const canvas = document.createElement('canvas')
-  canvas.width = W * dpr
-  canvas.height = height * dpr
   const ctx = canvas.getContext('2d')
   if (!ctx) return null
-  ctx.scale(dpr, dpr)
   const font = (size: number, weight = '400') =>
     `${weight} ${size}px -apple-system, "PingFang SC", "Microsoft YaHei", "Segoe UI", Roboto, sans-serif`
+  const notes = new Map<string, string[]>()
+  ctx.font = font(12)
+  for (const section of sections) for (const row of section.rows) {
+    const text = rowNotes(row, t)
+    if (!text) continue
+    const lines: string[] = []
+    let line = ''
+    for (const char of text) {
+      if (line && ctx.measureText(line + char).width > W - 2 * PAD - 24) { lines.push(line); line = '' }
+      line += char
+    }
+    if (line) lines.push(line)
+    notes.set(row.key, lines)
+  }
+  const plan = layout(sections, new Map([...notes].map(([key, lines]) => [key, lines.length * 18 + 6])))
+  const height = HEAD_H + plan.height + FOOT_H
+  const dpr = 2
+  canvas.width = W * dpr
+  canvas.height = height * dpr
+  ctx.scale(dpr, dpr)
 
   ctx.fillStyle = '#ffffff'
   ctx.fillRect(0, 0, W, height)
@@ -214,6 +232,12 @@ export function bomToPngDataUrl(input: BomExportInput, thumb: HTMLImageElement |
         ctx.fillText(shown, tx, y)
         ctx.fillStyle = '#374151'
         ctx.fillText(countText, x + colW - countW, y)
+        if (notes.has(r.key)) {
+          ctx.font = font(12)
+          ctx.fillStyle = '#6b7280'
+          for (const line of notes.get(r.key)!) { y += 18; ctx.fillText(line, x + 12, y) }
+          y += 6
+        }
         y += LINE
       }
       y += SEC_GAP

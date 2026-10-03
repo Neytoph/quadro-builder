@@ -3,6 +3,7 @@
 
 import { t, getLang } from "./i18n.js";
 import { ACCESSORY_PACK } from './accessoryPack.js';
+import { CONFIRMED_COMPONENTS } from './componentPack.js';
 import { COLOR_HEX, isHexColor } from "./colors.js";
 import { COLOR_ZH, COLOR_EN, COLOR_DE, PART_ZH, PART_EN, PART_DE } from "../names";
 
@@ -14,6 +15,12 @@ export async function loadCatalog() {
   if (!res.ok) throw new Error(t("catalog_load_error", res.status));
   _data = await res.json();
   _data.accessories.push(...ACCESSORY_PACK.map(part => ({ ...part, compat: true, qdf: part.id })));
+  for (const spec of CONFIRMED_COMPONENTS) {
+    const list = spec.placement === 'panel' ? _data.panels : _data.accessories;
+    const existing = list.find(p => p.id === spec.id);
+    const fields = { ...spec, buildable: true, compat: true, price: existing?.price || 0, qdf: spec.placement === 'fitting' ? spec.kind || spec.id : undefined };
+    if (existing) Object.assign(existing, { legacyFeature: existing.feature || null }, fields); else list.push(fields);
+  }
   return _data;
 }
 

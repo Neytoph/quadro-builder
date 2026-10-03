@@ -1,0 +1,312 @@
+{
+  "format": 2,
+  "nodes": [
+    {
+      "id": "n1",
+      "x": 0,
+      "y": 42.5,
+      "z": 0
+    },
+    {
+      "id": "n2",
+      "x": 0,
+      "y": 82.5,
+      "z": 0
+    },
+    {
+      "id": "n4",
+      "x": 40,
+      "y": 42.5,
+      "z": 0
+    },
+    {
+      "id": "n5",
+      "x": 40,
+      "y": 82.5,
+      "z": 0
+    },
+    {
+      "id": "n7",
+      "x": 80,
+      "y": 42.5,
+      "z": 0
+    },
+    {
+      "id": "n8",
+      "x": 80,
+      "y": 82.5,
+      "z": 0
+    },
+    {
+      "id": "n14",
+      "x": 0,
+      "y": 2.5,
+      "z": 0
+    },
+    {
+      "id": "n16",
+      "x": 0,
+      "y": 2.5,
+      "z": 40
+    },
+    {
+      "id": "n18",
+      "x": 40,
+      "y": 2.5,
+      "z": 0
+    },
+    {
+      "id": "n20",
+      "x": 40,
+      "y": 2.5,
+      "z": 40
+    },
+    {
+      "id": "n22",
+      "x": 80,
+      "y": 2.5,
+      "z": 0
+    },
+    {
+      "id": "n24",
+      "x": 80,
+      "y": 2.5,
+      "z": 40
+    }
+  ],
+  "tubes": [
+    {
+      "id": "t3",
+      "a": "n1",
+      "b": "n2",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t6",
+      "a": "n4",
+      "b": "n5",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t9",
+      "a": "n7",
+      "b": "n8",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t10",
+      "a": "n1",
+      "b": "n4",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t11",
+      "a": "n4",
+      "b": "n7",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t12",
+      "a": "n2",
+      "b": "n5",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t13",
+      "a": "n5",
+      "b": "n8",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t15",
+      "a": "n14",
+      "b": "n1",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t17",
+      "a": "n14",
+      "b": "n16",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t19",
+      "a": "n18",
+      "b": "n4",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t21",
+      "a": "n18",
+      "b": "n20",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t23",
+      "a": "n22",
+      "b": "n7",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t25",
+      "a": "n22",
+      "b": "n24",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    }
+  ],
+  "panels": [
+    {
+      "id": "p26",
+      "a": "t3",
+      "b": "t6",
+      "t0": 0,
+      "len": 40,
+      "panelId": "panel_40x40_busy",
+      "color": "green",
+      "appearanceVersion": 1,
+      "params": {
+        "id": "panel_40x40_busy",
+        "name": "忙碌板",
+        "name_en": "Busy board",
+        "name_de": "Motoriktafel",
+        "placement": "panel",
+        "mount": "vertical-frame",
+        "width": 40,
+        "height": 40,
+        "depth": 6,
+        "mountLayout": "opposite-transparent-screws",
+        "kitContents": [
+          "component",
+          "transparent-screw-4"
+        ],
+        "screwAxis": "vertical"
+      },
+      "mounts": [
+        {
+          "tube": "t3",
+          "t": 0.15,
+          "role": "inset-screw",
+          "width": 1.8,
+          "edge": 3
+        },
+        {
+          "tube": "t3",
+          "t": 0.85,
+          "role": "inset-screw",
+          "width": 1.8,
+          "edge": 3
+        },
+        {
+          "tube": "t6",
+          "t": 0.15,
+          "role": "inset-screw",
+          "width": 1.8,
+          "edge": 1
+        },
+        {
+          "tube": "t6",
+          "t": 0.85,
+          "role": "inset-screw",
+          "width": 1.8,
+          "edge": 1
+        }
+      ],
+      "supportTubes": [
+        "t3",
+        "t6"
+      ]
+    },
+    {
+      "id": "p27",
+      "a": "t11",
+      "b": "t13",
+      "t0": 0,
+      "len": 40,
+      "panelId": "panel_40x40_busy",
+      "color": "green",
+      "appearanceVersion": 1,
+      "params": {
+        "id": "panel_40x40_busy",
+        "name": "忙碌板",
+        "name_en": "Busy board",
+        "name_de": "Motoriktafel",
+        "placement": "panel",
+        "mount": "vertical-frame",
+        "width": 40,
+        "height": 40,
+        "depth": 6,
+        "mountLayout": "opposite-transparent-screws",
+        "kitContents": [
+          "component",
+          "transparent-screw-4"
+        ],
+        "screwAxis": "horizontal"
+      },
+      "mounts": [
+        {
+          "tube": "t11",
+          "t": 0.15,
+          "role": "inset-screw",
+          "width": 1.8,
+          "edge": 0
+        },
+        {
+          "tube": "t11",
+          "t": 0.85,
+          "role": "inset-screw",
+          "width": 1.8,
+          "edge": 0
+        },
+        {
+          "tube": "t13",
+          "t": 0.15,
+          "role": "inset-screw",
+          "width": 1.8,
+          "edge": 2
+        },
+        {
+          "tube": "t13",
+          "t": 0.85,
+          "role": "inset-screw",
+          "width": 1.8,
+          "edge": 2
+        }
+      ],
+      "supportTubes": [
+        "t11",
+        "t13"
+      ]
+    }
+  ],
+  "clamps": [],
+  "textiles": [],
+  "fittings": [],
+  "slides": [],
+  "groups": []
+}

@@ -22,10 +22,15 @@
 // Bewusst ohne Three.js und DOM -- wie qdfimport.js in Node testbar.
 
 import { geometry, getPanel, getTube } from "./catalog.js";
-import { ACCESSORY_IDS } from './accessoryPack.js';
+import { ACCESSORY_PACK } from './accessoryPack.js';
+import { confirmedSpec, confirmedColor } from './componentPack.js';
+import { QDF_FEATURE_KEYS } from './qdfFeatures.js';
+import { QDF_FITTING_KINDS, QDF_SLIDE_KINDS } from './qdfimport.js';
 import { officialColorId } from "./colors.js";
 import { panelNormal, modelMiddle } from "./util.js";
 import { isHolePart, HOLE_MASKS, BLACK_FITTINGS, isBoltPart, boltAxis, boltDepth, hingeDir, fixedFittingColor } from "./model.js";
+
+const NON_QDF_ACCESSORY_IDS = new Set(ACCESSORY_PACK.map(part => part.id));
 
 // Farbtabelle wie in den Dateien der Herstellersoftware: erst der Satz fuer
 // Rohre und Kupplungen (kind 1), dann derselbe Satz fuer Platten (kind 2). Die
@@ -75,7 +80,7 @@ const MATERIALS = [
 // 功能板（兼容件）：同一个办法，材质名「<color> (<feature>)」，从 27 号起每种
 // 五个颜色。官方软件按颜色画一块普通板，我们导入时按名字认回来。顺序固定，
 // 编号才不会因为加了一种就全变。
-const FEATURE_KEYS = ["lego", "honeycomb", "busy", "felt", "magnet", "climbing", "sensory", "pocket", "basin", "rainbow", "bridge"];
+const FEATURE_KEYS = QDF_FEATURE_KEYS;
 const FEATURE_RGB = { red: "1.,0.,0.", green: "0.,0.4941,0.0941", blue: "0.,0.,1.", yellow: "1.,1.,0.", black: "0.,0.,0." };
 const FEATURE_MAT = {};
 {
@@ -264,9 +269,9 @@ function tubeMat(color) {
 function lochplatte(p) {
   const def = getPanel(p.panelId);
   if (!def) return null;
-  if (def.holes) return "hole";
-  if (def.acrylic) return "acrylic";
   if (def.feature && FEATURE_MAT[def.feature]) return def.feature;
+  if (def.holes) return "hole";
+  if (def.acrylic || def.feature === 'acrylic') return "acrylic";
   return null;
 }
 
@@ -388,6 +393,7 @@ export function buildQDF(model, opts = {}) {
   const conn = geometry().connectorSize;
   const lines = ["0, 0;", ...MATERIALS, ...cameraLines(opts.camera)];
   const stats = { connectors: 0, tubes: 0, bows: 0, panels: 0, textiles: 0, clamps: 0, slides: 0, alu: 0, fittings: 0 };
+  const warnings = [];
   // Das Lager fuehrt eine feste Laenge (50 mm in allen Herstellerdateien).
   const cs50 = 5;
 
@@ -555,6 +561,7 @@ export function buildQDF(model, opts = {}) {
     if (t.arm || t.link) continue;               // Adapter-Huelse und Doppelrohr-Verbindung sind keine Teile
     const a = node(t.a), b = node(t.b);
     if (!a || !b) continue;
+    if (getTube(t.tubeId)?.material === 'aluminium') warnings.push({ code: 'simplified_component', partId: t.tubeId, id: t.id });
     const mat = tubeMat(t.color);
     // Ein eingelesenes Rohr bringt seine eigene Lage mit -- die geht unveraendert
     // wieder hinaus. Erst wenn es bewegt wurde, faellt sie weg und die Lage
@@ -658,6 +665,10 @@ export function buildQDF(model, opts = {}) {
   };
 
   for (const p of model.panels.values()) {
+    const color = confirmedColor(p);
+    if ((p.appearanceVersion === 2 && confirmedSpec(p.panelId)?.qdfSimplified) || (p.appearanceVersion === 1 && ['panel_40x40_busy', 'panel_40x40_pocket'].includes(p.panelId))) {
+      warnings.push({ code: 'simplified_component', partId: p.panelId, id: p.id });
+    }
     // Aeltere Staende fuehren das Baellebad noch als fuenf Platten mit der
     // Original-Zeile an der Frontwand. Die Zeile zurueckschreiben, die
     // abgeleiteten Flaechen auslassen -- sonst stuenden fuenf Platten statt
@@ -667,7 +678,7 @@ export function buildQDF(model, opts = {}) {
         const q = p.pool.quat && p.pool.quat.length === 4
           ? encodeQuat([p.pool.quat[3], p.pool.quat[0], p.pool.quat[1], p.pool.quat[2]])
           : IDENTITY;
-        lines.push(`${p.pool.kind}{${panelMat(p.color)}, ${tuple(q, p.pool.p[0], p.pool.p[1], p.pool.p[2])}, 1, 0}`);
+        lines.push(`${p.pool.kind}{${panelMat(color)}, ${tuple(q, p.pool.p[0], p.pool.p[1], p.pool.p[2])}, 1, 0}`);
         stats.panels++;
       }
       continue;
@@ -679,12 +690,12 @@ export function buildQDF(model, opts = {}) {
       // Reihenfolge wie in der Datei: `w` ist das ERSTE Mass (lokale Y-Achse),
       // `h` das zweite -- so hat der Import sie gelesen. Andersherum kam jede
       // nicht-quadratische Platte gedreht heraus (alle 106 im Bestand).
-      lines.push(`panel2{${panelMat(p.color, lochplatte(p))}, ${tuple(encodeQuat([g.quat[3], g.quat[0], g.quat[1], g.quat[2]]), g.p[0], g.p[1], g.p[2])}, 1, ${mm(g.w)}, ${mm(g.padW || 0)}, ${mm(g.h)}, ${mm(g.padH || 0)}, 0}`);
+      lines.push(`panel2{${panelMat(color, lochplatte(p))}, ${tuple(encodeQuat([g.quat[3], g.quat[0], g.quat[1], g.quat[2]]), g.p[0], g.p[1], g.p[2])}, 1, ${mm(g.w)}, ${mm(g.padW || 0)}, ${mm(g.h)}, ${mm(g.padH || 0)}, 0}`);
       stats.panels++;
       continue;
     }
     const def = getPanel(p.panelId);
-    const line = rectLine("panel2", model.panelCorners(p), panelMat(p.color, lochplatte(p)),
+    const line = rectLine("panel2", model.panelCorners(p), panelMat(color, lochplatte(p)),
       def ? [def.w, def.h] : null, p.side, !!p.turned);
     if (line) { lines.push(line); stats.panels++; }
   }
@@ -722,13 +733,24 @@ export function buildQDF(model, opts = {}) {
   // Anbauteile: Punkt + Ausrichtung, beim Netz zusaetzlich die Masse. Die
   // Feldzahl je Art richtet sich nach dem, was die Herstellerdateien fuehren.
   for (const f of (model.fittings ? model.fittings.values() : [])) {
+    if (f.appearanceVersion === 2 && confirmedSpec(f.partId || f.kind)) {
+      warnings.push({ code: 'omitted_accessory', partId: f.partId || confirmedSpec(f.kind).id, id: f.id });
+      continue;
+    }
     const q = f.quat && f.quat.length === 4
       ? encodeQuat([f.quat[3], f.quat[0], f.quat[1], f.quat[2]])
       : IDENTITY;
     // Tuchteile tragen die Platten-Materialien (Spielsack, Netz, Rundwand);
     // alles andere die der Rohre.
     // 软包滚筒和非官方的扩展配件在 .qdf 里没有对应元素，只存在我们自己的存档里
-    if (f.kind === "sleeve" || ACCESSORY_IDS.has(f.kind)) continue;
+    if (f.kind === "sleeve" || NON_QDF_ACCESSORY_IDS.has(f.kind)) {
+      warnings.push({ code: 'omitted_accessory', partId: f.kind, id: f.id });
+      continue;
+    }
+    if (!QDF_FITTING_KINDS.has(f.kind) && !QDF_SLIDE_KINDS.has(f.kind)) {
+      warnings.push({ code: 'omitted_accessory', partId: f.partId || f.kind, id: f.id });
+      continue;
+    }
     const stoff = f.kind === "bag2" || f.kind === "lattice2" || f.kind === "textil-round2"
       || f.kind === "pool2" || f.kind === "pool-small2";
     // Ohne Farbe: Material 0 wie in der Datei (so stehen alle 50 Dach-Zeilen
@@ -785,6 +807,10 @@ export function buildQDF(model, opts = {}) {
     stats.fittings++;
   }
   for (const s of (model.slides ? model.slides.values() : [])) {
+    if (s.kind && !QDF_SLIDE_KINDS.has(s.kind)) {
+      warnings.push({ code: 'omitted_accessory', partId: s.kind, id: s.id });
+      continue;
+    }
     // s.quat steht in Three-Reihenfolge (x,y,z,w), die Datei will (w,x,y,z).
     const q = s.quat && s.quat.length === 4
       ? encodeQuat([s.quat[3], s.quat[0], s.quat[1], s.quat[2]])
@@ -805,5 +831,5 @@ export function buildQDF(model, opts = {}) {
     }
   }
 
-  return { text: lines.join(EOL) + EOL, stats };
+  return { text: lines.join(EOL) + EOL, stats, warnings };
 }

@@ -3,6 +3,7 @@ import { setLang as syncEngineLang } from './engine/i18n.js'
 import { detectOsFamily, type OsFamily } from './platform'
 import { bootEntry } from './entry'
 import { sharedStrings } from './collab/sharedStrings'
+import { accessoryStrings } from './ui/accessoryStrings'
 
 export type Lang = 'zh' | 'en' | 'de'
 
@@ -47,8 +48,8 @@ const zh: Dict = {
   'panel.compat': '功能板 · 兼容件，非原厂',
   'tool.slides': '滑梯',
   'tool.wheels': '轮',
-  'tool.textiles': '布件',
-  'tool.accessories': '扩展配件',
+  'tool.textiles': '布艺',
+  'tool.accessories': '配件',
   'toast.exportedQdfNoAccessories': '已导出 QDF。秋千、吊环等扩展配件是非官方零件，QDF 文件里不包含它们',
   'tool.pools': '泳池',
   'tool.connections': '连接件',
@@ -2044,7 +2045,7 @@ const de: Dict = {
   'room.closeFirst': 'Erst den Umriss schließen, dann Türen und Fenster setzen',
 }
 
-export const dicts: Record<Lang, Dict> = { zh: { ...zh, ...sharedStrings.zh }, en: { ...en, ...sharedStrings.en }, de: { ...de, ...sharedStrings.de } }
+export const dicts: Record<Lang, Dict> = { zh: { ...zh, ...sharedStrings.zh, ...accessoryStrings.zh }, en: { ...en, ...sharedStrings.en, ...accessoryStrings.en }, de: { ...de, ...sharedStrings.de, ...accessoryStrings.de } }
 
 /** 打开时用哪种语言：网址里带了的优先，其次是用户选过的，都没有按浏览器语言。 */
 export function detect(): Lang {

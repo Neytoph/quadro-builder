@@ -3,6 +3,7 @@ import type { Lang } from './i18n'
 
 /** 零件显示名。三种语言都走这里，缺了才会退回 parts.json 的德/英名。 */
 export const PART_ZH: Record<string, string> = {
+  steering_wheel: '方向盘（兼容件）',
   swing: '秋千（兼容件）', gym_rings: '吊环（兼容件）',
   '6way': '空间6通',
   '5way': '空间5通',
@@ -113,6 +114,7 @@ export const PART_ZH: Record<string, string> = {
 }
 
 export const PART_EN: Record<string, string> = {
+  steering_wheel: 'Steering wheel (compatible)',
   swing: 'Swing (compatible)', gym_rings: 'Gym rings (compatible)',
   '6way': 'Space 6-way',
   '5way': 'Space 5-way',
@@ -223,6 +225,7 @@ export const PART_EN: Record<string, string> = {
 }
 
 export const PART_DE: Record<string, string> = {
+  steering_wheel: 'Lenkrad (kompatibel)',
   swing: 'Schaukel (kompatibel)', gym_rings: 'Turnringe (kompatibel)',
   '6way': 'Raum 6-Wege',
   '5way': 'Raum 5-Wege',
@@ -330,6 +333,43 @@ export const PART_DE: Record<string, string> = {
   'slide-new2': 'Integralrutsche',
   'slide-end2': 'Rutschenauslauf',
   'curved-slide2': 'Bogenrutsche',
+}
+
+const CONFIRMED_NAMES: Record<string, [string, string, string]> = {
+  panel_sector_40: ['扇形小板', 'Quarter-circle panel', 'Viertelkreisplatte'],
+  acrylic_panel_40x40: ['透明大板 40×40', 'Clear panel 40×40', 'Klare Platte 40×40'],
+  acrylic_panel_40x20: ['透明小板 40×20', 'Small clear panel 40×20', 'Kleine klare Platte 40×20'],
+  acrylic_panel_40x60: ['透明长板 40×60', 'Long clear panel 40×60', 'Lange klare Platte 40×60'],
+  acrylic_hole_panel_40x40: ['透明九洞板 40×40', 'Clear nine-hole panel 40×40', 'Klare Neunlochplatte 40×40'],
+  panel_40x40_clock: ['时钟迷宫板 40×40', 'Clock maze panel 40×40', 'Uhr-Labyrinthplatte 40×40'],
+  panel_40x40_maze: ['数字迷宫板 40×40', 'Number maze panel 40×40', 'Zahlenlabyrinthplatte 40×40'],
+  panel_40x40_lego: ['纯绿积木板 40×40', 'Green brick panel 40×40', 'Grüne Bausteinplatte 40×40'],
+  hole_panel_40x40: ['九洞板 40×40', 'Nine-hole panel 40×40', 'Neunlochplatte 40×40'],
+  panel_40x40_climbing: ['大攀岩板 40×40', 'Large climbing panel 40×40', 'Große Kletterplatte 40×40'],
+  panel_40x30_climbing: ['中攀岩板 40×30', 'Medium climbing panel 40×30', 'Mittlere Kletterplatte 40×30'],
+  panel_40x20_climbing: ['小攀岩板 40×20', 'Small climbing panel 40×20', 'Kleine Kletterplatte 40×20'],
+  lattice: ['平面攀爬网', 'Flat climbing net', 'Flaches Kletternetz'],
+  lattice_curved: ['弧形攀爬网', 'Curved climbing net', 'Gebogenes Kletternetz'],
+  panel_40x40_basketball: ['篮球框', 'Basketball hoop', 'Basketballkorb'],
+  textile_bridge: ['彩虹桥', 'Rainbow bridge', 'Regenbogenbrücke'],
+  trampoline: ['蹦床', 'Trampoline', 'Trampolin'],
+  sleeve: ['软体滚筒', 'Padded roller', 'Gepolsterte Rolle'],
+  textile: ['普通布片', 'Fabric sheet', 'Stoffbahn'],
+  textile_long: ['长布片', 'Long fabric sheet', 'Lange Stoffbahn'],
+  textile_round: ['弯管攀爬布', 'Curved climbing cloth', 'Gebogenes Klettertuch'],
+  textile_round_fourway: ['弯管四通布', 'Curved four-way cloth', 'Gebogenes Vierwegetuch'],
+  panel_40x40_capsule: ['半球太空舱', 'Hemispherical space capsule', 'Halbkugelförmige Raumkapsel'],
+  acrylic_platform_40x40: ['透明平台 40×40', 'Clear platform 40×40', 'Klare Plattform 40×40'],
+  panel_40x20_castle: ['城垛板 40×20', 'Battlement panel 40×20', 'Zinnenplatte 40×20'],
+  rope: ['组合搭建绳', 'Assembly rope', 'Konstruktionsseil'],
+  panel_40x40_grid: ['细方格格子板 40×40', 'Fine square grid panel 40×40', 'Feine Gitterplatte 40×40'],
+  TA35: ['铝管 35 cm', 'Aluminium tube 35 cm', 'Aluminiumrohr 35 cm'],
+  TA75: ['铝管 75 cm', 'Aluminium tube 75 cm', 'Aluminiumrohr 75 cm'],
+}
+for (const [id, [zh, en, de]] of Object.entries(CONFIRMED_NAMES)) {
+  PART_ZH[id] = zh
+  PART_EN[id] = en
+  PART_DE[id] = de
 }
 
 export const CONN_KIND_ZH: Record<string, string> = {
@@ -452,6 +492,33 @@ export function zhName(id: string, fallback?: string) {
 }
 
 export function colorLabel(id: string) {
+  const fixed: Record<string, [string, string, string]> = {
+    '#237841': ['积木绿', 'Brick green', 'Bausteingrün'],
+    '#2fcb5a': ['经典绿', 'Classic green', 'Klassisches Grün'],
+    '#008ce7': ['天蓝', 'Sky blue', 'Himmelblau'],
+    '#39a7df': ['天蓝', 'Sky blue', 'Himmelblau'],
+    '#64b66b': ['绿色', 'Green', 'Grün'],
+    '#ed5b49': ['红色', 'Red', 'Rot'],
+    '#f3f3ed': ['白色', 'White', 'Weiß'],
+    '#efc947': ['黄色', 'Yellow', 'Gelb'],
+    '#f6d334': ['黄色', 'Yellow', 'Gelb'],
+    '#77bf64': ['绿色', 'Green', 'Grün'],
+    '#ec9eb2': ['粉色', 'Pink', 'Rosa'],
+    '#f0d33f': ['黄色', 'Yellow', 'Gelb'],
+    '#f0d665': ['浅黄', 'Pale yellow', 'Hellgelb'],
+    '#f5ba33': ['橙黄', 'Amber', 'Bernsteingelb'],
+    '#b9c0c5': ['银色', 'Silver', 'Silber'],
+    '#d4d8da': ['金属灰', 'Metal grey', 'Metallgrau'],
+    '#f294be': ['粉色', 'Pink', 'Rosa'],
+    '#a9acb0': ['灰色', 'Grey', 'Grau'],
+    '#26292b': ['黑色', 'Black', 'Schwarz'],
+    '#f0e8d6': ['米白', 'Ivory', 'Elfenbein'],
+    '#f6f2e7': ['米白', 'Ivory', 'Elfenbein'],
+    '#eaf7fa': ['透明', 'Clear', 'Transparent'],
+    orange: ['橙色', 'Orange', 'Orange'],
+  }
+  const fixedName = fixed[id.toLowerCase()]
+  if (fixedName) return fixedName[currentLang() === 'zh' ? 0 : currentLang() === 'en' ? 1 : 2]
   return COLOR_BY_LANG[currentLang()][id] ?? id
 }
 

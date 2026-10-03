@@ -1,0 +1,184 @@
+{
+  "format": 2,
+  "nodes": [
+    {
+      "id": "n1",
+      "x": 0,
+      "y": 42.5,
+      "z": 0
+    },
+    {
+      "id": "n2",
+      "x": 40,
+      "y": 42.5,
+      "z": 0
+    },
+    {
+      "id": "n4",
+      "x": 0,
+      "y": 82.5,
+      "z": 0
+    },
+    {
+      "id": "n7",
+      "x": 0,
+      "y": 2.5,
+      "z": 0
+    },
+    {
+      "id": "n9",
+      "x": 40,
+      "y": 2.5,
+      "z": 0
+    }
+  ],
+  "tubes": [
+    {
+      "id": "t3",
+      "a": "n1",
+      "b": "n2",
+      "tubeId": "T35",
+      "color": "yellow",
+      "length": 35
+    },
+    {
+      "id": "t5",
+      "a": "n1",
+      "b": "n4",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t6",
+      "a": "n2",
+      "b": "n4",
+      "tubeId": "TC1",
+      "color": "blue",
+      "length": null,
+      "bow": true,
+      "bowCenter": [
+        0,
+        42.5,
+        0
+      ]
+    },
+    {
+      "id": "t8",
+      "a": "n7",
+      "b": "n1",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t10",
+      "a": "n9",
+      "b": "n2",
+      "tubeId": "T35",
+      "color": "yellow",
+      "length": 35
+    },
+    {
+      "id": "t11",
+      "a": "n7",
+      "b": "n9",
+      "tubeId": "T35",
+      "color": "red",
+      "length": 35
+    }
+  ],
+  "panels": [],
+  "clamps": [],
+  "textiles": [],
+  "fittings": [
+    {
+      "id": "f12",
+      "kind": "panel_sector_40",
+      "x": 0,
+      "y": 42.5,
+      "z": 0,
+      "quat": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "color": "blue",
+      "tube": "t3",
+      "appearanceVersion": 2,
+      "params": {
+        "id": "panel_sector_40",
+        "name": "扇形小板",
+        "mountType": "corner",
+        "feature": "sector",
+        "width": 40,
+        "height": 40,
+        "depth": 1.2,
+        "placement": "fitting",
+        "verifiedLoad": false,
+        "appearanceVersion": 2,
+        "kitContents": [
+          "component",
+          "retainers"
+        ],
+        "name_en": "Quarter-circle panel",
+        "name_de": "Viertelkreisplatte",
+        "fixedColor": null,
+        "mount": "corner",
+        "designAssumption": true,
+        "assumption": "frame-grid-unmeasured",
+        "qdfSupported": false,
+        "qdfSimplified": false
+      },
+      "mounts": [
+        {
+          "tube": "t3",
+          "t": 0.1,
+          "role": "corner",
+          "width": 2
+        },
+        {
+          "tube": "t3",
+          "t": 0.9,
+          "role": "corner",
+          "width": 2
+        },
+        {
+          "tube": "t5",
+          "t": 0.9,
+          "role": "corner",
+          "width": 2
+        },
+        {
+          "tube": "t6",
+          "t": 0.2,
+          "role": "arc-retainer",
+          "width": 2
+        },
+        {
+          "tube": "t6",
+          "t": 0.5,
+          "role": "arc-retainer",
+          "width": 2
+        },
+        {
+          "tube": "t6",
+          "t": 0.8,
+          "role": "arc-retainer",
+          "width": 2
+        }
+      ],
+      "supportTubes": [
+        "t3",
+        "t5",
+        "t6"
+      ],
+      "partId": "panel_sector_40",
+      "a": "t3",
+      "b": "t5"
+    }
+  ],
+  "slides": [],
+  "groups": []
+}

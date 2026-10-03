@@ -80,6 +80,20 @@ export interface BomRow {
   kind: string
   w?: number
   h?: number
+  kitContents?: string
+  designAssumption?: boolean
+  loadVerified?: boolean
+}
+
+export interface InstallationPreview {
+  kind: string
+  partId: string
+  mountCount: number
+  valid: boolean
+  reason: string | null
+  canFlip: boolean
+  supportCount?: number
+  assumption?: string | boolean
 }
 
 export interface BomView {
@@ -134,6 +148,13 @@ interface EngineApi {
   canUndo: boolean
   canRedo: boolean
   selectionCount: number
+  installationPreview: InstallationPreview | null
+  insetScrewAxis: 'vertical' | 'horizontal'
+  setInsetScrewAxis: (axis: 'vertical' | 'horizontal') => void
+  canFlipAccessory: boolean
+  confirmInstallation: () => void
+  cancelInstallation: () => void
+  flipAccessory: () => void
   toast: { message: string; kind: ToastKind } | null
   tabs: TabInfo[]
   activeTabId: string | null
@@ -496,6 +517,7 @@ export function asBom(raw: AnyRec): BomView {
     key: String(r.key ?? `${r.tubeId}|${r.color}`), name: cleanBomText(r.name), count: Number(r.count),
     color: (r.color as string) || null, colorName: (r.colorName as string) || null, subtotal: Number(r.subtotal || 0),
     id: cleanBomText(r.tubeId), kind: 'tubes',
+    kitContents: cleanBomText(r.kitContents), designAssumption: r.designAssumption === true, loadVerified: r.loadVerified,
   }))
   const connectors = ((raw.connectors as AnyRec[]) || []).map(r => ({
     key: `connectors:${r.type}`, name: cleanBomText(r.name), count: Number(r.count),
@@ -505,6 +527,7 @@ export function asBom(raw: AnyRec): BomView {
     key: String(r.key ?? `${r.panelId}|${r.color}`), name: cleanBomText(r.name), count: Number(r.count),
     color: (r.color as string) || null, colorName: (r.colorName as string) || null, subtotal: Number(r.subtotal || 0),
     id: cleanBomText(r.panelId), kind: 'panels',
+    kitContents: cleanBomText(r.kitContents), designAssumption: r.designAssumption === true, loadVerified: r.loadVerified,
   }))
   const textiles: BomRow[] = []
   const wheels: BomRow[] = []
@@ -512,8 +535,10 @@ export function asBom(raw: AnyRec): BomView {
   for (const r of ((raw.fittings as AnyRec[]) || [])) {
     const id = cleanBomText(r.id) || cleanBomText(r.kind)
     const row: BomRow = {
-      key: `fittings:${id || r.key}`, name: cleanBomText(r.name), count: Number(r.count),
+      key: `fittings:${cleanBomText(r.key) || id}`, name: cleanBomText(r.name), count: Number(r.count),
       subtotal: Number(r.subtotal || 0), id, kind: 'fittings',
+      w: Number(r.w) || undefined, h: Number(r.h) || undefined,
+      kitContents: cleanBomText(r.kitContents), designAssumption: r.designAssumption === true, loadVerified: r.loadVerified,
     }
     const qdf = cleanBomText(r.qdf) || cleanBomText(r.kind)
     if (TEXTIL.has(qdf) || TEXTIL.has(id)) textiles.push({ ...row, kind: 'textiles' })
@@ -532,6 +557,7 @@ export function asBom(raw: AnyRec): BomView {
       id: cleanBomText(r.id) || 'textile',
       kind: 'textiles',
       w, h,
+      kitContents: cleanBomText(r.kitContents), designAssumption: r.designAssumption === true, loadVerified: r.loadVerified,
     })
   }
   const slides = ((raw.slides as AnyRec[]) || []).map(r => ({
@@ -1471,10 +1497,17 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const e2 = eng.current
     if (!e2) return
     if (needAccount('qdf')) return
-    const out = buildQDF(e2.model, { camera: e2.scene.cameraForQdf?.() }) as { text?: string } | string
+    const out = buildQDF(e2.model, { camera: e2.scene.cameraForQdf?.() }) as { text?: string; warnings?: Array<{ code: string; partId: string; id: string }> } | string
     track('builder.export.qdf')
     download(`${activeName()}.qdf`, typeof out === 'string' ? out : (out.text || ''), 'text/plain')
-    if ([...e2.model.fittings.values()].some((f: AnyRec) => ACCESSORY_IDS.has(f.kind))) notify(t('toast.exportedQdfNoAccessories'), 'warn')
+    const warnings = typeof out === 'string' ? undefined : out.warnings
+    const separator = lang === 'zh' ? '、' : ', '
+    const omitted = [...new Set(warnings?.filter(w => w.code === 'omitted_accessory').map(w => nameLabel(w.partId)) || [])].join(separator)
+    const simplified = [...new Set(warnings?.filter(w => w.code === 'simplified_component').map(w => nameLabel(w.partId)) || [])].join(separator)
+    if (omitted && simplified) notify(t('accessory.qdf.both', { omitted, simplified }), 'warn')
+    else if (omitted) notify(t('accessory.qdf.omitted', { parts: omitted }), 'warn')
+    else if (simplified) notify(t('accessory.qdf.simplified', { parts: simplified }), 'warn')
+    else if (!warnings && [...e2.model.fittings.values()].some((f: AnyRec) => ACCESSORY_IDS.has(f.kind))) notify(t('toast.exportedQdfNoAccessories'), 'warn')
     else notify(t(qdfWillMapColors(e2.model) ? 'toast.exportedQdfMapped' : 'toast.exported'))
     // needAccount 每次渲染重建，只在回调里调用，不进依赖表
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2137,6 +2170,18 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     canUndo: !!builder?.canUndo?.(),
     canRedo: !!builder?.canRedo?.(),
     selectionCount: builder?.selection?.size ?? 0,
+    installationPreview: builder?.installationPreview ?? null,
+    insetScrewAxis: builder?.insetScrewAxis || 'vertical',
+    setInsetScrewAxis: axis => { if (!builder || builder.readOnly) return; builder.setInsetScrewAxis(axis); bump() },
+    canFlipAccessory: !builder?.readOnly && !!builder?.canFlipSelectedAccessory?.(),
+    confirmInstallation: () => { if (!builder || builder.readOnly) return; builder.confirmInstallation(); bump() },
+    cancelInstallation: () => { if (!builder) return; builder.cancelInstallation(); bump() },
+    flipAccessory: () => {
+      if (!builder || builder.readOnly) return
+      if (builder?.installationPreview?.canFlip) builder.flipInstallationFacing()
+      else builder.flipSelectedAccessory()
+      bump()
+    },
     toast,
     tabs, activeTabId, bom, inventory,
     invRows: cmp.rows, feasible: cmp.feasible, sizeCm, room, setRoom, roomOverflow,

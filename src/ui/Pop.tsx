@@ -63,7 +63,7 @@ export function Pop({ anchor, leaving, onClose, align = 'left', width, className
     <div
       ref={ref}
       className={`m-pop qb-card fixed z-[60] pointer-events-auto p-2 max-w-[calc(100vw-1rem)] max-h-[calc(100vh-5rem)] overflow-y-auto scrollbar-thin ${leaving ? 'm-leave pointer-events-none' : ''} ${className}`}
-      style={{ ...pos, width: width ? Math.min(width, window.innerWidth - 16) : undefined }}
+      style={{ ...pos, width: width ? Math.min(width, window.innerWidth - 16) : undefined, maxHeight: Math.max(120, window.innerHeight - pos.top - 8) }}
     >
       {children}
     </div>,

@@ -24,7 +24,7 @@ function colorWord(color: string | null | undefined) {
 
 function rowLabel(r: BomRow) {
   let label = labelOf(r.id || '', r.name)
-  if (r.kind === 'textiles' && r.w && r.h) {
+  if ((r.kind === 'textiles' || r.id === 'trampoline') && r.w && r.h) {
     const size = `${r.w}×${r.h}`
     if (!label.includes('×')) label = label ? `${label} ${size} cm` : `${size} cm`
   }
@@ -32,6 +32,7 @@ function rowLabel(r: BomRow) {
 }
 
 function Section({ title, rows, onPick }: { title: string; rows: BomRow[]; onPick: (r: BomRow) => void }) {
+  const { t } = useI18n()
   if (!rows.length) return null
   return (
     <div className="mb-3">
@@ -47,7 +48,11 @@ function Section({ title, rows, onPick }: { title: string; rows: BomRow[]; onPic
               className="flex items-center gap-2 w-full text-left text-xs rounded-lg px-2 py-1.5 hover:bg-gray-800 cursor-pointer">
               <RowIcon id={r.id} kind={r.kind} />
               {r.color ? <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: String(colorHex(r.color)) }} /> : null}
-              <span className="flex-1 truncate">{label}</span>
+              <span className="flex-1 min-w-0">
+                <span className="block truncate">{label}</span>
+                {r.kitContents && <span className="block text-[10px] leading-relaxed text-gray-400 whitespace-normal">{r.kitContents}</span>}
+                {r.designAssumption && r.loadVerified === false && <span className="block text-[10px] leading-relaxed text-[#9a5b16] whitespace-normal">{t('accessory.assumption')}</span>}
+              </span>
               <span className="tabular-nums text-gray-300">×{r.count}</span>
             </button>
           )

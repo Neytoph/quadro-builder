@@ -1,8 +1,9 @@
 // 3D-Szene + Rendering (Three.js). Kennt das Modell nur zum Zeichnen.
 
 import * as THREE from "three";
-import { ACCESSORY_IDS } from './accessoryPack.js';
-import { accessoryMeshes } from './accessoryMeshes.js';
+import { ACCESSORY_IDS, PANEL_ACCESSORY_IDS, mountPoint, componentVolumes } from './accessoryPack.js';
+import { accessoryMeshes, panelAccessoryMeshes } from './accessoryMeshes.js';
+import { confirmedSpec } from './componentPack.js';
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { geometry, colorHex, connectorColor, getPanel } from "./catalog.js";
 import { panelNormal, modelMiddle } from "./util.js";
@@ -578,6 +579,11 @@ export class SceneManager {
     this._disposed = true;
     window.removeEventListener("resize", this._onWindowResize);
     if (this._resizeObserver) this._resizeObserver.disconnect();
+    this._confirmedEnvironmentTarget?.dispose();
+    this._confirmedEnvironmentTarget = null;
+    this._confirmedEnvironmentRenderer = null;
+    this._confirmedFiberBump?.dispose();
+    this._confirmedFiberBump = null;
     this.controls.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
@@ -1666,7 +1672,7 @@ export class SceneManager {
    * Flaechennormale) -- genau wie im QDF.
    */
   _fittingMeshes(f) {
-    if (ACCESSORY_IDS.has(f.kind)) return accessoryMeshes(this, this._renderModel, f, this._look(f.color || 'yellow'));
+    if ((f.appearanceVersion === 2 && f.kind !== 'multi-wheel2') || (ACCESSORY_IDS.has(f.kind) && !confirmedSpec(f.kind))) return accessoryMeshes(this, this._renderModel, f, this._look(f.color || 'yellow'));
     const q = f.quat && f.quat.length === 4
       ? new THREE.Quaternion(f.quat[0], f.quat[1], f.quat[2], f.quat[3]).normalize()
       : new THREE.Quaternion();
@@ -2296,6 +2302,54 @@ export class SceneManager {
   _markPoolWater(mesh) {
     if (mesh) mesh.userData.role = "water";
     return mesh;
+  }
+
+  clearInstallationPreview() {
+    if (!this._installationGroup) return;
+    this.scene.remove(this._installationGroup);
+    this._installationGroup.traverse(object => {
+      if (object.userData.previewMaterial) object.material.dispose();
+      if (object.userData.previewGeometry) object.geometry.dispose();
+    });
+    this._installationGroup = null;
+    this.requestRender();
+  }
+
+  showInstallationPreview(model, part, valid = true) {
+    this.clearInstallationPreview();
+    if (!part?.mounts?.length) return;
+    const group = new THREE.Group();
+    group.name = 'accessory-installation-preview';
+    const meshes = part.kind ? accessoryMeshes(this, model, part, '#238fe4') : panelAccessoryMeshes(this, model, part);
+    for (const mesh of meshes) {
+      mesh.material = mesh.material.clone();
+      mesh.material.transparent = true; mesh.material.opacity = 0.45; mesh.material.depthWrite = false;
+      if (!valid) mesh.material.color.set('#e03131');
+      mesh.userData.previewMaterial = true;
+      group.add(mesh);
+    }
+    const positions = part.mounts.map(m => mountPoint(model, m)).filter(Boolean);
+    for (const position of positions) {
+      const marker = new THREE.Mesh(new THREE.SphereGeometry(1.6, 20, 12), new THREE.MeshBasicMaterial({ color: valid ? '#22c55e' : '#e03131', depthTest: false, transparent: true, opacity: 0.85 }));
+      marker.position.fromArray(position); marker.renderOrder = 20;
+      marker.userData.previewGeometry = true; marker.userData.previewMaterial = true;
+      group.add(marker);
+    }
+    if (part.kind === 'swing') {
+      const volumes = componentVolumes(model, part, { sweep: true });
+      for (const index of [0, (volumes.length - 3) / 2, volumes.length - 3]) {
+        const volume = volumes[index];
+        if (!volume) continue;
+        const edges = new THREE.EdgesGeometry(new THREE.BoxGeometry(...volume.half.map(n => n * 2)));
+        const outline = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: valid ? '#238fe4' : '#e03131', transparent: true, opacity: 0.35, depthWrite: false }));
+        outline.position.fromArray(volume.pos);
+        outline.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(...volume.axes.map(a => new THREE.Vector3(...a))));
+        outline.userData.previewGeometry = true; outline.userData.previewMaterial = true; group.add(outline);
+      }
+    }
+    this._installationGroup = group;
+    this.scene.add(group);
+    this.requestRender();
   }
 
   _placeFitting(mesh, f, q) {
@@ -4242,13 +4296,17 @@ export class SceneManager {
       const geo2 = isReinforceActive
         ? this._tubeGeometry(effectiveRadius, drawLen, qual.tube)
         : geo;
-      const mat = st === "future" ? this._ghostMaterial()
+      let mat = st === "future" ? this._ghostMaterial()
         : st === "current" ? this._tubeMaterial(t.color)
         : isReinforceActive ? this._tubeReinforceActive()
         : (suggest && suggest.has(t.id)) ? this._tubeSuggest()
         : reinforce ? this._tubeGray()
         : (asm && st === "done") ? this._fadedMaterial()
         : this._tubeMaterial(t.color);
+      if (t.tubeId?.startsWith('TA') && st !== 'future' && !(asm && st === 'done')) {
+        if (!this._materials.aluminiumTube) this._materials.aluminiumTube = new THREE.MeshStandardMaterial({ color: '#b9c0c5', metalness: 0.85, roughness: 0.27 });
+        mat = this._materials.aluminiumTube;
+      }
       const dir = vb.clone().sub(va).normalize();
       const quat = new THREE.Quaternion().setFromUnitVectors(UP, dir);
       this._batchAdd(isReinforceActive ? geo2 : geo, matFor(t.id, mat),
@@ -4338,7 +4396,16 @@ export class SceneManager {
       }
       // Die Acrylglasplatte ist ein Nachbau wie die Lochplatte: Rahmen aus der
       // Platten-Geometrie, Scheibe als eigene Box -- kein abgegriffenes Teil.
-      const pdef = getPanel(p.panelId) || {};
+      const currentDefinition = getPanel(p.panelId) || {};
+      const pdef = !p.appearanceVersion && Object.hasOwn(currentDefinition, 'legacyFeature') ? { ...currentDefinition, feature: currentDefinition.legacyFeature } : currentDefinition;
+      if (p.appearanceVersion && PANEL_ACCESSORY_IDS.has(p.panelId)) {
+        for (const mesh of panelAccessoryMeshes(this, model, p)) {
+          mesh.updateMatrix();
+          const material = st === 'future' ? this._ghostMaterial() : (asm && st === 'done') ? mat : mesh.material;
+          this._batchAdd(mesh.geometry, matFor(p.id, material), mesh.matrix, 'panel', p.id, this.pickPanels);
+        }
+        continue;
+      }
       // 功能板也是自己画的：板面要换贴图、板上要加东西，抓来的原件模型不合用
       const echteFlaeche = wantMeshes && !pdef.acrylic && !pdef.feature
         ? this._surfaceMeshFor(pdef.holes ? p.panelId : "panel2",

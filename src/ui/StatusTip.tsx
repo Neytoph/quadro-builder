@@ -4,6 +4,7 @@ import { useI18n } from '../i18n'
 import { NARROW_MAX, statusTipBox, usePanelLayout } from './panelLayout'
 import { useDock } from './dock'
 import { usePresence } from './motion'
+import { componentForTool } from '../store/builderComponents'
 
 const BY_MODE: Record<string, string> = {
   select: 'tip.select',
@@ -51,6 +52,8 @@ export default function StatusTip({ menuOpen }: { menuOpen: boolean }) {
     return () => window.clearTimeout(id)
   }, [text, menuOpen])
   const [shown, leaving] = usePresence(api.toast ? null : say)
+
+  if (api.installationPreview || api.canFlipAccessory || componentForTool(api)) return null
 
   if (narrow && pane) return null
   if (narrow) {

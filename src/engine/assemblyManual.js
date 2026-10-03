@@ -5,10 +5,11 @@
 import { jsPDF } from "jspdf";
 import {
   partForFitting, partName, slideKindName, geometry, colorHex, colorName,
-  reinforcementPart, poolLinerFor,
+  reinforcementPart, poolLinerFor, getPartById,
 } from "./catalog.js";
 import { connectorsForNode, textileRow } from "./bom.js";
 import { POOL_KINDS } from "./model.js";
+import { componentStepLabel, componentPartId, componentOutputColor, componentFittingKey, componentSizeLabel } from './accessoryInfo.js';
 import { partIcon } from "../ui/icons";
 import { drawQr } from "../sharePage";
 
@@ -301,7 +302,7 @@ export function collectPositions(model, filter = null) {
     if (!allowId(panels, p.id) && !all) continue;
     if (!(all || panels)) continue;
     const cor = model.panelCorners(p);
-    pushPos(map, `${p.panelId}|${p.color}`, centroid(cor));
+    pushPos(map, `${p.panelId}|${componentOutputColor(p)}`, centroid(cor));
   }
 
   for (const tx of (model.textiles ? model.textiles.values() : [])) {
@@ -329,9 +330,9 @@ export function collectPositions(model, filter = null) {
       if (def) pushPos(map, `fittings:${def.id}`, world);
       continue;
     }
-    const def = partForFitting(f.kind, f.mask);
+    const def = getPartById(componentPartId(f)) || partForFitting(f.kind, f.mask);
     const fid = def ? def.id : f.kind;
-    pushPos(map, `fittings:${fid}`, world);
+    pushPos(map, `fittings:${componentFittingKey(f, fid)}`, world);
   }
 
   return map;
@@ -413,11 +414,12 @@ function extraStepItems(model, step) {
       });
       continue;
     }
-    const def = partForFitting(f.kind, f.mask);
+    const def = getPartById(componentPartId(f)) || partForFitting(f.kind, f.mask);
     const fid = def ? def.id : f.kind;
-    bump(map, `fittings:${fid}`, {
-      key: `fittings:${fid}`, id: fid, kind: "fittings",
-      name: def ? partName(def) : f.kind,
+    const key = `fittings:${componentFittingKey(f, fid)}`, size = componentSizeLabel(f);
+    bump(map, key, {
+      key, id: fid, kind: "fittings",
+      name: (def ? partName(def) : f.kind) + (size ? ` ${size}` : ''),
     });
   }
   for (const id of step.textileIds || []) {
@@ -550,6 +552,7 @@ async function captureView(scene, model, yaw, { bounds, width, height, items, on
 }
 
 function kindLabel(kind, copy) {
+  if (kind === 'accessories') return componentStepLabel();
   if (kind === "risers") return copy.kindRisers;
   if (kind === "panels") return copy.kindPanels;
   return copy.kindFrame;
@@ -709,7 +712,7 @@ function paintCover(ctx, { front, back, copy, items, icons, fill, frontMarks, ba
   paintLegend(ctx, items, icons, mm(M), mm(bomY + 4.2), mm(PAGE_W - M * 2) - stampW, mm(PAGE_H - 3));
 }
 
-function paintStep(ctx, { front, back, copy, heading, items, icons, k, n, fill, frontMarks, backMarks, stamp }) {
+function paintStep(ctx, { front, back, copy, heading, items, icons, k, n, fill, frontMarks, backMarks, stamp, instructions = [] }) {
   const box = stepBox();
   ctx.fillStyle = INK;
   ctx.font = font(600, mm(4.4));
@@ -733,6 +736,27 @@ function paintStep(ctx, { front, back, copy, heading, items, icons, k, n, fill, 
     ctx.fillText(copy.none, mm(M), mm(partsY + 4.4));
   } else {
     paintLegend(ctx, items, icons, mm(M), mm(partsY + 4), mm(PAGE_W - M * 2) - stampW, mm(PAGE_H - 2.5));
+  }
+  if (instructions.length) {
+    const width = mm(PAGE_W - M * 2) - stampW;
+    const lineHeight = mm(3.2);
+    let y = mm(partsY + 10);
+    ctx.font = font(400, mm(2.4));
+    ctx.fillStyle = MUTED;
+    for (const text of instructions) {
+      const words = String(text).match(/\S+\s*|\s+/gu) || [];
+      let line = '';
+      // 按实际字宽换行，中文长段也逐字符断开。
+      for (const word of words) {
+        for (const char of word) {
+          if (ctx.measureText(line + char).width > width) {
+            ctx.fillText(line, mm(M), y); y += lineHeight; line = '';
+          }
+          line += char;
+        }
+      }
+      if (line) { ctx.fillText(line, mm(M), y); y += lineHeight; }
+    }
   }
 }
 
@@ -882,6 +906,7 @@ export async function exportAssemblyPdf({ scene, builder, model, name, bom, copy
       paintStep(ctx, {
         front: front.img, back: back.img, copy, heading, items, icons,
         k: i + 1, n: steps.length, fill,
+        instructions: s.instructions || [],
         frontMarks: front.marks, backMarks: back.marks, stamp,
       });
       await pageToPdf(doc, c, false);

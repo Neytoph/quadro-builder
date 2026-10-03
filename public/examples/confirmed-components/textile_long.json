@@ -1,0 +1,209 @@
+{
+  "format": 2,
+  "nodes": [
+    {
+      "id": "n1",
+      "x": 0,
+      "y": 42.5,
+      "z": 0
+    },
+    {
+      "id": "n2",
+      "x": 40,
+      "y": 42.5,
+      "z": 0
+    },
+    {
+      "id": "n4",
+      "x": 40,
+      "y": 42.5,
+      "z": 80
+    },
+    {
+      "id": "n6",
+      "x": 0,
+      "y": 42.5,
+      "z": 80
+    },
+    {
+      "id": "n9",
+      "x": 0,
+      "y": 2.5,
+      "z": 0
+    },
+    {
+      "id": "n11",
+      "x": 0,
+      "y": 2.5,
+      "z": 40
+    },
+    {
+      "id": "n13",
+      "x": 40,
+      "y": 2.5,
+      "z": 0
+    },
+    {
+      "id": "n15",
+      "x": 40,
+      "y": 2.5,
+      "z": 40
+    }
+  ],
+  "tubes": [
+    {
+      "id": "t3",
+      "a": "n1",
+      "b": "n2",
+      "tubeId": "T35",
+      "color": "red",
+      "length": 35
+    },
+    {
+      "id": "t5",
+      "a": "n2",
+      "b": "n4",
+      "tubeId": "T75",
+      "color": "green",
+      "length": 75
+    },
+    {
+      "id": "t7",
+      "a": "n4",
+      "b": "n6",
+      "tubeId": "T35",
+      "color": "blue",
+      "length": 35
+    },
+    {
+      "id": "t8",
+      "a": "n6",
+      "b": "n1",
+      "tubeId": "T75",
+      "color": "yellow",
+      "length": 75
+    },
+    {
+      "id": "t10",
+      "a": "n9",
+      "b": "n1",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t12",
+      "a": "n9",
+      "b": "n11",
+      "tubeId": "T35",
+      "color": "blue",
+      "length": 35
+    },
+    {
+      "id": "t14",
+      "a": "n13",
+      "b": "n2",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t16",
+      "a": "n13",
+      "b": "n15",
+      "tubeId": "T35",
+      "color": "blue",
+      "length": 35
+    },
+    {
+      "id": "t17",
+      "a": "n11",
+      "b": "n15",
+      "tubeId": "T35",
+      "color": "red",
+      "length": 35
+    }
+  ],
+  "panels": [],
+  "clamps": [],
+  "textiles": [],
+  "fittings": [
+    {
+      "id": "f18",
+      "kind": "textile_long",
+      "x": 20,
+      "y": 42.5,
+      "z": 40,
+      "quat": [
+        0,
+        0.7071,
+        0.7071,
+        0
+      ],
+      "color": "blue",
+      "tube": "t5",
+      "appearanceVersion": 2,
+      "params": {
+        "id": "textile_long",
+        "name": "长布片",
+        "mountType": "rails",
+        "feature": "cloth",
+        "width": 40,
+        "height": 80,
+        "depth": 1.2,
+        "placement": "fitting",
+        "verifiedLoad": false,
+        "appearanceVersion": 2,
+        "kitContents": [
+          "component",
+          "retainers"
+        ],
+        "name_en": "Long fabric panel",
+        "name_de": "Lange Stofffläche",
+        "fixedColor": null,
+        "mount": "rails",
+        "designAssumption": true,
+        "assumption": "frame-grid-unmeasured",
+        "qdfSupported": false,
+        "qdfSimplified": false
+      },
+      "mounts": [
+        {
+          "tube": "t5",
+          "t": 0.25,
+          "role": "sleeve",
+          "width": 2
+        },
+        {
+          "tube": "t5",
+          "t": 0.75,
+          "role": "sleeve",
+          "width": 2
+        },
+        {
+          "tube": "t8",
+          "t": 0.75,
+          "role": "sleeve",
+          "width": 2
+        },
+        {
+          "tube": "t8",
+          "t": 0.25,
+          "role": "sleeve",
+          "width": 2
+        }
+      ],
+      "supportTubes": [
+        "t5",
+        "t8"
+      ],
+      "partId": "textile_long",
+      "a": "t5",
+      "b": "t8",
+      "t0": 0,
+      "len": 80
+    }
+  ],
+  "slides": [],
+  "groups": []
+}

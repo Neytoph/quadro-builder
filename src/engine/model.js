@@ -2,12 +2,16 @@
 // Bewusst ohne Three.js-Abhaengigkeit, damit es testbar und Backend-tauglich bleibt.
 
 import { MERGE_EPS, FORMAT_VERSION, DIAGONAL_SNAP_TOL, DIRECTIONS, DIAGONAL_DIRECTIONS, DIR_ALIGN_TOL, ARM_ALIGN_TOL, CONN_TYPE_MASK, anchorGap } from "./config.js";
-import { ACCESSORY_IDS, accessoryMount } from './accessoryPack.js';
+import { ACCESSORY_IDS, PANEL_ACCESSORY_IDS, accessoryMount, accessoryDiagnostics, panelAccessoryDiagnostics, componentMountsValid, confirmedDiagnostics } from './accessoryPack.js';
+import { confirmedSpec } from './componentPack.js';
+import { confirmedCandidates, ropeCandidate } from './confirmedComponentModel.js';
+import { insetPanelProbes } from './insetPanelMounts.js';
 
 // Zellweite des Rasters, mit dem die Kollisionspruefung Nachbarn sucht. Etwas
 // groesser als das laengste Rohr (75 cm + Kupplung): ein Rohr liegt damit in
 // hoechstens zwei Zellen je Achse.
 const COLL_CELL = 100;
+export const fixedTubeColor = id => id === 'TA35' || id === 'TA75' ? '#b9c0c5' : null;
 
 export function slopeArmDirsAt(model, node) {
   let direction = null;
@@ -785,7 +789,7 @@ export class BuildModel {
   addTube(aId, bId, tubeId, color, length, reinforced = false) {
     if (aId === bId) return null;
     if (this.tubeBetween(aId, bId)) return null; // schon vorhanden
-    const tube = { id: this._id("t"), a: aId, b: bId, tubeId, color, length, reinforced: !!reinforced };
+    const tube = { id: this._id("t"), a: aId, b: bId, tubeId, color: fixedTubeColor(tubeId) || color, length, reinforced: !!reinforced };
     this.tubes.set(tube.id, tube);
     return tube;
   }
@@ -1193,8 +1197,14 @@ export class BuildModel {
     if (this.panelAt(aId, bId, t0, len)) return null;
     const panel = {
       id: this._id("p"), a: aId, b: bId, t0: round(t0), len: round(len),
-      panelId, color, side: side < 0 ? -1 : 1,
+      panelId, color: confirmedSpec(panelId)?.fixedColor || color || confirmedSpec(panelId)?.defaultColor, side: side < 0 ? -1 : 1,
     };
+    if (PANEL_ACCESSORY_IDS.has(panelId)) {
+      const mount = this.panelAccessoryDiagnostics(panel);
+      if (!mount.valid) return null;
+      for (const key of ['mounts', 'supportTubes', 'appearanceVersion', 'params']) panel[key] = structuredClone(mount[key]);
+      if(mount.params?.mountLayout)for(const key of ['a','b','t0','len','side'])panel[key]=mount[key];
+    }
     this.panels.set(panel.id, panel);
     return panel;
   }
@@ -1203,6 +1213,11 @@ export class BuildModel {
   flipPanelSide(id) {
     const p = this.panels.get(id) || this.textiles.get(id);
     if (!p) return null;
+    if (p.appearanceVersion && p.panelId === 'panel_40x40_pocket') return null;
+    if (p.appearanceVersion && PANEL_ACCESSORY_IDS.has(p.panelId)) {
+      const flipped = { ...p, side: -(p.side || 1) };
+      if (!this.panelAccessoryDiagnostics(flipped).valid) return null;
+    }
     p.side = (p.side || 1) < 0 ? 1 : -1;
     // Die eigene Lage aus der Datei kennt die alte Seite -- ab jetzt rechnet
     // sich die Platte wieder aus ihrem Rohrpaar.
@@ -1253,16 +1268,71 @@ export class BuildModel {
   }
 
   accessoryMounts(kind) {
-    const occupied = new Set([...this.fittings.values()].filter(f => ACCESSORY_IDS.has(f.kind)).map(f => f.tube));
-    return [...this.tubes.keys()].filter(id => !occupied.has(id)).map(id => accessoryMount(this, kind, id)).filter(Boolean);
+    return [...this.tubes.keys()].map(id => accessoryMount(this, kind, id)).filter(Boolean);
   }
 
-  addAccessory(kind, tubeId, color) {
-    const mount = this.accessoryMounts(kind).find(item => item.tube === tubeId);
+  accessoryDiagnostics(kind, tubeId, opts = {}) { return accessoryDiagnostics(this, kind, tubeId, opts); }
+
+  panelAccessoryDiagnostics(probe, opts = {}) { return panelAccessoryDiagnostics(this, probe, opts); }
+
+  addPanelAccessory(probe,color) {
+    const candidate=this.panelAccessoryDiagnostics(probe);
+    if(!candidate.valid || this.panelAt(candidate.a,candidate.b,candidate.t0,candidate.len))return null;
+    const record={...candidate,id:this._id('p'),color:color || probe.color || null};
+    for(const key of ['valid','reason','pos','obstacle'])delete record[key];
+    this.panels.set(record.id,record);return record;
+  }
+
+  panelAccessoryMounts(panelId,{screwAxis='vertical'}={}) {
+    if (confirmedSpec(panelId)) return this.confirmedMounts(panelId,{screwAxis}).filter(p => p.valid);
+    const mounts = [], seen = new Set();
+    for (const tube of this.tubes.values()) for (const partner of this.panelPartners(tube.id, [40, 40])) {
+      const count = Math.max(1, Math.floor((partner.hi - partner.lo + 0.5) / 40));
+      for (let k = 0; k < count; k++) {
+        const probe = { a: tube.id, b: partner.id, t0: partner.lo + k * 40, len: 40, panelId, side: 1,params:{screwAxis} };
+        const key = this.panelCorners(probe)?.map(c => c.map(round).join(',')).sort().join('|');
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        const mount = this.panelAccessoryDiagnostics(probe);
+        if (mount.valid) mounts.push(mount);
+      }
+    }
+    if(panelId==='panel_40x40_busy')for(const probe of insetPanelProbes(this,40,40)){
+      const key=this.panelCorners(probe)?.map(c=>c.map(round).join(',')).sort().join('|');if(!key || seen.has(key))continue;
+      const mount=this.panelAccessoryDiagnostics({...probe,panelId,side:1,params:{screwAxis}});if(mount.valid){mounts.push(mount);seen.add(key);}
+    }
+    return mounts;
+  }
+
+  addAccessory(kind, tubeId, color, opts = {}) {
+    const mount = accessoryMount(this, kind, tubeId, opts);
     if (!mount) return null;
-    const f = this.addFitting(kind, ...mount.pos, { color });
+    const f = this.addFitting(kind, ...mount.pos, { color, quat: mount.quat });
     f.tube = tubeId;
+    for (const key of ['mounts', 'supportTubes', 'appearanceVersion', 'params', 'facing']) f[key] = structuredClone(mount[key]);
     return f;
+  }
+
+  confirmedMounts(partId,options={}) { return confirmedCandidates(this, partId,options).map(p => confirmedDiagnostics(this, p)); }
+  ropeDiagnostics(first, second) { return confirmedDiagnostics(this, ropeCandidate(this, first, second)); }
+  confirmedDiagnostics(probe) { return confirmedDiagnostics(this, probe); }
+
+  addConfirmedComponent(probe, color) {
+    const candidate = confirmedDiagnostics(this, probe);
+    if (!candidate.valid) return null;
+    const record = { ...candidate, color: confirmedSpec(candidate.panelId || candidate.kind)?.fixedColor || color || probe.color || confirmedSpec(candidate.panelId || candidate.kind)?.defaultColor || null, id: this._id(candidate.panelId ? 'p' : 'f') };
+    for (const key of ['valid', 'reason', 'pos', 'obstacle']) delete record[key];
+    (record.panelId ? this.panels : this.fittings).set(record.id, record);
+    return record;
+  }
+
+  flipAccessory(id) {
+    const f = this.fittings.get(id);
+    if (f?.kind !== 'steering_wheel') return false;
+    const mount = this.accessoryDiagnostics(f.kind, f.tube, { facing: -(f.facing || 1), ignoreId: id });
+    if (!mount.valid) return false;
+    f.facing = mount.facing; f.quat = mount.quat;
+    return true;
   }
 
   /**
@@ -3118,6 +3188,8 @@ export class BuildModel {
     if (!map) return false;
     const el = map.get(id);
     if (!el || el.color === color) return false;
+    if (el.appearanceVersion === 2 && confirmedSpec(el.panelId || el.partId || el.kind)?.fixedColor) return false;
+    if (kind === 'tube' && fixedTubeColor(el.tubeId)) return false;
     // Arm-/Link-Kanten (C45-Adapter, Doppelrohr-Verbindung) sind keine echten
     // Rohre und werden nicht eingefaerbt.
     if (kind === "tube" && (el.arm || el.link)) return false;
@@ -3756,8 +3828,11 @@ export class BuildModel {
   _prunePanels() {
     for (const map of [this.panels, this.textiles]) {
       for (const p of [...map.values()]) {
-        if (!this._rail(p.a) || !this._rail(p.b)) map.delete(p.id);
+        if (!this._rail(p.a) || !this._rail(p.b) || (Array.isArray(p.supportTubes) && p.supportTubes.some(id => !this._rail(id)))) map.delete(p.id);
       }
+    }
+    for (const f of [...this.fittings.values()]) {
+      if ((f.tube && !this.tubes.has(f.tube)) || (Array.isArray(f.supportTubes) && f.supportTubes.some(id => !this.tubes.has(id)))) this.fittings.delete(f.id);
     }
   }
 
@@ -3837,7 +3912,7 @@ export class BuildModel {
       // Platten und Netze haengen an zwei Rohren -- verschoben werden deren Knoten.
       else if (kind === "panel" || kind === "textile") {
         const p = (kind === "panel" ? this.panels : this.textiles).get(id);
-        for (const tid of p ? [p.a, p.b] : []) {
+        for (const tid of p ? (Array.isArray(p.supportTubes) ? p.supportTubes : [p.a, p.b]) : []) {
           const t = this.tubes.get(tid);
           if (t) addNodes([t.a, t.b]);
         }
@@ -3848,16 +3923,18 @@ export class BuildModel {
         const f = this.fittings.get(id);
         if (f) {
           fittings.add(id);
-          if (ACCESSORY_IDS.has(f.kind)) {
-            const tube = this.tubes.get(f.tube);
-            if (tube) addNodes([tube.a, tube.b]);
+          if (ACCESSORY_IDS.has(f.kind) || (f.kind==='multi-wheel2' && f.appearanceVersion===2)) {
+            for (const id of Array.isArray(f.supportTubes) ? f.supportTubes : [f.tube]) {
+              const tube = this.tubes.get(id);
+              if (tube) addNodes([tube.a, tube.b]);
+            }
           }
         }
       }
     }
     for (const f of this.fittings.values()) {
       const tube = this.tubes.get(f.tube);
-      if (ACCESSORY_IDS.has(f.kind) && tube && nodes.has(tube.a) && nodes.has(tube.b)) fittings.add(f.id);
+      if ((ACCESSORY_IDS.has(f.kind) || (f.kind==='multi-wheel2' && f.appearanceVersion===2)) && tube && (Array.isArray(f.supportTubes) ? f.supportTubes : [f.tube]).every(id => { const t = this.tubes.get(id); return t && nodes.has(t.a) && nodes.has(t.b); })) fittings.add(f.id);
     }
     return { nodes, clamps, slides, fittings };
   }
@@ -4316,7 +4393,7 @@ export class BuildModel {
       return drin;
     }).map(ohneGeom);
     const aufRohren = (list) => (list || [])
-      .filter((p) => tubeIds.has(p.a) && tubeIds.has(p.b)).map(ohneGeom);
+      .filter((p) => (Array.isArray(p.supportTubes) ? p.supportTubes : [p.a, p.b]).every(id => tubeIds.has(id))).map(ohneGeom);
 
     const clamps = (json.clamps || []).filter((c) => tg.clamps.has(c.id));
     const slides = (json.slides || []).filter((s) => tg.slides.has(s.id));
@@ -4424,7 +4501,15 @@ export class BuildModel {
         const id = this._id(prefix);
         neu.set(p.id, id);
         out[art].push(id);
-        map.set(id, { ...p, id, a, b });
+        const rec = { ...p, id, a, b };
+        if (p.supportTubes) {
+          if (!Array.isArray(p.supportTubes)) continue;
+          if (!p.supportTubes.every(id => neu.has(id))) continue;
+          rec.supportTubes = p.supportTubes.map(id => neu.get(id));
+          rec.mounts = Array.isArray(p.mounts) ? p.mounts.map(m => m && typeof m === 'object' ? { ...m, tube: neu.get(m.tube) } : m) : p.mounts;
+          rec.params = structuredClone(p.params);
+        }
+        map.set(id, rec);
       }
     };
     aufRohre(frag.panels, this.panels, "p", "panels");
@@ -4442,10 +4527,18 @@ export class BuildModel {
     for (const f of frag.fittings || []) {
       const rec = versetzt(f, "f", "fittings");
       // 软包滚筒记着管子的 id，片段里的管换了新 id；管没一起带过来就丢掉
-      if (rec.kind === "sleeve" || ACCESSORY_IDS.has(rec.kind)) {
+      if (rec.kind === "sleeve" || ACCESSORY_IDS.has(rec.kind) || (rec.kind==='multi-wheel2' && rec.tube)) {
         rec.tube = rec.tube ? neu.get(rec.tube) || null : null;
         if (!rec.tube) continue;
       }
+      if (f.supportTubes) {
+        if (!Array.isArray(f.supportTubes)) continue;
+        if (!f.supportTubes.every(id => neu.has(id))) continue;
+        rec.supportTubes = f.supportTubes.map(id => neu.get(id));
+        rec.mounts = Array.isArray(f.mounts) ? f.mounts.map(m => m && typeof m === 'object' ? { ...m, tube: neu.get(m.tube) } : m) : f.mounts;
+        rec.params = structuredClone(f.params);
+      }
+      if (f.appearanceVersion === 2) for (const key of ['a', 'b']) if (f[key]) rec[key] = neu.get(f[key]);
       this.fittings.set(rec.id, rec);
     }
     // 承载接头跟随新轴承配件，删除副本时只能删除副本自己的配件。
@@ -4467,6 +4560,7 @@ export class BuildModel {
    */
   detachSelection(sel) {
     const tg = this.moveTargets(sel);
+    if (this._incompleteComponentMove(tg)) return 0;
     return tg.nodes.size ? this._detachBoundary(tg.nodes) : 0;
   }
 
@@ -4630,6 +4724,7 @@ export class BuildModel {
   moveSelection(sel, dx, dy, dz, { merge = true, validate = null, snapDist = 0 } = {}) {
     if (!dx && !dy && !dz) return { ok: true, merged: 0, detached: 0 };
     const tg = this.moveTargets(sel);
+    if (this._incompleteComponentMove(tg)) return { ok: false, reason: 'accessory_mounts' };
     if (!tg.nodes.size && !tg.clamps.size && !tg.slides.size && !tg.fittings.size) return { ok: false, reason: "empty" };
 
     // Unter den Boden wird nicht verschoben. Frueh geprueft, damit der teure
@@ -4646,6 +4741,7 @@ export class BuildModel {
     const movedTubes = this.tubesAt(tg.nodes);
     const collidedBefore = this.collisions({ only: movedTubes });
     const badBefore = validate ? validate(this) : null;
+    const invalidComponentsBefore = this._invalidComponents();
 
     const fail = (reason) => { this.loadJSON(snapshot); return { ok: false, reason }; };
     const detached = this._detachBoundary(tg.nodes);
@@ -4660,6 +4756,7 @@ export class BuildModel {
     }
 
     const merged = merge ? this._mergeMovedNodes(tg.nodes) : 0;
+    if ([...this._invalidComponents()].some(id => !invalidComponentsBefore.has(id))) return fail('accessory_space');
     if (badBefore) {
       for (const id of validate(this)) if (!badBefore.has(id)) return fail("connector");
     }
@@ -4730,6 +4827,7 @@ export class BuildModel {
    */
   mirrorSelection(sel, axis = "x", { merge = true, validate = null, grid = 5 } = {}) {
     const tg = this.moveTargets(sel);
+    if (this._incompleteComponentMove(tg)) return { ok: false, reason: 'accessory_mounts' };
     if (!tg.nodes.size && !tg.clamps.size && !tg.slides.size && !tg.fittings.size) return { ok: false, reason: "empty" };
     for (const id of tg.slides) {
       const sl = this.slides.get(id);
@@ -4750,6 +4848,7 @@ export class BuildModel {
     const movedTubes = this.tubesAt(tg.nodes);
     const collidedBefore = this.collisions({ only: movedTubes });
     const badBefore = validate ? validate(this) : null;
+    const invalidComponentsBefore = this._invalidComponents();
     const fail = (reason) => { this.loadJSON(snapshot); return { ok: false, reason }; };
 
     const detached = this._detachBoundary(tg.nodes);
@@ -4758,6 +4857,7 @@ export class BuildModel {
       if (!collidedBefore.has(id)) return fail("collision");
     }
     const merged = merge ? this._mergeMovedNodes(tg.nodes) : 0;
+    if ([...this._invalidComponents()].some(id => !invalidComponentsBefore.has(id))) return fail('accessory_space');
     if (badBefore) {
       for (const id of validate(this)) if (!badBefore.has(id)) return fail("connector");
     }
@@ -4773,7 +4873,7 @@ export class BuildModel {
     const r6 = (t) => Math.round(t * 1e6) / 1e6;
     const flipPos = (o) => {
       if (!o) return;
-      if (i === 0) o.x = round(2 * c - o.x); else o.z = round(2 * c - o.z);
+    if (i === 0) o.x = round(2 * c - o.x); else o.z = round(2 * c - o.z);
     };
     const flipPt = (p) => {
       if (!Array.isArray(p) || p.length !== 3) return p;
@@ -4793,6 +4893,9 @@ export class BuildModel {
     // 板和布在承重管上的起点：管的方向翻过来之后，从另一头量
     for (const list of [this.panels, this.textiles]) {
       for (const p of list.values()) {
+        if (p.appearanceVersion && (p.panelId === 'panel_40x40_busy' || p.appearanceVersion === 2) && (Array.isArray(p.supportTubes) ? p.supportTubes : [p.a, p.b]).every(id => {
+          const carrier = this.tubes.get(id); return carrier && tg.nodes.has(carrier.a) && tg.nodes.has(carrier.b);
+        })) p.side = -(p.side || 1);
         const t = this.tubes.get(p.a);
         if (!t || !tg.nodes.has(t.a) || !tg.nodes.has(t.b)) continue;
         const ra = this._rail(p.a);
@@ -4836,6 +4939,10 @@ export class BuildModel {
       if (!f) continue;
       flipPos(f);
       if (f.quat) f.quat = flipQuat(f.quat);
+      if (f.kind === 'steering_wheel' && f.quat && this._rail(f.tube)) {
+        const normal = cross3(this._rail(f.tube).dir, [0, 1, 0]);
+        f.facing = dot3(zAxisOf(f.quat), normal) < 0 ? -1 : 1;
+      }
     }
     for (const t of this.tubes.values()) {
       const ba = tg.nodes.has(t.a), bb = tg.nodes.has(t.b);
@@ -4861,12 +4968,24 @@ export class BuildModel {
         delete p.geom;
       }
     }
+    this._syncConfirmedPoses(tg);
+  }
+
+  _syncConfirmedPoses(tg) {
+    for (const id of tg.fittings || []) {
+      const part = this.fittings.get(id);
+      if (part?.appearanceVersion !== 2) continue;
+      const candidate = confirmedDiagnostics(this, part);
+      if (candidate.quat) part.quat = candidate.quat;
+      if (candidate.pos) [part.x,part.y,part.z] = candidate.pos;
+    }
   }
 
   rotateSelection(sel, steps = 1, { merge = true, validate = null, grid = 5 } = {}) {
     const schritte = ((steps % 4) + 4) % 4;
     if (!schritte) return { ok: true, merged: 0, detached: 0 };
     const tg = this.moveTargets(sel);
+    if (this._incompleteComponentMove(tg)) return { ok: false, reason: 'accessory_mounts' };
     if (!tg.nodes.size && !tg.clamps.size && !tg.slides.size && !tg.fittings.size) return { ok: false, reason: "empty" };
 
     // Drehachse: senkrecht durch die Mitte der Auswahl. Auf das Raster
@@ -4887,6 +5006,7 @@ export class BuildModel {
     const movedTubes = this.tubesAt(tg.nodes);
     const collidedBefore = this.collisions({ only: movedTubes });
     const badBefore = validate ? validate(this) : null;
+    const invalidComponentsBefore = this._invalidComponents();
     const fail = (reason) => { this.loadJSON(snapshot); return { ok: false, reason }; };
 
     const detached = this._detachBoundary(tg.nodes);
@@ -4896,6 +5016,7 @@ export class BuildModel {
     }
 
     const merged = merge ? this._mergeMovedNodes(tg.nodes) : 0;
+    if ([...this._invalidComponents()].some(id => !invalidComponentsBefore.has(id))) return fail('accessory_space');
     if (badBefore) {
       for (const id of validate(this)) if (!badBefore.has(id)) return fail("connector");
     }
@@ -5128,13 +5249,23 @@ export class BuildModel {
   // Nach dem Zusammenlegen koennen Rohre zwischen denselben zwei Kupplungen
   // doppelt vorliegen oder auf einen Punkt zusammenfallen.
   _dedupeTubes() {
-    const seen = new Set();
+    const seen = new Map();
     for (const t of [...this.tubes.values()]) {
       if (t.a === t.b) { this.tubes.delete(t.id); continue; }
       const pair = t.a < t.b ? `${t.a}|${t.b}` : `${t.b}|${t.a}`;
       const key = `${pair}|${t.arm ? "a" : t.link ? "l" : "t"}`;
-      if (seen.has(key)) this.tubes.delete(t.id);
-      else seen.add(key);
+      if (seen.has(key)) {
+        const kept = seen.get(key), reversed = t.a !== kept.a;
+        for (const part of [...this.panels.values(), ...this.textiles.values(), ...this.fittings.values()]) {
+          if (part.a === t.id) { part.a = kept.id; if (reversed) part.t0 = round((this._rail(kept.id)?.len || 0) - part.t0 - part.len); }
+          if (part.b === t.id) part.b = kept.id;
+          if (part.tube === t.id) { part.tube = kept.id; if (reversed && part.kind === 'steering_wheel') part.facing = -(part.facing || 1); }
+          if (Array.isArray(part.supportTubes)) part.supportTubes = [...new Set(part.supportTubes.map(id => id === t.id ? kept.id : id))];
+          if (Array.isArray(part.mounts)) part.mounts = part.mounts.map(m => m?.tube === t.id ? { ...m, tube: kept.id, t: reversed ? 1 - m.t : m.t } : m);
+        }
+        for (const node of this.nodes.values()) if (node.clampOn?.tubeId === t.id) { node.clampOn.tubeId = kept.id; if (reversed) node.clampOn.t = 1 - node.clampOn.t; }
+        this.tubes.delete(t.id);
+      } else seen.set(key, t);
     }
   }
 
@@ -5226,8 +5357,25 @@ export class BuildModel {
    */
   translateSelection(sel, dx, dy, dz) {
     const tg = this.moveTargets(sel);
+    if (this._incompleteComponentMove(tg)) return { ...tg, blocked: 'accessory_mounts' };
     if (dx || dy || dz) this._applyOffset(tg, dx, dy, dz);
     return tg;
+  }
+
+  _incompleteComponentMove(tg) {
+    for (const part of [...this.panels.values(), ...this.fittings.values()]) {
+      if (!part.appearanceVersion || !part.supportTubes) continue;
+      const supportTubes = Array.isArray(part.supportTubes) ? part.supportTubes : [part.tube, part.a, part.b].filter(Boolean);
+      const nodes = [...new Set(supportTubes.flatMap(id => { const t = this.tubes.get(id); return t ? [t.a, t.b] : []; }))];
+      if (nodes.some(id => tg.nodes.has(id)) && nodes.some(id => !tg.nodes.has(id))) return part.id;
+    }
+    return null;
+  }
+
+  _invalidComponents() {
+    return new Set([...this.panels.values(), ...this.fittings.values()].filter(p =>
+      p.appearanceVersion && (PANEL_ACCESSORY_IDS.has(p.panelId) || ACCESSORY_IDS.has(p.kind)) && (!componentMountsValid(this, p)
+        || !(p.appearanceVersion === 2 ? confirmedDiagnostics(this, p) : p.kind ? this.accessoryDiagnostics(p.kind, p.tube, { facing: p.facing, ignoreId: p.id }) : this.panelAccessoryDiagnostics(p)).valid)).map(p => p.id));
   }
 
   // Hat der Knoten eine senkrechte Stuetze nach unten (Rohr zu einem Knoten direkt darunter)?
@@ -5952,6 +6100,7 @@ export class BuildModel {
         if (p.geom) o.geom = p.geom;          // eigene Lage aus der Datei
         if (p.pool) o.pool = p.pool;          // Original-Zeile des Baellebads
         if (p.poolPart) o.poolPart = true;    // Wand/Boden eines Baellebads
+        for (const key of ['appearanceVersion', 'params', 'mounts', 'supportTubes']) if (p[key] != null) o[key] = structuredClone(p[key]);
         return o;
       }),
       clamps: [...this.clamps.values()].map((c) => {
@@ -5977,6 +6126,7 @@ export class BuildModel {
         if (f.rest) o.rest = f.rest;
         if (f.balls) o.balls = true;      // 泳池里倒了海洋球
         if (f.tube) o.tube = f.tube;      // 软包滚筒套在哪根管上
+        for (const key of ['appearanceVersion', 'params', 'mounts', 'supportTubes', 'facing', 'partId', 'a', 'b', 't0', 'len', 'curveReverse', 'ropeLength']) if (f[key] != null) o[key] = structuredClone(f[key]);
         return o;
       }),
       slides: [...this.slides.values()].map((s) => {
@@ -6050,6 +6200,7 @@ export class BuildModel {
       if (!rec.turned && rec.geom && rec.geom.quat) rec.turned = this._panelTurnedFromQuat(rec);
       if (p.pool) rec.pool = p.pool;
       if (p.poolPart) rec.poolPart = true;
+      for (const key of ['appearanceVersion', 'params', 'mounts', 'supportTubes']) if (p[key] != null) rec[key] = structuredClone(p[key]);
       this.panels.set(p.id, rec);
       maxSeq = Math.max(maxSeq, parseSeq(p.id));
     }
@@ -6091,6 +6242,8 @@ export class BuildModel {
         rest: f.rest || null,
         balls: !!f.balls,
         tube: f.tube || null,
+        ...(f.appearanceVersion != null ? { appearanceVersion: f.appearanceVersion, params: structuredClone(f.params), mounts: structuredClone(f.mounts), supportTubes: structuredClone(f.supportTubes), facing: f.facing || 1 } : {}),
+        ...(f.appearanceVersion === 2 ? { partId: f.partId, a: f.a, b: f.b, t0: f.t0, len: f.len, curveReverse: f.curveReverse, ropeLength: f.ropeLength } : {}),
       });
       maxSeq = Math.max(maxSeq, parseSeq(f.id));
     }

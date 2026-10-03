@@ -3,6 +3,7 @@ import type { CustomComponent, ComponentFragment } from './customComponents'
 import { labelOf } from '../names'
 import { ACC_CAT_ICON, CONN_CAT_ICON, TOOL_ICON, partIcon, tubeIcon } from '../ui/icons'
 import { MODULE_GROUPS, presetThumbPath } from '../data/presets'
+import { builderComponents } from './builderComponents'
 
 type EngineApi = ReturnType<typeof useEngine>
 type PartAction = { kind: 'panel' | 'tube' | 'slide' | 'clamp' | 'connector' | 'fitting' | 'pool' | 'c45' | 'module'; id: string; partId?: string }
@@ -53,6 +54,14 @@ export function componentChoices(api: EngineApi, saved: CustomComponent[], t: (k
   for (const part of [...api.catalog.tubes, ...api.catalog.curved]) {
     const length = 'length_cm' in part && typeof part.length_cm === 'number' ? part.length_cm : undefined
     choices.push({ key: `tube:${part.id}`, label: labelOf(part.id, part.name), group: t('tool.tubes'), partId: part.id, icon: tubeIcon(part.id, length), action: { kind: 'tube', id: part.id } })
+  }
+  for (const part of builderComponents()) {
+    const key = `${part.placement === 'panel' ? 'panel' : 'accessory'}:${part.id}`
+    const choice: ComponentChoice = { key, label: labelOf(part.id, part.name), group: t(part.placement === 'panel' ? 'tool.panels' : 'tool.accessories'), partId: part.id,
+      icon: partIcon(part.id, part.placement === 'panel' ? 'panels' : 'fittings'), action: part.placement === 'panel' ? { kind: 'panel', id: part.id } : { kind: 'fitting', id: part.kind || part.id, partId: part.id } }
+    const existing = choices.findIndex(candidate => candidate.key === key)
+    if (existing >= 0) choices[existing] = choice
+    else choices.push(choice)
   }
   for (const group of MODULE_GROUPS) for (const part of group.items) choices.push({ key: `module:${part.key}`, label: t(part.labelKey), group: t('section.modules'), image: presetThumbPath(part.key), icon: CONN_CAT_ICON['6way'], action: { kind: 'module', id: part.key } })
   for (const part of saved) choices.push({ key: `saved:${part.id}`, label: part.name, group: t('tool.customSaved'), icon: TOOL_ICON.panel, fragment: part.fragment })

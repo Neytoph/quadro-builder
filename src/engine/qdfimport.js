@@ -27,6 +27,7 @@
 
 import { round2 as round, panelNormal, modelMiddle, quatFromBasis } from "./util.js";
 import { FORMAT_VERSION, C45_SLEEVE_LEN, C45_ARM_LEN } from "./config.js";
+import { QDF_FEATURE_SUFFIX, qdfPanelDimensionKey } from './qdfFeatures.js';
 import { holePartForMask, holeArmDirs, BOLT_PART, MAX_HINGES, HINGE_STEP } from "./model.js";
 
 // Alle benannten Richtungen (kardinal + 45°-diagonal) fuer Arm-Erkennung.
@@ -79,6 +80,9 @@ const FITTING_KINDS = {
   "tube-cap2":          { keepRest: true },  // Rohrkappe
 };
 
+export const QDF_FITTING_KINDS = new Set([...Object.keys(FITTING_KINDS), 'hole-connector4', 'pool2', 'pool-small2']);
+export const QDF_SLIDE_KINDS = new Set(['slide2', 'slide-new2', 'slide-end2', 'curved-slide2', 'roof2', 'roof-large2']);
+
 // Tiefen, die ein Baellebad ueberhaupt haben kann -- die Langseiten der vier
 // Poolfolien (XS 40x40, S 80x120, L 120x160, XXL 120x240). Die Datei fuehrt die
 // Groesse nicht mit, sie wird aus den umstehenden Kupplungen gelesen; ohne diese
@@ -109,7 +113,7 @@ const HOLE_SUFFIX = " (hole)";
 // Acrylglasplatte: gleicher Kniff, Name "<farbe> (acrylic)".
 const ACRYLIC_SUFFIX = " (acrylic)";
 // 功能板（兼容件）：名字「<farbe> (<feature>)」，feature 见 qdfexport.js FEATURE_KEYS。
-const FEATURE_SUFFIX_RE = / \((lego|honeycomb|busy|felt|magnet|climbing|sensory|pocket|basin|rainbow|bridge)\)$/;
+const FEATURE_SUFFIX_RE = QDF_FEATURE_SUFFIX;
 const FALLBACK_COLOR = "blue";
 
 // So weit sitzt die Kupplung, die eine Lagerkupplung traegt, von deren Punkt
@@ -287,8 +291,11 @@ function nearestTube(tubes, lengthCm) {
 // QDF-Text parsen -> { nodes, tubes, panels } passend fuer BuildModel.loadJSON().
 // opts.tubes: [{id,length_cm}] (buildbare Rohre), opts.connectorSize: cm, opts.mergeEps: cm.
 export function parseQDF(text, opts = {}) {
-  const tubeCatalog = opts.tubes && opts.tubes.length
-    ? opts.tubes
+  // QDF expresses standard tubes; aluminium is only a native Builder material.
+  // Same-length aluminium entries must not replace existing official tube IDs.
+  const nativeTubes = (opts.tubes || []).filter(tube => tube.material !== 'aluminium');
+  const tubeCatalog = nativeTubes.length
+    ? nativeTubes
     : [{ id: "T35", length_cm: 35 }];
   const conn = opts.connectorSize != null ? opts.connectorSize : 5;
   const eps = opts.mergeEps != null ? opts.mergeEps : 2; // cm, beim Verschmelzen grosszuegig
@@ -320,11 +327,19 @@ export function parseQDF(text, opts = {}) {
   let holePanelId = null;
   let acrylicPanelId = null;
   const featurePanelIds = new Map();   // feature -> panelId（功能板同样不进尺寸表）
+  const featurePanelsByDims = new Map();
+  const acrylicPanelsByDims = new Map();
+  const holePanelsByDims = new Map();
   for (const pa of opts.panels || []) {
     if (pa.w == null || pa.h == null) continue;
-    if (pa.holes) { if (!holePanelId) holePanelId = pa.id; continue; }
-    if (pa.acrylic) { if (!acrylicPanelId) acrylicPanelId = pa.id; continue; }
-    if (pa.feature) { if (!featurePanelIds.has(pa.feature)) featurePanelIds.set(pa.feature, pa.id); continue; }
+    const size = qdfPanelDimensionKey(pa.w, pa.h);
+    if (pa.feature) {
+      if (!featurePanelIds.has(pa.feature)) featurePanelIds.set(pa.feature, pa.id);
+      if (!featurePanelsByDims.has(pa.feature + '|' + size)) featurePanelsByDims.set(pa.feature + '|' + size, pa.id);
+    }
+    if (pa.holes) { if (!holePanelId) holePanelId = pa.id; holePanelsByDims.set(size, pa.id); continue; }
+    if (pa.acrylic || pa.feature === 'acrylic') { if (!acrylicPanelId) acrylicPanelId = pa.id; if (!acrylicPanelsByDims.has(size)) acrylicPanelsByDims.set(size, pa.id); continue; }
+    if (pa.feature && pa.feature !== 'plain') continue;
     const a = Math.round(pa.w), b = Math.round(pa.h);
     panelByDims.set(Math.min(a, b) + "x" + Math.max(a, b), pa.id);
   }
@@ -808,12 +823,13 @@ export function parseQDF(text, opts = {}) {
       const matNr = typeof p.rest[0] === "number" ? p.rest[0] : null;
       // Lochplatte? Dann nicht ueber das Mass suchen -- das Lochraster steht im
       // Material (siehe HOLE_SUFFIX), die Groesse ist dieselbe wie bei der vollen.
-      const featureId = matNr != null && featureMaterials.has(matNr)
-        ? featurePanelIds.get(featureMaterials.get(matNr)) : null;
+      const size = qdfPanelDimensionKey(dimW + conn, dimH + conn);
+      const feature = matNr != null ? featureMaterials.get(matNr) : null;
+      const featureId = feature ? featurePanelsByDims.get(feature + '|' + size) || featurePanelIds.get(feature) : null;
       const panelId = (matNr != null && holeMaterials.has(matNr) && holePanelId)
-        ? holePanelId
+        ? holePanelsByDims.get(size) || holePanelId
         : (matNr != null && acrylicMaterials.has(matNr) && acrylicPanelId)
-          ? acrylicPanelId
+          ? acrylicPanelsByDims.get(size) || acrylicPanelId
           : featureId || panelIdForDims(dimW + conn, dimH + conn);
       if (!panelId) { skipped[p.name] = (skipped[p.name] || 0) + 1; continue; }
       const nodesFound = findPanelCorners(q, cx, cy, cz, (dimW + padW + conn) / 2, (dimH + padH + conn) / 2);

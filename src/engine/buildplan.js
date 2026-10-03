@@ -9,6 +9,7 @@
 import { inferConnectorType, connectorsForNode } from "./bom.js";
 import { getTube, getConnector, getPanel, colorName, partName, reinforcementPart } from "./catalog.js";
 import { getLang, t } from "./i18n.js";
+import { isOriginalComponent, componentInstallCopy, componentPartId, componentOutputColor, componentColorName } from './accessoryInfo.js';
 
 const Y_EPS = 0.6; // cm: Knoten innerhalb dieser Hoehe gelten als gleiche Ebene
 
@@ -151,14 +152,15 @@ function countTubes(tubes) {
 function countPanels(panels) {
   const map = new Map(); // panelId|color -> {panelId,color,count}
   for (const p of panels) {
-    const key = p.panelId + "|" + p.color;
-    if (!map.has(key)) map.set(key, { panelId: p.panelId, color: p.color, count: 0 });
+    const color = componentOutputColor(p);
+    const key = p.panelId + "|" + color;
+    if (!map.has(key)) map.set(key, { panelId: p.panelId, color, count: 0 });
     map.get(key).count++;
   }
   return [...map.values()].map((r) => {
     const def = getPanel(r.panelId) || { name: r.panelId, price: 0 };
     return { panelId: r.panelId, color: r.color, name: partName(def),
-             colorName: colorName(r.color), count: r.count, price: def.price || 0 };
+             colorName: componentColorName(r.color, colorName(r.color)), count: r.count, price: def.price || 0 };
   }).sort((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -266,7 +268,7 @@ export function computeBuildPlan(model, order = "y+") {
   // Platten haengen an zwei Rohren -- die Ebene ergibt sich aus deren Knoten.
   const railNodeIds = (p) => {
     const out = [];
-    for (const tid of [p.a, p.b]) {
+    for (const tid of p.supportTubes || [p.a, p.b]) {
       const t = model.tubes.get(tid);
       if (t) out.push(t.a, t.b);
     }
@@ -289,10 +291,12 @@ export function computeBuildPlan(model, order = "y+") {
   // Anbauteile haengen an einem Punkt -- sie kommen in die Ebene, auf der sie
   // sitzen.
   const fittingsByLevel = levels.map(() => []);
+  const componentFittings = [];
   for (const f of (model.fittings ? model.fittings.values() : [])) {
     // Das offene Verbinderende ist kein Bauteil, sondern ein Vermerk an der
     // Kupplung -- im Aufbau gibt es dafuer nichts zu tun.
     if (f.kind === "open-connector2") continue;
+    if (isOriginalComponent(f)) { componentFittings.push(f); continue; }
     fittingsByLevel[levelIndex(levels, coord(f))].push(f);
   }
   // Rutschen kommen dorthin, wo ihr EINSTIEG gebaut wird -- und eine Kette
@@ -319,11 +323,29 @@ export function computeBuildPlan(model, order = "y+") {
 
   const structure = [];
   const cladding = [];
+  const components = [];
+
+  const installStep = (part, panel = false) => {
+    const info = componentInstallCopy(componentPartId(part), part);
+    const supportNodes = [];
+    for (const tid of part.supportTubes || [part.tube, part.a, part.b]) {
+      const tube = model.tubes.get(tid);
+      if (tube) supportNodes.push(tube.a, tube.b);
+    }
+    const li = Math.max(0, ...supportNodes.map(id => nodeLevel.get(id) ?? 0));
+    return {
+      kind: 'accessories', ...info, level: li, y: levels[li],
+      connectors: [], openEnds: 0, tubes: [], panels: panel ? countPanels([part]) : [],
+      reinforcements: [], nodeIds: [], tubeIds: [], textileIds: [], slideIds: [],
+      panelIds: panel ? [part.id] : [], fittingIds: panel ? [] : [part.id],
+    };
+  };
 
   for (let i = 0; i < levels.length; i++) {
     const nodes = nodesByLevel[i];
     const horiz = horizByLevel[i];
-    const pans = panelsByLevel[i];
+    const pans = panelsByLevel[i].filter(p => !isOriginalComponent(p));
+    for (const p of panelsByLevel[i]) if (isOriginalComponent(p)) components.push(installStep(p, true));
     const txs = textilesByLevel[i];
     const sls = slidesByLevel[i];
     const fts = fittingsByLevel[i];
@@ -387,5 +409,6 @@ export function computeBuildPlan(model, order = "y+") {
     }
   }
 
-  return { levels, steps: [...structure, ...cladding] };
+  for (const f of componentFittings) components.push(installStep(f));
+  return { levels, steps: [...structure, ...cladding, ...components] };
 }
