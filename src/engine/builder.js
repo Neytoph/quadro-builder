@@ -12,7 +12,7 @@ import { TUBE_FITTINGS, POOL_KINDS, isHolePart, holeArmDirs, holeClampDirsAt, HO
   POOL_SETS, ARM_FITTINGS, armFittingDirsAt, fixedFittingColor, slopeArmDirsAt } from "./model.js";
 import { CONNECTOR_ARM_BITS } from "./qdfimport.js";
 import { ACCESSORY_IDS } from './accessoryPack.js';
-import { pickStepAnchor, stepCandidates, stepCandidatesFromSelection } from "./stepAnchor.js";
+import { pickStepAnchor, stepCandidates, stepCandidatesFromSelection, stepNeighbor } from "./stepAnchor.js";
 
 // Kupplungen, die auf einem Rohr sitzen statt im Raster: QDF-Art -> Katalogteil.
 // Teile, die sich um ein Rohr klemmen lassen. Die Lochzapfenkupplung gehört
@@ -1498,6 +1498,13 @@ export class Builder {
     const node = pickStepAnchor(this.model, from, dirVec,
       (n, d) => this.model.canExtendFrom(n, d) && !this._armOccupied(n, d));
     if (!node) { this.onNotice(t("notice_step_pick"), "warn"); return; }
+    const neighbor = stepNeighbor(this.model, node, dirVec);
+    if (neighbor) {
+      this.selectedNodeId = neighbor.id;
+      this.stepFrom = [neighbor.id];
+      this.refresh();
+      return;
+    }
     if (!this.model.canExtendFrom(node, dirVec) || this._armOccupied(node, dirVec)) {
       this.onNotice(t("notice_step_blocked"), "warn");
       return;

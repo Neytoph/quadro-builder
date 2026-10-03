@@ -5,6 +5,22 @@
 // 沿方向差这么多以内算一样靠前（cm）
 const TIE = 0.5;
 
+// 沿已有管子走到相邻接头，使用实际端点，不受当前所选管长影响。
+export function stepNeighbor(model, node, dir) {
+  const dirLength = Math.hypot(...dir);
+  if (!node || !dirLength) return null;
+  for (const tube of model.tubes.values()) {
+    if (tube.link || tube.arm) continue;
+    const id = tube.a === node.id ? tube.b : tube.b === node.id ? tube.a : null;
+    const other = model.nodes.get(id);
+    if (!other || other.unused || other.c45body) continue;
+    const delta = [other.x - node.x, other.y - node.y, other.z - node.z];
+    const length = Math.hypot(...delta);
+    if (length && delta.reduce((sum, value, i) => sum + value * dir[i], 0) / (length * dirLength) > 0.9) return other;
+  }
+  return null;
+}
+
 export function pickStepAnchor(model, candidateIds, dir, armFree) {
   let best = null;
   let bestAlong = -Infinity;
