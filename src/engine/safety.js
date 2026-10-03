@@ -32,6 +32,16 @@ const CLEAR_ZONE = 200;     // cm：四周留空
 
 const LEVEL_RANK = { error: 0, warn: 1, info: 2 };
 
+// 原有官方标准板继续参与结构风险检查；这项分类不表示承载已认证。
+const STANDARD_PANEL_FEATURES = new Map([
+  ['panel_40x40', 'plain'], ['panel_40x20', 'plain'], ['panel_30x30', 'plain'],
+  ['hole_panel_40x40', 'holes'],
+]);
+function retainsStandardPanelRole(p) {
+  const feature = STANDARD_PANEL_FEATURES.get(p.panelId);
+  return feature != null && confirmedSpec(p.panelId)?.feature === feature;
+}
+
 function realTubes(model) {
   return [...model.tubes.values()].filter((t) => !t.arm && !t.link);
 }
@@ -83,7 +93,7 @@ function decksOf(model) {
     if (p.poolPart || p.panelId === "pool_floor") continue;
     // 布兜、感官盆占着方框但不是能站的面
     const pdef = getPanel(p.panelId);
-    if (p.appearanceVersion === 2 && confirmedSpec(p.panelId)?.verifiedLoad !== true) continue;
+    if (p.appearanceVersion === 2 && !retainsStandardPanelRole(p) && confirmedSpec(p.panelId)?.verifiedLoad !== true) continue;
     if (pdef && (pdef.feature === "busy" || pdef.feature === "pocket" || pdef.feature === "basin")) continue;
     const c = cornersOf(model, p);
     if (!c) continue;
@@ -97,7 +107,7 @@ function decksOf(model) {
 function coversOf(model) {
   const out = [];
   for (const p of model.panels.values()) {
-    if (p.appearanceVersion === 2 && confirmedSpec(p.panelId)?.verifiedLoad !== true) continue;
+    if (p.appearanceVersion === 2 && !retainsStandardPanelRole(p) && confirmedSpec(p.panelId)?.verifiedLoad !== true) continue;
     if (getPanel(p.panelId)?.feature === 'pocket') continue;
     const c = cornersOf(model, p);
     if (c) out.push(c);
