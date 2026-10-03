@@ -1,19 +1,23 @@
+import { useEffect, useState } from 'react'
 import type { ComponentFragment } from '../store/customComponents'
+import { useI18n } from '../i18n'
+import { renderComponentThumbnail } from './componentThumbnail'
+
+const loading = { zh: '正在生成组件预览…', en: 'Rendering component preview…', de: 'Bauteilvorschau wird erstellt…' }
 
 export default function CustomComponentPreview({ fragment }: { fragment: ComponentFragment }) {
-  const parts = [...fragment.nodes, ...fragment.clamps, ...fragment.slides, ...fragment.fittings]
-    .filter(p => [p.x, p.y, p.z].every(n => typeof n === 'number' && Number.isFinite(n)))
-  const points = parts.map(p => ({ id: p.id, x: (Number(p.x) - Number(p.z)) * 0.866, y: (Number(p.x) + Number(p.z)) * 0.35 - Number(p.y) }))
-  const minX = Math.min(0, ...points.map(p => p.x)), maxX = Math.max(1, ...points.map(p => p.x))
-  const minY = Math.min(0, ...points.map(p => p.y)), maxY = Math.max(1, ...points.map(p => p.y))
-  const scale = 48 / Math.max(maxX - minX, maxY - minY)
-  const coords = new Map(points.map(p => [p.id, { x: 32 + (p.x - (minX + maxX) / 2) * scale, y: 32 + (p.y - (minY + maxY) / 2) * scale }]))
-  const colours: Record<string, string> = { red: '#ef4444', yellow: '#e9b80a', blue: '#2585d5', green: '#1fa85a' }
-  return <svg viewBox="0 0 64 64" aria-hidden="true" className="qb-component-preview">
-    {fragment.tubes.map(t => {
-      const a = coords.get(t.a || ''), b = coords.get(t.b || '')
-      return a && b ? <line key={t.id} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={colours[t.color || ''] || '#ea580c'} strokeWidth="3.5" strokeLinecap="round" /> : null
-    })}
-    {points.map(p => { const c = coords.get(p.id)!; return <circle key={p.id} cx={c.x} cy={c.y} r="2.2" fill="#718275" /> })}
-  </svg>
+  const { t, lang } = useI18n()
+  const key = JSON.stringify(fragment)
+  const [result, setResult] = useState<{ key: string; url?: string; error?: string } | null>(null)
+  useEffect(() => {
+    let active = true
+    renderComponentThumbnail(key).then(url => { if (active) setResult({ key, url }) }).catch(error => {
+      console.error('Component thumbnail failed', error)
+      if (active) setResult({ key, error: error instanceof Error ? error.message : String(error) })
+    })
+    return () => { active = false }
+  }, [key])
+  const current = result?.key === key ? result : null
+  if (current?.url) return <img src={current.url} alt="" draggable={false} className="qb-component-preview" data-ui="component-real-thumbnail" />
+  return <span className="qb-component-preview qb-component-preview-state" role="status" title={current?.error ? `${t('toast.pngFailed')}: ${current.error}` : loading[lang]} aria-label={current?.error ? t('toast.pngFailed') : loading[lang]} data-preview-error={!!current?.error}>{current?.error ? '⚠' : '…'}</span>
 }

@@ -1,5 +1,26 @@
-// 由 scripts/shoot-part-icons.mjs 与 scripts/shoot-accessory-icons.mjs 生成。列的是 public/parts/ 下有真实渲染图的零件 id。
-export const PART_IMAGES: ReadonlySet<string> = new Set([
+import { PART_IMAGE_MANIFEST } from './partImageManifest'
+
+type PartImage = { src: string; srcLarge?: string }
+const images: Readonly<Record<string, PartImage>> = PART_IMAGE_MANIFEST.parts
+const aliases: Readonly<Record<string, string>> = PART_IMAGE_MANIFEST.aliases
+
+export function resolvePartImage(idOrKey?: string | null): (PartImage & { id: string }) | null {
+  const key = String(idOrKey || '')
+  const candidates = [key, key.split('|')[0], ...key.split(':').slice(1), key.split('@')[0]]
+  for (const candidate of candidates) {
+    const id = aliases[candidate] || candidate
+    if (images[id]) return { id, ...images[id] }
+  }
+  return null
+}
+
+export function partImageSrc(idOrKey?: string | null, large = true): string | null {
+  const image = resolvePartImage(idOrKey)
+  return image ? `${import.meta.env.BASE_URL}${large && image.srcLarge ? image.srcLarge : image.src}` : null
+}
+
+// 兼容目录组件现有调用；所有图片定位使用上述公共映射。
+const LEGACY_PART_IMAGES: ReadonlySet<string> = new Set([
   'acrylic_hole_panel_40x40',
   'acrylic_panel_40x20',
   'acrylic_panel_40x60',
@@ -97,3 +118,4 @@ export const PART_IMAGES: ReadonlySet<string> = new Set([
   'wheel_adapter',
   'wheel_bearing',
 ])
+export const PART_IMAGES: ReadonlySet<string> = new Set([...LEGACY_PART_IMAGES, ...Object.keys(images)])

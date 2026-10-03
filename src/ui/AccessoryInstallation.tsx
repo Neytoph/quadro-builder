@@ -5,6 +5,7 @@ import { colorLabel, labelOf } from '../names'
 import { builderComponents, componentForTool, componentHintKey, componentDimensions } from '../store/builderComponents'
 import { NARROW_MAX, statusTipBox, usePanelLayout } from './panelLayout'
 import { useDock } from './dock'
+import PartThumbnail from './PartThumbnail'
 
 export default function AccessoryInstallation({ menuOpen }: { menuOpen: boolean }) {
   const api = useEngine()
@@ -21,8 +22,9 @@ export default function AccessoryInstallation({ menuOpen }: { menuOpen: boolean 
   return <div data-ui="accessory-installation" className={`fixed z-40 flex justify-center pointer-events-none bottom-[68px] ${narrow ? 'left-2 right-2' : ''}`} style={box ? { ...box, top: undefined } : undefined}>
     <section className="qb-card pointer-events-auto max-w-full w-[440px] px-3 py-2.5 text-xs leading-relaxed" aria-label={t('accessory.preview')}>
       {part && <>
-        <div className="flex items-center justify-between gap-2 font-medium">
-          <span>{labelOf(part.id, part.name)}</span>
+        <div className="flex items-center gap-2">
+          <PartThumbnail id={part.id} />
+          <span className="qb-material-name flex-1 min-w-0">{labelOf(part.id, part.name)}</span>
           {preview && <span className="text-gray-300 shrink-0">{t(preview.mountCount === 1 ? 'accessory.mountOne' : 'accessory.mounts', { n: preview.mountCount })}</span>}
         </div>
         <p className="mt-1 text-gray-300" role="status">{preview?.reason || t(componentHintKey(part), { size: componentDimensions(part) })}</p>

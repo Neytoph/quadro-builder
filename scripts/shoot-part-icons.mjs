@@ -323,9 +323,7 @@ for (const it of items.filter(it => !requestedIds || requestedIds.includes(it.ri
 }
 const ids = index.map(r => r.rid).sort()
 if (requestedIds?.some(id => !ids.includes(id))) throw new Error(`未生成全部请求组件：${requestedIds.filter(id => !ids.includes(id)).join(',')}`)
-if (!requestedIds && !process.env.OUTPUT_DIR) fs.writeFileSync(path.join(ROOT, 'src/ui/partImages.ts'),
-  '// 由 scripts/shoot-part-icons.mjs 生成，别手改。列的是 public/parts/ 下有渲染图的零件 id。\n'
-  + 'export const PART_IMAGES: ReadonlySet<string> = new Set([\n' + ids.map(id => `  '${id}',`).join('\n') + '\n])\n')
+if (!requestedIds && !process.env.OUTPUT_DIR) await import('./index-part-images.mjs')
 console.log('写了', ids.length, '张')
 if (process.env.MANIFEST) fs.writeFileSync(path.join(ROOT, process.env.MANIFEST), JSON.stringify(index, null, 2))
 await browser.close()

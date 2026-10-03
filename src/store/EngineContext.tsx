@@ -1790,8 +1790,15 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       notify(t('toast.stampFailed'), 'err')
       return
     }
-    const thumb = await loadImage(cover)
-    const data = bomToPngDataUrl({ ...bomExportInput(), stamp }, thumb)
+    let data: string | null
+    try {
+      const thumb = await loadImage(cover)
+      data = await bomToPngDataUrl({ ...bomExportInput(), stamp }, thumb)
+    } catch (error) {
+      console.error('BOM PNG export failed', error)
+      notify(t('toast.bomPngFailed'), 'err')
+      return
+    }
     if (!data) { notify(t('toast.manualEmpty'), 'warn'); return }
     track('builder.export.bom.png', { stamp: !!stamp })
     const a = document.createElement('a')

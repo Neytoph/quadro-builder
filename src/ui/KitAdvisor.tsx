@@ -1,11 +1,17 @@
 import { useMemo, useState } from 'react'
 import { useEngine } from '../store/EngineContext'
 import { useI18n } from '../i18n'
-import { kitsCovering, shortages, usedRows, vecFromBom, vecFromInventory } from '../data/kitAdvice'
+import { kitsCovering, shortages, usedRows, vecFromBom, vecFromInventory, type AdvisorPart } from '../data/kitAdvice'
 import { labelOf, skuLabel } from '../names'
 import { useDock } from './dock'
 import { formatKitPrice } from '../money'
 import { track } from '../analytics/track'
+import PartThumbnail from './PartThumbnail'
+
+function advisorPartName(part: AdvisorPart) {
+  const name = labelOf(part.id, part.name)
+  return part.w && part.h && !name.includes('×') ? `${name} ${part.w}×${part.h} cm` : name
+}
 
 export default function KitAdvisor() {
   const api = useEngine()
@@ -15,7 +21,7 @@ export default function KitAdvisor() {
   const mapped = useMemo(() => vecFromBom(api.bom), [api.bom])
   const stock = useMemo(() => vecFromInventory(api.inventory), [api.inventory])
   const buildable = useMemo(() => kitsCovering(mapped.used), [mapped.used])
-  const missing = useMemo(() => shortages(mapped.used, stock.owned), [mapped.used, stock.owned])
+  const missing = useMemo(() => shortages(mapped.used, stock.owned, mapped.parts), [mapped.used, stock.owned, mapped.parts])
   const rows = usedRows(mapped.used)
   const cheapest = buildable.find(k => k.price != null)
   const hasStock = api.feasible != null
@@ -65,22 +71,34 @@ export default function KitAdvisor() {
             </div>
             <div className="space-y-1">
               {rows.map(([i, v]) => (
-                <div key={i} className="flex justify-between text-xs gap-2">
-                  <span className="text-gray-400 min-w-0 truncate">{skuLabel(i)}</span>
-                  <span className="text-sky-700 font-semibold tabular-nums shrink-0">{v}</span>
+                <div key={i} data-ui="advisor-part-group" data-sku-index={i}>
+                  {mapped.parts[i].length > 1 && <div className="flex justify-between text-[10px] text-gray-500 mt-2"><span>{skuLabel(i)}</span><span>×{v}</span></div>}
+                  {mapped.parts[i].map(part => <div key={part.key} data-ui="advisor-part-row" data-part-id={part.id} className="qb-material-row flex items-center gap-2">
+                    <PartThumbnail id={part.id} imageKey={part.key} />
+                    <span className="qb-material-name text-gray-400 min-w-0 flex-1">{advisorPartName(part)}</span>
+                    <span className="qb-material-count text-sky-700 tabular-nums">×{part.count}</span>
+                  </div>)}
                 </div>
               ))}
             </div>
             {mapped.screws > 0 && (
-              <div className="mt-2 text-xs text-gray-500">{t('kit.screws', { n: mapped.screws })}</div>
+              <div className="mt-2 text-gray-500">
+                {api.bom?.screws.map(row => <div key={row.key} data-ui="advisor-screw-row" data-part-id={row.id} className="qb-material-row flex items-center gap-2">
+                  <PartThumbnail id={row.id} imageKey={row.key} kind="screws" />
+                  <span className="qb-material-name flex-1 min-w-0">{labelOf(row.id || '', row.name)}</span>
+                  <span className="qb-material-count tabular-nums">×{row.count}</span>
+                </div>)}
+                <p className="text-[10px] leading-relaxed mt-1">{t('kit.screws', { n: mapped.screws })}</p>
+              </div>
             )}
             {mapped.unmapped.length > 0 && (
               <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2">
                 <div className="text-[11px] text-amber-800 mb-1">{t('kit.unmapped')}</div>
                 {mapped.unmapped.map(u => (
-                  <div key={u.id} className="flex justify-between text-xs text-amber-900">
-                    <span className="truncate">{labelOf(u.id, u.name)}</span>
-                    <span className="tabular-nums shrink-0">×{u.count}</span>
+                  <div key={u.id} data-ui="advisor-unmapped-row" data-part-id={u.id} className="qb-material-row flex items-center gap-2 text-amber-900">
+                    <PartThumbnail id={u.id} />
+                    <span className="qb-material-name flex-1 min-w-0">{labelOf(u.id, u.name)}</span>
+                    <span className="qb-material-count tabular-nums">×{u.count}</span>
                   </div>
                 ))}
               </div>
@@ -118,9 +136,12 @@ export default function KitAdvisor() {
               <div className="text-sm text-amber-700 mb-2">{t('kit.stockShort')}</div>
               <div className="space-y-1">
                 {missing.map(m => (
-                  <div key={m.name} className="flex justify-between text-xs gap-2">
-                    <span className="text-gray-400 min-w-0 truncate">{m.name}</span>
-                    <span className="text-amber-700 tabular-nums shrink-0">−{m.short}</span>
+                  <div key={m.index} data-ui="advisor-shortage-group" data-sku-index={m.index}>
+                    <div className="flex justify-between gap-2 text-[10px] text-gray-500 mt-2"><span>{m.parts.length === 1 ? advisorPartName(m.parts[0]) : m.name}</span><span className="qb-material-count text-amber-700 tabular-nums">−{m.short}</span></div>
+                    {m.parts.map(part => <div key={part.key} data-ui="advisor-shortage-row" data-part-id={part.id} className="qb-material-row flex items-center gap-2">
+                      <PartThumbnail id={part.id} imageKey={part.key} />
+                      <span className="qb-material-name text-gray-400 min-w-0 flex-1">{advisorPartName(part)}<span className="block text-[10px] text-gray-500 mt-0.5">{t('side.need')} {part.count}</span></span>
+                    </div>)}
                   </div>
                 ))}
               </div>

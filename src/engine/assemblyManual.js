@@ -10,7 +10,7 @@ import {
 import { connectorsForNode, textileRow } from "./bom.js";
 import { POOL_KINDS } from "./model.js";
 import { componentStepLabel, componentPartId, componentOutputColor, componentFittingKey, componentSizeLabel } from './accessoryInfo.js';
-import { partIcon } from "../ui/icons";
+import { partImageSrc } from "../ui/partImages";
 import { drawQr } from "../sharePage";
 
 const PAGE_W = 297;
@@ -58,7 +58,7 @@ function loadImage(url) {
 function stepBox() {
   const gap = 2.5;
   const headerH = 11;
-  const partsH = 24;
+  const partsH = 47;
   const imgY = headerH;
   const imgH = PAGE_H - imgY - partsH - 3;
   const imgW = (PAGE_W - M * 2 - gap) / 2;
@@ -475,11 +475,10 @@ function attachPositions(items, posMap) {
 const iconCache = new Map();
 
 async function iconImage(id, kind) {
-  const inner = partIcon(id, kind);
-  const key = inner;
+  const key = partImageSrc(id);
+  if (!key) { console.warn('缺少零件图片', id, kind); return null; }
   if (iconCache.has(key)) return iconCache.get(key);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="64" height="64" fill="none">${String(inner).replaceAll("currentColor", INK)}</svg>`;
-  const img = await loadImage(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`);
+  const img = await loadImage(key);
   iconCache.set(key, img);
   return img;
 }
@@ -487,11 +486,7 @@ async function iconImage(id, kind) {
 async function loadIcons(items) {
   const map = new Map();
   await Promise.all(items.map(async (it) => {
-    try {
-      map.set(it.num, await iconImage(it.id, it.kind));
-    } catch {
-      map.set(it.num, null);
-    }
+    map.set(it.num, await iconImage(it.id, it.kind));
   }));
   return map;
 }
@@ -575,44 +570,45 @@ function newPageCanvas() {
 function paintLegend(ctx, items, icons, x, y, maxW, maxY) {
   const n = items.length;
   if (!n) return;
-  const cols = n > 16 ? 5 : n > 8 ? 4 : Math.min(3, n);
+  const cols = Math.min(3, n);
   const colGap = mm(4);
   const colW = (maxW - colGap * (cols - 1)) / cols;
-  const rowH = mm(5.4);
+  const minRowH = mm(15);
   const badgeR = mm(1.65);
   const numW = mm(6.4);
   const dotW = mm(3.6);
-  const iconS = mm(3.4);
-  const iconW = mm(4.4);
+  const iconS = mm(12);
+  const iconW = mm(14);
   const nameGap = mm(1.6);
-  const visible = [];
-  for (let i = 0; i < n; i++) {
-    const row = Math.floor(i / cols);
-    const cellY = y + row * rowH;
-    if (cellY + rowH > maxY) break;
-    visible.push({ i, col: i % cols, cellY, it: items[i] });
-  }
-
   ctx.font = font(700, mm(2.35));
   let qtyTextW = mm(3.2);
-  for (const v of visible) {
-    qtyTextW = Math.max(qtyTextW, ctx.measureText(`×${v.it.count}`).width);
-  }
+  for (const it of items) qtyTextW = Math.max(qtyTextW, ctx.measureText(`×${it.count}`).width);
   const qtyColW = qtyTextW;
   const nameX0 = numW + dotW + iconW;
   const nameBudget = Math.max(mm(5), colW - nameX0 - nameGap - qtyColW);
   ctx.font = font(400, mm(2.55));
-  const names = new Map();
-  const nameColW = new Array(cols).fill(0);
-  for (const v of visible) {
-    const name = ellipsize(ctx, itemCaption(v.it), nameBudget);
-    names.set(v.i, name);
-    nameColW[v.col] = Math.max(nameColW[v.col], ctx.measureText(name).width);
+  const wrapped = items.map(it => {
+    const lines = [];
+    let line = '';
+    for (const char of itemCaption(it)) {
+      if (line && ctx.measureText(line + char).width > nameBudget) { lines.push(line); line = ''; }
+      line += char;
+    }
+    if (line) lines.push(line);
+    return lines;
+  });
+  const visible = [];
+  let cellY = y;
+  for (let offset = 0; offset < n; offset += cols) {
+    const rowH = Math.max(minRowH, ...wrapped.slice(offset, offset + cols).map(lines => lines.length * mm(3.2) + mm(4)));
+    if (cellY + rowH > maxY) break;
+    for (let col = 0; col < cols && offset + col < n; col++) visible.push({ i: offset + col, col, cellY, rowH, it: items[offset + col] });
+    cellY += rowH;
   }
 
   ctx.textBaseline = "middle";
   for (const v of visible) {
-    const { it, col, cellY } = v;
+    const { it, col, cellY, rowH } = v;
     const cellX = x + col * (colW + colGap);
     const mid = cellY + rowH / 2;
 
@@ -633,21 +629,31 @@ function paintLegend(ctx, items, icons, x, y, maxW, maxY) {
     const iconX = dotX + dotW;
     const icon = icons.get(it.num);
     if (icon) ctx.drawImage(icon, iconX, mid - iconS / 2, iconS, iconS);
+    else {
+      ctx.fillStyle = MUTED;
+      ctx.font = font(600, mm(5));
+      ctx.fillText('?', iconX + iconS / 3, mid);
+    }
 
     const nameX = iconX + iconW;
     ctx.font = font(400, mm(2.55));
     ctx.fillStyle = INK;
     ctx.textAlign = "left";
-    ctx.fillText(names.get(v.i), nameX, mid);
+    ctx.textBaseline = 'top';
+    const lines = wrapped[v.i];
+    const top = mid - lines.length * mm(3.2) / 2;
+    lines.forEach((line, index) => ctx.fillText(line, nameX, top + index * mm(3.2)));
 
     const qty = `×${it.count}`;
-    const qtyX = nameX + nameColW[col] + nameGap;
+    const qtyX = cellX + colW - qtyColW;
     ctx.font = font(700, mm(2.35));
     ctx.fillStyle = ACCENT;
     ctx.textAlign = "left";
+    ctx.textBaseline = 'middle';
     ctx.fillText(qty, qtyX, mid);
   }
   ctx.textBaseline = "top";
+  return visible.length;
 }
 
 // 方案页的二维码印在每一页右下角：二维码在上，网址在下；封面上再加一句说明。
@@ -709,7 +715,7 @@ function paintCover(ctx, { front, back, copy, items, icons, fill, frontMarks, ba
   ctx.fillStyle = ACCENT;
   ctx.font = font(600, mm(3.2));
   ctx.fillText(copy.bomTitle, mm(M), mm(bomY));
-  paintLegend(ctx, items, icons, mm(M), mm(bomY + 4.2), mm(PAGE_W - M * 2) - stampW, mm(PAGE_H - 3));
+  return paintLegend(ctx, items, icons, mm(M), mm(bomY + 4.2), mm(PAGE_W - M * 2) - stampW, mm(PAGE_H - 3)) || 0;
 }
 
 function paintStep(ctx, { front, back, copy, heading, items, icons, k, n, fill, frontMarks, backMarks, stamp, instructions = [] }) {
@@ -730,34 +736,63 @@ function paintStep(ctx, { front, back, copy, heading, items, icons, k, n, fill, 
   ctx.fillStyle = ACCENT;
   ctx.font = font(600, mm(3));
   ctx.fillText(copy.thisStep, mm(M), mm(partsY));
+  const legendY = mm(partsY + 4);
   if (!items.length) {
     ctx.fillStyle = MUTED;
     ctx.font = font(400, mm(2.8));
     ctx.fillText(copy.none, mm(M), mm(partsY + 4.4));
   } else {
-    paintLegend(ctx, items, icons, mm(M), mm(partsY + 4), mm(PAGE_W - M * 2) - stampW, mm(PAGE_H - 2.5));
+    return paintLegend(ctx, items, icons, mm(M), legendY, mm(PAGE_W - M * 2) - stampW, mm(PAGE_H - 2.5)) || 0;
   }
-  if (instructions.length) {
-    const width = mm(PAGE_W - M * 2) - stampW;
-    const lineHeight = mm(3.2);
-    let y = mm(partsY + 10);
-    ctx.font = font(400, mm(2.4));
-    ctx.fillStyle = MUTED;
-    for (const text of instructions) {
-      const words = String(text).match(/\S+\s*|\s+/gu) || [];
-      let line = '';
-      // 按实际字宽换行，中文长段也逐字符断开。
-      for (const word of words) {
-        for (const char of word) {
-          if (ctx.measureText(line + char).width > width) {
-            ctx.fillText(line, mm(M), y); y += lineHeight; line = '';
-          }
-          line += char;
-        }
-      }
-      if (line) { ctx.fillText(line, mm(M), y); y += lineHeight; }
+  return 0;
+}
+
+async function appendLegendPages(doc, items, icons, consumed, title, stamp) {
+  while (consumed < items.length) {
+    const { c, ctx } = newPageCanvas();
+    ctx.fillStyle = INK;
+    ctx.font = font(600, mm(4.4));
+    ctx.textBaseline = 'top';
+    ctx.fillText(ellipsize(ctx, title, mm(PAGE_W - M * 2)), mm(M), mm(5));
+    const stampW = stamp ? paintStamp(ctx, stamp, STAMP_QR_STEP, false) : 0;
+    const count = paintLegend(ctx, items.slice(consumed), icons, mm(M), mm(17), mm(PAGE_W - M * 2) - stampW, mm(PAGE_H - M));
+    if (!count) throw new Error('材料图例没有可用分页空间');
+    consumed += count;
+    await pageToPdf(doc, c, false);
+  }
+}
+
+async function appendInstructionPages(doc, instructions, title, stamp) {
+  if (!instructions.length) return;
+  let page = newPageCanvas(), y = mm(18);
+  const heading = () => {
+    page.ctx.fillStyle = INK;
+    page.ctx.font = font(600, mm(4.4));
+    page.ctx.textBaseline = 'top';
+    page.ctx.fillText(ellipsize(page.ctx, title, mm(PAGE_W - M * 2)), mm(M), mm(5));
+    if (stamp) paintStamp(page.ctx, stamp, STAMP_QR_STEP, false);
+    page.ctx.font = font(400, mm(3));
+    page.ctx.fillStyle = INK;
+  };
+  heading();
+  const lineHeight = mm(5), width = mm(PAGE_W - M * 2 - (stamp ? 35 : 0));
+  const line = async (text) => {
+    if (y + lineHeight > mm(PAGE_H - M)) {
+      await pageToPdf(doc, page.c, false);
+      page = newPageCanvas(); y = mm(18); heading();
     }
+    page.ctx.fillText(text, mm(M), y); y += lineHeight;
+  };
+  for (const text of instructions) {
+    let current = '';
+    for (const char of String(text)) {
+      if (page.ctx.measureText(current + char).width > width) { await line(current); current = ''; }
+      current += char;
+    }
+    if (current) await line(current);
+    y += mm(3);
   }
+  await pageToPdf(doc, page.c, false);
 }
 
 async function pageToPdf(doc, canvas, first) {
@@ -871,12 +906,13 @@ export async function exportAssemblyPdf({ scene, builder, model, name, bom, copy
     });
     {
       const { c, ctx } = newPageCanvas();
-      paintCover(ctx, {
+      const consumed = paintCover(ctx, {
         front: coverFront.img, back: coverBack.img, copy: coverCopy,
         items: itemsCover, icons: coverIcons, fill,
         frontMarks: coverFront.marks, backMarks: coverBack.marks, stamp,
       });
       await pageToPdf(doc, c, true);
+      await appendLegendPages(doc, itemsCover, coverIcons, consumed, `${coverCopy.modelName} · ${copy.bomTitle}`, stamp);
     }
 
     builder.assemblyStep = 0;
@@ -903,16 +939,19 @@ export async function exportAssemblyPdf({ scene, builder, model, name, bom, copy
         .replace("{kind}", kindLabel(s.kind, copy))
         .replace("{title}", s.title || "");
       const { c, ctx } = newPageCanvas();
-      paintStep(ctx, {
+      const consumed = paintStep(ctx, {
         front: front.img, back: back.img, copy, heading, items, icons,
         k: i + 1, n: steps.length, fill,
         instructions: s.instructions || [],
         frontMarks: front.marks, backMarks: back.marks, stamp,
       });
       await pageToPdf(doc, c, false);
+      await appendLegendPages(doc, items, icons, consumed, `${heading} · ${copy.thisStep}`, stamp);
+      await appendInstructionPages(doc, s.instructions || [], heading, stamp);
     }
 
     doc.save(filename || `${name || "design"}.pdf`);
+    return { pages: doc.getNumberOfPages(), coverRows: itemsCover.length, steps: steps.length, missingPictures: itemsCover.filter(item => !partImageSrc(item.id)).map(item => item.id) };
   } finally {
     scene._viewSize = null;
     scene._labelDpr = 0;

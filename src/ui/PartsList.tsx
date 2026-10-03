@@ -3,18 +3,7 @@ import { useI18n } from '../i18n'
 import { formatCatalogPrice } from '../money'
 import { colorLabel, labelOf } from '../names'
 import { colorHex } from '../engine-api'
-import { PartImg, partIcon } from './icons'
-
-const COLOR_ONLY = new Set(['tubes', 'panels', 'screws'])
-
-function RowIcon({ id, kind }: { id?: string; kind?: string }) {
-  if (kind && COLOR_ONLY.has(kind)) return null
-  return (
-    <span className="shrink-0 text-gray-300 inline-flex">
-      <PartImg id={id} svg={partIcon(id, kind)} size={22} />
-    </span>
-  )
-}
+import PartThumbnail from './PartThumbnail'
 
 function colorWord(color: string | null | undefined) {
   if (!color) return ''
@@ -45,15 +34,16 @@ function Section({ title, rows, onPick }: { title: string; rows: BomRow[]; onPic
           return (
             <button key={r.key} onClick={() => onPick(r)} title={label}
               aria-label={`${label} ×${r.count}`}
-              className="flex items-center gap-2 w-full text-left text-xs rounded-lg px-2 py-1.5 hover:bg-gray-800 cursor-pointer">
-              <RowIcon id={r.id} kind={r.kind} />
-              {r.color ? <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: String(colorHex(r.color)) }} /> : null}
+              data-ui="bom-part-row" data-part-id={r.id}
+              className="qb-material-row flex items-center gap-2 w-full text-left rounded-lg px-2 py-1.5 hover:bg-gray-800 cursor-pointer">
+              <PartThumbnail id={r.id} imageKey={r.key} kind={r.kind} />
               <span className="flex-1 min-w-0">
-                <span className="block truncate">{label}</span>
+                <span className="qb-material-name">{base}</span>
+                {r.color ? <span className="qb-material-color"><i style={{ background: String(colorHex(r.color)) }} />{tint}</span> : null}
                 {r.kitContents && <span className="block text-[10px] leading-relaxed text-gray-400 whitespace-normal">{r.kitContents}</span>}
                 {r.designAssumption && r.loadVerified === false && <span className="block text-[10px] leading-relaxed text-[#9a5b16] whitespace-normal">{t('accessory.assumption')}</span>}
               </span>
-              <span className="tabular-nums text-gray-300">×{r.count}</span>
+              <span className="qb-material-count tabular-nums text-gray-300">×{r.count}</span>
             </button>
           )
         })}

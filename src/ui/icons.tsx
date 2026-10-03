@@ -1,5 +1,4 @@
-import { PART_IMAGES } from './partImages'
-import { PART_IMAGES_LARGE } from './partImagesHiDpi'
+import { resolvePartImage } from './partImages'
 
 /** 16×16 图标。inner 是静态 SVG（来自 vokako 工具栏）。 */
 export function Svg16({ inner, size = 18 }: { inner: string; size?: number }) {
@@ -155,20 +154,21 @@ const BY_KIND: Record<string, string> = {
  * 零件图标：有渲染图（public/parts/<id>.png，scripts/shoot-part-icons.mjs 出的）就用图，
  * 透明底直接摆在菜单上；加一圈淡白光晕，选中行的橙底上红色零件也分得出来。没图退回 SVG。
  */
-export function PartImg({ id, svg, size = 18 }: { id?: string | null; svg: string; size?: number }) {
-  if (id && (PART_IMAGES.has(id) || PART_IMAGES_LARGE.has(id))) {
+export function PartImg({ id, imageKey, svg, size = 18 }: { id?: string | null; imageKey?: string | null; svg: string; size?: number }) {
+  const image = resolvePartImage(imageKey) || resolvePartImage(id)
+  if (image) {
     return (
       <span className="qb-part-image shrink-0 inline-flex items-center justify-center" style={{ width: size, height: size }}>
-        <img src={`${import.meta.env.BASE_URL}parts/${id}.png`} alt="" draggable={false}
-          srcSet={PART_IMAGES_LARGE.has(id) ? `${import.meta.env.BASE_URL}parts/${id}.png 1x, ${import.meta.env.BASE_URL}parts/large/${id}.png 2x` : undefined}
-          loading="lazy" style={{ width: size, height: size, filter: 'drop-shadow(0 0 1.2px rgba(255,255,255,.95))' }} />
+        <img src={`${import.meta.env.BASE_URL}${image.src}`} alt="" draggable={false}
+          srcSet={image.srcLarge ? `${import.meta.env.BASE_URL}${image.src} 1x, ${import.meta.env.BASE_URL}${image.srcLarge} 2x` : undefined}
+          loading="lazy" style={{ width: size, height: size, objectFit: 'contain', filter: 'drop-shadow(0 0 1.2px rgba(255,255,255,.95))' }} />
       </span>
     )
   }
   // 没图的也占同样大的格子，和有图的行文字对齐
   return (
     <span className="qb-part-image shrink-0 inline-flex items-center justify-center" style={{ width: size, height: size }}>
-      <Svg16 inner={svg} size={size} />
+      {id ? <span title={id} style={{ color: '#8b929c', fontSize: size * .5 }}>?</span> : <Svg16 inner={svg} size={size} />}
     </span>
   )
 }

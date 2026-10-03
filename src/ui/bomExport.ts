@@ -3,6 +3,7 @@ import { colorHex } from '../engine-api'
 import { colorLabel, labelOf } from '../names'
 import { formatCatalogPrice } from '../money'
 import { drawQr, type Stamp } from '../sharePage'
+import { partImageSrc } from './partImages'
 
 type Lang = 'zh' | 'en' | 'de'
 type T = (key: string, vars?: Record<string, string | number>) => string
@@ -101,16 +102,16 @@ const W = 900
 const PAD = 36
 const HEAD_H = 132
 const THUMB_W = 168
-const LINE = 30
+const LINE = 60
 const SEC_GAP = 18
 const SEC_HEAD = 26
 const FOOT_H = 64
 
-function layout(sections: BomSection[], notesHeight: Map<string, number>) {
+function layout(sections: BomSection[], notesHeight: Map<string, number>, forcedSingle = false) {
   // 一列排得下就一列，排不下分两列
   const unit = (s: BomSection) => SEC_HEAD + s.rows.reduce((sum, row) => sum + LINE + (notesHeight.get(row.key) || 0), 0) + SEC_GAP
   const total = sections.reduce((a, s) => a + unit(s), 0)
-  if (total <= 760 || notesHeight.size) return { cols: 1 as const, height: total }
+  if (forcedSingle || total <= 760 || notesHeight.size) return { cols: 1 as const, height: total }
   let half = 0
   let cut = 0
   for (let i = 0; i < sections.length; i++) {
@@ -124,10 +125,19 @@ function layout(sections: BomSection[], notesHeight: Map<string, number>) {
 }
 
 /** 料表图片：白底 PNG，发群里直接能看。thumb 是模型缩略图的 dataURL，可空。 */
-export function bomToPngDataUrl(input: BomExportInput, thumb: HTMLImageElement | null): string | null {
+export async function bomToPngDataUrl(input: BomExportInput, thumb: HTMLImageElement | null): Promise<string | null> {
   const { bom, name, sizeCm, lang, t, stamp } = input
   const sections = bomSections(bom, t)
   if (!sections.length) return null
+  const images = new Map<string, HTMLImageElement>()
+  await Promise.all(sections.flatMap(section => section.rows).map(async row => {
+    const src = partImageSrc(row.id) || partImageSrc(row.key)
+    if (!src) { console.warn('缺少零件图片', row.id || row.key); return }
+    if (images.has(src)) return
+    const image = await loadImage(src)
+    if (!image) throw new Error(`零件图片加载失败：${row.id || row.key}`)
+    images.set(src, image)
+  }))
   const canvas = document.createElement('canvas')
   const ctx = canvas.getContext('2d')
   if (!ctx) return null
@@ -141,13 +151,37 @@ export function bomToPngDataUrl(input: BomExportInput, thumb: HTMLImageElement |
     const lines: string[] = []
     let line = ''
     for (const char of text) {
-      if (line && ctx.measureText(line + char).width > W - 2 * PAD - 24) { lines.push(line); line = '' }
+      if (line && ctx.measureText(line + char).width > W - 2 * PAD - 60) { lines.push(line); line = '' }
       line += char
     }
     if (line) lines.push(line)
     notes.set(row.key, lines)
   }
-  const plan = layout(sections, new Map([...notes].map(([key, lines]) => [key, lines.length * 18 + 6])))
+  const notesHeight = new Map([...notes].map(([key, lines]) => [key, lines.length * 18 + 6]))
+  let plan = layout(sections, notesHeight)
+  const names = new Map<string, string[]>()
+  const wrapNames = (cols: number) => {
+    const width = cols === 2 ? (W - 2 * PAD - 40) / 2 : W - 2 * PAD
+    ctx.font = font(15)
+    for (const section of sections) for (const row of section.rows) {
+      const tint = colorWord(row.color)
+      const label = tint ? `${rowName(row)} · ${tint}` : rowName(row)
+      const budget = width - 60 - ctx.measureText(`×${row.count}`).width - 16
+      const lines: string[] = []
+      let line = ''
+      for (const char of label) {
+        if (line && ctx.measureText(line + char).width > budget) { lines.push(line); line = '' }
+        line += char
+      }
+      if (line) lines.push(line)
+      names.set(row.key, lines)
+    }
+  }
+  wrapNames(plan.cols)
+  const rowExtras = () => new Map(sections.flatMap(section => section.rows).map(row => [row.key, (notesHeight.get(row.key) || 0) + Math.max(0, (names.get(row.key)!.length - 1) * 20)]).filter(([, height]) => Number(height) > 0) as [string, number][])
+  const next = layout(sections, rowExtras())
+  if (next.cols !== plan.cols) { wrapNames(next.cols); plan = layout(sections, rowExtras(), next.cols === 1) }
+  else plan = next
   const height = HEAD_H + plan.height + FOOT_H
   const dpr = 2
   canvas.width = W * dpr
@@ -209,33 +243,35 @@ export function bomToPngDataUrl(input: BomExportInput, thumb: HTMLImageElement |
       for (const r of sec.rows) {
         ctx.fillStyle = '#111827'
         ctx.font = font(15)
-        let tx = x
+        const image = images.get(partImageSrc(r.id) || partImageSrc(r.key) || '')
+        if (image) ctx.drawImage(image, x, y - 24, 48, 48)
+        else {
+          ctx.fillStyle = '#f3f4f6'; ctx.fillRect(x, y - 24, 48, 48)
+          ctx.fillStyle = '#6b7280'; ctx.font = font(26); ctx.fillText('?', x + 16, y + 8)
+        }
+        ctx.font = font(15)
+        ctx.fillStyle = '#111827'
+        let tx = x + 60
         if (r.color) {
           ctx.beginPath()
           ctx.fillStyle = String(colorHex(r.color))
-          ctx.arc(x + 6, y - 5, 6, 0, Math.PI * 2)
+          ctx.arc(x + 24, y + 30, 4, 0, Math.PI * 2)
           ctx.fill()
           ctx.strokeStyle = '#d1d5db'
           ctx.stroke()
-          tx = x + 20
           ctx.fillStyle = '#111827'
         }
-        const tint = colorWord(r.color)
-        const label = tint ? `${rowName(r)} · ${tint}` : rowName(r)
         const countText = `×${r.count}`
         const countW = ctx.measureText(countText).width
-        let shown = label
-        while (ctx.measureText(shown).width > colW - (tx - x) - countW - 16 && shown.length > 4) {
-          shown = shown.slice(0, -2)
-        }
-        if (shown !== label) shown += '…'
-        ctx.fillText(shown, tx, y)
+        const lines = names.get(r.key)!
+        lines.forEach((line, index) => ctx.fillText(line, tx, y + index * 20))
         ctx.fillStyle = '#374151'
         ctx.fillText(countText, x + colW - countW, y)
+        y += Math.max(0, (lines.length - 1) * 20)
         if (notes.has(r.key)) {
           ctx.font = font(12)
           ctx.fillStyle = '#6b7280'
-          for (const line of notes.get(r.key)!) { y += 18; ctx.fillText(line, x + 12, y) }
+          for (const line of notes.get(r.key)!) { y += 18; ctx.fillText(line, tx, y + 20) }
           y += 6
         }
         y += LINE
