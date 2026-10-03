@@ -12,7 +12,7 @@ const BASE = process.env.BASE || 'http://localhost:5230/'
 const SHOTS = process.env.SHOTS || fileURLToPath(new URL('../../qb-shots/', import.meta.url))
 mkdirSync(SHOTS, { recursive: true })
 
-const browser = await chromium.launch()
+const browser = await chromium.launch({ executablePath: process.env.CHROME_EXECUTABLE || undefined })
 let ok = 0
 const check = (label, cond) => { assert.ok(cond, label); ok++; console.log(`✓ ${label}`) }
 
@@ -216,6 +216,68 @@ added = await press('ArrowLeft')
 check('只有一根管、没有点选：按 ← 从左端往左接', grewFrom(added, [0, 0, 0], NX, SPAN))
 
 // ---- 8. 不知道从哪接：给提示，不长管 ----
+// 截图中的阶梯：上层中间接头往右已有管子，先移动，再继续往右接。
+await load(`
+  const a = model.addNode(0, 80, 0), b = model.addNode(40, 80, 0), c = model.addNode(80, 80, 0)
+  const d = model.addNode(0, 40, 0), e = model.addNode(40, 40, 0), f = model.addNode(80, 40, 0), g = model.addNode(120, 40, 0)
+  const h = model.addNode(40, 0, 0), i = model.addNode(80, 0, 0), j = model.addNode(120, 0, 0)
+  for (const [p, q, color] of [[a,b,'blue'],[b,c,'blue'],[a,d,'green'],[b,e,'green'],[c,f,'yellow'],[d,e,'blue'],[e,f,'green'],[f,g,'red'],[e,h,'red'],[f,i,'blue'],[g,j,'green'],[h,i,'red'],[i,j,'yellow']])
+    model.addTube(p.id, q.id, 'T35', color, 35)
+`)
+await frame()
+await clickAt(await toScreen([40, 80, 0]))
+await page.keyboard.press('b')
+await shot('existing-before')
+const navigationBefore = await page.evaluate(() => {
+  const { model, builder } = window.__quadroDev
+  return { json: JSON.stringify(model.toJSON()), undo: builder.history.manager.undoStack.length }
+})
+const existingRight = await nodeAt([80, 80, 0])
+added = await press('ArrowRight')
+check('阶梯上层中间按 → ：不长管，高亮移动到已有管子的右端', added.length === 0 && (await state()).sel === existingRight)
+check('沿管移动不改造型、不增加撤销记录', await page.evaluate((before) => {
+  const { model, builder } = window.__quadroDev
+  return JSON.stringify(model.toJSON()) === before.json && builder.history.manager.undoStack.length === before.undo &&
+    JSON.stringify(builder.stepFrom) === JSON.stringify([builder.selectedNodeId])
+}, navigationBefore))
+check('沿管移动没有接不上提示', !(await toast()).includes('接不上管子'))
+await shot('existing-moved')
+added = await press('ArrowRight')
+check('移动到右端后再按 → ：从右端继续接管', grewFrom(added, [80, 80, 0], X, SPAN))
+await page.keyboard.press('Meta+z')
+await page.waitForTimeout(200)
+check('撤销只撤掉新接的管子，原阶梯保留', await page.evaluate((before) => JSON.stringify(window.__quadroDev.model.toJSON()) === before.json, navigationBefore))
+await page.keyboard.press('Meta+Shift+z')
+await page.waitForTimeout(200)
+check('重做恢复从右端接出的管子', !!(await nodeAt([120, 80, 0])))
+await frame()
+await shot('existing-continued')
+
+// 所选管长与已有管长不同：每次沿真实管子移动一个节点。
+await load(`
+  const a = model.addNode(0, 40, 0), b = model.addNode(20, 40, 0), c = model.addNode(60, 40, 0), d = model.addNode(60, 0, 0)
+  model.addTube(a.id, b.id, 'T15', 'blue', 15); model.addTube(b.id, c.id, 'T35', 'green', 35); model.addTube(c.id, d.id, 'T35', 'yellow', 35)
+`)
+await frame()
+await clickAt(await toScreen([0, 40, 0]))
+await page.keyboard.press('b')
+await page.keyboard.press('3')
+added = await press('ArrowRight')
+check('选35厘米管按 → ：沿已有15厘米管只走到20厘米处', added.length === 0 && (await state()).sel === await nodeAt([20, 40, 0]))
+await page.keyboard.press('1')
+added = await press('ArrowRight')
+check('选15厘米管按 → ：沿已有35厘米管走到60厘米处', added.length === 0 && (await state()).sel === await nodeAt([60, 40, 0]))
+added = await press('ArrowLeft')
+check('按 ← 可以沿同一根管返回', added.length === 0 && (await state()).sel === await nodeAt([20, 40, 0]))
+await press('ArrowRight')
+await page.evaluate(() => window.__quadroDev.scene.snapToDirection([0, 0, 1]))
+await page.waitForTimeout(1000)
+added = await press('ArrowDown')
+check('正视按 ↓ 沿已有竖管移动到底部', added.length === 0 && (await state()).sel === await nodeAt([60, 0, 0]))
+added = await press('ArrowUp')
+check('正视按 ↑ 沿已有竖管返回顶部', added.length === 0 && (await state()).sel === await nodeAt([60, 40, 0]))
+await page.keyboard.press('3')
+
 await load(`
   const a = model.addNode(0, 0, 0), b = model.addNode(40, 0, 0), c = model.addNode(40, 40, 0)
   model.addTube(a.id, b.id, 'T35', 'blue', 35); model.addTube(b.id, c.id, 'T35', 'red', 35)
