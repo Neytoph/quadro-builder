@@ -147,31 +147,90 @@ export function layoutManualCallouts(marks, width, height, radius = mm(2.8)) {
   return placed;
 }
 
+/** Keep number boxes outside actual projected motion; never change arrow endpoints.
+ * @param {any[]} marks
+ * @param {number} width
+ * @param {number} height
+ * @param {{arrows?:any[],materialMarks?:any[],gap?:number,arrowClearance?:number,padding?:number,blockedRects?:any[]}} options
+ */
+export function layoutOperationCallouts(marks, width, height, options = {}) {
+  const { arrows = [], materialMarks = [], gap = 6, arrowClearance = 6, padding = 3, blockedRects = [] } = options;
+  const placed = [];
+  const intersectsMotion = (box, arrow) => {
+    // Slab intersection of the complete shaft/head clearance with a number box.
+    const limits = [[box.x - box.boxWidth / 2 - arrowClearance, box.x + box.boxWidth / 2 + arrowClearance],
+      [box.y - box.boxHeight / 2 - arrowClearance, box.y + box.boxHeight / 2 + arrowClearance]];
+    let lo = 0, hi = 1;
+    for (const [axis, from, to] of [[0, arrow.x1, arrow.x2], [1, arrow.y1, arrow.y2]]) {
+      const delta = to - from, [min, max] = limits[axis];
+      if (Math.abs(delta) < 1e-9) { if (from < min || from > max) return false; }
+      else {
+        const a = (min - from) / delta, b = (max - from) / delta;
+        lo = Math.max(lo, Math.min(a, b)); hi = Math.min(hi, Math.max(a, b));
+        if (lo > hi) return false;
+      }
+    }
+    return true;
+  };
+  const overlapsBox = (box, other) => Math.abs(box.x - other.x) < (box.boxWidth + other.boxWidth) / 2 + gap &&
+    Math.abs(box.y - other.y) < (box.boxHeight + other.boxHeight) / 2 + gap;
+  const overlapsMaterial = (box, mark) => Math.hypot(Math.max(0, Math.abs(mark.x - box.x) - box.boxWidth / 2),
+    Math.max(0, Math.abs(mark.y - box.y) - box.boxHeight / 2)) < (mark.radius ?? 12) + gap;
+  for (const mark of marks) {
+    const boxWidth = mark.boxWidth ?? 26, boxHeight = mark.boxHeight ?? 26;
+    const minX = padding + boxWidth / 2, maxX = width - padding - boxWidth / 2;
+    const minY = padding + boxHeight / 2, maxY = height - padding - boxHeight / 2;
+    const fitsViewport = minX <= maxX && minY <= maxY;
+    const clamp = (x, y) => ({ x: minX <= maxX ? Math.max(minX, Math.min(maxX, x)) : width / 2,
+      y: minY <= maxY ? Math.max(minY, Math.min(maxY, y)) : height / 2, boxWidth, boxHeight });
+    const candidates = [];
+    for (const arrow of arrows) {
+      const dx = arrow.x2 - arrow.x1, dy = arrow.y2 - arrow.y1, length = Math.hypot(dx, dy) || 1;
+      const nx = -dy / length, ny = dx / length;
+      const offset = Math.abs(nx) * boxWidth / 2 + Math.abs(ny) * boxHeight / 2 + arrowClearance + gap;
+      for (const t of [0.5, 0, 1]) for (const sign of [-1, 1]) {
+        candidates.push(clamp(arrow.x1 + dx * t + nx * offset * sign, arrow.y1 + dy * t + ny * offset * sign));
+      }
+    }
+    for (const distance of [boxHeight / 2 + arrowClearance + gap, boxWidth + gap, 2 * (boxWidth + gap)]) {
+      for (let angle = 0; angle < 8; angle++) candidates.push(clamp(mark.x + Math.cos(angle * Math.PI / 4) * distance, mark.y + Math.sin(angle * Math.PI / 4) * distance));
+    }
+    // Dense drawings still get a deterministic bounded search, rather than a clipped label.
+    const stride = Math.max(6, Math.min(boxWidth, boxHeight) / 2);
+    for (let y = minY; y <= maxY; y += stride) for (let x = minX; x <= maxX; x += stride) candidates.push({ x, y, boxWidth, boxHeight });
+    candidates.sort((a, b) => Math.hypot(a.x - mark.x, a.y - mark.y) - Math.hypot(b.x - mark.x, b.y - mark.y));
+    const collisionCount = box => arrows.filter(arrow => intersectsMotion(box, arrow)).length +
+      [...placed, ...blockedRects].filter(other => overlapsBox(box, other)).length + materialMarks.filter(other => overlapsMaterial(box, other)).length;
+    let box = fitsViewport ? candidates.find(candidate => !collisionCount(candidate)) : null;
+    const placementClear = !!box;
+    if (!box) box = candidates.reduce((best, candidate) => collisionCount(candidate) < collisionCount(best) ? candidate : best, clamp(mark.x, mark.y));
+    placed.push({ ...mark, ...box, anchorX: mark.x, anchorY: mark.y, placementClear });
+  }
+  return placed;
+}
+
+function projectedManualMarks(img, x, y, w, h, marks, local) {
+  const s = Math.max(w / img.width, h / img.height), dw = img.width * s, dh = img.height * s;
+  const ox = (w - dw) / 2, oy = (h - dh) / 2, r = mm(2.8);
+  const source = marks.map(mark => ({ x: ox + mark.u * dw, y: oy + mark.v * dh, label: String(mark.num), z: mark.z }))
+    .filter(mark => mark.x > -r && mark.x < w + r && mark.y > -r && mark.y < h + r).sort((a, b) => a.z - b.z);
+  const labels = local ? layoutManualCallouts(source, w, h, r) : layoutAssemblyMarks(source, w, h, { radius: r, gap: r * 0.15 });
+  return labels.map(mark => ({ ...mark, x: x + mark.x, y: y + mark.y, anchorX: x + mark.anchorX, anchorY: y + mark.anchorY, radius: r }));
+}
+
 function drawMarks(ctx, img, x, y, w, h, marks, local = false) {
   if (!img || !img.width || !marks || !marks.length) return;
-  const s = Math.max(w / img.width, h / img.height);
-  const dw = img.width * s, dh = img.height * s;
-  const ox = x + (w - dw) / 2;
-  const oy = y + (h - dh) / 2;
   const r = mm(2.8);
-  const placed = marks.map((m) => ({
-    num: m.num,
-    x: ox + m.u * dw,
-    y: oy + m.v * dh,
-    z: m.z,
-  })).filter((m) => m.x > x - r && m.x < x + w + r && m.y > y - r && m.y < y + h + r);
-  placed.sort((a, b) => a.z - b.z);
-  const source = placed.map(m => ({ x: m.x - x, y: m.y - y, label: String(m.num) }));
-  const labels = local ? layoutManualCallouts(source, w, h, r) : layoutAssemblyMarks(source, w, h, { radius: r, gap: r * 0.15 });
+  const labels = projectedManualMarks(img, x, y, w, h, marks, local);
   ctx.save();
   roundRect(ctx, x, y, w, h, mm(1.2));
   ctx.clip();
   for (const m of labels) {
     if (Math.hypot(m.x - m.anchorX, m.y - m.anchorY) > 1) {
-      ctx.beginPath(); ctx.moveTo(x + m.anchorX, y + m.anchorY); ctx.lineTo(x + m.x, y + m.y);
+      ctx.beginPath(); ctx.moveTo(m.anchorX, m.anchorY); ctx.lineTo(m.x, m.y);
       ctx.strokeStyle = 'rgba(92,101,112,0.75)'; ctx.lineWidth = 1.5; ctx.stroke();
     }
-    drawBadge(ctx, x + m.x, y + m.y, m.label, r);
+    drawBadge(ctx, m.x, m.y, m.label, r);
   }
   ctx.restore();
 }
@@ -758,7 +817,8 @@ function paintStep(ctx, { front, back, copy, heading, items, icons, k, n, fill, 
 }
 
 async function pageToPdf(doc, canvas, first) {
-  const jpeg = canvas.toDataURL("image/jpeg", 0.96);
+  // Keep the full page raster and fonts; reduce codec overhead for long manuals.
+  const jpeg = canvas.toDataURL("image/jpeg", 0.90);
   if (!first) doc.addPage();
   doc.addImage(jpeg, "JPEG", 0, 0, PAGE_W, PAGE_H);
 }
@@ -814,6 +874,14 @@ function positionedItems(model, items, state = null) {
 }
 
 export const manualPositionedItems = positionedItems;
+
+export function projectOperationMarks(scene, model, state, aspect) {
+  return (state?.operationNumbers || []).map(operation => {
+    const positions = positionedItems(model, [{ instanceIds: operation.partIds, key: operation.id }], state)[0]?.positions || [];
+    const point = scene.projectWorld(positions, aspect).find(value => value && value.u >= 0 && value.u <= 1 && value.v >= 0 && value.v <= 1);
+    return point ? { ...point, order: operation.order } : null;
+  }).filter(Boolean);
+}
 
 /** @param {any[] | null} [numberedCover] */
 export function assemblyDetailItems(model, plan, step, group, numberedCover = null) {
@@ -1000,29 +1068,59 @@ function projectStateMarks(scene, state, aspect) {
   return marks;
 }
 
-function drawArrows(ctx, img, x, y, w, h, arrows) {
-  if (!arrows?.length) return;
+/** Arrowhead uses the true projected tip, and fits inside even a short motion. */
+export function projectedOperationArrowHead(arrow, maxLength = 12) {
+  const dx = arrow.x2 - arrow.x1, dy = arrow.y2 - arrow.y1, distance = Math.hypot(dx, dy);
+  if (distance < 1e-6) return null;
+  const angle = Math.atan2(dy, dx), length = Math.min(maxLength, distance);
+  return { tip: [arrow.x2, arrow.y2], left: [arrow.x2 - length * Math.cos(angle - 0.45), arrow.y2 - length * Math.sin(angle - 0.45)],
+    right: [arrow.x2 - length * Math.cos(angle + 0.45), arrow.y2 - length * Math.sin(angle + 0.45)] };
+}
+
+/** @param {any[] | null} [operationMarks] */
+export function drawManualArrows(ctx, img, x, y, w, h, arrows, marks = [], local = false, operationMarks = null) {
+  if (!arrows?.length && !operationMarks?.length) return;
   const scale = Math.max(w / img.width, h / img.height);
   const dw = img.width * scale, dh = img.height * scale;
-  const ox = x + (w - dw) / 2, oy = y + (h - dh) / 2;
+  const ox = (w - dw) / 2, oy = (h - dh) / 2;
+  const projected = (arrows || []).map(arrow => ({ ...arrow, x1: ox + arrow.from.u * dw, y1: oy + arrow.from.v * dh,
+    x2: ox + arrow.to.u * dw, y2: oy + arrow.to.v * dh }));
+  const materialMarks = projectedManualMarks(img, 0, 0, w, h, marks, local);
+  ctx.font = font(600, mm(MANUAL_TEXT_MM));
+  const labelSources = operationMarks === null ? projected.filter(arrow => arrow.order).map(arrow => ({ x: arrow.x1, y: arrow.y1, order: arrow.order })) :
+    operationMarks.map(mark => ({ x: ox + mark.u * dw, y: oy + mark.v * dh, order: mark.order }));
+  const labels = layoutOperationCallouts(labelSources.map(mark => {
+    const label = mark.order <= 20 ? String.fromCodePoint(0x2460 + mark.order - 1) : `(${mark.order})`;
+    return { x: mark.x, y: mark.y, label, boxWidth: Math.max(mm(5), ctx.measureText(label).width + mm(2)), boxHeight: mm(5) };
+  }), w, h, { arrows: projected, materialMarks, gap: mm(0.8), arrowClearance: mm(2), padding: mm(1),
+    blockedRects: [{ x: w / 2, y: h - mm(5), boxWidth: w, boxHeight: mm(10) }] });
   ctx.save();
   roundRect(ctx, x, y, w, h, mm(1.2)); ctx.clip();
-  ctx.strokeStyle = ACCENT; ctx.fillStyle = ACCENT; ctx.lineWidth = mm(0.7);
-  for (const arrow of arrows) {
-    const from = [ox + arrow.from.u * dw, oy + arrow.from.v * dh];
-    const to = [ox + arrow.to.u * dw, oy + arrow.to.v * dh];
-    const angle = Math.atan2(to[1] - from[1], to[0] - from[0]);
-    ctx.beginPath(); ctx.moveTo(...from); ctx.lineTo(...to); ctx.stroke();
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  // Draw thin number leaders first so they cannot paint over movement arrows.
+  for (const box of labels) {
+    ctx.beginPath(); ctx.moveTo(x + box.anchorX, y + box.anchorY); ctx.lineTo(x + box.x, y + box.y);
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = mm(0.65); ctx.stroke();
+    ctx.strokeStyle = INK; ctx.lineWidth = mm(0.25); ctx.stroke();
+  }
+  for (const arrow of projected) {
+    const from = [x + arrow.x1, y + arrow.y1], to = [x + arrow.x2, y + arrow.y2];
+    // A motion parallel to the camera has no 2D length; do not invent a direction.
+    const head = projectedOperationArrowHead(arrow, mm(3));
+    if (!head) continue;
+    ctx.beginPath(); ctx.moveTo(...from); ctx.lineTo(...to);
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = mm(1.8); ctx.stroke();
+    ctx.strokeStyle = '#b33d00'; ctx.lineWidth = mm(0.7); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(...to);
-    ctx.lineTo(to[0] - mm(3) * Math.cos(angle - 0.45), to[1] - mm(3) * Math.sin(angle - 0.45));
-    ctx.lineTo(to[0] - mm(3) * Math.cos(angle + 0.45), to[1] - mm(3) * Math.sin(angle + 0.45));
-    ctx.closePath(); ctx.fill();
-    if (arrow.order) {
-      const box = manualActionLabelBox(ctx, arrow.order, from, { x, y, w, h });
-      ctx.fillStyle = 'rgba(255,255,255,0.95)'; ctx.fillRect(box.x - box.width / 2, box.y - box.height / 2, box.width, box.height);
-      ctx.fillStyle = INK; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(box.label, box.x, box.y);
-      ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillStyle = ACCENT;
-    }
+    ctx.lineTo(x + head.left[0], y + head.left[1]);
+    ctx.lineTo(x + head.right[0], y + head.right[1]);
+    ctx.closePath(); ctx.strokeStyle = '#fff'; ctx.lineWidth = mm(1.1); ctx.stroke();
+    ctx.fillStyle = '#b33d00'; ctx.fill();
+  }
+  for (const box of labels) {
+    ctx.fillStyle = '#fff'; ctx.fillRect(x + box.x - box.boxWidth / 2, y + box.y - box.boxHeight / 2, box.boxWidth, box.boxHeight);
+    ctx.strokeStyle = INK; ctx.lineWidth = mm(0.25); ctx.strokeRect(x + box.x - box.boxWidth / 2, y + box.y - box.boxHeight / 2, box.boxWidth, box.boxHeight);
+    ctx.fillStyle = INK; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(box.label, x + box.x, y + box.y);
   }
   ctx.restore();
 }
@@ -1242,16 +1340,7 @@ function paintDetailRow(ctx, { group, left, right, location, icons, copy, y, hei
   const imgH = height - (imgY - y) - legendH - 6;
   const box = { x0: M, x1: 133.5, imgY, imgW: 124, imgH };
   paintPair(ctx, left.img, right.img, box, { front: copy.actionView, back: copy.completeView }, fill, left.marks, right.marks, true);
-  drawArrows(ctx, left.img, mm(box.x0), mm(imgY), mm(box.imgW), mm(imgH), left.arrows);
-  // 动作序号独立于材料圆圈，使用带方形底的①②③。
-  const numbers = (left.operationNumbers || []).map(value => typeof value === 'number' ? value : value.order).filter(Number.isFinite);
-  if (numbers.length) {
-    ctx.font = font(600, mm(MANUAL_TEXT_MM)); ctx.fillStyle = INK;
-    const labels = numbers.map(n => n <= 20 ? String.fromCodePoint(0x2460 + n - 1) : `(${n})`).join('  ');
-    const width = ctx.measureText(labels).width + mm(2);
-    ctx.fillStyle = 'rgba(255,255,255,0.95)'; ctx.fillRect(mm(M + 2), mm(imgY + 1), width, mm(5));
-    ctx.fillStyle = INK; ctx.fillText(labels, mm(M + 3), mm(imgY + 2));
-  }
+  drawManualArrows(ctx, left.img, mm(box.x0), mm(imgY), mm(box.imgW), mm(imgH), left.arrows, left.marks, true, left.operationMarks);
   const legendY = imgY + imgH + 2;
   const consumed = paintLegend(ctx, group.items, icons, mm(M), mm(legendY), mm(245), mm(y + height));
   if (consumed !== group.items.length) throw manualError('pagination', '局部材料参考绘制空间不足');
@@ -1273,7 +1362,7 @@ function paintCompactDetail(ctx, { group, left, right, location, icons, copy, x,
   const imgH = (height - (imgY - y) - group.legendH - 4) / 2;
   drawShot(ctx, left.img, mm(x), mm(imgY), mm(width), mm(imgH), fill);
   drawMarks(ctx, left.img, mm(x), mm(imgY), mm(width), mm(imgH), left.marks, true);
-  drawArrows(ctx, left.img, mm(x), mm(imgY), mm(width), mm(imgH), left.arrows);
+  drawManualArrows(ctx, left.img, mm(x), mm(imgY), mm(width), mm(imgH), left.arrows, left.marks, true, left.operationMarks);
   paintCaption(ctx, `${copy.actionView} · ${directionLabel(group, copy)}`, mm(x), mm(imgY), mm(imgH));
   const completeY = imgY + imgH + 2;
   drawShot(ctx, right.img, mm(x), mm(completeY), mm(width), mm(imgH), fill);
@@ -1396,6 +1485,7 @@ export async function exportAssemblyPdf(opts) {
       const image = await captureView(scene, model, yaw, { ...size, bounds: bounds || renderedBounds(scene, model), items: positionedItems(model, visibleItems, state), oneEach: true, direction });
       if (!local) image.marks.push(...projectStateMarks(scene, state, size.width / size.height));
       image.operationNumbers = state?.operationNumbers || [];
+      image.operationMarks = projectOperationMarks(scene, model, state, size.width / size.height);
       image.arrows = (state?.arrows || []).map(arrow => {
         const [from, to] = scene.projectWorld([arrow.from, arrow.to], size.width / size.height);
         const operation = state?.operationNumbers?.find(value => value.id === arrow.id);
@@ -1517,7 +1607,7 @@ export async function exportAssemblyPdf(opts) {
           const consumed = paintStep(ctx, { front: left.img, back: right.img, copy: { ...copy, front: leftLabel, back: rightLabel, contextHint: layer ? copy.layerHint : bodyContext ? copy.bodyHint : modulePreassembly ? copy.preassemblyHint : roofCoverDetail ? copy.roofCoverHint : ['step', 'detail'].includes(descriptor.type) ? copy.contextHint : '' }, heading, items: descriptor.items || [], icons, k: currentPage, n: total, fill: sceneFill(scene), frontMarks: left.marks, backMarks: right.marks, instructions, stamp, partsH: descriptor.partsH, headerH: descriptor.headerH, instructionLines: descriptor.instructionLines });
           if (consumed !== (descriptor.items?.length || 0)) throw manualError('pagination', '步骤料表分页与实际绘制不一致');
           const box = pageBox;
-          if (descriptor.type !== 'detail') drawArrows(ctx, left.img, mm(box.x0), mm(box.imgY), mm(box.imgW), mm(box.imgH), left.arrows);
+          if (descriptor.type !== 'detail') drawManualArrows(ctx, left.img, mm(box.x0), mm(box.imgY), mm(box.imgW), mm(box.imgH), left.arrows, left.marks);
         }
         ctx.fillStyle = MUTED; ctx.font = font(400, mm(2)); ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
         ctx.fillText(`${currentPage} / ${total}`, mm(PAGE_W / 2), mm(PAGE_H - 2.5));
