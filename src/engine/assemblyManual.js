@@ -1312,10 +1312,11 @@ function manualError(code, message, diagnostics = []) {
  */
 export async function exportAssemblyPdf(opts) {
   const { name, filename, onProgress, stamp, save = true, onDocument } = opts;
+  const manualLang = getLang();
   // 在第一个异步等待之前冻结输入，编辑器切换模型或继续修改均不会进入本次导出。
   const snapshot = structuredClone(opts.modelJSON ?? opts.model.toJSON());
   const suppliedPlan = opts.plan ? structuredClone(opts.plan) : null;
-  const copy = { actionView: '安装动作', completeView: '本步完成', regionOverview: '区域总览', regionShape: '独立外形', regionLocation: '成品定位', regionOrder: '拼接顺序', finalTitle: '完成造型与接口位置', instructionsTitle: '安装说明', ...manualSafetyCopy(), ...opts.copy };
+  const copy = { actionView: '安装动作', completeView: '本步完成', regionOverview: '区域总览', regionShape: '独立外形', regionLocation: '成品定位', regionOrder: '拼接顺序', finalTitle: '完成造型与接口位置', instructionsTitle: '安装说明', ...manualSafetyCopy(manualLang), ...opts.copy };
   onProgress?.({ page: 0, total: 0, phase: 'resources' });
   await loadCatalog();
   const model = new BuildModel();
@@ -1331,7 +1332,7 @@ export async function exportAssemblyPdf(opts) {
   const icons = await loadIcons(itemsCover);
   const coverLayout = legendChunks(itemsCover, true, icons, stamp, copy.bomTitle);
   const descriptors = [{ type: 'cover', items: coverLayout.chunks[0], partsH: coverLayout.partsH }, ...coverLayout.chunks.slice(1).map(items => ({ type: 'legend', title: copy.bomTitle, items }))];
-  descriptors.push(manualSafetyDescriptor(copy));
+  descriptors.push(manualSafetyDescriptor(copy, manualLang));
   descriptors.push({ type: 'overview' });
   for (const region of plan.regions || []) descriptors.push({ type: 'region', region });
   for (let index = 0; index < steps.length; index++) {

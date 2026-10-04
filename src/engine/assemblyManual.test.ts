@@ -7,24 +7,55 @@ import { computeAssemblyPlan, assemblyState } from './assemblyPlan.js'
 import { coverItems, numberStepItems, stepItems, assemblyPresentationState, measureManualLegend, manualPartsHeight, assemblyDetailItems, assemblyDetailDirection, wrapManualText, manualStepTextLayout, manualStepDetailDescriptors, layoutManualCallouts, manualTextPageLayout, manualDetailPageLayout, manualActionLabelBox, manualSafetyDescriptor, MANUAL_TEXT_MM, MANUAL_AUX_MM } from './assemblyManual.js'
 import { parseQDF } from './qdfimport.js'
 import { partImageSrc } from '../ui/partImages'
+import { getLang, setLang } from './i18n.js'
 
 type ManualItem = { id: string; key: string; kind: string; num: number }
 
-beforeAll(async () => { await loadCatalog() })
+const fixtureFiles = ['qdf/B0012.qdf', 'qdf/C0005.qdf', 'qdf/C0013.qdf', 'qdf/C0156.qdf', 'qdf/C0179.qdf', 'assembly-fixtures/s33.json', 'assembly-fixtures/s36.json']
+const fixturePlans = new Map<string, any>()
+const fixturePlanEvidence: any[] = []
+const fixtureKey = (model: any) => JSON.stringify([getLang(), model.toJSON()])
+function loadManualFixture(file: string) {
+  const text = readFileSync(`public/${file}`, 'utf8')
+  const data = file.endsWith('.qdf') ? parseQDF(text, { tubes: buildableTubes(), panels: panels(), connectorSize: geometry().connectorSize, mergeEps: 2 }) : JSON.parse(text)
+  const model = new BuildModel()
+  expect(model.loadJSON(data).ok, file).toBe(true)
+  return model
+}
+function manualFixture(file: string) {
+  const model = loadManualFixture(file), plan = fixturePlans.get(fixtureKey(model))
+  if (!plan) throw new Error(`固定输入与语言尚未预规划：${file}`)
+  // 每项测试有独立模型和计划副本；修改后的输入不能借用旧计划。
+  return { model, plan: structuredClone(plan) }
+}
+beforeAll(async () => {
+  await loadCatalog()
+  for (const file of fixtureFiles) {
+    const model = loadManualFixture(file), key = fixtureKey(model), started = performance.now()
+    if (!fixturePlans.has(key)) fixturePlans.set(key, computeAssemblyPlan(model))
+    const plan = fixturePlans.get(key)
+    fixturePlanEvidence.push({ file, lang: getLang(), ms: performance.now() - started, canExport: plan.canExport, diagnostics: plan.diagnostics.map((item: any) => item.code) })
+  }
+}, 300000)
 const assetEvidence: any[] = []
-afterAll(() => { mkdirSync('.work', { recursive: true }); writeFileSync('.work/assembly-pdf-assets.json', JSON.stringify(assetEvidence, null, 2)) })
+afterAll(() => { mkdirSync('.work', { recursive: true }); writeFileSync('.work/assembly-pdf-assets.json', JSON.stringify(assetEvidence, null, 2)); writeFileSync('.work/assembly-pdf-fixture-plans.json', JSON.stringify(fixturePlanEvidence, null, 2)) })
 
 describe('说明书材料编号', () => {
   it('三语搭建前页保留未实物验证状态，调用方缺少状态文案也不遗漏', () => {
     const claims = { zh: ['现场搭建', '首次搭建者走查', '承载', '尚未验证'], en: ['On-site assembly', 'first-time builder', 'load-bearing capacity', 'not yet been verified'], de: ['Aufbau vor Ort', 'erstmalige Aufbauende', 'Tragfähigkeit', 'noch nicht verifiziert'] }
-    for (const [lang, required] of Object.entries(claims)) {
-      const descriptor = manualSafetyDescriptor({ safetyNotice: 'Caller assembly notice without a verification status.' }, lang)
-      expect(descriptor.type).toBe('safety')
-      const text = descriptor.lines.join(' ')
-      for (const claim of required) expect(text).toContain(claim)
-      expect(text).toContain('Caller assembly notice without a verification status.')
-      expect(descriptor.lines.at(-1)).toBe('https://quadroworld.com/files/manuals/Sicherheitsanweisung.pdf')
-    }
+    const previousLang = getLang()
+    try {
+      for (const [lang, required] of Object.entries(claims)) {
+        // 导出等待资源时切换UI语言，显式冻结的导出语言仍决定验证状态。
+        setLang(lang === 'zh' ? 'en' : 'zh')
+        const descriptor = manualSafetyDescriptor({ safetyNotice: 'Caller assembly notice without a verification status.' }, lang)
+        expect(descriptor.type).toBe('safety')
+        const text = descriptor.lines.join(' ')
+        for (const claim of required) expect(text).toContain(claim)
+        expect(text).toContain('Caller assembly notice without a verification status.')
+        expect(descriptor.lines.at(-1)).toBe('https://quadroworld.com/files/manuals/Sicherheitsanweisung.pdf')
+      }
+    } finally { setLang(previousLang) }
   })
   it('带二维码的长说明与长区域标题按安全高度续页，不覆盖二维码', () => {
     const ctx = { font: '', measureText: (text: string) => ({ width: [...text].length * 20 }) }
@@ -93,9 +124,7 @@ describe('说明书材料编号', () => {
     expect(assemblyDetailDirection({ ...group, viewDirection: 'back' }, step)).toEqual([-1, 0.65, -1])
   })
   it.each(['C0179', 'C0005', 'C0013'])('%s 局部续页保留主步骤号，每组仅一次且不重复计料', name => {
-    const model = new BuildModel()
-    model.loadJSON(parseQDF(readFileSync(`public/qdf/${name}.qdf`, 'utf8'), { tubes: buildableTubes(), panels: panels(), connectorSize: geometry().connectorSize, mergeEps: 2 }))
-    const plan = computeAssemblyPlan(model)
+    const { model, plan } = manualFixture(`qdf/${name}.qdf`)
     const cover = coverItems(plan.bom)
     const ctx = { font: '', measureText: (text: string) => ({ width: [...text].length * 16 }) }
     const copy = { stepHeading: '{k}/{n} · {title}', detailTitle: '局部动作详图' }
@@ -115,9 +144,7 @@ describe('说明书材料编号', () => {
     }
   })
   it('C0179整层安装保留已装主体，顶层框架与接头一同下套且不修改模型状态', () => {
-    const model = new BuildModel()
-    model.loadJSON(parseQDF(readFileSync('public/qdf/C0179.qdf', 'utf8'), { tubes: buildableTubes(), panels: panels(), connectorSize: geometry().connectorSize, mergeEps: 2 }))
-    const plan = computeAssemblyPlan(model)
+    const { model, plan } = manualFixture('qdf/C0179.qdf')
     const index = plan.steps.findIndex((step: any) => plan.regions.find((region: any) => region.id === step.regionId)?.kind === 'body' && step.y === 20 && step.action.layer)
     expect(index).toBeGreaterThanOrEqual(0)
     const step = plan.steps[index], before = assemblyState(plan, index, { action: true }), after = assemblyState(plan, index)
@@ -144,9 +171,7 @@ describe('说明书材料编号', () => {
     expect(JSON.stringify(model.toJSON())).toBe(saved)
   })
   it('C0179 80cm整层页同时呈现四个独立框架及完整已装主体', () => {
-    const model = new BuildModel()
-    model.loadJSON(parseQDF(readFileSync('public/qdf/C0179.qdf', 'utf8'), { tubes: buildableTubes(), panels: panels(), connectorSize: geometry().connectorSize, mergeEps: 2 }))
-    const plan = computeAssemblyPlan(model)
+    const { model, plan } = manualFixture('qdf/C0179.qdf')
     const index = plan.steps.findIndex((step: any) => plan.regions.find((region: any) => region.id === step.regionId)?.kind === 'body' && step.y === 80 && step.action.layer)
     expect(index).toBeGreaterThanOrEqual(0)
     const step = plan.steps[index], state = assemblyState(plan, index, { action: true })
@@ -170,9 +195,7 @@ describe('说明书材料编号', () => {
     expect(presented.arrows.every((arrow: any) => arrow.from[1] > arrow.to[1])).toBe(true)
   })
   it('C0179主体20cm层的全部材料留在同一主步骤，管35 cm与后装立柱不单独计料', () => {
-    const model = new BuildModel()
-    model.loadJSON(parseQDF(readFileSync('public/qdf/C0179.qdf', 'utf8'), { tubes: buildableTubes(), panels: panels(), connectorSize: geometry().connectorSize, mergeEps: 2 }))
-    const plan = computeAssemblyPlan(model)
+    const { model, plan } = manualFixture('qdf/C0179.qdf')
     const index = plan.steps.findIndex((step: any) => plan.regions.find((region: any) => region.id === step.regionId)?.kind === 'body' && step.y === 20 && step.action.layer)
     expect(index).toBeGreaterThanOrEqual(0)
     const step = plan.steps[index]
@@ -212,9 +235,7 @@ describe('说明书材料编号', () => {
   })
 
   it('C0013 新步骤的加固件完整分配，料表按实际行高留在图示页', () => {
-    const model = new BuildModel()
-    model.loadJSON(parseQDF(readFileSync('public/qdf/C0013.qdf', 'utf8'), { tubes: buildableTubes(), panels: panels(), connectorSize: geometry().connectorSize, mergeEps: 2 }))
-    const plan = computeAssemblyPlan(model)
+    const { model, plan } = manualFixture('qdf/C0013.qdf')
     const groups = plan.steps.map((step: any) => stepItems(model, step)).filter((items: any[]) => items.some(item => item.kind === 'reinforcements'))
     const ctx = { font: '', measureText: (text: string) => ({ width: [...text].length * 20 }) }
     expect(groups.flat().filter((item: any) => item.kind === 'reinforcements').reduce((sum: number, item: any) => sum + item.count, 0)).toBe(8)
@@ -238,9 +259,7 @@ describe('说明书材料编号', () => {
     expect(210 - 16 - partsH - 3).toBeGreaterThanOrEqual(85)
   })
   it('C0005 顶棚安装保留完整支撑框架，供底部视角核对固定杆', () => {
-    const model = new BuildModel()
-    model.loadJSON(parseQDF(readFileSync('public/qdf/C0005.qdf', 'utf8'), { tubes: buildableTubes(), panels: panels(), connectorSize: geometry().connectorSize, mergeEps: 2 }))
-    const plan = computeAssemblyPlan(model)
+    const { model, plan } = manualFixture('qdf/C0005.qdf')
     const cover = plan.regions.find((r: any) => r.accessoryType === 'roof-cover')
     const index = plan.steps.findIndex((s: any) => s.regionId === cover.id && s.action.type === 'attach')
     const support = plan.regions.find((r: any) => r.id === cover.supportRegionId)
@@ -250,9 +269,7 @@ describe('说明书材料编号', () => {
     for (const id of cover.slideIds) expect(presented.visible.has(id)).toBe(true)
   })
   it('C0005 滑梯本体按原位分件步骤绘图，详情过滤遮挡板且不修改冻结模型或零件状态', () => {
-    const model = new BuildModel()
-    model.loadJSON(parseQDF(readFileSync('public/qdf/C0005.qdf', 'utf8'), { tubes: buildableTubes(), panels: panels(), connectorSize: geometry().connectorSize, mergeEps: 2 }))
-    const plan = computeAssemblyPlan(model)
+    const { model, plan } = manualFixture('qdf/C0005.qdf')
     const index = plan.steps.findIndex((step: any) => plan.regions.find((region: any) => region.id === step.regionId)?.kind === 'slide' && step.operations.some((operation: any) => operation.type === 'fit-accessory' && operation.partIds.some((id: string) => model.slides.get(id)?.kind === 'slide2')))
     expect(index).toBeGreaterThanOrEqual(0)
     expect(plan.steps[index].action.detached).toBe(false)
@@ -269,9 +286,7 @@ describe('说明书材料编号', () => {
     expect(plan.ledger.conserved).toBe(true)
   })
   it('s33 说明书不生成固定检查步骤或螺丝位置', () => {
-    const model = new BuildModel()
-    expect(model.loadJSON(JSON.parse(readFileSync('public/assembly-fixtures/s33.json', 'utf8'))).ok).toBe(true)
-    const plan = computeAssemblyPlan(model)
+    const { plan } = manualFixture('assembly-fixtures/s33.json')
     expect(plan.steps.some((step: any) => step.action.type === 'fix')).toBe(false)
     expect(plan.fixingPoints).toEqual([])
     expect(plan.ledger.conserved).toBe(true)
@@ -295,14 +310,10 @@ describe('说明书材料编号', () => {
     expect(() => numberStepItems([{ key: 'unknown', id: 'unknown', count: 1 }], [])).toThrow('材料未列入总料表')
   })
 
-  it.each(['qdf/B0012.qdf', 'qdf/C0005.qdf', 'qdf/C0013.qdf', 'qdf/C0156.qdf', 'qdf/C0179.qdf', 'assembly-fixtures/s33.json', 'assembly-fixtures/s36.json'])('%s 说明书物料图片存在且不统计螺丝', file => {
-      const text = readFileSync(`public/${file}`, 'utf8')
-      const data = file.endsWith('.qdf') ? parseQDF(text, { tubes: buildableTubes(), panels: panels(), connectorSize: geometry().connectorSize, mergeEps: 2 }) : JSON.parse(text)
-      const model = new BuildModel()
-      expect(model.loadJSON(data).ok).toBe(true)
+  it.each(fixtureFiles)('%s 说明书物料图片存在且不统计螺丝', file => {
+      const { model, plan } = manualFixture(file)
       const items = coverItems(computeBOM(model)) as ManualItem[]
       expect(items.some(item => item.kind === 'screws')).toBe(false)
-      const plan = computeAssemblyPlan(model)
       for (const step of plan.steps) expect(stepItems(model, step).some((item: any) => item.kind === 'screws')).toBe(false)
       const images = items.map(item => ({ id: item.id, kind: item.kind, src: partImageSrc(item.id) }))
       for (const image of images) {
