@@ -238,12 +238,14 @@ describe('说明书材料编号', () => {
     for (const id of support.tubeIds) expect(presented.visible.has(id)).toBe(true)
     for (const id of cover.slideIds) expect(presented.visible.has(id)).toBe(true)
   })
-  it('C0005 滑梯操作仅显示模块与支撑接口，隐藏遮挡板且不修改冻结模型或零件状态', () => {
+  it('C0005 滑梯本体按原位分件步骤绘图，详情过滤遮挡板且不修改冻结模型或零件状态', () => {
     const model = new BuildModel()
     model.loadJSON(parseQDF(readFileSync('public/qdf/C0005.qdf', 'utf8'), { tubes: buildableTubes(), panels: panels(), connectorSize: geometry().connectorSize, mergeEps: 2 }))
     const plan = computeAssemblyPlan(model)
-    const index = plan.steps.findIndex((step: any) => step.action.type === 'attach' && plan.regions.find((region: any) => region.id === step.regionId)?.kind === 'slide')
+    const index = plan.steps.findIndex((step: any) => plan.regions.find((region: any) => region.id === step.regionId)?.kind === 'slide' && step.operations.some((operation: any) => operation.type === 'fit-accessory' && operation.partIds.some((id: string) => model.slides.get(id)?.kind === 'slide2')))
     expect(index).toBeGreaterThanOrEqual(0)
+    expect(plan.steps[index].action.detached).toBe(false)
+    expect(plan.steps[index].action.type).toBe('build')
     const before = JSON.stringify(model.toJSON())
     const state = assemblyState(plan, index, { action: false })
     const original = [...state.visible]
