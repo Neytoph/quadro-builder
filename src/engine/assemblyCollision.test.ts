@@ -9,6 +9,24 @@ import {parseQDF} from './qdfimport.js';
 import {SceneManager} from './scene.js';
 beforeAll(async()=>{await loadCatalog();});
 describe('measured assembly geometry',()=>{
+  it('A0016 standalone file C45 keeps its complete Scene-native adapter as well as its ordinary base connector',()=>{
+    const model=new BuildModel();expect(model.loadJSON(parseQDF(readFileSync('public/qdf/A0016.qdf','utf8'),{tubes:buildableTubes(),panels:panels(),connectorSize:geometry().connectorSize,mergeEps:2})).ok).toBe(true);
+    const scene={_c45BaseNode:SceneManager.prototype._c45BaseNode};let adapters=0,exposedFace:null|{nodeId:string;point:number[]}=null;
+    for(const node of model.nodes.values())if(node.c45file&&!node.c45body){
+      adapters++;const matrix=SceneManager.prototype._c45Placement.call(scene as any,model,node)!,elements=matrix.elements,shapes=partEnvelope(model,node.id),count=accessoryTriangles.connector45_2.length;
+      expect(matrix).not.toBeNull();expect(shapes.length).toBeGreaterThan(count);
+      const adapter=shapes.slice(-count),base=shapes.slice(0,-count);
+      adapter.forEach((shape:any,index:number)=>shape.points.forEach((point:number[],vertex:number)=>point.forEach((value:number,axis:number)=>{
+        const local=accessoryTriangles.connector45_2[index][vertex];expect(value).toBeCloseTo(elements[12+axis]+elements[axis]*local[0]+elements[4+axis]*local[1]+elements[8+axis]*local[2],8);
+      })));
+      for(const face of adapter){const point=face.points[0].map((_:number,i:number)=>face.points.reduce((sum:number,p:number[])=>sum+p[i],0)/3),box={kind:'box',pos:point,axes:[[1,0,0],[0,1,0],[0,0,1]],half:[.02,.02,.02]};if(assemblyShapesOverlap(face,box)&&base.every((shape:any)=>!assemblyShapesOverlap(shape,box))){exposedFace={nodeId:node.id,point};break;}}
+    }
+    expect(adapters).toBe(4);expect(exposedFace).not.toBeNull();const face=exposedFace!;
+    model.fittings.set('adapter-face-obstacle',{id:'adapter-face-obstacle',kind:'unknown-test-box',x:face.point[0],y:face.point[1],z:face.point[2],w:.04,h:.04,d:.04});beginAssemblyCollisionPass(model);
+    expect(checkAssemblyPath(model,['adapter-face-obstacle'],[face.nodeId],[0,0,0],[0,0,0],{allowMating:false})).toMatchObject({obstaclePartId:face.nodeId});
+    model.fittings.get('adapter-face-obstacle')!.x+=100;beginAssemblyCollisionPass(model);
+    expect(checkAssemblyPath(model,['adapter-face-obstacle'],[face.nodeId],[0,0,0],[0,0,0],{allowMating:false})).toBeNull();
+  });
   it('C0156 panel lip touches only its explicit shared pool sleeve, retaining side, inward and unrelated collisions',()=>{
     const model=new BuildModel();model.loadJSON(parseQDF(readFileSync('public/qdf/C0156.qdf','utf8'),{tubes:buildableTubes(),panels:panels(),connectorSize:geometry().connectorSize,mergeEps:2}));
     const contact={panelId:'p772',linerId:'f785',railId:'t710',basis:'source-native-shared-carrier-lip'},options={panelLinerContacts:new Map([['p772:f785',contact]])};

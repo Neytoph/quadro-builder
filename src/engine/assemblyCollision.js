@@ -1,4 +1,4 @@
-import { resolveNodeConnection } from './bom.js';
+import { resolveNodeConnection, hasStandaloneFileC45 } from './bom.js';
 import { geometry } from './catalog.js';
 import { nativeEnvelopes, surfaceTriangles, connectorTriangles, connectorMasks, accessoryTriangles } from './assemblyNativeEnvelopes.js';
 import { componentVolumes } from './accessoryPack.js';
@@ -60,7 +60,10 @@ function computeEnvelope(model,id) {
   const node=model.nodes.get(id);
   if(node){
     if(node.c45body){const arm=[...model.tubes.values()].find(t=>t.arm&&(t.a===id||t.b===id)),base=arm&&model.nodes.get(arm.a===id?arm.b:arm.a);if(base){let basis;if(base.c45quat)basis=axes(base.c45quat);else {const ex=unit(node.c45axis||base.c45axis||[1,0,0]),v=sub(xyz(node),xyz(base)),ey=unit(v.map((n,i)=>n-ex[i]*dot(v,ex)));basis=[ex,ey,cross(ex,ey)];}const pos=xyz(base);return accessoryTriangles.connector45_2.map(points=>({kind:'triangle',points:points.map(point=>pos.map((v,i)=>v+basis.reduce((sum,axis,k)=>sum+axis[i]*point[k],0)))}));}}
-    const resolved=resolveNodeConnection(model,node);if(!resolved.types.length)return [];const pos=xyz(node),basis=connectorBasis(resolved);if(basis&&connectorTriangles[resolved.type]&&!node.c45body&&!node.part)return connectorTriangles[resolved.type].map(points=>({kind:'triangle',points:points.map(point=>pos.map((v,i)=>v+basis.reduce((sum,axis,k)=>sum+axis[i]*point[k],0)))}));const out=[{kind:'box',pos,axes:axes(node.quat),half:[cs/2,cs/2,cs/2]}];for(const direction of resolved.renderDirs || resolved.worldDirs){const d=unit(direction);out.push({kind:'capsule',a:pos.map((v,i)=>v+d[i]*cs/2),b:pos.map((v,i)=>v+d[i]*7.5),r:2});}return out;}
+    // Scene renders a standalone file adapter in addition to its base connector.
+    // Keep both full native meshes; a regular connector match cannot return early.
+    const pos=xyz(node),fileAdapter=hasStandaloneFileC45(model,node)&&node.c45quat?.length===4?accessoryTriangles.connector45_2.map(points=>{const frame=axes(node.c45quat);return {kind:'triangle',points:points.map(point=>pos.map((v,i)=>v+frame.reduce((sum,axis,k)=>sum+axis[i]*point[k],0)))};}):[];
+    const resolved=resolveNodeConnection(model,node);if(!resolved.types.length)return fileAdapter;const basis=connectorBasis(resolved);if(basis&&connectorTriangles[resolved.type]&&!node.c45body&&!node.part)return [...connectorTriangles[resolved.type].map(points=>({kind:'triangle',points:points.map(point=>pos.map((v,i)=>v+basis.reduce((sum,axis,k)=>sum+axis[i]*point[k],0)))})),...fileAdapter];const out=[{kind:'box',pos,axes:axes(node.quat),half:[cs/2,cs/2,cs/2]}];for(const direction of resolved.renderDirs || resolved.worldDirs){const d=unit(direction);out.push({kind:'capsule',a:pos.map((v,i)=>v+d[i]*cs/2),b:pos.map((v,i)=>v+d[i]*7.5),r:2});}return [...out,...fileAdapter];}
   const p=model.panels?.get(id)||model.textiles?.get(id);
   if(p) {
     if(p.appearanceVersion)return componentVolumes(model,p).map(b=>({...b,kind:'box'}));
