@@ -4,7 +4,7 @@ import { BuildModel } from './model.js'
 import { loadCatalog, buildableTubes, panels, geometry } from './catalog.js'
 import { computeBOM } from './bom.js'
 import { computeAssemblyPlan, assemblyState } from './assemblyPlan.js'
-import { coverItems, numberStepItems, stepItems, assemblyPresentationState, measureManualLegend, manualPartsHeight, assemblyDetailItems, assemblyDetailDirection, wrapManualText, manualStepTextLayout, manualStepDetailDescriptors, layoutManualCallouts, manualTextPageLayout, manualDetailPageLayout, manualActionLabelBox, MANUAL_TEXT_MM, MANUAL_AUX_MM } from './assemblyManual.js'
+import { coverItems, numberStepItems, stepItems, assemblyPresentationState, measureManualLegend, manualPartsHeight, assemblyDetailItems, assemblyDetailDirection, wrapManualText, manualStepTextLayout, manualStepDetailDescriptors, layoutManualCallouts, manualTextPageLayout, manualDetailPageLayout, manualActionLabelBox, manualSafetyDescriptor, MANUAL_TEXT_MM, MANUAL_AUX_MM } from './assemblyManual.js'
 import { parseQDF } from './qdfimport.js'
 import { partImageSrc } from '../ui/partImages'
 
@@ -15,6 +15,17 @@ const assetEvidence: any[] = []
 afterAll(() => { mkdirSync('.work', { recursive: true }); writeFileSync('.work/assembly-pdf-assets.json', JSON.stringify(assetEvidence, null, 2)) })
 
 describe('说明书材料编号', () => {
+  it('三语搭建前页保留未实物验证状态，调用方缺少状态文案也不遗漏', () => {
+    const claims = { zh: ['现场搭建', '首次搭建者走查', '承载', '尚未验证'], en: ['On-site assembly', 'first-time builder', 'load-bearing capacity', 'not yet been verified'], de: ['Aufbau vor Ort', 'erstmalige Aufbauende', 'Tragfähigkeit', 'noch nicht verifiziert'] }
+    for (const [lang, required] of Object.entries(claims)) {
+      const descriptor = manualSafetyDescriptor({ safetyNotice: 'Caller assembly notice without a verification status.' }, lang)
+      expect(descriptor.type).toBe('safety')
+      const text = descriptor.lines.join(' ')
+      for (const claim of required) expect(text).toContain(claim)
+      expect(text).toContain('Caller assembly notice without a verification status.')
+      expect(descriptor.lines.at(-1)).toBe('https://quadroworld.com/files/manuals/Sicherheitsanweisung.pdf')
+    }
+  })
   it('带二维码的长说明与长区域标题按安全高度续页，不覆盖二维码', () => {
     const ctx = { font: '', measureText: (text: string) => ({ width: [...text].length * 20 }) }
     const title = 'Sehr lange Bereichsbezeichnung mit mehreren Montagehinweisen '.repeat(8)

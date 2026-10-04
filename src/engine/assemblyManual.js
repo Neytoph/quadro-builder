@@ -1112,11 +1112,21 @@ function manualTextDescriptors(ctx, title, lines, stamp) {
   return descriptors;
 }
 
-function manualSafetyCopy() {
-  const lang = getLang();
+function manualSafetyCopy(lang = getLang()) {
   if (lang === 'de') return { safetyTitle: 'Vor dem Aufbau', safetyNotice: 'Teile zuerst anhand der Gesamtstückliste zählen und nach Länge und Farbe sortieren. Nach dem vollständigen Zusammenstecken von unten nach oben verschrauben. An Plattenpositionen Plattenschrauben verwenden. Vor der Benutzung die offizielle Sicherheitsanweisung beachten.', safetySource: 'Offizielle Sicherheitsanweisung', detailTitle: 'Lokale Montageschritte', detailReference: 'Materialnummern: Mengen sind im Hauptschritt enthalten.', locationView: 'Position im Modell', viewFront: 'Vorderseite', viewBack: 'Rückseite', viewBottom: 'Unterseite', viewCustom: 'Angegebene Blickrichtung', continuation: 'Fortsetzung' };
   if (lang === 'en') return { safetyTitle: 'Before assembly', safetyNotice: 'First count the parts against the full parts list and sort them by length and colour. After the complete structure is connected, fasten from bottom to top. Use panel screws at panel positions. Follow the official safety instructions before use.', safetySource: 'Official safety instructions', detailTitle: 'Local assembly actions', detailReference: 'Material references: quantities are included in the main step.', locationView: 'Location in model', viewFront: 'Front', viewBack: 'Back', viewBottom: 'Underside', viewCustom: 'Specified view direction', continuation: 'Continued' };
   return { safetyTitle: '搭建前须知', safetyNotice: '先按总表清点零件，按长度与颜色分组。完整拼好后，从下往上固定；板位使用板螺丝。使用前请核对官方安全指南。', safetySource: '官方安全指南', detailTitle: '局部动作详图', detailReference: '材料编号参考；数量已计入本步。', locationView: '成品定位', viewFront: '正面', viewBack: '背面', viewBottom: '底部', viewCustom: '指定视角', continuation: '续页' };
+}
+
+/** The physical verification status remains present when caller copy omits it. */
+export function manualSafetyDescriptor(copy = {}, lang = getLang()) {
+  const defaults = manualSafetyCopy(lang), text = { ...defaults, ...copy };
+  const physicalNotice = lang === 'de'
+    ? 'Der Aufbau vor Ort, die Prüfung der Anleitung durch erstmalige Aufbauende und die Tragfähigkeit sind noch nicht verifiziert.'
+    : lang === 'en'
+      ? 'On-site assembly, a walkthrough by a first-time builder, and load-bearing capacity have not yet been verified.'
+      : '本说明书的现场搭建、首次搭建者走查及承载尚未验证。';
+  return { type: 'safety', title: text.safetyTitle, lines: [text.safetyNotice, physicalNotice, text.safetySource, 'https://quadroworld.com/files/manuals/Sicherheitsanweisung.pdf'] };
 }
 
 export function manualStepTextLayout(ctx, heading, instructions, contextHint = '') {
@@ -1321,7 +1331,7 @@ export async function exportAssemblyPdf(opts) {
   const icons = await loadIcons(itemsCover);
   const coverLayout = legendChunks(itemsCover, true, icons, stamp, copy.bomTitle);
   const descriptors = [{ type: 'cover', items: coverLayout.chunks[0], partsH: coverLayout.partsH }, ...coverLayout.chunks.slice(1).map(items => ({ type: 'legend', title: copy.bomTitle, items }))];
-  descriptors.push({ type: 'safety', title: copy.safetyTitle, lines: instructionChunks([copy.safetyNotice, copy.safetySource, 'https://quadroworld.com/files/manuals/Sicherheitsanweisung.pdf'])[0] });
+  descriptors.push(manualSafetyDescriptor(copy));
   descriptors.push({ type: 'overview' });
   for (const region of plan.regions || []) descriptors.push({ type: 'region', region });
   for (let index = 0; index < steps.length; index++) {
@@ -1511,7 +1521,12 @@ export async function exportAssemblyPdf(opts) {
         ctx.fillStyle = MUTED; ctx.font = font(400, mm(2)); ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
         ctx.fillText(`${currentPage} / ${total}`, mm(PAGE_W / 2), mm(PAGE_H - 2.5));
         await pageToPdf(doc, c, currentPage === 1);
-        if (descriptor.type === 'safety') doc.link(M, 28, 150, 10, { url: 'https://quadroworld.com/files/manuals/Sicherheitsanweisung.pdf' });
+        if (descriptor.type === 'safety') {
+          const sourceLayout = manualTextPageLayout(ctx, descriptor.title, descriptor.lines, stamp);
+          sourceLayout.lines.forEach((line, index) => {
+            if (line === copy.safetySource || line.startsWith('https://quadroworld.com/')) doc.link(M, sourceLayout.bodyY + index * 5, ctx.measureText(line).width / mm(1), 5, { url: 'https://quadroworld.com/files/manuals/Sicherheitsanweisung.pdf' });
+          });
+        }
       } finally { c.width = c.height = 0; }
     }
     if (doc.getNumberOfPages() !== total) throw manualError('pagination', '说明书页数与导出进度不一致');
