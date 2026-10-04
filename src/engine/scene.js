@@ -11,6 +11,7 @@ import { nodeClampOffset, isHolePart, HOLE_MASKS, holeArmDirs, BLACK_FITTINGS,
   isBoltPart, boltAxis, boltShift, hingeDir, hingeKey, POOL_KINDS, fixedFittingColor,
   ARM_FITTINGS } from "./model.js";
 import { reinforcementProfiles } from "./qdfexport.js";
+import { assemblyProfilePosition } from './assemblyProfilePresentation.js';
 import { loadConnectorMeshes, loadSlideMeshes, loadTubeMeshes, loadFittingMeshes,
   loadSurfaceMeshes } from "./meshes.js";
 import { CONNECTOR_ARM_BITS } from "./qdfimport.js";
@@ -4032,6 +4033,8 @@ export class SceneManager {
     // Pfeilen darauf -- genau so zeigt sie die Herstellersoftware.
     if (aluModelle && !reinforce) {
       for (const lauf of reinforcementProfiles(model)) {
+        const profilePosition = assemblyProfilePosition(asm, lauf);
+        if (!profilePosition) continue;
         const zustand = lauf.tubes.map((id) => stateOf(id));
         if (zustand.every((z) => z === "future")) continue;
         const rec = this._fitMeshes[
@@ -4055,10 +4058,10 @@ export class SceneManager {
         const mat = matFor(lauf.tubes.find((id) => marked && marked.has(id)) ?? null, grund);
         this._batchAdd(this._meshGeometry("fit:" + (Math.abs(lauf.len - 80) < 1 ? "alu2_800" : "alu2_600"), rec),
           mat, new THREE.Matrix4().makeBasis(ex, ey, ez)
-            .setPosition(new THREE.Vector3(lauf.from[0], lauf.from[1], lauf.from[2])),
+            .setPosition(new THREE.Vector3(...profilePosition)),
           // Ein Klick auf das Profil meint das Rohr darunter; `tubes` haelt den
           // ganzen Lauf fest, damit die Auswahl beide Rohre erwischt.
-          "tube", lauf.tubes[0], this.pickReinforce, { tubes: lauf.tubes.slice() });
+          "tube", lauf.tubes[0], this.pickReinforce, { tubes: lauf.tubes.slice(), assemblyPoseApplied: true });
       }
     }
 
@@ -6086,7 +6089,10 @@ export class SceneManager {
       if (!delta) continue;
       if (!Array.isArray(delta) || delta.length !== 3 || !delta.every(Number.isFinite)) throw new Error(`Invalid assembly transform: ${rec.id}`);
       translation.makeTranslation(...delta);
-      for (const piece of this._bindPieces(rec.pieces)) {
+      // Profiles already use their independent assembly pose. Keep the carrier
+      // picking identity without applying its displacement a second time.
+      const pieces = rec.pieces.filter(piece => !(piece.index >= 0 && piece.obj.userData.instances?.[piece.index]?.assemblyPoseApplied));
+      for (const piece of this._bindPieces(pieces)) {
         matrix.multiplyMatrices(translation, piece.P).premultiply(piece.Pinv).multiply(piece.base);
         if (piece.index >= 0) {
           piece.obj.setMatrixAt(piece.index, matrix);
