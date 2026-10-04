@@ -827,7 +827,8 @@ export function assemblyFocusBounds(scene, model, plan, step, state) {
 export function assemblyPresentationState(model, plan, step, state, { detail = false } = {}) {
   if (!state || !step) return state;
   // 整层操作保留全部已装主体，才能把上方的新框架对应回原位置。
-  if (!detail && (step.action?.layer || ['frame', 'risers', 'panels'].includes(step.kind))) return { ...state, contextFiltered: false };
+  if (step.action?.layer && !detail) return { ...state, interfaceMarks: [], contextFiltered: false };
+  if (!detail && ['frame', 'risers', 'panels'].includes(step.kind)) return { ...state, contextFiltered: false };
   const region = plan.regions.find(region => region.id === step.regionId);
   const modulePreassembly = step.action?.scope === 'parts' && step.action.type === 'preassemble';
   const moduleInstallation = step.action?.scope === 'parts' && step.action.type === 'attach';

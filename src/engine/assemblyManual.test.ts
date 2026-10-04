@@ -28,6 +28,8 @@ describe('说明书材料编号', () => {
     expect([...right.visible].sort()).toEqual([...after.visible].sort())
     expect(left.contextFiltered).toBe(false)
     expect(left.arrows).toHaveLength(4)
+    expect(left.interfaceMarks).toEqual([])
+    expect(before.interfaceMarks).toHaveLength(4)
     for (const module of step.action.modules) for (const id of module.partIds) {
       expect(left.transforms.get(id)).toEqual(module.translation)
       expect(right.transforms.has(id)).toBe(false)
