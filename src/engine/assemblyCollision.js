@@ -242,6 +242,32 @@ function entryPanelContact(model,id,obstacleId,a,b,delta,end,pad,obstacleOffset,
   for(const plane of planes){const outside=clipPolygonPlane(a.points,plane.origin,plane.normal,true);for(let i=1;i<outside.length-1;i++)if(assemblyShapesOverlap(move({kind:'triangle',points:[outside[0],outside[i],outside[i+1]]},delta),move(b,obstacleOffset),pad))return false;}
   return true;
 }
+function panelLinerContact(model,id,obstacleId,a,b,delta,end,pad,obstacleOffset,contracts){
+  const contract=contracts.get(`${id}:${obstacleId}`),panel=model.panels?.get(id),liner=model.fittings?.get(obstacleId);
+  if(!contract||contract.panelId!==id||contract.linerId!==obstacleId||!panel||!['pool2','pool-small2'].includes(liner?.kind)||a.kind!=='triangle'||b.kind!=='triangle'||![panel.a,panel.b].includes(contract.railId))return false;
+  const rail=model._rail(contract.railId),corners=model.panelCorners(panel);if(!rail||!corners)return false;
+  const basis=axes(liner.quat),up=basis[1],width=liner.kind==='pool2'?120:80,depth=liner.kind==='pool2'?160:120;
+  if(Math.abs((liner.w||width)-width)>1||Math.abs((liner.d||depth)-depth)>1||dot(up,[0,1,0])<.995)return false;
+  const poolCorners=[[-width/2,0,0],[width/2,0,0],[width/2,0,depth],[-width/2,0,depth]].map(p=>xyz(liner).map((v,i)=>v+basis.reduce((sum,axis,k)=>sum+axis[i]*p[k],0))),axis=unit(rail.dir),origin=rail.p0,railEnd=origin.map((v,i)=>v+axis[i]*rail.len);
+  if(!poolCorners.some((p,i)=>[origin,railEnd].every(q=>segmentDistance(q,q,p,poolCorners[(i+1)%4])<.01)))return false;
+  const near=(p,q)=>Math.hypot(...sub(p,q))<.01;
+  if(!corners.some((p,i)=>{const q=corners[(i+1)%4];return near(p,origin)&&near(q,railEnd)||near(q,origin)&&near(p,railEnd);}))return false;
+  const panelCenter=corners[0].map((v,i)=>(v+corners[2][i])/2),poolCenter=poolCorners[0].map((v,i)=>(v+poolCorners[2][i])/2),nativeNormal=panel.geom?.quat?axes(panel.geom.quat)[2]:panelNormal(unit(sub(corners[1],corners[0])),unit(sub(corners[3],corners[0])),panelCenter,modelMiddle(model.nodes.values())).map(v=>v*(panel.side<0?-1:1));
+  if(dot(nativeNormal,up)<.995||panel.geom?.p&&!near(panel.geom.p,panelCenter))return false;
+  const inward=unit(sub(poolCenter,origin).map((v,i)=>v-axis[i]*dot(sub(poolCenter,origin),axis)));
+  if(dot(sub(panelCenter,origin),inward)>=-.01)return false;
+  const relative=sub(delta,obstacleOffset);
+  if(Math.hypot(...sub(end,obstacleOffset))>1e-6||Math.hypot(...relative)+Math.hypot(...pad)>7.5+1e-6||dot(relative,up)<-1e-6||Math.hypot(...relative.map((v,i)=>v-up[i]*dot(relative,up)))>1e-6||Math.hypot(...pad)>1e-6&&Math.abs(dot(unit(pad),up))<.995)return false;
+  const radiusAt=p=>{const v=sub(p,origin),along=dot(v,axis);return Math.hypot(...v.map((n,i)=>n-axis[i]*along));};
+  // Source radii classify the factory sleeve; they never enlarge its bore.
+  if(!b.points.every(p=>radiusAt(p)>=2.50&&radiusAt(p)<=2.54)||segmentTriangleDistance(origin.map((v,i)=>v-axis[i]*1000),railEnd.map((v,i)=>v+axis[i]*1000),a.points)<2.50)return false;
+  const radial=up,tangent=unit(cross(axis,radial)),planes=[{origin,normal:axis.map(v=>-v)},{origin:railEnd,normal:axis}];
+  // Only the finite native 2.52 cm circular sleeve/lip boundary can touch.
+  // All lining outside this inscribed band remains a swept obstacle.
+  for(let k=0;k<64;k++){const angle=(k+.5)*Math.PI/32,n=radial.map((v,i)=>v*Math.cos(angle)+tangent[i]*Math.sin(angle));planes.push({origin:origin.map((v,i)=>v+n[i]*2.52*Math.cos(Math.PI/64)),normal:n});}
+  for(const plane of planes){const outside=clipPolygonPlane(b.points,plane.origin,plane.normal,true);for(let i=1;i<outside.length-1;i++){const points=[outside[0],outside[i],outside[i+1]];if(Math.hypot(...cross(sub(points[1],points[0]),sub(points[2],points[0])))<1e-9)continue;if(assemblyShapesOverlap(move(a,delta),move({kind:'triangle',points},obstacleOffset),pad))return false;}}
+  return true;
+}
 function linerSleeveContact(model,id,obstacleId,a,b,delta,end,pad,obstacleOffset,contracts){
   const movingLiner=model.fittings?.has(id),linerId=movingLiner?id:obstacleId,nodeId=movingLiner?obstacleId:id,contract=contracts.get(`${linerId}:${nodeId}`),liner=model.fittings?.get(linerId),node=model.nodes.get(nodeId);
   if(!contract||contract.linerId!==linerId||contract.nodeId!==nodeId||!['pool2','pool-small2'].includes(liner?.kind)||!node||a.kind!=='triangle'||b.kind!=='triangle')return false;
@@ -291,7 +317,7 @@ export function assemblyFittingBoreContact(model,id,obstacleId,a,b,delta,end,pad
   return true;
 }
 /** Full conservative swept geometry; contacts are exempted only inside the mating port. */
-export function checkAssemblyPath(model,movingIds,installedIds,start,end=[0,0,0],{allowMating=true,obstacleTranslations=new Map(),matingContacts=new Map(),entryPanelContacts=new Map(),linerCarrierContacts=new Map(),fittingMatingContacts=new Map(),movingAssemblyIds=movingIds}={}) {
+export function checkAssemblyPath(model,movingIds,installedIds,start,end=[0,0,0],{allowMating=true,obstacleTranslations=new Map(),matingContacts=new Map(),entryPanelContacts=new Map(),panelLinerContacts=new Map(),linerCarrierContacts=new Map(),fittingMatingContacts=new Map(),movingAssemblyIds=movingIds}={}) {
   const started=performance.now();const timing=()=>{const elapsed=performance.now()-started;if(globalThis.process?.env?.ASSEMBLY_PROFILE && elapsed>200)globalThis.process.stderr.write(JSON.stringify({elapsed:Math.round(elapsed),moving:movingIds.length,installed:installedIds.length,first:movingIds.slice(0,3),start,end})+'\n');};
   const moving=new Set(movingIds),travel=Math.hypot(...sub(start,end)),spacing=geometry().tubeRadius||2.45,count=Math.max(1,Math.ceil(travel/spacing));
   const assemblyMoving=new Set(movingAssemblyIds);
@@ -320,6 +346,7 @@ export function checkAssemblyPath(model,movingIds,installedIds,start,end=[0,0,0]
         if(allowMating&&panelSlotContact(model,id,obstacle.id,a,delta,obstacle.offset))continue;
         if(allowMating&&sharedPanelLipContact(model,id,obstacle.id,a,b,delta,end,pad,obstacle.offset))continue;
         if(allowMating&&entryPanelContact(model,id,obstacle.id,a,b,delta,end,pad,obstacle.offset,entryPanelContacts))continue;
+        if(allowMating&&panelLinerContact(model,id,obstacle.id,a,b,delta,end,pad,obstacle.offset,panelLinerContacts))continue;
         if(allowMating&&linerSleeveContact(model,id,obstacle.id,a,b,delta,end,pad,obstacle.offset,linerCarrierContacts))continue;
         if(allowMating&&assemblyFittingBoreContact(model,id,obstacle.id,a,b,delta,end,pad,obstacle.offset,fittingMatingContacts))continue;
         // Connector/tube contact at the destination is valid only near the actual node.
