@@ -142,7 +142,7 @@ export function layoutManualCallouts(marks, width, height, radius = mm(2.8)) {
     const rows = marks.filter(mark => (mark.x < width / 2 ? 0 : 1) === side).sort((a, b) => a.y - b.y);
     rows.forEach((mark, index) => placed.push({ ...mark, anchorX: mark.x, anchorY: mark.y,
       x: side ? width - radius - 3 : radius + 3,
-      y: radius + 3 + (height - radius * 2 - mm(10)) * (index + 1) / (rows.length + 1) }));
+      y: radius + 3 + (height - 2 * (radius + 3)) * (index + 1) / (rows.length + 1) }));
   }
   return placed;
 }

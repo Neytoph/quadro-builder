@@ -41,6 +41,8 @@ describe('说明书材料编号', () => {
     expect(placed).toHaveLength(6)
     expect(new Set(placed.map(mark => `${mark.x},${mark.y}`)).size).toBe(6)
     placed.forEach(mark => expect(mark.anchorY).toBe(100))
+    const phone = layoutManualCallouts(marks, 360, 260, 12)
+    for (let index = 1; index < phone.length; index++) expect(Math.hypot(phone[index].x - phone[index - 1].x, phone[index].y - phone[index - 1].y)).toBeGreaterThanOrEqual(24)
     expect(() => layoutManualCallouts([...marks, marks[0]], 800, 600, 28)).toThrow('超过六个')
     expect(assemblyDetailDirection({ viewDirection: 'back' })).toEqual([-1, 0.65, -1])
     expect(assemblyDetailDirection({ viewDirection: 'bottom' })).toEqual([1, -0.65, 1])
