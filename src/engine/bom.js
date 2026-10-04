@@ -3,6 +3,7 @@
 import { getTube, getConnector, getPanel, colorName, partName, reinforcementPart, partForFitting, getPartById, getScrew, poolLinerFor, geometry, slideKindName, textilePart } from "./catalog.js";
 import { round2, xAxisOf, yAxisOf, zAxisOf } from "./util.js";
 import { POOL_KINDS, isHolePart, isBoltPart, BOLT_PART, HINGE_PART, ARM_FITTINGS } from "./model.js";
+import { isOriginalComponent, componentKitFields, componentPartId, componentColorName, componentOutputColor, componentFittingKey, componentSizeLabel } from './accessoryInfo.js';
 
 // Einheitsvektoren der Nachbarn eines Knotens. Doppelrohr-Verbindungen (link)
 // sind KEIN Arm der Kupplung und zaehlen nicht in die Kupplungstyp-Heuristik
@@ -534,6 +535,8 @@ export function computeScrews(model) {
   //    Acrylglasschrauben im Rahmen -- die belegen keinen Platz am Rohr.
   for (const p of model.panels.values()) {
     if (p.poolPart) continue;                  // Baellebad ist eine Folie
+    // 原创套装使用随附固定夹或绑带，不占标准板螺丝的位置。
+    if (isOriginalComponent(p)) continue;
     count.panel += 4;
     const pdef = getPanel(p.panelId);
     if (pdef && pdef.acrylic) count.acrylic += 4;
@@ -653,7 +656,7 @@ export function ballBagsFor(f) {
  * 分步料表和图上的编号用同一个 key。
  */
 export function textileRow(model, tx) {
-  const def = textilePart(model.textileSpan(tx), tx.variant);
+  const def = tx.partId ? getPartById(tx.partId) : textilePart(model.textileSpan(tx), tx.variant);
   const id = (def && def.id) || "textile";
   const fest = !!(def && def.rail);
   const key = (fest ? id : tx.w + "x" + tx.h) + "|" + tx.color + "|" + (tx.variant || "");
@@ -674,9 +677,10 @@ export function computeBOM(model) {
     return {
       key: r.tubeId + "|" + r.color,
       tubeId: r.tubeId, color: r.color,
-      name: partName(def), colorName: colorName(r.color),
+      name: partName(def), colorName: componentColorName(r.color, colorName(r.color)),
       length: def.length_cm, count: r.count,
       price: def.price, subtotal: round2(def.price * r.count),
+      ...(def.material === 'aluminium' ? { material: def.material, designAssumption: true, loadVerified: false } : {}),
     };
   }).sort((a, b) => (a.length || 0) - (b.length || 0));
 
@@ -719,17 +723,21 @@ export function computeBOM(model) {
   const panelMap = new Map();
   for (const p of model.panels.values()) {
     if (p.poolPart) continue;
-    const key = p.panelId + "|" + p.color;
-    if (!panelMap.has(key)) panelMap.set(key, { panelId: p.panelId, color: p.color, count: 0 });
+    const color = componentOutputColor(p);
+    const key = p.panelId + "|" + color;
+    if (!panelMap.has(key)) panelMap.set(key, { panelId: p.panelId, color, count: 0, designCount: 0, insetCount: 0 });
     panelMap.get(key).count++;
+    if (isOriginalComponent(p)) panelMap.get(key).designCount++;
+    if (p.params?.mountLayout === 'opposite-transparent-screws') panelMap.get(key).insetCount++;
   }
   const panels = [...panelMap.values()].map((r) => {
     const def = getPanel(r.panelId) || { name: r.panelId, price: 0 };
     return {
       key: r.panelId + "|" + r.color,
       panelId: r.panelId, color: r.color,
-      name: partName(def), colorName: colorName(r.color), count: r.count,
+      name: partName(def), colorName: componentColorName(r.color, colorName(r.color)), count: r.count,
       price: def.price, subtotal: round2(def.price * r.count),
+      ...componentKitFields(r.panelId, r.designCount, r.count, r.insetCount),
     };
   }).sort((a, b) => a.name.localeCompare(b.name));
 
@@ -766,6 +774,7 @@ export function computeBOM(model) {
       color: r.color, colorName: colorName(r.color), count: r.count,
       price: (r.def && r.def.price) || 0,
       subtotal: 0,
+      ...(r.def?.compat ? { designAssumption: true, loadVerified: false } : {}),
     };
   }).sort((a, b) => b.count - a.count);
   const textileCount = textiles.reduce((s, r) => s + r.count, 0);
@@ -814,14 +823,16 @@ export function computeBOM(model) {
       const a = tb && model.nodes.get(tb.a), b = tb && model.nodes.get(tb.b);
       const len = a && b ? Math.round(Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z) - geometry().connectorSize) : 0;
       const skey = "sleeve|" + len;
-      if (!fitMap.has(skey)) fitMap.set(skey, { def: getPartById("sleeve"), kind: "sleeve", count: 0, len });
+      if (!fitMap.has(skey)) fitMap.set(skey, { def: getPartById("sleeve"), kind: "sleeve", count: 0, designCount: 0, len });
       fitMap.get(skey).count++;
+      if (isOriginalComponent(f)) fitMap.get(skey).designCount++;
       continue;
     }
-    const def = partForFitting(f.kind, f.mask);
-    const key = def ? def.id : f.kind;
-    if (!fitMap.has(key)) fitMap.set(key, { def, kind: f.kind, count: 0 });
+    const def = getPartById(componentPartId(f)) || partForFitting(f.kind, f.mask);
+    const key = componentFittingKey(f, def ? def.id : f.kind);
+    if (!fitMap.has(key)) fitMap.set(key, { def, kind: f.kind, count: 0, designCount: 0, size: componentSizeLabel(f), w: f.w ?? f.params?.width, h: f.h ?? f.params?.height });
     fitMap.get(key).count++;
+    if (isOriginalComponent(f)) fitMap.get(key).designCount++;
   }
   // Die Poolfolien reihen sich bei den Anbauteilen ein -- sie sind Zubehoer
   // mit Katalogpreis wie Sack, Netz oder Dachtextil.
@@ -834,18 +845,20 @@ export function computeBOM(model) {
   let acrylicSheets = 0;
   for (const p of model.panels.values()) {
     const def = getPanel(p.panelId);
-    if (def && def.acrylic) acrylicSheets++;
+    if (def && def.acrylic && p.appearanceVersion !== 2) acrylicSheets++;
   }
   if (acrylicSheets) {
     fitMap.set("acrylic_glass", { def: getPartById("acrylic_glass"), kind: "acrylic", count: acrylicSheets });
   }
   const fittings = [...fitMap.entries()].map(([key, r]) => ({
-    key, id: key, kind: r.kind,
-    name: (r.def ? partName(r.def) : (partName(getPartById(key)) || r.kind)) + (r.len ? ` ${r.len} cm` : ""),
+    key, id: r.size ? r.def?.id || r.kind : key, kind: r.kind,
+    name: (r.def ? partName(r.def) : (partName(getPartById(key)) || r.kind)) + (r.len ? ` ${r.len} cm` : "") + (r.size ? ` ${r.size}` : ""),
+    ...(r.size ? { w: r.w, h: r.h } : {}),
     code: (r.def && r.def.code) || "",
     count: r.count,
     price: (r.def && r.def.price) || 0,
     subtotal: round2(((r.def && r.def.price) || 0) * r.count),
+    ...componentKitFields(r.def?.id || key, r.designCount, r.count),
   })).sort((a, b) => b.count - a.count);
   const fittingCount = fittings.reduce((s, r) => s + r.count, 0);
 
@@ -934,7 +947,7 @@ export function computeBOM(model) {
 // Netz, Rundwand, Spielsack, Dachtextil -- ist Zubehoer: es fehlt vielleicht,
 // aber das Modell steht trotzdem. Die Zeilen bleiben in der Liste und faerben
 // sich rot, nur der Haken bleibt gruen.
-export const SOFT_PARTS = new Set(["textile", "textile_20x40", "lattice", "textile_round", "bag", "roof", "roof_large"]);
+export const SOFT_PARTS = new Set(["textile", "textile_20x40", "textile_long", "textile_round_fourway", "textile_bridge", "textile_rainbow", "lattice", "lattice_curved", "trampoline", "rope", "textile_round", "bag", "roof", "roof_large"]);
 
 export function neededParts(bom) {
   const tubes = new Map();   // tubeId -> count

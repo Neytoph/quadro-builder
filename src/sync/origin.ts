@@ -7,16 +7,17 @@
 // 标签页那一段放在内存里：关掉页面再打开，那就是另一回事了。存档那一段放在 localStorage：
 // 存下以后没登录、隔天登录了才推上去，也还带得上。开源本地版不同步，这里记下的东西没人读。
 
+import { accountKey } from '../engine/storage.js'
 const KEY = 'quadro.docOrigin.v1'
 
 const byTab = new Map<string, string>()
 
 function readAll(): Record<string, string> {
-  return JSON.parse(localStorage.getItem(KEY) || '{}') as Record<string, string>
+  return JSON.parse(localStorage.getItem(accountKey(KEY)) || '{}') as Record<string, string>
 }
 
 function writeAll(all: Record<string, string>) {
-  localStorage.setItem(KEY, JSON.stringify(all))
+  localStorage.setItem(accountKey(KEY), JSON.stringify(all))
 }
 
 /** 这个标签页是从 origin 打开的。 */

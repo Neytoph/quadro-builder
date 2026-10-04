@@ -1,5 +1,5 @@
 import { KITS, PART_NAMES, type Kit } from './quadroKits'
-import type { BomView, Inventory } from '../store/EngineContext'
+import type { BomView, BomRow, Inventory } from '../store/EngineContext'
 import { skuLabel } from '../names'
 
 export { KITS, PART_NAMES }
@@ -33,6 +33,9 @@ const COL: Record<string, number> = {
   hole_t: 49, 'hole-connector4': 49,
 }
 
+export type AdvisorPart = { key: string; id: string; name: string; count: number; w?: number; h?: number }
+export type AdvisorParts = Record<number, AdvisorPart[]>
+
 function emptyVec() {
   return new Array(PART_NAMES.length).fill(0) as number[]
 }
@@ -50,17 +53,31 @@ function bump(vec: number[], id: string, n: number, unmapped: { id: string; name
 export function vecFromBom(bom: BomView | null) {
   const used = emptyVec()
   const unmapped: { id: string; name: string; count: number }[] = []
-  if (!bom) return { used, unmapped, total: 0, screws: 0 }
-  for (const r of bom.tubes) bump(used, r.id || '', r.count, unmapped, r.name)
-  for (const r of bom.connectors) bump(used, r.id || '', r.count, unmapped, r.name)
-  for (const r of bom.panels) bump(used, r.id || '', r.count, unmapped, r.name)
-  for (const r of bom.slides) bump(used, r.id || '', r.count, unmapped, r.name)
-  for (const r of bom.wheels) bump(used, r.id || '', r.count, unmapped, r.name)
-  for (const r of bom.textiles) bump(used, r.id || 'textile', r.count, unmapped, r.name)
-  for (const r of bom.fittings) bump(used, r.id || '', r.count, unmapped, r.name)
+  const parts: AdvisorParts = {}
+  if (!bom) return { used, unmapped, parts, total: 0, screws: 0 }
+  const addRows = (rows: BomRow[], fallback = '') => {
+    for (const row of rows) {
+      const id = row.id || fallback
+      bump(used, id, row.count, unmapped, row.name)
+      const col = COL[id]
+      if (col == null || !(row.count > 0)) continue
+      const key = `${id}|${row.w || ''}x${row.h || ''}`
+      const entries = parts[col] ||= []
+      const existing = entries.find(part => part.key === key)
+      if (existing) existing.count += row.count
+      else entries.push({ key, id, name: row.name, count: row.count, w: row.w, h: row.h })
+    }
+  }
+  addRows(bom.tubes)
+  addRows(bom.connectors)
+  addRows(bom.panels)
+  addRows(bom.slides)
+  addRows(bom.wheels)
+  addRows(bom.textiles, 'textile')
+  addRows(bom.fittings)
   const total = used.reduce((s, n) => s + n, 0)
   const screws = bom.screws.reduce((s, r) => s + r.count, 0)
-  return { used, unmapped, total, screws }
+  return { used, unmapped, parts, total, screws }
 }
 
 export function vecFromInventory(inv: Inventory) {
@@ -83,10 +100,10 @@ export function kitsCovering(used: number[]) {
     .sort((a, b) => (a.price ?? 1e9) - (b.price ?? 1e9))
 }
 
-export function shortages(used: number[], owned: number[]) {
-  const missing: { name: string; short: number }[] = []
+export function shortages(used: number[], owned: number[], parts: AdvisorParts = {}) {
+  const missing: { index: number; name: string; short: number; parts: AdvisorPart[] }[] = []
   used.forEach((v, i) => {
-    if (v > (owned[i] || 0)) missing.push({ name: skuLabel(i), short: v - (owned[i] || 0) })
+    if (v > (owned[i] || 0)) missing.push({ index: i, name: skuLabel(i), short: v - (owned[i] || 0), parts: parts[i] || [] })
   })
   return missing
 }

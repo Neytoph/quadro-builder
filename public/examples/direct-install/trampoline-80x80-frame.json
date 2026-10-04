@@ -1,0 +1,181 @@
+{
+  "format": 2,
+  "nodes": [
+    {
+      "id": "n1",
+      "x": 0,
+      "y": 42.5,
+      "z": 0
+    },
+    {
+      "id": "n2",
+      "x": 40,
+      "y": 42.5,
+      "z": 0
+    },
+    {
+      "id": "n4",
+      "x": 80,
+      "y": 42.5,
+      "z": 0
+    },
+    {
+      "id": "n6",
+      "x": 0,
+      "y": 42.5,
+      "z": 80
+    },
+    {
+      "id": "n7",
+      "x": 40,
+      "y": 42.5,
+      "z": 80
+    },
+    {
+      "id": "n9",
+      "x": 80,
+      "y": 42.5,
+      "z": 80
+    },
+    {
+      "id": "n11",
+      "x": 0,
+      "y": 42.5,
+      "z": 40
+    },
+    {
+      "id": "n14",
+      "x": 80,
+      "y": 42.5,
+      "z": 40
+    },
+    {
+      "id": "n17",
+      "x": 0,
+      "y": 2.5,
+      "z": 0
+    },
+    {
+      "id": "n19",
+      "x": 0,
+      "y": 2.5,
+      "z": 80
+    },
+    {
+      "id": "n21",
+      "x": 80,
+      "y": 2.5,
+      "z": 0
+    },
+    {
+      "id": "n23",
+      "x": 80,
+      "y": 2.5,
+      "z": 80
+    }
+  ],
+  "tubes": [
+    {
+      "id": "t3",
+      "a": "n1",
+      "b": "n2",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t5",
+      "a": "n2",
+      "b": "n4",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t8",
+      "a": "n6",
+      "b": "n7",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t10",
+      "a": "n7",
+      "b": "n9",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t12",
+      "a": "n1",
+      "b": "n11",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t13",
+      "a": "n11",
+      "b": "n6",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t15",
+      "a": "n4",
+      "b": "n14",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t16",
+      "a": "n14",
+      "b": "n9",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t18",
+      "a": "n17",
+      "b": "n1",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t20",
+      "a": "n19",
+      "b": "n6",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t22",
+      "a": "n21",
+      "b": "n4",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t24",
+      "a": "n23",
+      "b": "n9",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    }
+  ],
+  "panels": [],
+  "clamps": [],
+  "textiles": [],
+  "fittings": [],
+  "slides": [],
+  "groups": []
+}

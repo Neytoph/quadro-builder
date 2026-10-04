@@ -14,7 +14,7 @@
 // 共享方案（托管版设了 VITE_SYNC_BASE 才认）：
 //
 //	?plan=<id>                     在标签页里打开共享方案，按自己的角色决定能不能编辑
-//	&invite=<token>                成员邀请：登录后加入成为评论者
+//	&invite=<token>                成员邀请：按服务端链接权限加入
 //	&compare=<版本 id>,<版本 id>    版本对照，版本 id 可以写 current
 //	?delivery=<token>              交付页里嵌入的只读查看，嵌在 iframe 里时只有可拖动的三维画面
 //	&assembly=1                    交付页「开始拼」：直接进这一版的逐层拼装
@@ -46,7 +46,9 @@ export interface Entry {
   /** 带进来的 #s= 分享链接内容（只看模式里「在 Builder 里打开」要原样带过去） */
   hash: string
   plan: string | null
+  version: string | null
   invite: string | null
+  createShared: boolean
   compare: [string, string] | null
   delivery: string | null
   /** 交付查看打开就进逐层拼装 */
@@ -90,7 +92,9 @@ export function readEntry(search: string, hash: string, collab: boolean): Entry 
     lang: lang === 'zh' || lang === 'en' || lang === 'de' ? lang : null,
     hash,
     plan: collab ? q.get('plan') : null,
+    version: collab && q.get('plan') ? q.get('version') : null,
     invite: collab ? q.get('invite') : null,
+    createShared: collab && q.get('createShared') === '1',
     compare: collab && cmp.length === 2 ? [cmp[0], cmp[1]] : null,
     delivery: collab ? q.get('delivery') : null,
     assembly: collab && !!q.get('delivery') && q.get('assembly') === '1',
@@ -120,7 +124,7 @@ export const VIEW_ONLY = bootEntry().view
  * 只放一座、不读也不写这台设备上的标签页的打开方式：只看、交付查看、画房间。
  * 它们都不是这个人自己的标签页，不能盖掉。共享方案是标签页里的一个，照常读写。
  */
-export const SESSIONLESS = VIEW_ONLY || !!bootEntry().delivery || !!bootEntry().roomBrief
+export const SESSIONLESS = VIEW_ONLY || !!bootEntry().delivery || !!bootEntry().roomBrief || !!bootEntry().version
 
 /**
  * 交付查看嵌在交付页的 iframe 里：拖动旋转、逐层拼装、全屏和版本名都由交付页自己画，

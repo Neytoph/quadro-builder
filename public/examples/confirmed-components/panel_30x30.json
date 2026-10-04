@@ -1,0 +1,206 @@
+{
+  "format": 2,
+  "nodes": [
+    {
+      "id": "n1",
+      "x": 0,
+      "y": 42.5,
+      "z": 0
+    },
+    {
+      "id": "n2",
+      "x": 30,
+      "y": 42.5,
+      "z": 0
+    },
+    {
+      "id": "n4",
+      "x": 30,
+      "y": 72.5,
+      "z": 0
+    },
+    {
+      "id": "n6",
+      "x": 0,
+      "y": 72.5,
+      "z": 0
+    },
+    {
+      "id": "n9",
+      "x": 0,
+      "y": 2.5,
+      "z": 0
+    },
+    {
+      "id": "n11",
+      "x": 0,
+      "y": 2.5,
+      "z": 40
+    },
+    {
+      "id": "n13",
+      "x": 30,
+      "y": 2.5,
+      "z": 0
+    },
+    {
+      "id": "n15",
+      "x": 30,
+      "y": 2.5,
+      "z": 40
+    }
+  ],
+  "tubes": [
+    {
+      "id": "t3",
+      "a": "n1",
+      "b": "n2",
+      "tubeId": "T25",
+      "color": "red",
+      "length": 25
+    },
+    {
+      "id": "t5",
+      "a": "n2",
+      "b": "n4",
+      "tubeId": "T25",
+      "color": "green",
+      "length": 25
+    },
+    {
+      "id": "t7",
+      "a": "n4",
+      "b": "n6",
+      "tubeId": "T25",
+      "color": "blue",
+      "length": 25
+    },
+    {
+      "id": "t8",
+      "a": "n6",
+      "b": "n1",
+      "tubeId": "T25",
+      "color": "yellow",
+      "length": 25
+    },
+    {
+      "id": "t10",
+      "a": "n9",
+      "b": "n1",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t12",
+      "a": "n9",
+      "b": "n11",
+      "tubeId": "T35",
+      "color": "blue",
+      "length": 35
+    },
+    {
+      "id": "t14",
+      "a": "n13",
+      "b": "n2",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t16",
+      "a": "n13",
+      "b": "n15",
+      "tubeId": "T35",
+      "color": "blue",
+      "length": 35
+    },
+    {
+      "id": "t17",
+      "a": "n11",
+      "b": "n15",
+      "tubeId": "T25",
+      "color": "red",
+      "length": 25
+    }
+  ],
+  "panels": [
+    {
+      "id": "p18",
+      "a": "t3",
+      "b": "t7",
+      "t0": 0,
+      "len": 30,
+      "panelId": "panel_30x30",
+      "color": "blue",
+      "appearanceVersion": 2,
+      "params": {
+        "id": "panel_30x30",
+        "name": "30厘米方板",
+        "feature": "plain",
+        "w": 30,
+        "h": 30,
+        "width": 30,
+        "height": 30,
+        "depth": 1.2,
+        "placement": "panel",
+        "mountType": "frame",
+        "verifiedLoad": false,
+        "appearanceVersion": 2,
+        "kitContents": [
+          "component",
+          "retainers"
+        ],
+        "name_en": "30 cm square panel",
+        "name_de": "Quadratische 30-cm-Platte",
+        "fixedColor": null,
+        "mount": "frame",
+        "designAssumption": true,
+        "assumption": "frame-grid-unmeasured",
+        "qdfSupported": true,
+        "qdfSimplified": true
+      },
+      "mounts": [
+        {
+          "tube": "t3",
+          "t": 0.13333333333333333,
+          "role": "retainer",
+          "width": 2,
+          "edge": 0
+        },
+        {
+          "tube": "t5",
+          "t": 0.13333333333333333,
+          "role": "retainer",
+          "width": 2,
+          "edge": 1
+        },
+        {
+          "tube": "t7",
+          "t": 0.13333333333333333,
+          "role": "retainer",
+          "width": 2,
+          "edge": 2
+        },
+        {
+          "tube": "t8",
+          "t": 0.13333333333333333,
+          "role": "retainer",
+          "width": 2,
+          "edge": 3
+        }
+      ],
+      "supportTubes": [
+        "t3",
+        "t5",
+        "t7",
+        "t8"
+      ]
+    }
+  ],
+  "clamps": [],
+  "textiles": [],
+  "fittings": [],
+  "slides": [],
+  "groups": []
+}

@@ -75,4 +75,6 @@ export interface SyncOptions {
   /** 便于测试注入。 */
   fetchImpl?: typeof fetch
   onEvent?: (e: SyncEvent) => void
+  accountId?: string
+  onIdentityChange?: () => void
 }

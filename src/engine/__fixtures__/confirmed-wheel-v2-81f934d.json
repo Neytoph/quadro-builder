@@ -1,0 +1,155 @@
+{
+  "source": "81f934d public/examples/confirmed-components/wheel.json; real v2 installation before native restoration",
+  "model": {
+    "format": 2,
+    "nodes": [
+      {
+        "id": "n1",
+        "x": 0,
+        "y": 42.5,
+        "z": 0
+      },
+      {
+        "id": "n2",
+        "x": 40,
+        "y": 42.5,
+        "z": 0
+      },
+      {
+        "id": "n4",
+        "x": 0,
+        "y": 2.5,
+        "z": 0
+      },
+      {
+        "id": "n6",
+        "x": 0,
+        "y": 2.5,
+        "z": 40
+      },
+      {
+        "id": "n8",
+        "x": 40,
+        "y": 2.5,
+        "z": 0
+      },
+      {
+        "id": "n10",
+        "x": 40,
+        "y": 2.5,
+        "z": 40
+      }
+    ],
+    "tubes": [
+      {
+        "id": "t3",
+        "a": "n1",
+        "b": "n2",
+        "tubeId": "T35",
+        "color": "green",
+        "length": 35
+      },
+      {
+        "id": "t5",
+        "a": "n4",
+        "b": "n1",
+        "tubeId": "T35",
+        "color": "yellow",
+        "length": 35
+      },
+      {
+        "id": "t7",
+        "a": "n4",
+        "b": "n6",
+        "tubeId": "T35",
+        "color": "red",
+        "length": 35
+      },
+      {
+        "id": "t9",
+        "a": "n8",
+        "b": "n2",
+        "tubeId": "T35",
+        "color": "yellow",
+        "length": 35
+      },
+      {
+        "id": "t11",
+        "a": "n8",
+        "b": "n10",
+        "tubeId": "T35",
+        "color": "red",
+        "length": 35
+      },
+      {
+        "id": "t12",
+        "a": "n6",
+        "b": "n10",
+        "tubeId": "T35",
+        "color": "blue",
+        "length": 35
+      }
+    ],
+    "panels": [],
+    "clamps": [],
+    "textiles": [],
+    "fittings": [
+      {
+        "id": "f13",
+        "kind": "multi-wheel2",
+        "x": 20,
+        "y": 42.5,
+        "z": 0,
+        "quat": [
+          -0.7071,
+          0,
+          0,
+          0.7071
+        ],
+        "color": "#f0d665",
+        "tube": "t3",
+        "appearanceVersion": 2,
+        "params": {
+          "id": "wheel",
+          "name": "多轮",
+          "mountType": "tube",
+          "feature": "wheel",
+          "width": 40,
+          "height": 40,
+          "depth": 1.2,
+          "placement": "fitting",
+          "verifiedLoad": false,
+          "appearanceVersion": 2,
+          "kitContents": [
+            "component",
+            "retainers"
+          ],
+          "kind": "multi-wheel2",
+          "radius": 15.1,
+          "name_en": "Multi wheel",
+          "name_de": "Multirad",
+          "fixedColor": "#f0d665",
+          "mount": "tube",
+          "designAssumption": true,
+          "assumption": "frame-grid-unmeasured",
+          "qdfSupported": false,
+          "qdfSimplified": true
+        },
+        "mounts": [
+          {
+            "tube": "t3",
+            "t": 0.5,
+            "role": "axle",
+            "width": 2.4
+          }
+        ],
+        "supportTubes": [
+          "t3"
+        ],
+        "partId": "wheel"
+      }
+    ],
+    "slides": [],
+    "groups": []
+  }
+}

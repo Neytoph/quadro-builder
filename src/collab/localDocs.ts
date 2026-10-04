@@ -12,6 +12,7 @@ import * as Y from 'yjs'
 import { IndexeddbPersistence, clearDocument } from 'y-indexeddb'
 import { docIsEmpty, writeJSON, type ModelJSON } from './ymodel'
 import { ModelHistory } from './history'
+import { accountKey } from '../engine/storage.js'
 
 /** 从存档、旧会话、文件、服务器 data 写进一份空文档时的 origin：不进撤销记录。 */
 export const SEED_ORIGIN = { name: 'seed' }
@@ -23,7 +24,7 @@ export interface LocalDoc {
 }
 
 function tabDbName(tabId: string) {
-  return `quadro.tab.${tabId}`
+  return accountKey(`quadro.tab.${tabId}`)
 }
 
 /**

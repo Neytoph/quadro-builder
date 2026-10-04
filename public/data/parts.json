@@ -306,6 +306,8 @@
     }
   ],
   "tubes": [
+    { "id": "TA35", "code": "", "name": "铝管 35 cm", "name_en": "Aluminium tube 35 cm", "name_de": "Aluminiumrohr 35 cm", "length_cm": 35, "shape": "straight", "material": "aluminium", "fixedColor": "#b9c0c5", "buildable": true, "compat": true, "price": 0, "note": "框格设计假设；节点适配、尺寸和承载未经实测。" },
+    { "id": "TA75", "code": "", "name": "铝管 75 cm", "name_en": "Aluminium tube 75 cm", "name_de": "Aluminiumrohr 75 cm", "length_cm": 75, "shape": "straight", "material": "aluminium", "fixedColor": "#b9c0c5", "buildable": true, "compat": true, "price": 0, "note": "框格设计假设；节点适配、尺寸和承载未经实测。" },
     {
       "id": "T10",
       "code": "T10",
@@ -509,6 +511,18 @@
     }
   ],
   "panels": [
+    { "id": "acrylic_panel_40x20", "name": "透明小板", "w": 40, "h": 20, "feature": "acrylic", "buildable": true, "compat": true, "price": 0 },
+    { "id": "acrylic_panel_40x60", "name": "亚克力长板", "w": 40, "h": 60, "feature": "acrylic", "buildable": true, "compat": true, "price": 0 },
+    { "id": "acrylic_hole_panel_40x40", "name": "亚克力九洞板", "w": 40, "h": 40, "feature": "acrylic_holes", "buildable": true, "compat": true, "price": 0 },
+    { "id": "panel_40x40_clock", "name": "时钟板", "w": 40, "h": 40, "feature": "clock", "buildable": true, "compat": true, "price": 0 },
+    { "id": "panel_40x40_maze", "name": "数字迷宫板", "w": 40, "h": 40, "feature": "maze", "buildable": true, "compat": true, "price": 0 },
+    { "id": "panel_40x30_climbing", "name": "中板攀岩板", "w": 40, "h": 30, "feature": "climbing", "buildable": true, "compat": true, "price": 0 },
+    { "id": "panel_40x20_climbing", "name": "小板攀岩板", "w": 40, "h": 20, "feature": "climbing", "buildable": true, "compat": true, "price": 0 },
+    { "id": "panel_40x40_basketball", "name": "篮球框", "w": 40, "h": 40, "feature": "basketball", "buildable": true, "compat": true, "price": 0 },
+    { "id": "panel_40x40_capsule", "name": "太空舱", "w": 40, "h": 40, "feature": "capsule", "buildable": true, "compat": true, "price": 0 },
+    { "id": "acrylic_platform_40x40", "name": "透明平台", "w": 40, "h": 40, "feature": "acrylic", "buildable": true, "compat": true, "price": 0 },
+    { "id": "panel_40x20_castle", "name": "长城板", "w": 40, "h": 20, "feature": "castle", "buildable": true, "compat": true, "price": 0 },
+    { "id": "panel_40x40_grid", "name": "格子板", "w": 40, "h": 40, "feature": "grid", "buildable": true, "compat": true, "price": 0 },
     {
       "id": "panel_40x40",
       "code": "PA4",
@@ -765,6 +779,12 @@
     }
   ],
   "accessories": [
+    { "id": "panel_sector_40", "name": "扇形小板", "qdf": "panel_sector_40", "compat": true, "price": 0 },
+    { "id": "lattice_curved", "name": "曲面攀爬网", "qdf": "lattice_curved", "compat": true, "price": 0 },
+    { "id": "trampoline", "name": "蹦床", "qdf": "trampoline", "compat": true, "price": 0 },
+    { "id": "textile_long", "name": "长布片", "qdf": "textile_long", "compat": true, "price": 0 },
+    { "id": "textile_round_fourway", "name": "弯管四通布", "qdf": "textile_round_fourway", "compat": true, "price": 0 },
+    { "id": "rope", "name": "绳子", "qdf": "rope", "compat": true, "price": 0 },
     {
       "id": "wheel_bearing",
       "code": "CBR",

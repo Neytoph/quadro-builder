@@ -11,15 +11,17 @@ import { fileURLToPath } from 'node:url'
 const { chromium } = await import(process.env.PLAYWRIGHT_CORE || 'playwright-core')
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
-const OUT = path.join(ROOT, 'public/parts')
+const OUT = path.resolve(ROOT, process.env.OUTPUT_DIR || 'public/parts')
+const requestedIds = process.env.PART_IDS?.split(',').filter(Boolean)
 const QDF_DIR = path.join(ROOT, 'public/qdf')
 fs.mkdirSync(OUT, { recursive: true })
 const qdfs = fs.readdirSync(QDF_DIR).filter(f => f.endsWith('.qdf')).sort()
-const SIZE = 256   // 渲染尺寸；存盘时缩到 OUT_SIZE，边缘更干净
-const OUT_SIZE = 128
+const OUT_SIZE = Number(process.env.OUTPUT_SIZE || 128)
+if (!Number.isInteger(OUT_SIZE) || OUT_SIZE < 128 || OUT_SIZE > 1024) throw new Error('OUTPUT_SIZE 必须为 128 到 1024 的整数')
+const SIZE = Math.max(256, OUT_SIZE * 2)
 const TUBE_FRAME = 20   // 管子取景半径（cm）：映射后最长的 75 cm 管正好撑满
 
-const browser = await chromium.launch(process.env.PW_CHANNEL ? { channel: process.env.PW_CHANNEL } : {})
+const browser = await chromium.launch({ ...(process.env.PW_CHANNEL ? { channel: process.env.PW_CHANNEL } : {}), ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE } : {}) })
 const ctx = await browser.newContext({ viewport: { width: 1000, height: 800 }, locale: 'zh-CN', deviceScaleFactor: 1 })
 await ctx.addInitScript(() => { localStorage.setItem('quadro.builder.onboarded.v2', '1') })
 const page = await ctx.newPage()
@@ -89,8 +91,7 @@ console.log('零件种类', items.length)
 
 // 2. 逐件渲染
 const index = []
-for (const f of fs.readdirSync(OUT)) if (f.endsWith('.png')) fs.unlinkSync(path.join(OUT, f))
-for (const it of items) {
+for (const it of items.filter(it => !requestedIds || requestedIds.includes(it.rid))) {
   const res = await page.evaluate(async ({ it, SIZE, OUT_SIZE, TUBE_FRAME }) => { try {
     const api = await import('/src/engine-api.ts')
     const { scene, model, builder } = window.__quadroDev
@@ -311,15 +312,18 @@ for (const it of items) {
     restore.forEach(f => f())
     return { url, size: box.getSize(new THREE.Vector3()).toArray().map(v => Math.round(v)) }
   } catch (e) { return { err: String(e && e.message || e).slice(0, 200) } } }, { it, SIZE, OUT_SIZE, TUBE_FRAME })
-  if (res.err) { console.log('跳过', it.key, res.err); continue }
+  if (res.err) {
+    if (requestedIds) throw new Error(`${it.rid}: ${res.err}`)
+    console.log('跳过', it.key, res.err); continue
+  }
   const file = it.rid + '.png'
   fs.writeFileSync(path.join(OUT, file), Buffer.from(res.url.split(',')[1], 'base64'))
   index.push({ ...it, file, size: res.size })
   console.log('ok', it.key, it.name, res.size.join('×'))
 }
 const ids = index.map(r => r.rid).sort()
-fs.writeFileSync(path.join(ROOT, 'src/ui/partImages.ts'),
-  '// 由 scripts/shoot-part-icons.mjs 生成，别手改。列的是 public/parts/ 下有渲染图的零件 id。\n'
-  + 'export const PART_IMAGES: ReadonlySet<string> = new Set([\n' + ids.map(id => `  '${id}',`).join('\n') + '\n])\n')
+if (requestedIds?.some(id => !ids.includes(id))) throw new Error(`未生成全部请求组件：${requestedIds.filter(id => !ids.includes(id)).join(',')}`)
+if (!requestedIds && !process.env.OUTPUT_DIR) await import('./index-part-images.mjs')
 console.log('写了', ids.length, '张')
+if (process.env.MANIFEST) fs.writeFileSync(path.join(ROOT, process.env.MANIFEST), JSON.stringify(index, null, 2))
 await browser.close()

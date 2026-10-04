@@ -1,26 +1,48 @@
-import { useState } from 'react'
-import { Share2 } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Users, UserPlus } from 'lucide-react'
 import { useI18n } from '../../i18n'
 import { useCollab } from '../CollabContext'
 import { Face } from './bits'
-import { EnableShareModal, ShareModal } from './Modals'
+import { DeliverModal, EnableShareModal, ShareModal } from './Modals'
+import { bootEntry, dropParam } from '../../entry'
+import { useEngine } from '../../store/EngineContext'
 
 /**
- * 顶栏最右边：在线成员头像和「共享」按钮。自己的造型没共享时是描边的「共享」，
- * 点了说明怎么共享；共享方案里是实心的「共享 · 人数」，点了看链接和成员。
+ * 顶栏最右边：普通设计创建共享副本，共享方案查看成员；创建人可以邀请协作。
  * 开源本地版不出现。
  */
 export default function ShareCluster() {
   const collab = useCollab()
   const { t } = useI18n()
-  const [open, setOpen] = useState<'enable' | 'share' | null>(null)
+  const api = useEngine()
+  const [open, setOpen] = useState<'enable' | 'share' | 'deliver' | null>(null)
+  const createOpened = useRef(false)
+  const manageOpened = useRef(false)
+  const show = (dialog: 'enable' | 'share' | 'deliver') => { collab.setSharingDialogOpen(true); setOpen(dialog) }
+  useEffect(() => {
+    if (!collab.enabled || !api.ready || !api.entryReady || createOpened.current || !bootEntry().createShared) return
+    if (bootEntry().plan && (collab.plan?.id !== bootEntry().plan || !collab.session?.synced)) return
+    createOpened.current = true
+    show('enable')
+  }, [collab.enabled, api.ready, api.entryReady, collab.plan, collab.session, collab.rev])
+  useEffect(() => {
+    if (collab.inviteOpenId && collab.plan?.id === collab.inviteOpenId) show('share')
+    if (!manageOpened.current && collab.plan && new URLSearchParams(location.search).get('inviteManage') === '1') {
+      manageOpened.current = true
+      dropParam('inviteManage')
+      show('share')
+    }
+  }, [collab.inviteOpenId, collab.plan])
+  const close = () => { setOpen(null); collab.setSharingDialogOpen(false); collab.closeInvite(); dropParam('createShared') }
+  const closeCreate = () => { setOpen(null); collab.setSharingDialogOpen(false); dropParam('createShared') }
   if (!collab.enabled || collab.mode === 'delivery' || collab.mode === 'room') return null
 
   if (collab.mode !== 'plan') {
     return (
       <div className="cb-cluster">
-        <button type="button" className="cb-share ghost" onClick={() => setOpen('enable')} data-ui="share-enable"><Share2 /><span>{t('collab.share')}</span></button>
-        {open === 'enable' && <EnableShareModal onClose={() => setOpen(null)} />}
+        <button type="button" className="cb-share ghost" onClick={() => show('enable')} data-ui="share-enable"><Users /><span>{t('collab.create.action')}</span></button>
+        {collab.createdPlan && <button type="button" className="cb-text-action" onClick={collab.recoverCreatedPlan}>{t('collab.create.recover')}</button>}
+        {open === 'enable' && <EnableShareModal onClose={closeCreate} />}
       </div>
     )
   }
@@ -41,11 +63,14 @@ export default function ShareCluster() {
         {members.length > 5 && <span className="cb-face more">+{members.length - 5}</span>}
       </div>
       {plan && (
-        <button type="button" className="cb-share" onClick={() => setOpen('share')} data-ui="plan-share">
-          <Share2 /><span>{t('collab.shareN', { n: plan.members.length })}</span>
+        <button type="button" className="cb-share" onClick={() => show('share')} data-ui="plan-share">
+          {collab.role === 'owner' ? <UserPlus /> : <Users />}<span>{t(collab.role === 'owner' ? 'collab.create.invite' : 'collab.create.members')}</span>
         </button>
       )}
-      {open === 'share' && <ShareModal onClose={() => setOpen(null)} />}
+      {!plan && collab.createdPlan && <button type="button" className="cb-text-action" onClick={collab.recoverCreatedPlan} data-ui="plan-recovery">{t('collab.create.recover')}</button>}
+      {open === 'share' && <ShareModal onClose={close} onDeliver={() => { collab.closeInvite(); show('deliver') }} />}
+      {open === 'deliver' && <DeliverModal onClose={close} />}
+      {open === 'enable' && <EnableShareModal onClose={closeCreate} />}
     </div>
   )
 }

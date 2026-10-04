@@ -1,7 +1,7 @@
 // ?doc=<doc id>：打开自己「我的设计」里的这一座（站点工作台「我的设计」点卡片时用）。
 // 同步跑完一轮以后本机一般就有了；本机还是没有（这台设备上登过别的账号，拉取游标跑到了前面），
 // 就把服务端的整份列表拉一遍取这一座。服务端只给自己的，别人的、删掉的都拿不到。
-import { docs } from '../engine-api'
+import { docs, storage } from '../engine-api'
 import type { PullResponse, RemoteDoc } from './types'
 
 /** 服务端列表里的这一座，删掉的不算 */
@@ -16,10 +16,15 @@ export async function hasLocalDoc(id: string): Promise<boolean> {
 
 /** 本机没有就从 /models 拉下来放进本机。拉到了（或者本来就有）返回 true，服务端也没有返回 false */
 export async function pullDoc(baseUrl: string, id: string): Promise<boolean> {
+  const epoch = storage.getAccountEpoch()
+  const scope = storage.getAccountScope()
   if (await hasLocalDoc(id)) return true
-  const res = await fetch(`${baseUrl}/models?since=0`, { credentials: 'include', headers: { Accept: 'application/json' } })
+  if (!scope.startsWith('user:')) throw new Error('verified account required')
+  const userId = scope.slice(5)
+  const res = await fetch(`${baseUrl}/models?since=0`, { credentials: 'include', headers: { Accept: 'application/json', 'X-Builder-User-ID': userId } })
   if (!res.ok) throw new Error(`GET /models → ${res.status}`)
   const doc = pickRemote(((await res.json()) as PullResponse).items, id)
+  if (epoch !== storage.getAccountEpoch() || res.headers.get('X-Builder-User-ID') !== userId) throw new Error('account changed')
   if (!doc) return false
   await docs.putRemoteDoc(doc)
   return true

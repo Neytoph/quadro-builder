@@ -1,22 +1,47 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronDown, Eye, Info, Link, ShieldCheck } from 'lucide-react'
+import { Copy, Eye, FilePlus2, Info, Link, ShieldCheck, UserPlus } from 'lucide-react'
 import { useI18n } from '../../i18n'
 import { useEngine } from '../../store/EngineContext'
 import { UI_ESCAPE_EVENT } from '../../ui/events'
 import { isDesigner, useCollab } from '../CollabContext'
-import type { Metrics, Role } from '../api'
+import { collabApi, mediaUrl, type Invite, type InviteRole, type Metrics } from '../api'
+import { snapshotURL, useFlowText } from '../flowStrings'
+import { diffBom, type BomDiffRow } from '../compare'
+import { BuildModel } from '../../engine-api'
+import type { ModelJSON } from '../ymodel'
+import { bootEntry } from '../../entry'
 import { errText, Face, useSignedIn, when } from './bits'
 
 /** 弹层：遮罩加一张卡片，挂到 body 上（从抽屉里打开也不会被框住），Esc 关掉。 */
 export function Modal({ onClose, wide, label, children, className }: { onClose: () => void; wide?: boolean; label: string; children: ReactNode; className?: string }) {
+  const { holdModal } = useCollab()
+  useLayoutEffect(holdModal, [holdModal])
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const previousFocus = useRef(document.activeElement as HTMLElement | null)
+  useEffect(() => {
+    const dialog = dialogRef.current
+    if (!dialog) return
+    const controls = () => Array.from(dialog.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex="0"]')).filter(element => element.getClientRects().length > 0)
+    if (!dialog.contains(document.activeElement)) (controls()[0] || dialog).focus()
+    const trap = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab') return
+      const items = controls()
+      const first = items[0], last = items[items.length - 1]
+      if (!first) { event.preventDefault(); dialog.focus(); return }
+      if (!dialog.contains(document.activeElement) || (!event.shiftKey && document.activeElement === last)) { event.preventDefault(); first.focus() }
+      else if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) { event.preventDefault(); last.focus() }
+    }
+    document.addEventListener('keydown', trap, true)
+    return () => { document.removeEventListener('keydown', trap, true); if (previousFocus.current?.isConnected) previousFocus.current.focus() }
+  }, [])
   useEffect(() => {
     window.addEventListener(UI_ESCAPE_EVENT, onClose)
     return () => window.removeEventListener(UI_ESCAPE_EVENT, onClose)
   }, [onClose])
   return createPortal(
     <div className="cb-mask" onClick={onClose}>
-      <div role="dialog" aria-label={label} className={`cb-modal ${className || ''} ${wide ? 'w' : ''} qb-card`} onClick={e => e.stopPropagation()}>
+      <div ref={dialogRef} role="dialog" aria-modal="true" tabIndex={-1} aria-label={label} className={`cb-modal ${className || ''} ${wide ? 'w' : ''} qb-card`} onClick={e => e.stopPropagation()}>
         <button type="button" className="x" aria-label="×" onClick={onClose}>×</button>
         {children}
       </div>
@@ -25,128 +50,164 @@ export function Modal({ onClose, wide, label, children, className }: { onClose: 
   )
 }
 
-const ROLES: Role[] = ['owner', 'editor', 'commenter']
-
-/** 自己的造型还没共享：说明三种角色，确认后开启。 */
+/** 从点击时的造型或者空白创建独立方案。 */
 export function EnableShareModal({ onClose }: { onClose: () => void }) {
   const collab = useCollab()
+  const api = useEngine()
   const { t } = useI18n()
   const signedIn = useSignedIn()
   const [busy, setBusy] = useState(false)
+  const source = api.tabs.find(tab => tab.tabId === api.activeTabId)?.name || ''
+  const [blank, setBlank] = useState(bootEntry().blank)
+  const initialName = (isBlank: boolean) => Array.from(isBlank ? t('collab.create.blankName') : t('collab.create.copyName', { name: source })).slice(0, 40).join('')
+  const [name, setName] = useState(() => initialName(bootEntry().blank))
+  const [failure, setFailure] = useState('')
+  const pick = (value: boolean) => { setBlank(value); setName(initialName(value)) }
   const go = async () => {
+    if (busy) return
     setBusy(true)
+    setFailure('')
     try {
-      await collab.enableSharing()
+      await collab.enableSharing(name, blank)
       onClose()
     } catch (err) {
-      collab.report(err)
-      setBusy(false)
-    }
+      setFailure(errText(err))
+    } finally { setBusy(false) }
   }
   return (
-    <Modal onClose={onClose} label={t('collab.enable.title')}>
+    <Modal onClose={busy ? () => {} : onClose} label={t('collab.create.title')} className="cb-shared-dialog">
       <div data-ui="enable-share">
-        <h3>{t('collab.enable.title')}</h3>
-        <p className="s">{t('collab.enable.body')}</p>
-        <div className="cb-radio">
-          {ROLES.map(r => (
-            <label key={r} className={`info ${r === 'owner' ? 'on' : ''}`}><i /><span><b>{t(r === 'owner' ? 'collab.enable.you' : `collab.role.${r}`)}</b><br /><span>{t(`collab.roleCan.${r}`)}</span></span><span /></label>
-          ))}
+        <div className="cb-dialog-icon"><UserPlus /></div>
+        <h3>{t('collab.create.title')}</h3>
+        <p className="s">{t('collab.create.subtitle')}</p>
+        <div className="cb-create-options">
+          <button type="button" className={!blank ? 'active' : ''} disabled={busy} onClick={() => pick(false)} aria-pressed={!blank} data-ui="create-copy"><Copy /><b>{t('collab.create.copy')}</b><small>{t('collab.create.copyHint')}</small></button>
+          <button type="button" className={blank ? 'active' : ''} disabled={busy} onClick={() => pick(true)} aria-pressed={blank} data-ui="create-blank"><FilePlus2 /><b>{t('collab.create.blank')}</b><small>{t('collab.create.blankHint')}</small></button>
         </div>
-        <p className="s" style={{ margin: '12px 0 0', fontSize: 12 }}>{t('collab.enable.offline')}</p>
-        <div className="foot">
-          <button type="button" className="qb-btn qb-btn-ghost qb-btn-sm" onClick={onClose}>{t('collab.enable.later')}</button>
+        {!blank && <div className="cb-source"><Copy /><div><b>{source}</b><p>{t('collab.create.sourceHint')}</p></div></div>}
+        <form onSubmit={e => { e.preventDefault(); void go() }}>
+          <label className="cb-field"><span>{t('collab.create.name')}</span><input autoFocus value={name} onChange={e => setName(Array.from(e.target.value).slice(0, 40).join(''))} disabled={busy} required data-ui="create-name" autoComplete="off" /></label>
+          <p className="cb-independent"><Copy />{t('collab.create.independent')}</p>
+          {failure && <p className="cb-action-error" role="alert">{failure}</p>}
+          {collab.createdPlan && <a href={`?plan=${encodeURIComponent(collab.createdPlan.id)}&inviteManage=1`} className="cb-text-action" data-ui="create-recovery">{t('collab.create.recover')}</a>}
           {signedIn
-            ? <button type="button" className="qb-btn qb-btn-sm" disabled={busy} onClick={() => void go()} data-ui="enable-share-go">{t('collab.enable.go')}</button>
-            : <a href={collab.loginUrl()} className="qb-btn qb-btn-sm no-underline">{t('collab.enable.login')}</a>}
-        </div>
+            ? <button type="submit" className="qb-btn cb-wide" disabled={busy || !name.trim() || !api.entryReady} data-ui="enable-share-go">{t(busy ? 'collab.create.creating' : 'collab.create.go')}</button>
+            : <a href={collab.loginUrl()} className="qb-btn cb-wide no-underline">{t('collab.create.login')}</a>}
+        </form>
       </div>
     </Modal>
   )
 }
 
 /** 共享：邀请链接、只看链接、成员和角色。创建人能改别人的角色、移出方案。 */
-export function ShareModal({ onClose }: { onClose: () => void }) {
+export function ShareModal({ onClose, onDeliver }: { onClose: () => void; onDeliver?: () => void }) {
   const collab = useCollab()
   const api = useEngine()
   const { t } = useI18n()
+  const f = useFlowText()
   const plan = collab.plan
-  const [invite, setInvite] = useState('')
-  const [menu, setMenu] = useState<number | null>(null)
+  const [invites, setInvites] = useState<Invite[]>([])
+  const [tab, setTab] = useState<'invite' | 'members' | 'view'>(collab.role === 'owner' ? 'invite' : 'members')
+  const [role, setRole] = useState<InviteRole>('editor')
+  const [busy, setBusy] = useState(true)
+  const [failure, setFailure] = useState('')
+  const [confirm, setConfirm] = useState<{ kind: 'disable'; token: string } | { kind: 'remove'; userId: number; name: string } | null>(null)
   const me = plan?.me
   const owner = collab.role === 'owner'
   const online = new Set(collab.peers.map(p => p.user?.userId).filter(Boolean))
+  const invite = invites.find(item => item.role === role)
 
   useEffect(() => {
-    // 打开时把成员再取一遍（刚有人用邀请链接加入），生成一条邀请链接
-    collab.session?.refresh().catch(collab.report)
-    if (!me || collab.role === 'guest') return
-    collab.inviteUrl().then(setInvite).catch(collab.report)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+    let disposed = false
+    void (async () => {
+      try {
+        await collab.session?.refresh()
+        if (owner && plan) {
+          const list = await collabApi.invites(plan.id)
+          if (!list.length && collab.inviteOpenId === plan.id) list.push(await collabApi.invite(plan.id, 'editor'))
+          if (!disposed) setInvites(list)
+        }
+      } catch (err) { if (!disposed) setFailure(errText(err)) }
+      finally { if (!disposed) setBusy(false) }
+    })()
+    return () => { disposed = true }
+  }, [plan?.id, owner, collab.session])
 
+  const act = async (action: () => Promise<void>) => {
+    if (busy) return
+    setBusy(true)
+    setFailure('')
+    try { await action() } catch (err) { setFailure(errText(err)) }
+    finally { setBusy(false) }
+  }
+  const generate = () => act(async () => {
+    if (!plan || !owner) return
+    const next = await collabApi.invite(plan.id, role)
+    setInvites(list => [...list.filter(item => item.role !== role), next])
+  })
+
+  const inviteURL = invite ? `${location.origin}${location.pathname}?${new URLSearchParams({ plan: plan?.id || '', invite: invite.token })}` : ''
   const copy = (text: string, done: string) => {
     navigator.clipboard.writeText(text).then(() => api.notify(done)).catch(collab.report)
   }
-  const pretty = (url: string) => url.replace(/^https?:\/\//, '')
-
   if (!plan) return null
+  const memberRows = (manage: boolean) => <div className="cb-members">{plan.members.map(m => {
+    const self = me?.userId === m.userId
+    const designer = isDesigner(plan, m.userId)
+    const fixed = !manage || self || m.role === 'owner' || designer
+    return <div key={m.userId} className="cb-mem" data-ui="member" data-user={m.userId}>
+      <Face name={m.name} avatar={m.avatar} color={collab.colorOf(m.userId)} state={self || online.has(m.userId) ? 'on' : 'off'} />
+      <div className="t"><b>{m.name}{self ? t('collab.youSuffix') : ''}</b><span>{t(m.role === 'owner' ? 'collab.create.owner' : designer ? 'collab.designer' : self || online.has(m.userId) ? 'collab.online' : 'collab.offline')}</span></div>
+      {fixed ? <span className="cb-role lock">{t(`collab.create.role.${m.role}`)}</span> : <div className="cb-member-actions">
+        <select className="cb-role-select" value={m.role} disabled={busy} aria-label={t('collab.create.memberRole', { name: m.name })} data-ui="member-role" onChange={e => { const next = e.target.value as InviteRole; void act(() => collab.setRole(m.userId, next)) }}>
+          <option value="editor">{t('collab.create.role.editor')}</option><option value="commenter">{t('collab.create.role.commenter')}</option>
+        </select>
+        <button type="button" className="cb-remove" disabled={busy} aria-label={t('collab.create.removeName', { name: m.name })} data-ui="member-remove" onClick={() => setConfirm({ kind: 'remove', userId: m.userId, name: m.name })}>×</button>
+      </div>}
+    </div>
+  })}</div>
   return (
-    <Modal onClose={onClose} label={t('collab.share')}>
+    <Modal onClose={onClose} label={t(owner ? 'collab.create.invite' : 'collab.create.members')} className="cb-shared-dialog cb-invite-dialog">
       <div data-ui="share-modal">
-        <h3>{t('collab.shareTitle', { name: collab.session?.name || plan.name })}</h3>
-        {me && collab.role !== 'guest' && (
-          <>
-            <div className="cb-sub" style={{ marginTop: 12 }}>{t('collab.invite')}<span>{t('collab.inviteHint')}</span></div>
-            <div className="cb-link"><Link /><code data-ui="invite-url">{invite ? pretty(invite) : '…'}</code>
-              <button type="button" className="qb-btn qb-btn-sm" disabled={!invite} onClick={() => copy(invite, t('collab.inviteCopied'))} data-ui="invite-copy">{t('collab.copy')}</button></div>
-          </>
-        )}
-        <div className="cb-sub">{t('collab.viewLink')}<span>{t('collab.viewLinkHint')}</span></div>
-        <div className="cb-link"><Eye /><code>{pretty(collab.viewUrl())}</code>
-          <button type="button" className="qb-btn qb-btn-ghost qb-btn-sm" onClick={() => copy(collab.viewUrl(), t('collab.linkCopied'))}>{t('collab.copy')}</button></div>
-        <div className="cb-sub">{t('collab.membersN', { n: plan.members.length })}{plan.briefId != null && <span>{t('collab.briefPlan')}</span>}</div>
-        <div className="cb-members">
-          {plan.members.map(m => {
-            const self = me?.userId === m.userId
-            const designer = isDesigner(plan, m.userId)
-            const on = self || online.has(m.userId)
-            // 创建人和需求单里接单的设计师：角色固定，只能看
-            const fixed = !owner || self || m.role === 'owner' || designer
-            const sub = [
-              designer ? t('collab.designer') : '',
-              on ? t('collab.online') : t('collab.offline'),
-              designer ? t('collab.designerLeave') : '',
-            ].filter(Boolean).join(' · ')
-            return (
-              <div key={m.userId} className="cb-mem" data-ui="member" data-user={m.userId}>
-                <Face name={m.name} avatar={m.avatar} color={collab.colorOf(m.userId)} state={on ? 'on' : 'off'} />
-                <div className="t">
-                  <b>{m.name}{self ? t('collab.youSuffix') : ''}{m.canDeliver && <span className="cb-chip dl">{t('collab.canDeliver')}</span>}</b>
-                  <span>{sub}</span>
-                </div>
-                {fixed
-                  ? <span className="cb-role lock">{t(`collab.role.${m.role}`)}</span>
-                  : <button type="button" className="cb-role" onClick={() => setMenu(menu === m.userId ? null : m.userId)} data-ui="member-role">{t(`collab.role.${m.role}`)}<ChevronDown /></button>}
-                {menu === m.userId && (
-                  <div className="cb-menu" data-ui="member-menu">
-                    {(['editor', 'commenter'] as const).map(r => (
-                      <button key={r} type="button" className={m.role === r ? 'on' : ''}
-                        onClick={() => { setMenu(null); collab.setRole(m.userId, r).catch(collab.report) }}>
-                        <b>{t(`collab.role.${r}`)}{m.role === r ? ' ✓' : ''}</b><span>{t(`collab.roleMenu.${r}`)}</span>
-                      </button>
-                    ))}
-                    <div className="sep" />
-                    <button type="button" className="del" onClick={() => { setMenu(null); collab.removeMember(m.userId).catch(collab.report) }}>
-                      <b>{t('collab.remove')}</b><span>{t('collab.removeHint')}</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-            )
-          })}
-        </div>
-        {!me && <p className="s" style={{ marginTop: 12 }}>{t('collab.guestHint')}</p>}
+        <div className="cb-dialog-icon"><UserPlus /></div>
+        <h3>{t(owner ? 'collab.create.invite' : 'collab.create.members')}</h3>
+        <p className="s">{collab.session?.name || plan.name}</p>
+        <div className="cb-modal-tabs" role="tablist">{(owner ? ['invite', 'members', 'view'] as const : ['members'] as const).map(key => <button key={key} type="button" role="tab" aria-selected={tab === key} className={tab === key ? 'active' : ''} data-ui={`share-tab-${key}`} onClick={() => { setTab(key); setConfirm(null) }}>{t(`collab.create.tab.${key}`)}{key === 'members' ? ` · ${plan.members.length}` : ''}</button>)}</div>
+        {failure && <div className="cb-action-error" role="alert">{failure}</div>}
+        {collab.createdPlan?.id === plan.id && collab.createdPlan.coverError && <div className="cb-action-error" role="alert">{t('collab.create.coverFailed')}<p>{collab.createdPlan.coverError}</p><button type="button" className="cb-text-action" disabled={busy} data-ui="cover-retry" onClick={() => void act(collab.retryCover)}>{t('collab.create.retryCover')}</button></div>}
+        {busy && <p className="s" role="status">{t('collab.loading')}</p>}
+        {confirm ? <div className="cb-confirm-action">
+          <h3>{t(confirm.kind === 'disable' ? 'collab.create.disableTitle' : 'collab.create.removeTitle')}</h3>
+          <p className="s">{confirm.kind === 'remove' ? t('collab.create.removeBody', { name: confirm.name }) : t('collab.create.disableBody')}</p>
+          <div className="foot"><button type="button" className="qb-btn qb-btn-ghost" disabled={busy} onClick={() => setConfirm(null)}>{t('confirm.cancel')}</button><button type="button" className="qb-btn" disabled={busy} data-ui="confirm-collab-action" onClick={() => void act(async () => {
+            if (confirm.kind === 'disable') { await collabApi.disableInvite(plan.id, confirm.token); setInvites(list => list.filter(item => item.token !== confirm.token)) }
+            else await collab.removeMember(confirm.userId)
+            setConfirm(null)
+          })}>{t(confirm.kind === 'disable' ? 'collab.create.disable' : 'collab.remove')}</button></div>
+        </div> : tab === 'invite' && owner ? <>
+          <div className="cb-invite-banner"><UserPlus /><div><b>{t('collab.create.inviteBanner')}</b><p>{t('collab.create.onlyOwner')}</p></div></div>
+          <label className="cb-field-label">{t('collab.create.permission')}</label>
+          <div className="cb-role-options">{(['editor', 'commenter'] as const).map(value => <button key={value} type="button" className={role === value ? 'active' : ''} disabled={busy} aria-pressed={role === value} data-ui={`invite-role-${value}`} onClick={() => setRole(value)}>{t(`collab.create.inviteRole.${value}`)}<i /></button>)}</div>
+          <p className="s">{t(`collab.create.inviteHint.${role}`)}</p>
+          {invite ? <>
+            <input className="cb-url-input" readOnly value={inviteURL} aria-label={t('collab.invite')} data-ui="invite-url" />
+            <button type="button" className="qb-btn cb-wide" disabled={busy} data-ui="invite-copy" onClick={() => copy(inviteURL, t('collab.inviteCopied'))}><Copy />{t(`collab.create.copyInvite.${role}`)}</button>
+            <div className="cb-link-tools"><a className="cb-text-action" href={inviteURL} target="_blank" rel="noreferrer">{t('collab.create.previewInvite')}</a><button type="button" className="cb-text-action danger" disabled={busy} data-ui="invite-disable" onClick={() => setConfirm({ kind: 'disable', token: invite.token })}>{t('collab.create.disable')}</button></div>
+          </> : <>
+            <div className="cb-status-box">{t('collab.create.noLink')}</div>
+            <button type="button" className="qb-btn cb-wide" disabled={busy} data-ui="invite-generate" onClick={() => void generate()}><Link />{t('collab.create.generate')}</button>
+          </>}
+          <div className="cb-sub">{t('collab.create.joinedMembers')}</div>{memberRows(false)}
+          <button type="button" className="cb-text-action" onClick={() => setTab('members')}>{t('collab.create.manageMembers')}</button>
+        </> : tab === 'view' && owner ? <div className="cb-view-pane">
+          <Eye /><h3>{t('collab.create.viewTitle')}</h3><p className="s">{t('collab.create.viewHint')}</p>
+          <input className="cb-url-input" readOnly value={collab.viewUrl()} aria-label={t('collab.viewLink')} data-ui="view-url" />
+          <button type="button" className="qb-btn qb-btn-ghost cb-wide" data-ui="view-copy" onClick={() => copy(collab.viewUrl(), t('collab.linkCopied'))}><Copy />{t('collab.create.copyView')}</button>
+        </div> : <><p className="s">{t(owner ? 'collab.create.manageHint' : 'collab.create.memberHint')}</p>{memberRows(owner)}</>}
+        {!confirm && collab.canDeliver && onDeliver && <div className="cb-share-delivery">
+          <b>{f('deliveryOptional')}</b><p>{f('deliveryHint')}</p>
+          <button type="button" className="qb-btn qb-btn-ghost qb-btn-sm" disabled={busy} onClick={onDeliver} data-ui="share-deliver"><Link />{f('deliveryTitle')}</button>
+        </div>}
       </div>
     </Modal>
   )
@@ -190,93 +251,134 @@ export function ForkModal({ onClose }: { onClose: () => void }) {
   )
 }
 
-/**
- * 锁定交付：选一版，客观量按这一版算好，写适龄和承重说明。已经有交付页时说明旧页面
- * 会提示有更新。锁好以后给出交付页地址（复制出去的链接带来源标记）。
- */
+/** 可选交付：预览时自动保存当前共享模型，生成固定页面后继续原共享协作。 */
 export function DeliverModal({ onClose }: { onClose: () => void }) {
   const collab = useCollab()
   const api = useEngine()
   const { t, lang } = useI18n()
-  const own = collab.versions.filter(v => v.kind !== 'reference').sort((a, b) => b.createdAt - a.createdAt)
-  const [pick, setPick] = useState<number | null>(own[0]?.id ?? null)
-  const [metrics, setMetrics] = useState<Metrics | null>(null)
-  const [ageNote, setAgeNote] = useState('')
-  const [loadNote, setLoadNote] = useState('')
+  const f = useFlowText()
+  const [snapshot, setSnapshot] = useState<{ id: number; name: string; metrics: Metrics; parts: BomDiffRow[] } | null>(null)
+  const saved = useRef<{ id: number; name: string } | null>(null)
+  const running = useRef(false)
+  const [ageNote, setAgeNote] = useState<string>(() => f('ageDefault'))
+  const [loadNote, setLoadNote] = useState<string>(() => f('loadDefault'))
   const [busy, setBusy] = useState(false)
+  const [busyLabel, setBusyLabel] = useState('')
   const [token, setToken] = useState<string | null>(null)
-  const nameOf = (userId: number) => collab.plan?.members.find(m => m.userId === userId)?.name || ''
-  const chosen = own.find(v => v.id === pick) || null
-  const old = own.find(v => v.delivered && v.id !== pick) || null
+  const [failure, setFailure] = useState('')
+  const [renders, setRenders] = useState<string[]>([])
+  const [uploaded, setUploaded] = useState<string[]>([])
+  const [preview, setPreview] = useState(false)
+  const heading = useRef<HTMLHeadingElement>(null)
+  useLayoutEffect(() => {
+    heading.current?.focus({ preventScroll: true })
+    heading.current?.closest('.cb-modal')?.scrollTo({ top: 0 })
+  }, [preview, token])
+  const available = [...new Set([...uploaded, ...collab.threads.flatMap(th => th.posts.flatMap(p => p.photos))])]
+  const metrics = snapshot?.metrics
+  const parts = snapshot?.parts || []
 
-  const { metricsOf, report } = collab
-  useEffect(() => {
-    if (pick == null) return
-    setMetrics(null)
-    metricsOf(pick).then(setMetrics).catch(report)
-  }, [metricsOf, report, pick])
+  const prepare = async (refresh = false) => {
+    if (running.current || !collab.canDeliver) return
+    running.current = true; setBusy(true); setBusyLabel(f('preparing')); setFailure('')
+    try {
+      if (refresh) saved.current = null
+      if (!saved.current) {
+        const name = `${f('snapshotName')} · ${new Date().toLocaleString(lang === 'zh' ? 'zh-CN' : lang, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}`
+        const version = await collab.saveVersion(name)
+        saved.current = { id: version.id, name }
+        if (refresh) setRenders([])
+      }
+      const current = saved.current
+      const [data, measured] = await Promise.all([collab.versionModel(String(current.id)), collab.metricsOf(current.id)])
+      setSnapshot({ ...current, metrics: measured, parts: diffBom(new BuildModel().toJSON() as ModelJSON, data) })
+      setPreview(true)
+    } catch (error) { setFailure(errText(error)) }
+    finally { running.current = false; setBusy(false) }
+  }
 
   const url = token ? `${location.origin}/deliver.html?t=${encodeURIComponent(token)}&src=${encodeURIComponent(`delivery:${token}`)}` : ''
 
   const submit = async () => {
-    if (pick == null || !metrics || busy) return
-    setBusy(true)
+    if (!snapshot || running.current || !preview || !collab.canDeliver) return
+    running.current = true; setBusy(true); setBusyLabel(f('creating'))
+    setFailure('')
     try {
-      setToken(await collab.deliver({ versionId: pick, ageNote: ageNote.trim(), loadNote: loadNote.trim(), metrics }))
+      setToken(await collab.deliver({ versionId: snapshot.id, ageNote: ageNote.trim(), loadNote: loadNote.trim(), metrics: snapshot.metrics, renders }))
     } catch (err) {
-      api.notify(errText(err), 'err')
+      setFailure(errText(err))
     } finally {
-      setBusy(false)
+      running.current = false; setBusy(false)
     }
+  }
+
+  const upload = async (files: FileList | null) => {
+    if (!files?.length || !collab.plan || running.current) return
+    if (renders.length + files.length > 6) { setFailure(f('limit')); return }
+    running.current = true; setBusy(true); setBusyLabel(f('loading')); setFailure('')
+    try {
+      for (const file of Array.from(files)) {
+        const result = await collabApi.photo(collab.plan.id, file)
+        setUploaded(paths => [...paths, result.path]); setRenders(paths => [...paths, result.path])
+      }
+    } catch (e) { setFailure(errText(e)) }
+    finally { running.current = false; setBusy(false) }
   }
 
   const cell = (label: string, value: ReactNode) => <div><dt>{label}</dt><dd>{value}</dd></div>
 
   return (
-    <Modal onClose={onClose} wide label={t('collab.deliver.title')}>
+    <Modal onClose={busy ? () => {} : onClose} wide label={f('deliveryTitle')}>
       <div data-ui="deliver-dialog">
-        <h3>{t('collab.deliver.title')}</h3>
-        <p className="s">{t('collab.deliver.body')}</p>
+        <h3 ref={heading} tabIndex={-1}>{token ? f('done') : f('deliveryTitle')}</h3>
+        <p className="s">{token ? f('doneHint') : f('deliveryIntro')}</p>
+        {failure && <p role="alert" className="cb-action-error">{failure}</p>}
         {!token && (
           <>
-            <div className="cb-radio">
-              {own.map((v, i) => (
-                <label key={v.id} className={pick === v.id ? 'on' : ''} onClick={() => setPick(v.id)}><i />
-                  <span><b>{v.name}</b><br /><span>{nameOf(v.createdBy)} · {when(v.createdAt, lang)} · {t('collab.parts', { n: v.partsCount })}</span></span>
-                  {i === 0 ? <span className="cb-chip cur">{t('collab.deliver.latest')}</span> : v.delivered ? <span className="cb-chip dl">{t('collab.version.delivered')}</span> : <span />}
-                </label>
-              ))}
-            </div>
-            <div className="cb-sub">{t('collab.deliver.metrics')}<span>{chosen ? t('collab.deliver.metricsOf', { name: chosen.name }) : ''}</span></div>
-            {metrics ? (
+            {!preview && <div className="cb-delivery-source"><b>{snapshot?.name || collab.session?.name}</b><p>{snapshot ? f('frozenHint') : f('currentModel')}</p>
+              {snapshot && <><button type="button" className="cb-text-action" disabled={busy} onClick={() => void prepare(true)} data-ui="delivery-refresh">{f('refreshSnapshot')}</button><small>{f('resetImagesHint')}</small></>}
+            </div>}
+            {preview && snapshot && collab.plan && <section className="cb-delivery-preview" data-ui="delivery-preview">
+              <h4>{f('preview')}</h4><p className="cb-hint">{f('frozenHint')}</p>
+              <iframe title={snapshot.name} src={`${snapshotURL(collab.plan.id, snapshot.id, lang)}&view=1`} />
+              <p><b>{f('parts')}</b> · {t('collab.parts', { n: parts.reduce((sum, part) => sum + part.right, 0) })}</p>
+              <ul className="cb-parts-summary">{parts.map(part => <li key={part.key}><span>{part.name}{part.color ? ` · ${part.color}` : ''}</span><b>× {part.right}</b></li>)}</ul>
+            </section>}
+            {snapshot && <div className="cb-sub">{t('collab.deliver.metrics')}<span>{snapshot.name}</span></div>}
+            {metrics && (
               <dl className="cb-metrics" data-ui="deliver-metrics">
                 {cell(t('collab.metrics.maxDeckHeight'), <>{metrics.maxDeckHeight}<small>cm</small></>)}
                 {cell(t('collab.metrics.maxSpan'), <>{metrics.maxSpan}<small>cm</small></>)}
                 {cell(t('collab.metrics.hasGuard'), t(metrics.hasGuard ? 'collab.metrics.yes' : 'collab.metrics.no'))}
                 {cell(t('collab.metrics.footprint'), <>{metrics.footprint}<small>㎡</small></>)}
               </dl>
-            ) : <div className="cb-hint" style={{ padding: 0 }}>{t('collab.loading')}</div>}
-            <label className="cb-field"><span>{t('collab.deliver.ageNote')} <i>{t('collab.deliver.ageHint')}</i></span>
-              <textarea value={ageNote} onChange={e => setAgeNote(e.target.value)} data-ui="deliver-age" /></label>
-            <label className="cb-field"><span>{t('collab.deliver.loadNote')} <i>{t('collab.deliver.loadHint')}</i></span>
-              <textarea value={loadNote} onChange={e => setLoadNote(e.target.value)} data-ui="deliver-load" /></label>
-            <div className="cb-warn"><Info /><span>{old ? t('collab.deliver.hasOld', { old: old.name, name: chosen?.name || '' }) : ''}{t('collab.deliver.noShop')}</span></div>
+            )}
+            <label className="cb-field"><span>{f('ageNote')} <i>{!preview && f('defaultHint')}</i></span>
+              <textarea value={ageNote} readOnly={preview} disabled={busy} onChange={e => setAgeNote(e.target.value)} data-ui="deliver-age" /></label>
+            <label className="cb-field"><span>{f('loadNote')}</span>
+              <textarea value={loadNote} readOnly={preview} disabled={busy} onChange={e => setLoadNote(e.target.value)} data-ui="deliver-load" /></label>
+            <section className="cb-delivery-images">
+              <h4>{f('images')} · {renders.length}/6</h4><p className="cb-hint">{f('imageHint')}</p>
+              {!preview && <><label className="qb-btn qb-btn-ghost qb-btn-sm">{f('upload')}<input type="file" accept="image/*" multiple disabled={busy || renders.length >= 6} data-ui="delivery-upload" onChange={e => { void upload(e.target.files); e.target.value = '' }} /></label>
+              {available.length > 0 && <details><summary>{f('existing')}</summary><div className="cb-image-grid">{available.map(path => <label key={path}><img src={mediaUrl(path)} alt="" /><input type="checkbox" aria-label={f('existing')} checked={renders.includes(path)} disabled={busy || (!renders.includes(path) && renders.length >= 6)} onChange={e => setRenders(paths => e.target.checked ? [...paths, path] : paths.filter(p => p !== path))} /></label>)}</div></details>}</>}
+              {renders.length ? <div className="cb-image-grid" data-ui="delivery-images">{renders.map(path => <figure key={path}><a href={mediaUrl(path)} target="_blank" rel="noreferrer"><img src={mediaUrl(path)} alt={snapshot?.name || collab.session?.name || ''} /></a>{!preview && <button type="button" disabled={busy} onClick={() => setRenders(paths => paths.filter(p => p !== path))}>{f('remove')}</button>}</figure>)}</div> : <p>{f('noImages')}</p>}
+            </section>
+            <div className="cb-warn"><Info /><span>{t('collab.deliver.noShop')}</span></div>
             <div className="foot">
               <span className="note">{t('collab.deliver.disclaimer')}</span>
-              <button type="button" className="qb-btn qb-btn-ghost qb-btn-sm" onClick={onClose}>{t('confirm.cancel')}</button>
-              <button type="button" className="qb-btn qb-btn-sm" disabled={!metrics || busy || !ageNote.trim() || !loadNote.trim()} onClick={() => void submit()} data-ui="deliver-submit"><ShieldCheck />{t('collab.deliver.submit')}</button>
+              <button type="button" className="qb-btn qb-btn-ghost qb-btn-sm" disabled={busy} onClick={preview ? () => setPreview(false) : onClose}>{preview ? f('edit') : t('confirm.cancel')}</button>
+              <button type="button" className="qb-btn qb-btn-sm" disabled={busy || !collab.canDeliver || !ageNote.trim() || !loadNote.trim()} onClick={() => preview ? void submit() : void prepare()} data-ui={preview ? 'deliver-submit' : 'deliver-preview'}><ShieldCheck />{busy ? busyLabel : preview ? f('deliveryTitle') : f('preview')}</button>
             </div>
           </>
         )}
         {token && (
           <div data-ui="deliver-done">
-            <div className="cb-sub" style={{ marginTop: 4 }}>{t('collab.deliver.done')}</div>
             <div className="cb-link"><Link /><code>{url.replace(/^https?:\/\//, '')}</code>
               <button type="button" className="qb-btn qb-btn-sm" onClick={() => { navigator.clipboard.writeText(url).then(() => api.notify(t('collab.linkCopied'))).catch(collab.report) }}>{t('collab.copy')}</button></div>
             <input type="hidden" value={url} data-ui="deliver-url" readOnly />
             <div className="foot">
               <a href={url} target="_blank" rel="noreferrer" className="qb-btn qb-btn-ghost qb-btn-sm no-underline">{t('collab.deliver.openPage')}</a>
-              <button type="button" className="qb-btn qb-btn-sm" onClick={onClose}>{t('collab.done')}</button>
+              <button type="button" className="qb-btn qb-btn-sm" onClick={onClose} data-ui="delivery-continue">{f('continue')}</button>
             </div>
           </div>
         )}
@@ -290,8 +392,8 @@ export function JoinModal() {
   const collab = useCollab()
   const { t } = useI18n()
   const ask = collab.joinAsk
+  if (collab.inviteError) return <Modal onClose={collab.dismissInviteError} label={t('collab.error.title')} className="cb-shared-dialog"><div data-ui="invite-error"><h3>{t('collab.error.title')}</h3><p className="cb-action-error" role="alert">{collab.inviteError}</p><button type="button" className="qb-btn cb-wide" onClick={collab.dismissInviteError}>{t('collab.done')}</button></div></Modal>
   if (!ask) return null
-  const owner = ask.plan.members.find(m => m.role === 'owner')
   const shown = ask.plan.members.slice(0, 2)
   return (
     <Modal onClose={collab.joinAsGuest} label={t('collab.join.title')}>
@@ -300,8 +402,9 @@ export function JoinModal() {
           {shown.map(m => <Face key={m.userId} name={m.name} avatar={m.avatar} color={collab.colorOf(m.userId)} state="on" size="lg" />)}
           {ask.plan.members.length > 2 && <span className="cb-face lg more">+{ask.plan.members.length - 2}</span>}
         </div>
-        <h3 style={{ padding: 0 }}>{t('collab.join.invited', { who: owner?.name || '', name: ask.plan.name })}</h3>
-        <p className="s">{t('collab.join.body')}</p>
+        <h3 style={{ padding: 0 }}>{t('collab.join.invited', { who: ask.info.ownerName, name: ask.info.planName })}</h3>
+        <div className="cb-join-role">{t(`collab.create.role.${ask.info.role}`)}</div>
+        <p className="s">{t(`collab.create.inviteHint.${ask.info.role}`)}</p>
         <div className="foot" style={{ justifyContent: 'center' }}>
           <button type="button" className="qb-btn qb-btn-ghost qb-btn-sm" onClick={collab.joinAsGuest} data-ui="join-guest">{t('collab.join.look')}</button>
           <a href={collab.loginUrl()} className="qb-btn qb-btn-sm no-underline" data-ui="login-join">{t('collab.join.go')}</a>

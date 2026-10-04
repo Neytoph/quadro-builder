@@ -2,6 +2,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { setLang as syncEngineLang } from './engine/i18n.js'
 import { detectOsFamily, type OsFamily } from './platform'
 import { bootEntry } from './entry'
+import { sharedStrings } from './collab/sharedStrings'
+import { accessoryStrings } from './ui/accessoryStrings'
 
 export type Lang = 'zh' | 'en' | 'de'
 
@@ -26,6 +28,7 @@ const zh: Dict = {
   'app.docTitle': 'Quadro Builder · 攀爬架设计器',
   'app.metaDesc': 'QUADRO 攀爬架 3D 设计器 — 界面来自 vokako，搭建能力来自 quadro-3D。',
   'tool.select': '选择',
+  'tool.customSaved': '已保存的组件',
   'tool.delete': '删除',
   'tool.deleteHint': '点击零件逐个删除（D）',
   'tool.tubes': '管',
@@ -45,8 +48,8 @@ const zh: Dict = {
   'panel.compat': '功能板 · 兼容件，非原厂',
   'tool.slides': '滑梯',
   'tool.wheels': '轮',
-  'tool.textiles': '布件',
-  'tool.accessories': '扩展配件',
+  'tool.textiles': '布艺',
+  'tool.accessories': '配件',
   'toast.exportedQdfNoAccessories': '已导出 QDF。秋千、吊环等扩展配件是非官方零件，QDF 文件里不包含它们',
   'tool.pools': '泳池',
   'tool.connections': '连接件',
@@ -259,6 +262,11 @@ const zh: Dict = {
   'toast.blockEmpty': '先把指针放在零件上，或先点选一件',
   'saves.title': '我的设计',
   'saves.empty': '还没有存档',
+  'saves.legacyBackup': '备份旧版设备草稿',
+  'saves.legacyBackupHint': '选择草稿下载模型 JSON。可用「导入文件」重新打开，确认内容属于你后再保存到当前账户。完整备份另含旧会话、模型库和库存。',
+  'saves.legacyBackupAll': '下载完整设备备份',
+  'saves.legacyDownload': '下载「{name}」模型 JSON',
+  'saves.legacyBackupConfirm': '旧版设备草稿没有账户归属，可能包含这台设备其他使用者的内容。确认你有权备份这些内容后继续。备份仅下载到本机，不会导入或上传到当前账户。',
   'saves.open': '打开',
   'doc.notFound': '找不到这座造型',
   'saves.rename': '重命名',
@@ -394,6 +402,7 @@ const zh: Dict = {
   'btn.share': '复制分享链接',
   'toast.pngSaved': '效果图已保存',
   'toast.pngFailed': '无法截取 3D 画面',
+  'toast.bomPngFailed': '零件清单图片导出失败，请重试',
   'toast.shareCopied': '分享链接已复制。对方打开链接即可看到这个设计。',
   'toast.shareFailed': '无法复制链接，请检查剪贴板权限。',
   'toast.shareTooBig': '设计太大，链接受不了。请改用导出 JSON。',
@@ -457,7 +466,7 @@ const zh: Dict = {
   'onboard.s1hint': '官方造型跟程序一起带了，点卡片就能打开。',
   'onboard.s2title': '往箭头方向接管',
   'onboard.s2body': '看上面中间这一排。点「管」，再点接头上亮起来的箭头，管子就朝那个方向长出去，另一头自动带新接头。',
-  'onboard.s2hint': '数字键 1 到 6 换管长，先不用记。',
+  'onboard.s2hint': '数字键 1 到 3 换管长，4 打开自定义组件。',
   'onboard.s3title': '颜色在左边',
   'onboard.s3body': '左边这一列选颜色。红绿蓝黄是经典色，下面 Home 更柔和。先选颜色再接管；搭好了也能整块换。',
   'onboard.s4title': '用了哪些件',
@@ -699,6 +708,7 @@ const en: Dict = {
   'app.docTitle': 'Quadro Builder · Climbing frame designer',
   'app.metaDesc': 'QUADRO climbing-frame 3D designer — UI from vokako, build engine from quadro-3D.',
   'tool.select': 'Select',
+  'tool.customSaved': 'Saved components',
   'tool.delete': 'Delete',
   'tool.deleteHint': 'Click parts one by one to delete (D)',
   'tool.tubes': 'Tubes',
@@ -932,6 +942,11 @@ const en: Dict = {
   'toast.blockEmpty': 'Point at a part, or select one first',
   'saves.title': 'My designs',
   'saves.empty': 'No saved designs',
+  'saves.legacyBackup': 'Back up old device drafts',
+  'saves.legacyBackupHint': 'Download a draft as model JSON and reopen it with Import file. Save it to your account after confirming it is yours. The full backup also contains old sessions, library entries and inventory.',
+  'saves.legacyBackupAll': 'Download full device backup',
+  'saves.legacyDownload': 'Download “{name}” model JSON',
+  'saves.legacyBackupConfirm': 'Old device drafts have no account owner and may contain another user’s work. Continue only if you may back up this content. The backup downloads locally; it is not imported or uploaded to your account.',
   'saves.open': 'Open',
   'doc.notFound': 'This design could not be found',
   'saves.rename': 'Rename',
@@ -1067,6 +1082,7 @@ const en: Dict = {
   'btn.share': 'Copy share link',
   'toast.pngSaved': 'PNG saved.',
   'toast.pngFailed': 'Could not capture the 3D view.',
+  'toast.bomPngFailed': 'Could not export the parts list image. Please try again.',
   'toast.shareCopied': 'Share link copied. Anyone with the link can open this design.',
   'toast.shareFailed': 'Could not copy the link. Check clipboard permission.',
   'toast.shareTooBig': 'This design is too large for a link. Export JSON instead.',
@@ -1130,7 +1146,7 @@ const en: Dict = {
   'onboard.s1hint': 'Official models are bundled. Click a card to open one.',
   'onboard.s2title': 'Grow a tube along an arrow',
   'onboard.s2body': 'Use the bar up here. Click Tubes, then a lit-up arrow on a joint. The tube grows that way and a new joint appears at the far end.',
-  'onboard.s2hint': 'Keys 1–6 change the length. You can ignore them for now.',
+  'onboard.s2hint': 'Keys 1–3 change tube length. 4 opens custom components.',
   'onboard.s3title': 'Colors live on the left',
   'onboard.s3body': 'Pick a color in this column. Classic is red, green, blue, yellow; Home is softer. Choose a color before you add tubes — you can recolor a whole block later.',
   'onboard.s4title': 'See what you used',
@@ -1372,6 +1388,7 @@ const de: Dict = {
   'app.docTitle': 'Quadro Builder · Klettergerüst-Planer',
   'app.metaDesc': 'QUADRO Klettergerüst-3D-Planer — Oberfläche nach vokako, Aufbaukern von quadro-3D.',
   'tool.select': 'Auswahl',
+  'tool.customSaved': 'Gespeicherte Komponenten',
   'tool.delete': 'Löschen',
   'tool.deleteHint': 'Teile einzeln anklicken zum Löschen (D)',
   'tool.tubes': 'Rohre',
@@ -1605,6 +1622,11 @@ const de: Dict = {
   'toast.blockEmpty': 'Zeiger auf ein Teil, oder erst eines auswählen',
   'saves.title': 'Meine Entwürfe',
   'saves.empty': 'Noch keine Entwürfe',
+  'saves.legacyBackup': 'Alte Geräteentwürfe sichern',
+  'saves.legacyBackupHint': 'Lade einen Entwurf als Modell-JSON herunter und öffne ihn über Datei importieren. Speichere ihn erst in deinem Konto, nachdem du die Eigentümerschaft bestätigt hast. Die vollständige Sicherung enthält auch alte Sitzungen, Bibliothek und Bestand.',
+  'saves.legacyBackupAll': 'Vollständige Gerätesicherung herunterladen',
+  'saves.legacyDownload': 'Modell-JSON „{name}“ herunterladen',
+  'saves.legacyBackupConfirm': 'Alte Geräteentwürfe sind keinem Konto zugeordnet und können Inhalte anderer Benutzer enthalten. Fahre nur fort, wenn du diese Inhalte sichern darfst. Die Sicherung wird lokal heruntergeladen und nicht in dein Konto importiert oder hochgeladen.',
   'saves.open': 'Öffnen',
   'doc.notFound': 'Dieses Modell wurde nicht gefunden',
   'saves.rename': 'Umbenennen',
@@ -1740,6 +1762,7 @@ const de: Dict = {
   'btn.share': 'Teillink kopieren',
   'toast.pngSaved': 'PNG gespeichert.',
   'toast.pngFailed': 'Die 3D-Ansicht ließ sich nicht aufnehmen.',
+  'toast.bomPngFailed': 'Die Teileliste konnte nicht als Bild exportiert werden. Bitte erneut versuchen.',
   'toast.shareCopied': 'Teillink kopiert. Wer den Link öffnet, sieht diesen Entwurf.',
   'toast.shareFailed': 'Link ließ sich nicht kopieren. Zwischenablage prüfen.',
   'toast.shareTooBig': 'Der Entwurf ist zu groß für einen Link. Stattdessen JSON exportieren.',
@@ -1803,7 +1826,7 @@ const de: Dict = {
   'onboard.s1hint': 'Offizielle Modelle sind dabei. Eine Karte anklicken zum Öffnen.',
   'onboard.s2title': 'Rohr in Pfeilrichtung wachsen lassen',
   'onboard.s2body': 'Schau auf die Leiste oben in der Mitte. „Rohre“ klicken, dann einen leuchtenden Pfeil an einer Kupplung. Das Rohr wächst dorthin, am anderen Ende sitzt automatisch eine neue Kupplung.',
-  'onboard.s2hint': 'Tasten 1–6 ändern die Länge. Das kannst du später merken.',
+  'onboard.s2hint': 'Tasten 1–3 ändern die Rohrlänge. 4 öffnet eigene Komponenten.',
   'onboard.s3title': 'Farben links',
   'onboard.s3body': 'In dieser Spalte wählst du die Farbe. Klassisch ist Rot, Grün, Blau, Gelb; Home ist weicher. Farbe zuerst wählen — später kannst du ganze Blöcke umfärben.',
   'onboard.s4title': 'Was du verbaut hast',
@@ -2040,7 +2063,7 @@ const de: Dict = {
   'room.closeFirst': 'Erst den Umriss schließen, dann Türen und Fenster setzen',
 }
 
-export const dicts: Record<Lang, Dict> = { zh, en, de }
+export const dicts: Record<Lang, Dict> = { zh: { ...zh, ...sharedStrings.zh, ...accessoryStrings.zh }, en: { ...en, ...sharedStrings.en, ...accessoryStrings.en }, de: { ...de, ...sharedStrings.de, ...accessoryStrings.de } }
 
 /** 打开时用哪种语言：网址里带了的优先，其次是用户选过的，都没有按浏览器语言。 */
 export function detect(): Lang {

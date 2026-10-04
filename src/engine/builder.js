@@ -9,10 +9,11 @@ import { t } from "./i18n.js";
 import { round2, panelNormal, modelMiddle, xAxisOf, yAxisOf, zAxisOf, quatFromBasis } from "./util.js";
 import { TUBE_FITTINGS, POOL_KINDS, isHolePart, holeArmDirs, holeClampDirsAt, HOLE_MASKS,
   BOLT_PART, HINGE_PART, isBoltPart, boltArmDirs, boltDepth, hingeDir, hingeKey, splitHingeKey,
-  POOL_SETS, ARM_FITTINGS, armFittingDirsAt, fixedFittingColor, slopeArmDirsAt } from "./model.js";
+  POOL_SETS, ARM_FITTINGS, armFittingDirsAt, fixedFittingColor, fixedTubeColor, slopeArmDirsAt } from "./model.js";
 import { CONNECTOR_ARM_BITS } from "./qdfimport.js";
-import { ACCESSORY_IDS } from './accessoryPack.js';
-import { pickStepAnchor, stepCandidates, stepCandidatesFromSelection } from "./stepAnchor.js";
+import { ACCESSORY_IDS, PANEL_ACCESSORY_IDS, componentFrame } from './accessoryPack.js';
+import { confirmedSpec } from './componentPack.js';
+import { pickStepAnchor, stepCandidates, stepCandidatesFromSelection, stepNeighbor } from "./stepAnchor.js";
 
 // Kupplungen, die auf einem Rohr sitzen statt im Raster: QDF-Art -> Katalogteil.
 // Teile, die sich um ein Rohr klemmen lassen. Die Lochzapfenkupplung gehört
@@ -92,6 +93,9 @@ export class Builder {
     this.placeConnectorId = null;       // 普通通型：套到现有空插座接头上
     // Platten-Modus: erstes angeklicktes Tragrohr + Stelle entlang davon.
     this.panelRail = null;
+    this.installationPreview = null;
+    this.insetScrewAxis='vertical';
+    this._installationPart = null;
     // Verstaerken-Modus: erstes angeklicktes 35er-Rohr, das noch seinen Partner
     // sucht (ein Profil deckt immer 80 cm).
     this.reinforceRail = null;
@@ -217,6 +221,7 @@ export class Builder {
    * wechselt erst beim naechsten Escape den Modus.
    */
   clearMarks() {
+    if (this.installationPreview) { this.cancelInstallation(); return true; }
     const had = this.selection.size > 0 || !!this.highlight || !!this.panelRail ||
       !!this.reinforceRail || (this.mode !== "select" && !!this.selectedNodeId);
     if (!had) return false;
@@ -256,6 +261,9 @@ export class Builder {
 
   // --- oeffentliche Steuerung --------------------------------------------
   setMode(mode) {
+    this._ropeFirst = null;
+    this._installationPart = null; this.installationPreview = null;
+    this.scene.clearInstallationPreview?.();
     this._runSelectFlip();
     // Ein Moduswechsel beendet ein laufendes Einfuegen (startPaste schaltet
     // selbst auf "select" und setzt seinen Zustand danach).
@@ -301,6 +309,14 @@ export class Builder {
       return;
     }
     if (this.mode !== "fitting") return;
+    if (ACCESSORY_IDS.has(this.fittingKind)) {
+      if (!this.model.accessoryMounts(this.fittingKind).length) {
+        const diagnostics = [...this.model.tubes.keys()].map(id => this.model.accessoryDiagnostics(this.fittingKind, id));
+        const result = diagnostics.find(d => !['straight_tube', 'horizontal_tube', 'tube_short'].includes(d.reason)) || diagnostics.find(d => d.reason !== 'straight_tube') || { reason: 'straight_tube' };
+        this.onNotice(t('accessory_reason_' + result.reason), 'info');
+      }
+      return;
+    }
     if (ROOF_KINDS.has(this.fittingKind)) {
       if (this.model.roofMounts(this.fittingKind).length) return;
       // Alle Gerippe schon bedeckt? Dann ist das die Nachricht. Gerippe da, nur
@@ -341,6 +357,7 @@ export class Builder {
   /** Wieviele Stellen das gewaehlte Anbauteil jetzt hat -- wie _buildFittingHandles. */
   _countFittingPlaces() {
     const kind = this.fittingKind;
+    if (ACCESSORY_IDS.has(kind)) return this.model.accessoryMounts(kind).length;
     const cs = geometry().connectorSize;
     if (RAIL_FITTINGS.has(kind)) return this.model.railFittingMounts(kind, this._railSize()).length;
     if (ROOF_KINDS.has(kind)) return this.model.roofMounts(kind).length;
@@ -387,7 +404,12 @@ export class Builder {
       this.onNotice(t("notice_connector_no_node"), "warn");
     }
   }
-  setPanel(panelId) { this.panelId = panelId; if (this.mode === "panel") this.refresh(); }
+  setPanel(panelId) { this._ropeFirst = null; this._installationPart = null; this.installationPreview = null; this.scene.clearInstallationPreview?.(); this.panelId = panelId; if (this.mode === "panel") this.refresh(); }
+  setInsetScrewAxis(axis) {
+    if(!['vertical','horizontal'].includes(axis) || this.readOnly)return false;
+    this.insetScrewAxis=axis;this._installationPart=null;this.installationPreview=null;
+    this.scene.clearInstallationPreview?.();this._clearPanelRail();this.refresh();return true;
+  }
   /** Schrittweite beim Verschieben setzen (cm). */
   setMoveStep(cm) {
     const wert = Number(cm);
@@ -399,9 +421,12 @@ export class Builder {
   setClampPart(id) { this.clampPart = id; if (this.mode === "clamp") this.refresh(); }
 
   setFitting(kind, partId = null) {
-    this.fittingKind = kind;
+    this._installationPart = null; this.installationPreview = null; this.scene.clearInstallationPreview?.();
+    const confirmed = confirmedSpec(partId || kind);
+    this.fittingKind = confirmed?.placement === 'fitting' ? confirmed.kind || confirmed.id : kind === 'wheel' ? 'multi-wheel2' : kind;
     // 同一种 qdf 元素下的具体件（布件 / 彩虹带 / 彩虹桥），放下去时给它打变体标记
     this.fittingPart = partId;
+    this._ropeFirst = null;
     this.poolLinerId = null;
     this._clearPanelRail();          // Rohr-Auswahl gilt nur fuer das Netz
     if (this.mode === "fitting") this.refresh();
@@ -449,6 +474,7 @@ export class Builder {
     if (nodeId != null) {
       for (const t of this.model.tubes.values()) {
         if (t.arm || t.link) continue;
+        if (fixedTubeColor(t.tubeId)) continue;
         if (t.a !== nodeId && t.b !== nodeId) continue;
         const c = officialColorId(t.color);
         if (counts[c] != null) counts[c]++;
@@ -468,16 +494,19 @@ export class Builder {
     this.recordHistory(() => {
       for (const t of this.model.tubes.values()) {
         if (t.arm || t.link) continue;
+        if (fixedTubeColor(t.tubeId)) continue;
         const next = pick();
         if (t.color !== next) { t.color = next; changed++; }
       }
       for (const map of [this.model.panels, this.model.textiles, this.model.slides]) {
         for (const el of map.values()) {
+          if (el.appearanceVersion === 2 && confirmedSpec(el.panelId || el.partId || el.kind)?.fixedColor) continue;
           const next = pick();
           if (el.color !== next) { el.color = next; changed++; }
         }
       }
       for (const f of this.model.fittings.values()) {
+        if (f.appearanceVersion === 2 && confirmedSpec(f.partId || f.kind)?.fixedColor) continue;
         if (fixedFittingColor(f.kind)) continue;
         const next = pick();
         if (f.color !== next) { f.color = next; changed++; }
@@ -875,6 +904,7 @@ export class Builder {
       frag,
       before: JSON.stringify(this.model.toJSON()),
       collidedBefore: this.model.collisions(),
+      invalidComponentsBefore: this.model._invalidComponents(),
       offset: null,
       ids: null,
       valid: true,
@@ -995,6 +1025,8 @@ export class Builder {
   _troubleWith(sel, collidedBefore) {
     const tg = this.model.moveTargets(sel);
     const schlecht = new Set();
+    const invalidComponentsBefore = this._paste?.invalidComponentsBefore || this._drag?.invalidComponentsBefore || new Set();
+    for (const id of this.model._invalidComponents()) if (!invalidComponentsBefore.has(id)) schlecht.add(id);
     for (const id of this.model.collisions({
       only: this.model.tubesAt(tg.nodes),
       allowCoincide: true,
@@ -1024,6 +1056,7 @@ export class Builder {
   commitPaste() {
     const d = this._paste;
     if (!d) return false;
+    d.valid = !this._troubleWith(d.sel, d.collidedBefore);
     if (!d.valid) { this.onNotice(t("notice_collision"), "warn"); return false; }
     this._paste = null;
     this.scene.setCursor("default");
@@ -1155,6 +1188,9 @@ export class Builder {
   }
 
   _beginMoveDrag(e, pick) {
+    if (this.model._incompleteComponentMove(this.model.moveTargets(this.selection))) {
+      this.onNotice(t('notice_move_accessory_mounts'), 'warn'); return;
+    }
     const origin = pick.point.clone();
     this._drag = {
       origin,
@@ -1167,6 +1203,7 @@ export class Builder {
       gridWant: [0, 0, 0],
       // Was vorher schon uebereinander lag, zaehlt nicht als neue Kollision.
       collidedBefore: this.model.collisions(),
+      invalidComponentsBefore: this.model._invalidComponents(),
       invalid: null,
       result: null,
       axes: this.scene.dragAxes(),
@@ -1351,6 +1388,10 @@ export class Builder {
    * Zaehler starten wieder bei 1) -- _pruneSelection findet das nicht.
    */
   modelReplaced() {
+    // 模型换入前结束旧模型的预览与手势，避免取消操作把旧快照写进新标签页。
+    this._cancelSelectFlip();
+    this._abortGesture();
+    this._externalPending = false;
     this.selection.clear();
     this.selectedNodeId = null;
     this.stepFrom = [];
@@ -1494,6 +1535,13 @@ export class Builder {
     const node = pickStepAnchor(this.model, from, dirVec,
       (n, d) => this.model.canExtendFrom(n, d) && !this._armOccupied(n, d));
     if (!node) { this.onNotice(t("notice_step_pick"), "warn"); return; }
+    const neighbor = stepNeighbor(this.model, node, dirVec);
+    if (neighbor) {
+      this.selectedNodeId = neighbor.id;
+      this.stepFrom = [neighbor.id];
+      this.refresh();
+      return;
+    }
     if (!this.model.canExtendFrom(node, dirVec) || this._armOccupied(node, dirVec)) {
       this.onNotice(t("notice_step_blocked"), "warn");
       return;
@@ -1708,6 +1756,7 @@ export class Builder {
         focusId: this.panelRail ? this.panelRail.id : null,
         preview: !!(this._paste || this._drag || this._clampDrag || this._clampSlide) });
     this._buildHandles();
+    if (this._installationPart) this.scene.showInstallationPreview(this.model, this._installationPart, this.installationPreview.valid);
     this.scene.requestRender();
     // Waehrend einer Vorschau (Ziehen, Kopie am Zeiger) bleibt die Oberflaeche
     // aussen vor: Stueckliste und Sitzung rechnen sonst bei jedem Rasterschritt
@@ -1730,7 +1779,10 @@ export class Builder {
     // Verstaerkungs-Ablaeufe gehoeren dagegen zum Setzen und bleiben.
     if (this.highlight && !this.panelRail && !this.reinforceRail) return;
     // Im Platten-Modus klickt man zwei Rohre an -- keine Flaechen-Handles.
-    if (this.mode === "panel") return;
+    if (this.mode === "panel") {
+      if (PANEL_ACCESSORY_IDS.has(this.panelId)) for (const mount of this.model.panelAccessoryMounts(this.panelId,{screwAxis:this.insetScrewAxis||'vertical'})) this.scene.addHandle(mount.pos, { panelAccessoryMount: mount }, 'place');
+      return;
+    }
     if (this.mode === "slide") { this._buildSlideHandles(); return; }
     if (this.mode === "clamp") { this._buildClampHandles(); return; }
     if (this.mode === "c45") { this._buildC45Handles(); return; }
@@ -2325,6 +2377,10 @@ export class Builder {
     // Merkt sich, an welchen Kupplungen das gewaehlte Teil sitzen darf -- der
     // Zeiger zeigt dort eine Hand, auch wenn er den Ankerpunkt knapp verfehlt.
     this._fittingMountNodes = new Set();
+    if (confirmedSpec(this.fittingPart || this.fittingKind)?.placement === 'fitting') {
+      for (const mount of this.model.confirmedMounts(this.fittingPart || this.fittingKind)) if (mount.mounts.length) this.scene.addHandle(mount.pos, { confirmedComponent: mount, placeNode: true }, 'place');
+      return;
+    }
     if (ACCESSORY_IDS.has(this.fittingKind)) {
       for (const mount of this.model.accessoryMounts(this.fittingKind)) this.scene.addHandle(mount.pos, { accessoryTube: mount.tube, placeNode: true }, 'place');
       return;
@@ -3763,15 +3819,30 @@ export class Builder {
   }
 
   _clickFitting(e) {
+    if (this.fittingKind === 'rope') {
+      const pick = this.scene.pickForDelete(e.clientX, e.clientY);
+      if (pick?.data?.kind !== 'tube') return;
+      const rail = this.model._rail(pick.data.id); if (!rail) return;
+      const at = this._alongTube(pick.data.id, pick.point);
+      const endpoint = { tube: pick.data.id, t: Math.max(0.05, Math.min(0.95, at / rail.len)) };
+      if (!this._ropeFirst) { this._ropeFirst = endpoint; this.installationPreview = { kind:'fitting',partId:'rope',mountCount:1,supportCount:1,valid:false,reason:t('notice_rope_second'),canFlip:false,assumption:'frame-grid-unmeasured' };this.onNotice(t('notice_rope_second'), 'info'); this.refresh(); return; }
+      const first = this._ropeFirst; this._ropeFirst = null;
+      this._previewInstallation(this.model.ropeDiagnostics(first, endpoint), 'rope'); return;
+    }
+    if (confirmedSpec(this.fittingPart || this.fittingKind)?.placement === 'fitting') {
+      const h = this.scene.pickHandle(e.clientX, e.clientY);
+      if (h?.data?.confirmedComponent) this._previewInstallation(h.data.confirmedComponent, this.fittingPart || this.fittingKind);
+      else this.onNotice(t('notice_accessory_pick'), 'info');
+      return;
+    }
     if (ACCESSORY_IDS.has(this.fittingKind)) {
       const handle = this.scene.pickHandle(e.clientX, e.clientY);
       const pick = handle?.data?.accessoryTube ? null : this.scene.pickForDelete(e.clientX, e.clientY);
       const tubeId = handle?.data?.accessoryTube || (pick?.data?.kind === 'tube' ? pick.data.id : null);
       if (!tubeId) { this.onNotice(t('notice_accessory_pick'), 'info'); return; }
-      let added;
-      this.recordHistory(() => { added = this.model.addAccessory(this.fittingKind, tubeId, this.colorFor('panel')); });
-      this.onNotice(t(added ? 'notice_accessory_added' : 'notice_accessory_invalid'), added ? 'ok' : 'warn');
-      this.refresh(); return;
+      const mount = this.model.accessoryDiagnostics(this.fittingKind, tubeId);
+      this._previewInstallation(mount, this.fittingKind);
+      return;
     }
     if (this.fittingKind === "sleeve") { this._clickSleeve(e); return; }
     if (this.fittingKind === "balls") { this._clickBalls(e); return; }
@@ -4271,6 +4342,10 @@ export class Builder {
    * Klicks. Ein Klick auf eine liegende Platte legt sie auf die andere Seite.
    */
   _clickPanel(e) {
+    if (PANEL_ACCESSORY_IDS.has(this.panelId)) {
+      const handle = this.scene.pickHandle(e.clientX, e.clientY);
+      if (handle?.data?.panelAccessoryMount) { this._previewInstallation(handle.data.panelAccessoryMount, this.panelId); return; }
+    }
     // Ist ein Tragrohr gewaehlt, zaehlen zuerst die hervorgehobenen Gegenrohre --
     // auch wenn ein anderes Teil davor liegt. Sie scheinen ohnehin durch die
     // zurueckgeblendeten Teile hindurch.
@@ -4324,6 +4399,13 @@ export class Builder {
   }
 
   _placePanelOnRails(aId, bId, t0, len) {
+    if (PANEL_ACCESSORY_IDS.has(this.panelId)) {
+      const probe = { a: aId, b: bId, t0, len, panelId: this.panelId, color: this.colorFor('panel'), side: 1,params:{screwAxis:this.insetScrewAxis||'vertical'} };
+      if (this.panelId !== 'panel_40x40_pocket') probe.side = this._panelSideFromCorners(this.model.panelCorners(probe));
+      this.panelRail = null; this.highlight = null;
+      this._previewInstallation(this.model.panelAccessoryDiagnostics(probe), this.panelId);
+      return null;
+    }
     let added = null;
     this.recordHistory(() => {
       added = this.model.addPanel(aId, bId, t0, len, this.panelId, this.colorFor("panel"), 1);
@@ -4334,6 +4416,69 @@ export class Builder {
     this.highlight = null;
     this.refresh();
     return added;
+  }
+
+  _previewInstallation(part, partId) {
+    if (this.readOnly) return;
+    if (!part.kind && part.mounts?.length && part.panelId === 'panel_40x40_busy') {
+      const frame=componentFrame(this.model,part),cam=this.scene.cameraPosition();
+      const towardCamera=frame && frame.axes[2].reduce((sum,v,i)=>sum+v*(cam[i]-frame.pos[i]),0);
+      if(towardCamera<0)part=this.model.panelAccessoryDiagnostics({...part,side:-(part.side||1)});
+    }
+    this.scene.clearInstallationPreview?.();
+    this._installationPart = part.mounts?.length ? part : null;
+    this.installationPreview = { kind: part.kind ? 'fitting' : 'panel', partId, mountCount: part.mounts?.length || 0, supportCount: part.supportTubes?.length || 0, assumption: part.params?.assumption || 'frame-grid-unmeasured',
+      valid: part.valid, reason: part.reason ? t('accessory_reason_' + part.reason) : null, canFlip: partId === 'steering_wheel' && !!part.mounts?.length };
+    if (!part.valid) this.onNotice(this.installationPreview.reason, 'warn');
+    if(part.valid)return this.confirmInstallation();
+    this.refresh();
+  }
+
+  confirmInstallation() {
+    const part = this._installationPart;
+    if (!part || this.readOnly) return false;
+    const fresh = part.appearanceVersion === 2 ? this.model.confirmedDiagnostics(part) : part.kind ? this.model.accessoryDiagnostics(part.kind, part.tube, { facing: part.facing }) : this.model.panelAccessoryDiagnostics(part);
+    if (!fresh) { this.cancelInstallation(); return false; }
+    if (!fresh.valid) { this._previewInstallation(fresh, part.kind || part.panelId); return false; }
+    let added;
+    this.recordHistory(() => {
+      added = part.appearanceVersion === 2 ? this.model.addConfirmedComponent(fresh, this.colorFor('panel')) : part.kind ? this.model.addAccessory(part.kind, part.tube, this.colorFor('panel'), { facing: part.facing })
+        : this.model.addPanelAccessory(fresh,part.color || this.colorFor('panel'));
+    });
+    if (!added) return false;
+    this._installationPart = null; this.installationPreview = null;
+    this.scene.clearInstallationPreview();
+    this._notePlaced(added.id, part.kind ? 'fitting' : 'panel');
+    this.onNotice(t('notice_accessory_added'), 'ok');
+    this.refresh();
+    return true;
+  }
+
+  cancelInstallation() {
+    this._ropeFirst = null;
+    this._installationPart = null; this.installationPreview = null;
+    this.scene.clearInstallationPreview?.(); this.refresh();
+  }
+
+  flipInstallationFacing() {
+    const part = this._installationPart;
+    if (part?.kind !== 'steering_wheel') return false;
+    this._previewInstallation(this.model.accessoryDiagnostics(part.kind, part.tube, { facing: -(part.facing || 1) }), part.kind);
+    return true;
+  }
+
+  canFlipSelectedAccessory() {
+    return !this.readOnly && this.selection.size > 0 && [...this.selection.entries()].every(([id, kind]) => kind === 'fitting' && this.model.fittings.get(id)?.kind === 'steering_wheel');
+  }
+
+  flipSelectedAccessory() {
+    if (!this.canFlipSelectedAccessory()) return false;
+    const ids = [...this.selection.keys()];
+    if (ids.some(id => { const f = this.model.fittings.get(id); return !this.model.accessoryDiagnostics(f.kind, f.tube, { facing: -(f.facing || 1), ignoreId: id }).valid; })) {
+      this.onNotice(t('accessory_reason_component_space'), 'warn'); return false;
+    }
+    this.recordHistory(() => { for (const id of ids) this.model.flipAccessory(id); });
+    this.refresh(); return true;
   }
 
   /** Masse der gewaehlten Platte. */

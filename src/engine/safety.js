@@ -18,6 +18,8 @@
  */
 import { connectorsForNode } from "./bom.js";
 import { getPanel } from "./catalog.js";
+import { ACCESSORY_IDS, PANEL_ACCESSORY_IDS, componentMountsValid, componentObstacle } from './accessoryPack.js';
+import { confirmedSpec } from './componentPack.js';
 
 const EPS = 2;              // cm：网格点重合判定
 const CORNER_EPS = 6;       // cm：板角落到接头的距离（半个接头加余量）
@@ -29,6 +31,16 @@ const TIP_RATIO = 2;        // 高度 / 底面短边
 const CLEAR_ZONE = 200;     // cm：四周留空
 
 const LEVEL_RANK = { error: 0, warn: 1, info: 2 };
+
+// 原有官方标准板继续参与结构风险检查；这项分类不表示承载已认证。
+const STANDARD_PANEL_FEATURES = new Map([
+  ['panel_40x40', 'plain'], ['panel_40x20', 'plain'], ['panel_30x30', 'plain'],
+  ['hole_panel_40x40', 'holes'],
+]);
+function retainsStandardPanelRole(p) {
+  const feature = STANDARD_PANEL_FEATURES.get(p.panelId);
+  return feature != null && confirmedSpec(p.panelId)?.feature === feature;
+}
 
 function realTubes(model) {
   return [...model.tubes.values()].filter((t) => !t.arm && !t.link);
@@ -81,7 +93,8 @@ function decksOf(model) {
     if (p.poolPart || p.panelId === "pool_floor") continue;
     // 布兜、感官盆占着方框但不是能站的面
     const pdef = getPanel(p.panelId);
-    if (pdef && (pdef.feature === "pocket" || pdef.feature === "basin")) continue;
+    if (p.appearanceVersion === 2 && !retainsStandardPanelRole(p) && confirmedSpec(p.panelId)?.verifiedLoad !== true) continue;
+    if (pdef && (pdef.feature === "busy" || pdef.feature === "pocket" || pdef.feature === "basin")) continue;
     const c = cornersOf(model, p);
     if (!c) continue;
     if (Math.abs(normalOf(c)[1]) < 0.9) continue;
@@ -94,6 +107,8 @@ function decksOf(model) {
 function coversOf(model) {
   const out = [];
   for (const p of model.panels.values()) {
+    if (p.appearanceVersion === 2 && !retainsStandardPanelRole(p) && confirmedSpec(p.panelId)?.verifiedLoad !== true) continue;
+    if (getPanel(p.panelId)?.feature === 'pocket') continue;
     const c = cornersOf(model, p);
     if (c) out.push(c);
   }
@@ -355,6 +370,37 @@ function ruleRailing(model, decks, ground, covers, out) {
  * 全部规则跑一遍。opts.room = { w, d }（厘米，可选，填了就和无障碍区比）。
  * 返回 { findings, height }：findings 按 错误 → 提醒 → 说明 排；height 是最高站立面（cm）。
  */
+function ruleAccessories(model, out) {
+  const parts = [...model.panels.values(), ...model.fittings.values()].filter(p => (ACCESSORY_IDS.has(p.kind) && (!confirmedSpec(p.kind) || p.appearanceVersion === 2)) || (p.appearanceVersion && PANEL_ACCESSORY_IDS.has(p.panelId)));
+  if (!parts.length) return;
+  const collect = selected => ({ panels: selected.filter(p => p.panelId).map(p => p.id), fittings: selected.filter(p => p.kind).map(p => p.id), tubes: [...new Set(selected.flatMap(p => Array.isArray(p.supportTubes) ? p.supportTubes.filter(id => typeof id === 'string') : [p.tube].filter(Boolean)))] });
+  const broken = parts.filter(p => !componentMountsValid(model, p));
+  const structurallyValid = parts.filter(p => !broken.includes(p));
+  if (broken.length) out.push({ rule: 'accessory_mounts', level: 'error', ref: 'builder', params: { n: broken.length }, ids: collect(broken) });
+  const floating = [], tipping = [], cache = new Map();
+  const connected = id => {
+    if (cache.has(id)) return cache.get(id);
+    const ids = model._floodNodes(new Set([id]));
+    for (const nodeId of ids) cache.set(nodeId, ids);
+    return ids;
+  };
+  for (const part of structurallyValid) {
+    const tubeIds = part.supportTubes || [part.tube].filter(Boolean);
+    const groups = tubeIds.map(id => model.tubes.get(id)).filter(Boolean).map(t => connected(t.a));
+    if (!groups.length || groups.some(ids => ![...ids].some(id => model.nodes.get(id)?.y <= GROUND_EPS))) { floating.push(part); continue; }
+    const nodes = [...new Set(groups.flatMap(ids => [...ids]))].map(id => model.nodes.get(id)).filter(Boolean);
+    const contacts = nodes.filter(n => n.y <= GROUND_EPS);
+    const short = Math.min(Math.max(...contacts.map(n => n.x)) - Math.min(...contacts.map(n => n.x)), Math.max(...contacts.map(n => n.z)) - Math.min(...contacts.map(n => n.z)));
+    const height = Math.max(...nodes.map(n => n.y)) - Math.min(...contacts.map(n => n.y));
+    if (height > TIP_RATIO * short + 1) tipping.push({ part, height, short });
+  }
+  if (floating.length) out.push({ rule: 'accessory_support', level: 'error', ref: 'builder', params: { n: floating.length }, ids: collect(floating) });
+  if (tipping.length && !out.some(f => f.rule === 'tipping')) out.push({ rule: 'tipping', level: 'warn', ref: '5.2', params: { h: Math.round(Math.max(...tipping.map(p => p.height))), base: Math.round(Math.min(...tipping.map(p => p.short))) }, ids: collect(tipping.map(p => p.part)) });
+  const blocked = structurallyValid.filter(p => componentObstacle(model, p, { sweep: p.kind === 'swing' }));
+  if (blocked.length) out.push({ rule: 'accessory_clearance', level: 'warn', ref: 'builder', params: { n: blocked.length }, ids: collect(blocked) });
+  out.push({ rule: 'accessory_load', level: 'info', ref: 'builder', params: { n: parts.length }, ids: collect(parts) });
+}
+
 export function computeSafety(model, opts = {}) {
   const out = [];
   if (!model || !model.nodes.size) return { findings: out, height: 0 };
@@ -372,6 +418,7 @@ export function computeSafety(model, opts = {}) {
   ruleClearZone(model, opts.room, out);
   ruleFloating(model, ground, out);
   ruleRailing(model, decks, ground, covers, out);
+  ruleAccessories(model, out);
   out.sort((a, b) => LEVEL_RANK[a.level] - LEVEL_RANK[b.level]);
   return { findings: out, height };
 }
@@ -450,4 +497,5 @@ export function computeMetrics(model) {
 export const SAFETY_RULE_IDS = [
   "open_end", "deck_edges", "entrapment", "level_gap", "fall_height",
   "anchoring", "tipping", "clear_zone", "floating", "railing",
+  'accessory_mounts', 'accessory_support', 'accessory_clearance', 'accessory_load',
 ];

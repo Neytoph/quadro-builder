@@ -3,6 +3,7 @@ import { useEngine } from '../store/EngineContext'
 import { parseOfficialId } from '../data/official'
 import { useDock } from './dock'
 import { canvasCorner, usePanelLayout } from './panelLayout'
+import { SESSIONLESS } from '../entry'
 
 export default function CanvasHost() {
   const { hostRef, ready, error, openLibraryId, setViewCubePad } = useEngine()
@@ -15,6 +16,7 @@ export default function CanvasHost() {
     setViewCubePad(pad.cubePadRight, pad.cubePadBottom, pad.cubeSize)
   }, [ready, left, right, vw, pane, setViewCubePad])
   const onDragOver = (e: React.DragEvent) => {
+    if (SESSIONLESS) return
     if (![...e.dataTransfer.types].includes('text/plain')) return
     e.preventDefault()
     e.dataTransfer.dropEffect = 'copy'
@@ -26,6 +28,7 @@ export default function CanvasHost() {
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault()
     e.currentTarget.classList.remove('ring-2', 'ring-inset', 'ring-teal-400/80')
+    if (SESSIONLESS) return
     const raw = e.dataTransfer.getData('text/plain').trim()
     const id = parseOfficialId(raw) || (raw.startsWith('lib:') ? raw : null)
     if (!id) return

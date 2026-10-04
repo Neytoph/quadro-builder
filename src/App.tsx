@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { LanguageProvider, useI18n } from './i18n'
 import { EngineProvider, useEngine } from './store/EngineContext'
 import CanvasHost from './ui/CanvasHost'
@@ -17,9 +17,9 @@ import { UI_ESCAPE_EVENT } from './ui/events'
 import { DockProvider, useDock } from './ui/dock'
 import { usePresence } from './ui/motion'
 import { bootEntry, DELIVERY_EMBED, dropParam, fullBuilderUrl, VIEW_ONLY } from './entry'
+import { SnapshotInfo } from './collab/ui/SnapshotInfo'
 import { syncNow, syncProbe } from './sync/bootstrap'
 import { pullDoc } from './sync/docEntry'
-import { collabApi } from './collab/api'
 import { CollabProvider, useCollab } from './collab/CollabContext'
 import './collab/collab.css'
 import { JoinModal } from './collab/ui/Modals'
@@ -28,6 +28,7 @@ import CollabCoach from './collab/ui/CollabCoach'
 import CompareView from './collab/ui/CompareView'
 import BatchImport from './collab/ui/BatchImport'
 import RoomEditor from './collab/ui/RoomEditor'
+import CustomComponentsMenu, { CUSTOM_COMPONENTS_EVENT, type ComponentMenuPosition } from './ui/CustomComponentsMenu'
 
 function Toast() {
   const { toast: live, dismissToast } = useEngine()
@@ -219,17 +220,21 @@ function ViewBar() {
 function ViewShell() {
   const { t } = useI18n()
   const collab = useCollab()
-  const { ready, setViewCubeEnabled } = useEngine()
+  const { ready, readOnly, setViewCubeEnabled } = useEngine()
   // 交付查看没有「在 Builder 里打开」；嵌在交付页里时连分步手册和视角方块也不画
   const delivery = collab.mode === 'delivery'
+  const snapshot = collab.mode === 'snapshot'
+  const snapshotEmbed = snapshot && VIEW_ONLY && window.top !== window
   useEffect(() => {
-    if (ready && DELIVERY_EMBED) setViewCubeEnabled(false)
-  }, [ready, setViewCubeEnabled])
+    if (ready && (DELIVERY_EMBED || snapshotEmbed)) setViewCubeEnabled(false)
+  }, [ready, setViewCubeEnabled, snapshotEmbed])
   return (
-    <div className="app-viewport w-screen flex bg-gray-950 overflow-hidden" data-ui={DELIVERY_EMBED ? 'delivery-embed' : undefined}>
+    <div className={`app-viewport w-screen flex bg-gray-950 overflow-hidden ${snapshot && !VIEW_ONLY ? 'cb-snapshot-shell' : ''}`} data-ui={DELIVERY_EMBED ? 'delivery-embed' : undefined}>
       <CanvasHost />
-      {!delivery && <a href={fullBuilderUrl()} target="_top" className="qb-btn qb-btn-sm fixed top-3 left-3 z-40 no-underline">{t('view.open')} ↗</a>}
-      {!DELIVERY_EMBED && <ViewBar />}
+      {!delivery && !snapshot && <a href={fullBuilderUrl()} target="_top" className="qb-btn qb-btn-sm fixed top-3 left-3 z-40 no-underline">{t('view.open')} ↗</a>}
+      {snapshot && !VIEW_ONLY && readOnly && !collab.error && <SnapshotInfo planId={bootEntry().plan!} versionId={Number(bootEntry().version)} />}
+      {snapshot && collab.error && <p role="alert" className="cb-snapshot-error cb-action-error">{collab.error}</p>}
+      {!DELIVERY_EMBED && !snapshotEmbed && <ViewBar />}
       <Toast />
     </div>
   )
@@ -257,7 +262,7 @@ function ImportOnEntry() {
 
 /**
  * ?doc=<doc id>：打开自己「我的设计」里的这一座。没登录先去登录；登录了等同步跑完一轮，
- * 开启过共享的这一座打开方案标签页，其余的打开它的标签页；本机没有就从 /models 拉下来，
+ * 打开个人设计的独立标签页；本机没有就从 /models 拉下来，
  * 服务端也没有（不是自己的、删掉了）就说找不到。
  */
 function DocOnEntry() {
@@ -265,8 +270,8 @@ function DocOnEntry() {
   const collab = useCollab()
   const { t } = useI18n()
   const done = useRef(false)
-  const { ready, openDoc, notify } = api
-  const { openPlan, loginUrl, report } = collab
+  const { ready, openDoc, notify, completeEntry } = api
+  const { loginUrl, report } = collab
 
   useEffect(() => {
     const id = bootEntry().doc
@@ -277,12 +282,12 @@ function DocOnEntry() {
       if (signedIn === false) { location.href = loginUrl(); return }
       if (signedIn !== true) throw new Error('?doc=: sync server did not answer')
       await syncNow()
-      dropParam('doc')
-      if ((await collabApi.mine()).some(p => p.id === id)) { await openPlan(id); return }
       if (!await pullDoc(import.meta.env.VITE_SYNC_BASE as string, id)) { notify(t('doc.notFound'), 'err'); return }
       await openDoc(id)
+      dropParam('doc')
+      completeEntry()
     })().catch(report)
-  }, [ready, openDoc, notify, openPlan, loginUrl, report, t])
+  }, [ready, openDoc, notify, completeEntry, loginUrl, report, t])
 
   return null
 }
@@ -320,9 +325,41 @@ function AppInner() {
   const api = useEngine()
   const collab = useCollab()
   const { handleEsc } = useDock()
+  const [componentPosition, setComponentPosition] = useState<ComponentMenuPosition | null>(null)
+  const pointer = useRef<ComponentMenuPosition | null>(null)
+  const closeComponents = useCallback(() => setComponentPosition(null), [])
+
+  useEffect(() => {
+    const move = (e: PointerEvent) => { pointer.current = { x: e.clientX, y: e.clientY } }
+    const open = (e: Event) => {
+      if (!api.ready || api.readOnly || api.nameAsk || api.exportManualConfirm || api.accountAsk) return
+      const position = (e as CustomEvent<ComponentMenuPosition>).detail
+      window.dispatchEvent(new Event(UI_ESCAPE_EVENT))
+      setComponentPosition(position || pointer.current || { x: window.innerWidth / 2, y: window.innerHeight / 2 })
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener(CUSTOM_COMPONENTS_EVENT, open)
+    return () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener(CUSTOM_COMPONENTS_EVENT, open)
+    }
+  }, [api.ready, api.readOnly, api.nameAsk, api.exportManualConfirm, api.accountAsk])
+
+  useEffect(() => { setComponentPosition(null) }, [api.readOnly, api.activeTabId])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.isComposing) return
+      const el = e.target as HTMLElement | null
+      const input = !!el?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')
+      if (componentPosition) {
+        if (e.key === 'Escape') {
+          e.preventDefault()
+          if (document.querySelector('.cc-configuration[data-dragging="true"]')) return
+          setComponentPosition(null)
+        }
+        return
+      }
       if (e.key === 'Escape') {
         e.preventDefault()
         if (api.nameAsk) {
@@ -345,10 +382,10 @@ function AppInner() {
         handleEsc()
         return
       }
-      // 起名框开着时，画布上的快捷键一律不响应
-      if (api.nameAsk) return
-      const el = e.target as HTMLElement | null
-      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return
+      // 输入控件和确认框占用键盘时，不触发画布操作。
+      if (api.nameAsk || api.exportManualConfirm || api.accountAsk || api.exportingManual) return
+      if (input || el?.closest('[role="dialog"][aria-modal="true"]') || document.querySelector('[role="dialog"][aria-modal="true"]')) return
+      if (e.altKey) return
       if (el?.closest?.('[data-panel-chrome]')) return
       const meta = e.metaKey || e.ctrlKey
       if (meta && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); e.shiftKey ? api.redo() : api.undo(); return }
@@ -419,7 +456,15 @@ function AppInner() {
         api.setAssembly(!api.assembly.active)
         return
       }
-      const TUBE_BY_KEY: Record<string, string> = { '1': 'T15', '2': 'T25', '3': 'T35', '4': 'T10', '5': 'T20', '6': 'T75' }
+      if (e.key === '4') {
+        if (!api.ready || api.readOnly || e.repeat) return
+        if (api.engine()?.builder.busy() && !api.pasting) return
+        e.preventDefault()
+        window.dispatchEvent(new Event(UI_ESCAPE_EVENT))
+        setComponentPosition({ ...(pointer.current || { x: window.innerWidth / 2, y: window.innerHeight / 2 }), held: true })
+        return
+      }
+      const TUBE_BY_KEY: Record<string, string> = { '1': 'T15', '2': 'T25', '3': 'T35' }
       if (TUBE_BY_KEY[e.key]) { api.setTube(TUBE_BY_KEY[e.key]); return }
       if (e.key === 'd' || e.key === 'D') {
         e.preventDefault()
@@ -434,7 +479,7 @@ function AppInner() {
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [api, collab, handleEsc])
+  }, [api, collab, handleEsc, componentPosition])
 
   // 共享方案里只能看的人没有颜色栏；访客连工具条也没有，评论者的工具条只剩「选择」「评论」
   const viewer = collab.mode === 'plan' && !collab.canEdit
@@ -445,6 +490,7 @@ function AppInner() {
       <SceneToggle />
       <ProjectTabs />
       {!visitor && !collab.compare && <TopToolbar />}
+      {componentPosition && !api.readOnly && <CustomComponentsMenu position={componentPosition} onClose={closeComponents} />}
       {!viewer && !collab.compare && <LeftStack />}
       <RightDock />
       {!collab.compare && <AssemblyBar />}
@@ -456,7 +502,7 @@ function AppInner() {
       <AccountDialog />
       <NameDialog />
       <ManualProgress />
-      {collab.mode === 'off' && <Onboarding />}
+      {collab.mode === 'off' && !bootEntry().plan && !bootEntry().invite && !bootEntry().createShared && <Onboarding />}
       {collab.mode === 'plan' && <CollabCoach />}
       <ThumbCapture />
       <ImportOnEntry />
@@ -492,7 +538,7 @@ function EngineShell() {
 
 function Shell() {
   const collab = useCollab()
-  if (VIEW_ONLY || collab.mode === 'delivery') return <ViewShell />
+  if (VIEW_ONLY || collab.mode === 'delivery' || collab.mode === 'snapshot') return <ViewShell />
   if (collab.mode === 'room') return <RoomShell />
   return <AppInner />
 }

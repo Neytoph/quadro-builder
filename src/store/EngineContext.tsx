@@ -27,6 +27,7 @@ import { MOTION } from '../ui/motion'
 import { createTabDoc, dropTabDoc, memoryDoc, openTabDoc, SEED_ORIGIN, type LocalDoc } from '../collab/localDocs'
 import { partCountOf, writeJSON, type ModelJSON } from '../collab/ymodel'
 import { appendTab } from './tabs'
+import { renderModelCover } from './modelCover'
 
 // 引擎来自 Vanilla JS，这里不跟它的推断类型较劲。
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -80,6 +81,20 @@ export interface BomRow {
   kind: string
   w?: number
   h?: number
+  kitContents?: string
+  designAssumption?: boolean
+  loadVerified?: boolean
+}
+
+export interface InstallationPreview {
+  kind: string
+  partId: string
+  mountCount: number
+  valid: boolean
+  reason: string | null
+  canFlip: boolean
+  supportCount?: number
+  assumption?: string | boolean
 }
 
 export interface BomView {
@@ -117,6 +132,8 @@ export interface Inventory {
 
 interface EngineApi {
   ready: boolean
+  entryReady: boolean
+  completeEntry: () => void
   error: string | null
   hostRef: React.RefObject<HTMLDivElement | null>
   tick: number
@@ -132,6 +149,13 @@ interface EngineApi {
   canUndo: boolean
   canRedo: boolean
   selectionCount: number
+  installationPreview: InstallationPreview | null
+  insetScrewAxis: 'vertical' | 'horizontal'
+  setInsetScrewAxis: (axis: 'vertical' | 'horizontal') => void
+  canFlipAccessory: boolean
+  confirmInstallation: () => void
+  cancelInstallation: () => void
+  flipAccessory: () => void
   toast: { message: string; kind: ToastKind } | null
   tabs: TabInfo[]
   activeTabId: string | null
@@ -262,9 +286,7 @@ interface EngineApi {
   /** 交付查看：把一份外面取来的文档换进来当唯一的标签页，只能看。 */
   attachDoc: (o: { local: LocalDoc; name: string; readOnly: boolean }) => void
   /** 打开共享方案的标签页（已开着就切过去），返回标签页 id */
-  openPlanTab: (planId: string, name: string) => string
-  /** 自己的造型开启共享：标签页原地变成共享方案 */
-  convertToPlan: (tabId: string, planId: string, name: string) => void
+  openPlanTab: (planId: string, name: string, preserveOriginal?: boolean) => string
   /** 共享方案标签页的权限：能不能改、新建零件 id 的本端标记（见 BuildModel.idTag） */
   setTabAccess: (tabId: string, o: { readOnly: boolean; idTag: string }) => void
   tabLocal: (tabId: string) => LocalDoc | null
@@ -496,6 +518,7 @@ export function asBom(raw: AnyRec): BomView {
     key: String(r.key ?? `${r.tubeId}|${r.color}`), name: cleanBomText(r.name), count: Number(r.count),
     color: (r.color as string) || null, colorName: (r.colorName as string) || null, subtotal: Number(r.subtotal || 0),
     id: cleanBomText(r.tubeId), kind: 'tubes',
+    kitContents: cleanBomText(r.kitContents), designAssumption: r.designAssumption === true, loadVerified: r.loadVerified,
   }))
   const connectors = ((raw.connectors as AnyRec[]) || []).map(r => ({
     key: `connectors:${r.type}`, name: cleanBomText(r.name), count: Number(r.count),
@@ -505,6 +528,7 @@ export function asBom(raw: AnyRec): BomView {
     key: String(r.key ?? `${r.panelId}|${r.color}`), name: cleanBomText(r.name), count: Number(r.count),
     color: (r.color as string) || null, colorName: (r.colorName as string) || null, subtotal: Number(r.subtotal || 0),
     id: cleanBomText(r.panelId), kind: 'panels',
+    kitContents: cleanBomText(r.kitContents), designAssumption: r.designAssumption === true, loadVerified: r.loadVerified,
   }))
   const textiles: BomRow[] = []
   const wheels: BomRow[] = []
@@ -512,8 +536,10 @@ export function asBom(raw: AnyRec): BomView {
   for (const r of ((raw.fittings as AnyRec[]) || [])) {
     const id = cleanBomText(r.id) || cleanBomText(r.kind)
     const row: BomRow = {
-      key: `fittings:${id || r.key}`, name: cleanBomText(r.name), count: Number(r.count),
+      key: `fittings:${cleanBomText(r.key) || id}`, name: cleanBomText(r.name), count: Number(r.count),
       subtotal: Number(r.subtotal || 0), id, kind: 'fittings',
+      w: Number(r.w) || undefined, h: Number(r.h) || undefined,
+      kitContents: cleanBomText(r.kitContents), designAssumption: r.designAssumption === true, loadVerified: r.loadVerified,
     }
     const qdf = cleanBomText(r.qdf) || cleanBomText(r.kind)
     if (TEXTIL.has(qdf) || TEXTIL.has(id)) textiles.push({ ...row, kind: 'textiles' })
@@ -532,6 +558,7 @@ export function asBom(raw: AnyRec): BomView {
       id: cleanBomText(r.id) || 'textile',
       kind: 'textiles',
       w, h,
+      kitContents: cleanBomText(r.kitContents), designAssumption: r.designAssumption === true, loadVerified: r.loadVerified,
     })
   }
   const slides = ((raw.slides as AnyRec[]) || []).map(r => ({
@@ -595,6 +622,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const highlightKey = useRef<string | null>(null)
 
   const [ready, setReady] = useState(false)
+  const [entryReady, setEntryReady] = useState(false)
+  const completeEntry = useCallback(() => setEntryReady(true), [])
   const [error, setError] = useState<string | null>(null)
   const [tick, setTick] = useState(0)
   const [toast, setToast] = useState<{ message: string; kind: ToastKind } | null>(null)
@@ -1107,7 +1136,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   }, [applyTab, snapshotActive, syncTabs, t])
 
   /** 打开共享方案：已经有这个方案的标签页就切过去，没有就新开一个。 */
-  const openPlanTab = useCallback((planId: string, name: string) => {
+  const openPlanTab = useCallback((planId: string, name: string, preserveOriginal = false) => {
     const existing = tabsRef.current.find(x => x.planId === planId)
     if (existing) {
       if (name && existing.name !== name) existing.name = name
@@ -1123,7 +1152,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const tab = makePlanTab(planId, name)
     // 刚打开的空白「未命名」页让给方案，不多留一个空标签
     const active = tabsRef.current.find(x => x.tabId === activeRef.current)
-    const reuse = active && !active.planId && !active.docId && !active.dirty && tabParts(active) === 0 && isUntitledName(active.name)
+    const reuse = !preserveOriginal && active && !active.planId && !active.docId && !active.dirty && tabParts(active) === 0 && isUntitledName(active.name)
     tabsRef.current = reuse
       ? tabsRef.current.map(x => (x === active ? tab : x))
       : [...tabsRef.current, tab]
@@ -1133,16 +1162,6 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     syncTabs()
     return tab.tabId
   }, [applyTab, snapshotActive, syncTabs])
-
-  /** 自己的造型开启共享：这个标签页原地变成共享方案，文档不换。 */
-  const convertToPlan = useCallback((tabId: string, planId: string, name: string) => {
-    const tab = tabsRef.current.find(x => x.tabId === tabId)
-    if (!tab) throw new Error(`convertToPlan: no tab ${tabId}`)
-    tab.planId = planId
-    tab.name = name
-    tab.dirty = false
-    syncTabs()
-  }, [syncTabs])
 
   /** 共享方案标签页的权限：能不能改、新建零件 id 的本端标记。 */
   const setTabAccess = useCallback((tabId: string, o: { readOnly: boolean; idTag: string }) => {
@@ -1232,7 +1251,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       if (typed == null) return null
       saveName = typed.trim() || t('tab.untitled')
     }
-    const data = exportTab(tab)
+    const data = structuredClone(exportTab(tab))
     const saved = await docs.saveDoc({ docId: tab.docId, name: saveName, data })
     tabSavedAs(tab.tabId, saved.id)
     tab.docId = saved.id
@@ -1244,7 +1263,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     // 存下就推上去。等一个同步周期的话，这中间关掉页面这一座就只在这台
     // 机器上；社区发帖页更是当场就要读服务器那张列表。不挡着上面那句提示：
     // 存进本地这件事已经成了，网络慢不该让用户对着按钮等。
-    await coverSaved(String(saved.id))
+    await coverSaved(String(saved.id), data, saved.updatedAt)
     void pushSaved(String(saved.id), String(saved.name), data)
     return { docId: String(saved.id), name: String(saved.name), data }
     // coverSaved、pushSaved 每次渲染重建，只在回调里调用，不进依赖表
@@ -1256,10 +1275,10 @@ export function EngineProvider({ children }: { children: ReactNode }) {
    * 「我的设计」和发布出去的方案用的就是它。截完才算存完：存下之后紧接着的事
    * （比如开启共享）也要截图，两次截图不能叠在一起。
    */
-  async function coverSaved(docId: string) {
+  async function coverSaved(docId: string, data: ModelJSON, updatedAt: number) {
     if (!syncStarted()) return
-    const cover = await coverShot()
-    if (cover) await docs.setDocCover(docId, cover)
+    const cover = await renderModelCover(data)
+    if (cover) await docs.setDocCover(docId, cover, updatedAt)
   }
 
   /**
@@ -1295,7 +1314,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const suggested = isUntitledName(tab.name) ? '' : await freeDocName(tab.name)
     const typed = await askName(t('saves.saveAsTitle'), t('saves.saveOk'), suggested)
     if (typed == null) return
-    const data = exportTab(tab)
+    const data = structuredClone(exportTab(tab))
     const saved = await docs.saveDoc({ docId: null, name: typed.trim() || t('tab.untitled'), data })
     tabSavedAs(tab.tabId, saved.id)
     // 共享方案另存一份到「我的设计」：标签页还是那个方案
@@ -1307,7 +1326,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     syncTabs()
     track('builder.design.saveAs', { ...modelShape(data) })
     notify(t('toast.saved', { name: saved.name }))
-    await coverSaved(String(saved.id))
+    await coverSaved(String(saved.id), data, saved.updatedAt)
     void pushSaved(String(saved.id), String(saved.name), data)
     // coverSaved、pushSaved 每次渲染重建，只在回调里调用，不进依赖表
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1479,10 +1498,17 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const e2 = eng.current
     if (!e2) return
     if (needAccount('qdf')) return
-    const out = buildQDF(e2.model, { camera: e2.scene.cameraForQdf?.() }) as { text?: string } | string
+    const out = buildQDF(e2.model, { camera: e2.scene.cameraForQdf?.() }) as { text?: string; warnings?: Array<{ code: string; partId: string; id: string }> } | string
     track('builder.export.qdf')
     download(`${activeName()}.qdf`, typeof out === 'string' ? out : (out.text || ''), 'text/plain')
-    if ([...e2.model.fittings.values()].some((f: AnyRec) => ACCESSORY_IDS.has(f.kind))) notify(t('toast.exportedQdfNoAccessories'), 'warn')
+    const warnings = typeof out === 'string' ? undefined : out.warnings
+    const separator = lang === 'zh' ? '、' : ', '
+    const omitted = [...new Set(warnings?.filter(w => w.code === 'omitted_accessory').map(w => nameLabel(w.partId)) || [])].join(separator)
+    const simplified = [...new Set(warnings?.filter(w => w.code === 'simplified_component').map(w => nameLabel(w.partId)) || [])].join(separator)
+    if (omitted && simplified) notify(t('accessory.qdf.both', { omitted, simplified }), 'warn')
+    else if (omitted) notify(t('accessory.qdf.omitted', { parts: omitted }), 'warn')
+    else if (simplified) notify(t('accessory.qdf.simplified', { parts: simplified }), 'warn')
+    else if (!warnings && [...e2.model.fittings.values()].some((f: AnyRec) => ACCESSORY_IDS.has(f.kind))) notify(t('toast.exportedQdfNoAccessories'), 'warn')
     else notify(t(qdfWillMapColors(e2.model) ? 'toast.exportedQdfMapped' : 'toast.exported'))
     // needAccount 每次渲染重建，只在回调里调用，不进依赖表
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1765,8 +1791,15 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       notify(t('toast.stampFailed'), 'err')
       return
     }
-    const thumb = await loadImage(cover)
-    const data = bomToPngDataUrl({ ...bomExportInput(), stamp }, thumb)
+    let data: string | null
+    try {
+      const thumb = await loadImage(cover)
+      data = await bomToPngDataUrl({ ...bomExportInput(), stamp }, thumb)
+    } catch (error) {
+      console.error('BOM PNG export failed', error)
+      notify(t('toast.bomPngFailed'), 'err')
+      return
+    }
     if (!data) { notify(t('toast.manualEmpty'), 'warn'); return }
     track('builder.export.bom.png', { stamp: !!stamp })
     const a = document.createElement('a')
@@ -1961,8 +1994,9 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!ready || entryOpened.current) return
     const ent = bootEntry()
+    if (ent.version) { entryOpened.current = true; setEntryReady(true); return }
     const payload = peekSharePayload()
-    if (!payload && !ent.src) return
+    if (!payload && !ent.src) { if (!ent.doc) setEntryReady(true); return }
     entryOpened.current = true
     void (async () => {
       let data: unknown = null
@@ -1988,7 +2022,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       if (tab && ent.origin) tabOpenedFrom(tab.tabId, ent.origin)
       track('builder.design.open', { from: payload ? 'share' : 'src', view: VIEW_ONLY, copy: ent.copy })
       if (ent.copy && !VIEW_ONLY) await copyToAccount()
-    })()
+      setEntryReady(true)
+    })().catch(err => notify(err instanceof Error ? err.message : String(err), 'err'))
   }, [ready, applyModelJson, copyToAccount, newTab, notify, syncTabs, t])
 
   // 注册完从注册页回来（?export=）：确认登录上了，问一句要不要接着导出。
@@ -2129,7 +2164,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   }), [endThumbBatch, startThumbBatch])
 
   const value: EngineApi = {
-    ready, error, hostRef, tick,
+    ready, entryReady, completeEntry, error, hostRef, tick,
     mode: (builder?.mode as string) || 'select',
     color: (builder?.color as string) || 'random',
     recolorAll: (colors) => { track('builder.color.all', { n: colors.length }); builder?.recolorAll?.(colors); bump() },
@@ -2143,6 +2178,18 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     canUndo: !!builder?.canUndo?.(),
     canRedo: !!builder?.canRedo?.(),
     selectionCount: builder?.selection?.size ?? 0,
+    installationPreview: builder?.installationPreview ?? null,
+    insetScrewAxis: builder?.insetScrewAxis || 'vertical',
+    setInsetScrewAxis: axis => { if (!builder || builder.readOnly) return; builder.setInsetScrewAxis(axis); bump() },
+    canFlipAccessory: !builder?.readOnly && !!builder?.canFlipSelectedAccessory?.(),
+    confirmInstallation: () => { if (!builder || builder.readOnly) return; builder.confirmInstallation(); bump() },
+    cancelInstallation: () => { if (!builder) return; builder.cancelInstallation(); bump() },
+    flipAccessory: () => {
+      if (!builder || builder.readOnly) return
+      if (builder?.installationPreview?.canFlip) builder.flipInstallationFacing()
+      else builder.flipSelectedAccessory()
+      bump()
+    },
     toast,
     tabs, activeTabId, bom, inventory,
     invRows: cmp.rows, feasible: cmp.feasible, sizeCm, room, setRoom, roomOverflow,
@@ -2219,7 +2266,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     startThumbBatch, endThumbBatch, captureThumb,
     // 正在给模型库、批量导入截图时，画面上是别的造型，这一张不截
     coverShot: async () => (thumbBatch.current ? null : coverShot()),
-    attachDoc, openPlanTab, convertToPlan, setTabAccess, tabLocal,
+    attachDoc, openPlanTab, setTabAccess, tabLocal,
     readOnly: !!builder?.readOnly,
     engine,
   }

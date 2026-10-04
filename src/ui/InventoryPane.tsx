@@ -3,19 +3,8 @@ import { useEngine, type Inventory, type InvRow } from '../store/EngineContext'
 import { useI18n } from '../i18n'
 import { labelOf } from '../names'
 import { inventoryCatalog, INV_SECTIONS, INV_SECTION_TITLE, type InvCatalogItem, type InvGroup, type InvSection } from '../data/inventoryCatalog'
-import { PartImg, partIcon } from './icons'
+import PartThumbnail from './PartThumbnail'
 import { bumpCount, track } from '../analytics/track'
-
-const COLOR_ONLY = new Set(['tubes', 'panels', 'screws'])
-
-function RowIcon({ id, kind }: { id: string; kind: string }) {
-  if (COLOR_ONLY.has(kind)) return null
-  return (
-    <span className="shrink-0 text-gray-300 inline-flex">
-      <PartImg id={id} svg={partIcon(id, kind)} size={18} />
-    </span>
-  )
-}
 
 function QtyField({
   value, onCommit, name, minus, plus,
@@ -216,9 +205,10 @@ export default function InventoryPane() {
                   const short = need > have
                   return (
                     <div key={`${item.group}:${item.id}`}
-                      className={`flex items-center gap-2 rounded-lg px-2 py-1 ${short ? 'bg-orange-500/25' : ''}`}>
-                      <RowIcon id={item.id} kind={item.section} />
-                      <span className="flex-1 min-w-0 truncate text-xs text-gray-100" title={name}>{name}</span>
+                      data-ui="inventory-part-row" data-part-id={item.id}
+                      className={`qb-material-row flex items-center gap-2 rounded-lg px-2 py-1 ${short ? 'bg-orange-500/25' : ''}`}>
+                      <PartThumbnail id={item.id} kind={item.section} />
+                      <span className="qb-material-name flex-1 min-w-0 text-gray-100" title={name}>{name}</span>
                       <span title={need ? `${t('side.need')} ${need}` : undefined}
                         className={`w-8 text-right tabular-nums text-[11px] shrink-0 ${need ? (short ? 'text-orange-400' : 'text-gray-500') : 'text-gray-700'}`}>
                         {need || '—'}

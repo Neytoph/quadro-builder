@@ -1,5 +1,44 @@
-// 由 scripts/shoot-part-icons.mjs 生成，别手改。列的是 public/parts/ 下有渲染图的零件 id。
-export const PART_IMAGES: ReadonlySet<string> = new Set([
+import { PART_IMAGE_MANIFEST } from './partImageManifest'
+
+type PartImage = { src: string; srcLarge?: string }
+const images: Readonly<Record<string, PartImage>> = PART_IMAGE_MANIFEST.parts
+const aliases: Readonly<Record<string, string>> = PART_IMAGE_MANIFEST.aliases
+
+export function resolvePartImage(idOrKey?: string | null): (PartImage & { id: string }) | null {
+  const key = String(idOrKey || '')
+  const candidates = [key, key.split('|')[0], ...key.split(':').slice(1), key.split('@')[0]]
+  for (const candidate of candidates) {
+    const id = aliases[candidate] || candidate
+    if (images[id]) return { id, ...images[id] }
+  }
+  return null
+}
+
+export function partImageSrc(idOrKey?: string | null, large = true): string | null {
+  const image = resolvePartImage(idOrKey)
+  return image ? `${import.meta.env.BASE_URL}${large && image.srcLarge ? image.srcLarge : image.src}` : null
+}
+
+// 兼容目录组件现有调用；所有图片定位使用上述公共映射。
+const LEGACY_PART_IMAGES: ReadonlySet<string> = new Set([
+  'acrylic_hole_panel_40x40',
+  'acrylic_panel_40x20',
+  'acrylic_panel_40x60',
+  'acrylic_platform_40x40',
+  'lattice_curved',
+  'panel_40x20_castle',
+  'panel_40x20_climbing',
+  'panel_40x30_climbing',
+  'panel_40x40_basketball',
+  'panel_40x40_capsule',
+  'panel_40x40_clock',
+  'panel_40x40_grid',
+  'panel_40x40_maze',
+  'panel_sector_40',
+  'rope',
+  'textile_long',
+  'textile_round_fourway',
+  'trampoline',
   '3way',
   '4way',
   '5way',
@@ -11,6 +50,8 @@ export const PART_IMAGES: ReadonlySet<string> = new Set([
   'T35',
   'T52',
   'T75',
+  'TA35',
+  'TA75',
   'TC1',
   'TS1',
   'TS2',
@@ -62,7 +103,9 @@ export const PART_IMAGES: ReadonlySet<string> = new Set([
   'slide_integral',
   'slide_module',
   'steering_lock',
+  'steering_wheel',
   'straight',
+  'swing',
   't',
   'textile',
   'textile_20x40',
@@ -75,3 +118,4 @@ export const PART_IMAGES: ReadonlySet<string> = new Set([
   'wheel_adapter',
   'wheel_bearing',
 ])
+export const PART_IMAGES: ReadonlySet<string> = new Set([...LEGACY_PART_IMAGES, ...Object.keys(images)])

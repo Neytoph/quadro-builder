@@ -19,7 +19,7 @@
 // Ohne Backend bleiben die Felder bedeutungslos und Löschen wirft den Datensatz
 // wie bisher sofort weg.
 
-import { dbTx, DB_STORES, listNames, loadNamed, loadAutosave } from "./storage.js";
+import { dbTx, DB_STORES, listNames, loadNamed, loadAutosave, getAccountScope } from "./storage.js";
 
 const MIGRATED_KEY = "quadro.migrated.v2";
 const SESSION_ID = "current";
@@ -106,18 +106,26 @@ export function docByName(name) {
  */
 export function saveDoc({ docId, name, data }) {
   const jetzt = Date.now();
-  return (docId ? getDoc(docId) : Promise.resolve(null)).then((alt) => {
-    const doc = {
-      id: docId || id("d"),
-      name: (name || alt?.name || "").trim() || "Unbenannt",
-      data,
-      createdAt: alt?.createdAt || jetzt,
-      updatedAt: jetzt,
-      rev: alt?.rev || 0,
-      dirty: true,
+  const savedId = docId || id("d");
+  // Read and write in one transaction so concurrent saves receive distinct versions.
+  return dbTx(DB_STORES.docs, "readwrite", (store) => {
+    const doc = {};
+    const request = store.get(savedId);
+    request.onsuccess = () => {
+      const alt = request.result?.deletedAt ? null : request.result;
+      Object.assign(doc, {
+        id: savedId,
+        name: (name || alt?.name || "").trim() || "Unbenannt",
+        data,
+        createdAt: alt?.createdAt || jetzt,
+        updatedAt: Math.max(jetzt, (alt?.updatedAt || 0) + 1),
+        rev: alt?.rev || 0,
+        dirty: true,
+      });
+      if (alt?.cover) doc.cover = alt.cover;
+      store.put(doc);
     };
-    if (alt?.cover) doc.cover = alt.cover;
-    return dbTx(DB_STORES.docs, "readwrite", (store) => store.put(doc)).then(() => doc);
+    return doc;
   });
 }
 
@@ -125,13 +133,18 @@ export function saveDoc({ docId, name, data }) {
  * 给这份存档记一张封面（图片的 data URL），下一次同步时跟着交上去，交成功就清掉。
  * 批量导入 .qdf 用它：「我的设计」和发到广场的方案要有这一座的画面。
  */
-export function setDocCover(docId, cover) {
-  return getDoc(docId).then((doc) => {
-    if (!doc) throw new Error(`setDocCover: ${docId} 不在`);
-    doc.cover = cover;
-    doc.updatedAt = Date.now();
-    doc.dirty = true;
-    return dbTx(DB_STORES.docs, "readwrite", (store) => store.put(doc)).then(() => doc);
+export function setDocCover(docId, cover, expectUpdatedAt) {
+  return dbTx(DB_STORES.docs, "readwrite", (store) => {
+    const request = store.get(docId);
+    request.onsuccess = () => {
+      const doc = request.result;
+      if (!doc || doc.deletedAt || (expectUpdatedAt != null && doc.updatedAt !== expectUpdatedAt)) return;
+      doc.cover = cover;
+      doc.updatedAt = Math.max(Date.now(), (doc.updatedAt || 0) + 1);
+      doc.dirty = true;
+      store.put(doc);
+    };
+    return request;
   });
 }
 
@@ -139,7 +152,7 @@ export function renameDoc(docId, name) {
   return getDoc(docId).then((doc) => {
     if (!doc) return null;
     doc.name = (name || "").trim() || doc.name;
-    doc.updatedAt = Date.now();
+    doc.updatedAt = Math.max(Date.now(), (doc.updatedAt || 0) + 1);
     doc.dirty = true;
     return dbTx(DB_STORES.docs, "readwrite", (store) => store.put(doc)).then(() => doc);
   });
@@ -186,6 +199,8 @@ export function newTabId() {
  * verloren. Liefert die Zahl der übernommenen Dateien.
  */
 export function migrateOldDrafts() {
+  // 旧库没有可靠归属。仅本地版自动迁移；账户库保留空白，旧文件可由用户明确导入。
+  if (getAccountScope() !== "local") return Promise.resolve(0);
   if (localStorage.getItem(MIGRATED_KEY)) return Promise.resolve(0);
   let uebernommen = 0;
   const arbeit = [];

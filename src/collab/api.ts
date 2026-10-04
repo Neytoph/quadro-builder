@@ -5,6 +5,9 @@
 import type { ModelJSON } from './ymodel'
 
 export type Role = 'owner' | 'editor' | 'commenter' | 'guest'
+export type InviteRole = 'editor' | 'commenter'
+export interface Invite { token: string; url: string; role: InviteRole }
+export interface InviteInfo { planId: string; role: InviteRole; planName: string; ownerName: string }
 
 export interface Member {
   userId: number
@@ -26,6 +29,7 @@ export interface Plan {
   id: string
   name: string
   data: ModelJSON | null
+  sourceName?: string
   qdf: string
   members: Member[]
   myRole: Role
@@ -49,6 +53,18 @@ export interface Version extends VersionInfo {
   state: string
   data: ModelJSON
   qdf: string
+}
+
+export interface Review {
+  id: number
+  planId: string
+  versionId: number
+  versionName: string
+  summary: string
+  decision: '' | 'pending' | 'changes' | 'confirmed'
+  comment: string
+  createdAt: number
+  respondedAt: number
 }
 
 export interface Anchor {
@@ -140,8 +156,8 @@ export function collabEnabled(): boolean {
   return Boolean(import.meta.env.VITE_SYNC_BASE)
 }
 
-async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const init: RequestInit = { method, credentials: 'include', headers: { Accept: 'application/json' } }
+async function call<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+  const init: RequestInit = { method, credentials: 'include', headers: { Accept: 'application/json' }, signal }
   if (body instanceof FormData) init.body = body
   else if (body !== undefined) {
     init.body = JSON.stringify(body)
@@ -163,19 +179,25 @@ const enc = encodeURIComponent
 // 列表接口返回 {复数名词:[...]}，新建东西的接口返回 {id}
 export const collabApi = {
   plan: (id: string) => call<Plan>('GET', `/collab/plans/${enc(id)}`),
-  createPlan: (body: { id: string; name: string } & Omit<ExportBody, 'name'>) =>
-    call<{ id: string }>('POST', '/collab/plans', body),
+  createPlan: (body: ExportBody & { sourceName?: string }) =>
+    call<{ id: string; coverError?: string }>('POST', '/collab/plans', body),
   mine: async () => (await call<{ plans: Array<{ id: string; name: string; role: Role; briefId: number | null; unread: number; updatedAt: number }> }>('GET', '/collab/plans/mine')).plans,
   exportPlan: (id: string, body: ExportBody) => call<unknown>('PUT', `/collab/plans/${enc(id)}/export`, body),
-  invite: (id: string) => call<{ token: string; url: string }>('POST', `/collab/plans/${enc(id)}/invites`),
+  invites: async (id: string) => (await call<{ invites: Invite[] }>('GET', `/collab/plans/${enc(id)}/invites`)).invites,
+  invite: (id: string, role: InviteRole = 'editor') => call<Invite>('POST', `/collab/plans/${enc(id)}/invites`, { role }),
+  disableInvite: (id: string, token: string) => call<unknown>('DELETE', `/collab/plans/${enc(id)}/invites/${enc(token)}`),
+  inviteInfo: (token: string) => call<InviteInfo>('GET', `/collab/invites/${enc(token)}`),
   join: (token: string) => call<{ planId: string }>('POST', `/collab/invites/${enc(token)}/join`),
   setRole: (id: string, userId: number, role: Role) => call<unknown>('PUT', `/collab/plans/${enc(id)}/members/${userId}`, { role }),
   removeMember: (id: string, userId: number) => call<unknown>('DELETE', `/collab/plans/${enc(id)}/members/${userId}`),
-  versions: async (id: string) => (await call<{ versions: VersionInfo[] }>('GET', `/collab/plans/${enc(id)}/versions`)).versions,
+  versions: async (id: string, signal?: AbortSignal) => (await call<{ versions: VersionInfo[] }>('GET', `/collab/plans/${enc(id)}/versions`, undefined, signal)).versions,
   saveVersion: (id: string, body: { name: string; state: string } & Omit<ExportBody, 'name'>) =>
     call<{ id: number }>('POST', `/collab/plans/${enc(id)}/versions`, body),
   version: (id: string, vid: string | number) => call<Version>('GET', `/collab/plans/${enc(id)}/versions/${enc(String(vid))}`),
-  threads: async (id: string) => (await call<{ threads: Thread[] }>('GET', `/collab/plans/${enc(id)}/threads`)).threads,
+  reviews: async (id: string) => (await call<{ reviews: Review[] }>('GET', `/collab/plans/${enc(id)}/reviews`)).reviews,
+  review: (id: string, body: { versionId: number; summary: string }) => call<Review>('POST', `/collab/plans/${enc(id)}/reviews`, body),
+  respond: (id: string, rid: number, body: { decision: 'changes' | 'confirmed'; comment: string }) => call<Review>('POST', `/collab/plans/${enc(id)}/reviews/${rid}/respond`, body),
+  threads: async (id: string, signal?: AbortSignal) => (await call<{ threads: Thread[] }>('GET', `/collab/plans/${enc(id)}/threads`, undefined, signal)).threads,
   newThread: (id: string, body: { anchor: Anchor; versionId: number | null; body: string; photos: string[]; refs: Ref[] }) =>
     call<{ id: number }>('POST', `/collab/plans/${enc(id)}/threads`, body),
   reply: (tid: number, body: { body: string; photos: string[]; refs: Ref[] }) =>
@@ -189,7 +211,7 @@ export const collabApi = {
   },
   read: (id: string) => call<unknown>('POST', `/collab/plans/${enc(id)}/read`),
   fork: (id: string, versionId: number | null) => call<{ planId: string }>('POST', `/collab/plans/${enc(id)}/fork`, { versionId }),
-  deliver: (id: string, body: { versionId: number; ageNote: string; loadNote: string; metrics: Metrics }) =>
+  deliver: (id: string, body: { versionId: number; ageNote: string; loadNote: string; metrics: Metrics; renders: string[] }) =>
     call<{ token: string }>('POST', `/collab/plans/${enc(id)}/deliver`, body),
   delivery: (token: string) => call<{ data: ModelJSON; qdf: string; supersededBy: string | null } & Record<string, unknown>>('GET', `/collab/deliveries/${enc(token)}`),
   brief: (id: string) => call<{ id: number; room: Room | null } & Record<string, unknown>>('GET', `/briefs/${enc(id)}`),

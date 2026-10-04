@@ -3,7 +3,6 @@ import { useEngine } from '../store/EngineContext'
 import { useI18n, type Lang } from '../i18n'
 import { useDock } from './dock'
 import { onSyncStart, syncConfigured, syncStarted } from '../sync/bootstrap'
-import { useCollab } from '../collab/CollabContext'
 import { docs } from '../engine-api'
 import { track } from '../analytics/track'
 import { publishEnabled, publishPage, publishStates, withdrawDoc, type PublishState } from '../publish'
@@ -34,7 +33,6 @@ function communityWrite(lang: Lang, on: boolean): string {
 
 export default function SavesPanel() {
   const api = useEngine()
-  const collab = useCollab()
   const { t, lang } = useI18n()
   const { setPane } = useDock()
   const [docList, setDocs] = useState<Array<{ id: string; name: string; updatedAt: number; local: boolean }>>([])
@@ -126,12 +124,9 @@ export default function SavesPanel() {
             </div>
             <div className="flex flex-wrap gap-x-2 gap-y-1">
               <button onClick={() => {
-                // 开启过共享的这一座改走共享方案：打开方案的标签页
-                if (collab.planOfDoc(d.id)) collab.openPlan(d.id).catch(collab.report)
-                else void api.openDoc(d.id)
+                void api.openDoc(d.id)
                 setPane('bom')
               }} className="text-xs text-teal-300 hover:text-teal-100 cursor-pointer">{t('saves.open')}</button>
-              {collab.planOfDoc(d.id) && <span className="text-[11px] text-orange-600">{t('collab.sharedTag')}</span>}
               <button onClick={() => {
                 void api.askName(t('saves.rename'), t('saves.rename'), d.name).then(name => {
                   if (name) void api.renameDoc(d.id, name).then(refresh)

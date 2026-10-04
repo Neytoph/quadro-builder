@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { BuildModel } from './model.js'
-import { pickStepAnchor, stepCandidates, stepCandidatesFromSelection } from './stepAnchor.js'
+import { pickStepAnchor, stepCandidates, stepCandidatesFromSelection, stepNeighbor } from './stepAnchor.js'
 
 type V = [number, number, number]
 type N = { id: string; x: number; y: number; z: number }
@@ -51,6 +51,57 @@ const at = (m: BuildModel, id: string): V => {
   const n = m.nodes.get(id)
   return [n.x, n.y, n.z]
 }
+
+describe('方向键沿已有管子移动接头', () => {
+  it.each<V>([X, NX, UP, [0, -1, 0], Z, [0, 0, -1]])('沿 %j 移动到实际相邻端点', (...dir) => {
+    const m = new BuildModel()
+    const a = m.addNode(0, 80, 0)
+    const b = m.addNode(a.x + dir[0] * 20, a.y + dir[1] * 20, a.z + dir[2] * 20)
+    m.addTube(a.id, b.id, 'T15', 'blue', 15)
+    const before = m.toJSON()
+    expect(stepNeighbor(m, a, dir)).toBe(b)
+    expect(stepNeighbor(m, b, dir.map(v => -v))).toBe(a)
+    expect(m.toJSON()).toEqual(before)
+  })
+
+  it('一次只走一根管，连续按键逐个经过不同长度的管子', () => {
+    const m = new BuildModel()
+    const a = m.addNode(0, 0, 0), b = m.addNode(20, 0, 0), c = m.addNode(60, 0, 0)
+    m.addTube(a.id, b.id, 'T15', 'blue', 15)
+    m.addTube(b.id, c.id, 'T35', 'green', 35)
+    expect(stepNeighbor(m, a, X)).toBe(b)
+    expect(stepNeighbor(m, b, X)).toBe(c)
+    expect(stepNeighbor(m, c, X)).toBeNull()
+  })
+
+  it('同方向但未连接的节点、空方向和已删除端点不跳转', () => {
+    const { m, a, b } = oneTube()
+    expect(stepNeighbor(m, a, UP)).toBeNull()
+    expect(stepNeighbor(m, a, [0, 0, 0])).toBeNull()
+    m.removeTube([...m.tubes.keys()][0])
+    expect(stepNeighbor(m, a, X)).toBeNull()
+    m.nodes.delete(b.id)
+    expect(stepNeighbor(m, a, X)).toBeNull()
+  })
+
+  it('双管连接和斜角适配器不当作可移动的普通管子', () => {
+    const m = new BuildModel()
+    const a = m.addNode(0, 20, 0), b = m.addNode(5, 20, 0)
+    m.addLink(a.id, b.id)
+    expect(stepNeighbor(m, a, X)).toBeNull()
+    m.tubes.clear()
+    const tube = m.addTube(a.id, b.id, 'T35', 'blue', 35)
+    if (!tube) throw new Error('addTube failed')
+    Object.assign(tube, { arm: true })
+    expect(stepNeighbor(m, a, X)).toBeNull()
+    Object.assign(tube, { arm: false })
+    b.c45body = true
+    expect(stepNeighbor(m, a, X)).toBeNull()
+    b.c45body = false
+    b.unused = true
+    expect(stepNeighbor(m, a, X)).toBeNull()
+  })
+})
 
 // 一根管：a 在 (0,20,0)，b 在 (40,20,0)
 function oneTube() {

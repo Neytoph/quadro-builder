@@ -85,6 +85,7 @@ const de = {
   notice_sleeve_pick: 'Ein Rohr anklicken: Polster drauf. Das Polster anklicken: wieder runter.',
   notice_sleeve_on: 'Polster aufgezogen.',
   notice_accessory_pick: 'Eine markierte Montagestelle auswählen.',
+  notice_rope_second: 'Ersten Seilknoten gewählt. Jetzt den Punkt am zweiten Tragrohr wählen.',
   notice_accessory_added: 'Zubehör angebracht.',
   notice_accessory_invalid: 'Das Zubehör passt nicht an diese Stelle.',
   notice_sleeve_off: 'Polster abgenommen.',
@@ -670,6 +671,7 @@ const en = {
   notice_sleeve_pick: 'Click a tube to put a sleeve on it. Click the sleeve to take it off.',
   notice_sleeve_on: 'Sleeve put on.',
   notice_accessory_pick: 'Choose a highlighted mounting point.',
+  notice_rope_second: 'First rope endpoint selected. Choose the point on the second support tube.',
   notice_accessory_added: 'Accessory installed.',
   notice_accessory_invalid: 'This accessory cannot be installed here.',
   notice_sleeve_off: 'Sleeve taken off.',
@@ -1238,6 +1240,7 @@ const zh = {
   notice_sleeve_pick: '点一根管子套上软包；点软包本身就取下来。',
   notice_sleeve_on: '软包套上了。',
   notice_accessory_pick: '请选择高亮安装位置。',
+  notice_rope_second: '已选第一处绳结，请点击第二根承载管上的安装点。',
   notice_accessory_added: '配件已安装。',
   notice_accessory_invalid: '此位置无法安装所选配件。',
   notice_sleeve_off: '软包取下来了。',
@@ -1304,6 +1307,19 @@ const zh = {
 };
 
 const LANG_KEY = 'quadro.lang';
+const componentReasons = {
+  zh: { straight_tube: '需要一根水平直管，弧管和连接边不能承载。', horizontal_tube: '承载管必须水平。', missing_support: '缺少承载管或端点。', tube_short: '管子太短，两个固定点需要端部安装余量。', ground_clearance: '组件下方离地空间不足。', mount_occupied: '固定区间已被其它配件或软包占用。', component_space: '组件空间与管、板或其它部件重叠。', swing_clearance: '秋千前后±30°活动范围有障碍，请移开障碍或更换安装位置。', frame_size: '需要40×40厘米方框。', vertical_frame: '忙碌板需要竖直方框。', horizontal_frame: '布兜需要水平方框。', four_edges: '方框四条边需要完整的直管支撑。', four_corners: '缺少四角固定位置。', opening_occupied: '这个开口已有板或布件。' },
+  en: { straight_tube: 'A horizontal straight tube is required; curved tubes and connector edges cannot support this part.', horizontal_tube: 'The support tube must be horizontal.', missing_support: 'A support tube or endpoint is missing.', tube_short: 'The tube is too short to leave installation clearance at both fixing points.', ground_clearance: 'There is insufficient clearance above the ground.', mount_occupied: 'A fixing interval is occupied by another fitting or sleeve.', component_space: 'The component overlaps a tube, panel or other part.', swing_clearance: 'An obstacle lies within the swing’s ±30° range. Remove it or choose another mount.', frame_size: 'A 40 × 40 cm frame is required.', vertical_frame: 'The busy board requires a vertical frame.', horizontal_frame: 'The fabric pocket requires a horizontal frame.', four_edges: 'All four frame edges need complete straight tube supports.', four_corners: 'A corner fixing point is missing.', opening_occupied: 'This opening already contains a panel or textile.' },
+  de: { straight_tube: 'Ein waagerechtes gerades Rohr ist erforderlich; Bögen und Verbindungskanten sind keine Träger.', horizontal_tube: 'Das Tragrohr muss waagerecht sein.', missing_support: 'Ein Tragrohr oder Endpunkt fehlt.', tube_short: 'Das Rohr ist für zwei Befestigungen mit Montageabstand an beiden Enden zu kurz.', ground_clearance: 'Der Abstand zum Boden reicht nicht aus.', mount_occupied: 'Eine Befestigungsstelle ist durch ein Zubehörteil oder Polster belegt.', component_space: 'Das Zubehör überschneidet sich mit einem Rohr, einer Platte oder einem anderen Teil.', swing_clearance: 'Im Schwenkbereich von ±30° liegt ein Hindernis. Hindernis entfernen oder andere Montagestelle wählen.', frame_size: 'Ein Rahmen mit 40 × 40 cm ist erforderlich.', vertical_frame: 'Die Motoriktafel benötigt einen senkrechten Rahmen.', horizontal_frame: 'Die Stofftasche benötigt einen waagerechten Rahmen.', four_edges: 'Alle vier Rahmenkanten benötigen vollständige gerade Rohrträger.', four_corners: 'Eine Befestigungsstelle an einer Ecke fehlt.', opening_occupied: 'In dieser Öffnung befindet sich bereits eine Platte oder ein Textil.' },
+};
+for (const [lang, dict] of Object.entries({ de, en, zh })) {
+  componentReasons[lang].opposite_edges = lang==='zh' ? '左右两条对边需要连续直管支撑，每边固定两颗透明螺丝。' : lang==='de' ? 'Die beiden gegenüberliegenden Seiten benötigen durchgehende gerade Rohre mit je zwei transparenten Schrauben.' : 'Both opposite side edges need continuous straight tubes with two transparent screws on each edge.';
+  for (const [key, text] of Object.entries(componentReasons[lang])) dict['accessory_reason_' + key] = text;
+  for (const action of ['move', 'rotate', 'mirror']) {
+    dict['notice_' + action + '_accessory_mounts'] = lang === 'zh' ? '此操作会拆开多点固定。请一并选择组件和完整承载框架。' : lang === 'de' ? 'Dieser Vorgang würde Befestigungen trennen. Zubehör und vollständigen Tragrahmen gemeinsam auswählen.' : 'This would separate fixing points. Select the component and its complete support frame together.';
+    dict['notice_' + action + '_accessory_space'] = componentReasons[lang].component_space;
+  }
+}
 const translations = { de, en, zh };
 
 let _lang = (() => {

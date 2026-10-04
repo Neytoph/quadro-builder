@@ -45,7 +45,7 @@ export default function RightDock() {
     <aside
       data-tour="dock-panel"
       data-ui="right-dock"
-      className={`m-dock fixed z-[45] flex flex-col overflow-y-auto scrollbar-thin qb-card text-gray-200 ${leaving ? 'm-leave pointer-events-none' : ''}`}
+      className={`m-dock fixed ${narrow ? 'z-[60]' : 'z-[45]'} flex flex-col overflow-y-auto scrollbar-thin qb-card text-gray-200 ${leaving ? 'm-leave pointer-events-none' : ''}`}
       style={narrow
         ? { left: PANEL_GAP, right: PANEL_GAP, top: TAB_BAR_H + PANEL_GAP, bottom: PANEL_GAP, width: 'auto', height: 'auto' }
         : { width: right.width, top, right: PANEL_GAP, maxHeight: maxH }}
