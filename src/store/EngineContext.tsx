@@ -27,6 +27,7 @@ import { MOTION } from '../ui/motion'
 import { createTabDoc, dropTabDoc, memoryDoc, openTabDoc, SEED_ORIGIN, type LocalDoc } from '../collab/localDocs'
 import { partCountOf, writeJSON, type ModelJSON } from '../collab/ymodel'
 import { appendTab } from './tabs'
+import { renderModelCover } from './modelCover'
 
 // 引擎来自 Vanilla JS，这里不跟它的推断类型较劲。
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1250,7 +1251,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       if (typed == null) return null
       saveName = typed.trim() || t('tab.untitled')
     }
-    const data = exportTab(tab)
+    const data = structuredClone(exportTab(tab))
     const saved = await docs.saveDoc({ docId: tab.docId, name: saveName, data })
     tabSavedAs(tab.tabId, saved.id)
     tab.docId = saved.id
@@ -1262,7 +1263,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     // 存下就推上去。等一个同步周期的话，这中间关掉页面这一座就只在这台
     // 机器上；社区发帖页更是当场就要读服务器那张列表。不挡着上面那句提示：
     // 存进本地这件事已经成了，网络慢不该让用户对着按钮等。
-    await coverSaved(String(saved.id))
+    await coverSaved(String(saved.id), data, saved.updatedAt)
     void pushSaved(String(saved.id), String(saved.name), data)
     return { docId: String(saved.id), name: String(saved.name), data }
     // coverSaved、pushSaved 每次渲染重建，只在回调里调用，不进依赖表
@@ -1274,10 +1275,10 @@ export function EngineProvider({ children }: { children: ReactNode }) {
    * 「我的设计」和发布出去的方案用的就是它。截完才算存完：存下之后紧接着的事
    * （比如开启共享）也要截图，两次截图不能叠在一起。
    */
-  async function coverSaved(docId: string) {
+  async function coverSaved(docId: string, data: ModelJSON, updatedAt: number) {
     if (!syncStarted()) return
-    const cover = await coverShot()
-    if (cover) await docs.setDocCover(docId, cover)
+    const cover = await renderModelCover(data)
+    if (cover) await docs.setDocCover(docId, cover, updatedAt)
   }
 
   /**
@@ -1313,7 +1314,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const suggested = isUntitledName(tab.name) ? '' : await freeDocName(tab.name)
     const typed = await askName(t('saves.saveAsTitle'), t('saves.saveOk'), suggested)
     if (typed == null) return
-    const data = exportTab(tab)
+    const data = structuredClone(exportTab(tab))
     const saved = await docs.saveDoc({ docId: null, name: typed.trim() || t('tab.untitled'), data })
     tabSavedAs(tab.tabId, saved.id)
     // 共享方案另存一份到「我的设计」：标签页还是那个方案
@@ -1325,7 +1326,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     syncTabs()
     track('builder.design.saveAs', { ...modelShape(data) })
     notify(t('toast.saved', { name: saved.name }))
-    await coverSaved(String(saved.id))
+    await coverSaved(String(saved.id), data, saved.updatedAt)
     void pushSaved(String(saved.id), String(saved.name), data)
     // coverSaved、pushSaved 每次渲染重建，只在回调里调用，不进依赖表
     // eslint-disable-next-line react-hooks/exhaustive-deps

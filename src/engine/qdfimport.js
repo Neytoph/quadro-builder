@@ -1176,7 +1176,7 @@ export function parseQDF(text, opts = {}) {
       const s2 = rel[0] * u[0] + rel[1] * u[1] + rel[2] * u[2];
       if (s2 < -1 || s2 > L + 1) continue;
       const d = Math.hypot(rel[0] - u[0] * s2, rel[1] - u[1] * s2, rel[2] - u[2] * s2);
-      if (d < best) { best = d; onTube = { id: t.id, t: round(Math.max(0, Math.min(L, s2))) }; }
+      if (d < best) { best = d; onTube = { tubeId: t.id, t: round(Math.max(0, Math.min(L, s2))) }; }
     }
     // NICHT auf eine vorhandene Kupplung schnappen: die Klemm-Kupplung ist ein
     // eigenes Teil, auch wenn sie dicht neben einer Kupplung sitzt. Sonst

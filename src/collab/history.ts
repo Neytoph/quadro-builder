@@ -21,22 +21,24 @@ const REPAIR_ORIGIN = { name: 'undo-repair' }
  * 一件零件离不开哪些零件：管的两端接头、板和布的两根承重管、套在管上的接头、
  * 挂在管上的配件。组只是一批 id，不算。
  */
-function refsOf(get: (k: string) => unknown): string[] {
+export function refsOf(get: (k: string) => unknown): string[] {
   const out: string[] = []
   const add = (v: unknown) => { if (typeof v === 'string' && v) out.push(v) }
   switch (get('$type')) {
     case 'tube':
     case 'panel':
     case 'textile':
+    case 'fitting':
       add(get('a'))
       add(get('b'))
+      add(get('tube'))
+      for (const id of (get('supportTubes') as unknown[] | undefined) || []) add(id)
+      for (const mount of (get('mounts') as Array<{ tube?: string }> | undefined) || []) add(mount?.tube)
       break
     case 'node':
-      add((get('clampOn') as { tubeId?: string } | undefined)?.tubeId)
+      add((get('clampOn') as { tubeId?: string; id?: string } | undefined)?.tubeId ||
+        (get('clampOn') as { id?: string } | undefined)?.id)
       add(get('bearingOn'))
-      break
-    case 'fitting':
-      add(get('tube'))
       break
   }
   return out

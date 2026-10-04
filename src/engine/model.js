@@ -6158,13 +6158,21 @@ export class BuildModel {
     if (!(version >= 1 && version <= FORMAT_VERSION)) {
       return { ok: false, reason: "format" };
     }
+    // 兼容旧 QDF 导入器保存的 id；无效卡扣引用在替换当前模型之前明确拒绝。
+    const nodeIds = new Set(data.nodes.map(n => n.id));
+    const tubeIds = new Set((data.tubes || []).filter(t => t.a && t.b &&
+      nodeIds.has(t.a) && nodeIds.has(t.b)).map(t => t.id));
+    for (const n of data.nodes) {
+      if (n.clampOn && (!tubeIds.has(n.clampOn.tubeId || n.clampOn.id) ||
+        !Number.isFinite(n.clampOn.t))) return { ok: false, reason: "data" };
+    }
     this.clear();
     let maxSeq = 0;
     for (const n of data.nodes) {
       this.nodes.set(n.id, { id: n.id, x: n.x, y: n.y, z: n.z, c45: !!n.c45, c45body: !!n.c45body,
         c45axis: n.c45axis || null, c45quat: n.c45quat || null,
         armDirs: n.armDirs || null, arms: n.arms || null, quat: n.quat || null,
-        part: n.part || null, clampOn: n.clampOn || null, stub: n.stub || null,
+        part: n.part || null, clampOn: n.clampOn ? { tubeId: n.clampOn.tubeId || n.clampOn.id, t: n.clampOn.t } : null, stub: n.stub || null,
         bearingOn: n.bearingOn || null,
         ownConnector: !!n.ownConnector, c45file: !!n.c45file, unused: !!n.unused,
         partQuat: n.partQuat || null, partMask: n.partMask || null,

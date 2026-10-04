@@ -156,8 +156,8 @@ export function collabEnabled(): boolean {
   return Boolean(import.meta.env.VITE_SYNC_BASE)
 }
 
-async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const init: RequestInit = { method, credentials: 'include', headers: { Accept: 'application/json' } }
+async function call<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+  const init: RequestInit = { method, credentials: 'include', headers: { Accept: 'application/json' }, signal }
   if (body instanceof FormData) init.body = body
   else if (body !== undefined) {
     init.body = JSON.stringify(body)
@@ -190,14 +190,14 @@ export const collabApi = {
   join: (token: string) => call<{ planId: string }>('POST', `/collab/invites/${enc(token)}/join`),
   setRole: (id: string, userId: number, role: Role) => call<unknown>('PUT', `/collab/plans/${enc(id)}/members/${userId}`, { role }),
   removeMember: (id: string, userId: number) => call<unknown>('DELETE', `/collab/plans/${enc(id)}/members/${userId}`),
-  versions: async (id: string) => (await call<{ versions: VersionInfo[] }>('GET', `/collab/plans/${enc(id)}/versions`)).versions,
+  versions: async (id: string, signal?: AbortSignal) => (await call<{ versions: VersionInfo[] }>('GET', `/collab/plans/${enc(id)}/versions`, undefined, signal)).versions,
   saveVersion: (id: string, body: { name: string; state: string } & Omit<ExportBody, 'name'>) =>
     call<{ id: number }>('POST', `/collab/plans/${enc(id)}/versions`, body),
   version: (id: string, vid: string | number) => call<Version>('GET', `/collab/plans/${enc(id)}/versions/${enc(String(vid))}`),
   reviews: async (id: string) => (await call<{ reviews: Review[] }>('GET', `/collab/plans/${enc(id)}/reviews`)).reviews,
   review: (id: string, body: { versionId: number; summary: string }) => call<Review>('POST', `/collab/plans/${enc(id)}/reviews`, body),
   respond: (id: string, rid: number, body: { decision: 'changes' | 'confirmed'; comment: string }) => call<Review>('POST', `/collab/plans/${enc(id)}/reviews/${rid}/respond`, body),
-  threads: async (id: string) => (await call<{ threads: Thread[] }>('GET', `/collab/plans/${enc(id)}/threads`)).threads,
+  threads: async (id: string, signal?: AbortSignal) => (await call<{ threads: Thread[] }>('GET', `/collab/plans/${enc(id)}/threads`, undefined, signal)).threads,
   newThread: (id: string, body: { anchor: Anchor; versionId: number | null; body: string; photos: string[]; refs: Ref[] }) =>
     call<{ id: number }>('POST', `/collab/plans/${enc(id)}/threads`, body),
   reply: (tid: number, body: { body: string; photos: string[]; refs: Ref[] }) =>

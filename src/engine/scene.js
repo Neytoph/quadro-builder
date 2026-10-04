@@ -584,6 +584,10 @@ export class SceneManager {
     this._confirmedEnvironmentRenderer = null;
     this._confirmedFiberBump?.dispose();
     this._confirmedFiberBump = null;
+    for (const g of this._keepGeos) g.dispose();
+    this._keepGeos.clear();
+    this._fitGeos?.clear();
+    for (const m of Object.values(this._materials)) m.dispose();
     this.controls.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
@@ -6304,6 +6308,15 @@ export class SceneManager {
         if (o.geometry && !keep.has(o.geometry)) o.geometry.dispose();
       });
       group.remove(c);
+    }
+    // 只保留仍在场景中引用的 confirmed 几何，清空模型时连 GPU buffer 一起释放。
+    const live = new Set();
+    this.scene?.traverse(o => { if (o.geometry) live.add(o.geometry); });
+    for (const [key, geo] of this._fitGeos || []) {
+      if (!key.startsWith('confirmed:') || live.has(geo)) continue;
+      this._fitGeos.delete(key);
+      keep.delete(geo);
+      geo.dispose();
     }
   }
 

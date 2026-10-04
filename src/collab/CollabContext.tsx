@@ -9,13 +9,14 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useEngine } from '../store/EngineContext'
 import { bootEntry, dropParam } from '../entry'
-import { computeMetrics, BuildModel } from '../engine-api'
+import { computeMetrics, BuildModel, storage } from '../engine-api'
 import { useI18n } from '../i18n'
 import { ApiError, collabApi, collabEnabled, type Anchor, type InviteInfo, type InviteRole, type Metrics, type Plan, type Post, type Ref, type Role, type Room, type Thread, type VersionInfo } from './api'
 import { canEditRole, docFromBase64, exportOf, memberColor, PlanSession, type Peer } from './planSession'
 import { memoryDoc } from './localDocs'
 import { docToJSON, type ModelJSON } from './ymodel'
 import { diffBom, diffModels, type BomDiffRow, type ModelDiff } from './compare'
+import { ScopedRequests } from './scopedRequests'
 
 export type CollabMode = 'off' | 'plan' | 'delivery' | 'room' | 'snapshot'
 
@@ -144,8 +145,8 @@ export function CollabProvider({ children }: { children: ReactNode }) {
   const bump = useCallback(() => setRev(n => n + 1), [])
   const sessions = useRef(new Map<string, PlanSession>())
   const [errors, setErrors] = useState<Record<string, string>>({})
-  const [threads, setThreads] = useState<Thread[]>([])
-  const [versions, setVersions] = useState<VersionInfo[]>([])
+  const [threadResult, setThreadResult] = useState<{ plan: string | null; epoch: number; items: Thread[] }>({ plan: null, epoch: 0, items: [] })
+  const [versionResult, setVersionResult] = useState<{ plan: string | null; epoch: number; items: VersionInfo[] }>({ plan: null, epoch: 0, items: [] })
   const [placingPin, setPlacingPin] = useState(false)
   const [pinDraft, setPinDraft] = useState<Anchor | null>(null)
   const [activeThread, setActiveThread] = useState<number | null>(null)
@@ -165,7 +166,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
     return () => setModalCount(count => count - 1)
   }, [])
   const [createdPlan, setCreatedPlan] = useState<{ id: string; name: string; coverError?: string } | null>(() => {
-    const pending = localStorage.getItem('quadro.shared.created')
+    const pending = localStorage.getItem(storage.accountKey('quadro.shared.created'))
     return pending ? JSON.parse(pending) : null
   })
   const createdRef = useRef(createdPlan)
@@ -181,6 +182,17 @@ export function CollabProvider({ children }: { children: ReactNode }) {
 
   const activeTab = api.tabs.find(x => x.tabId === api.activeTabId) || null
   const activePlanId = activeTab?.planId || null
+  const planGeneration = useRef(new ScopedRequests()).current
+  planGeneration.select(activePlanId)
+  const threads = threadResult.plan === activePlanId && threadResult.epoch === planGeneration.current.epoch ? threadResult.items : []
+  const versions = versionResult.plan === activePlanId && versionResult.epoch === planGeneration.current.epoch ? versionResult.items : []
+  useEffect(() => {
+    planGeneration.select(activePlanId)
+    return () => {
+      planGeneration.cancel()
+      planGeneration.current = { id: null, epoch: planGeneration.current.epoch + 1 }
+    }
+  }, [activePlanId, planGeneration])
   // 方案导出时截封面要看的是那一刻：哪个方案开在画面上、截图用哪一份引擎接口
   const shotRef = useRef({ activePlanId, coverShot: api.coverShot })
   shotRef.current = { activePlanId, coverShot: api.coverShot }
@@ -354,17 +366,19 @@ export function CollabProvider({ children }: { children: ReactNode }) {
   // —— 当前方案的评论和版本 ——
   const refreshThreads = useCallback(async () => {
     if (!activePlanId) return
-    setThreads(await collabApi.threads(activePlanId))
-  }, [activePlanId])
+    await planGeneration.run(activePlanId, 'threads', signal => collabApi.threads(activePlanId, signal),
+      (items, epoch) => setThreadResult({ plan: activePlanId, epoch, items }))
+  }, [activePlanId, planGeneration])
 
   const refreshVersions = useCallback(async () => {
     if (!activePlanId) return
-    setVersions(await collabApi.versions(activePlanId))
-  }, [activePlanId])
+    await planGeneration.run(activePlanId, 'versions', signal => collabApi.versions(activePlanId, signal),
+      (items, epoch) => setVersionResult({ plan: activePlanId, epoch, items }))
+  }, [activePlanId, planGeneration])
 
   useEffect(() => {
-    setThreads([])
-    setVersions([])
+    setThreadResult({ plan: activePlanId, epoch: planGeneration.current.epoch, items: [] })
+    setVersionResult({ plan: activePlanId, epoch: planGeneration.current.epoch, items: [] })
     setActiveThread(null)
     setPinDraft(null)
     setPlacingPin(false)
@@ -439,8 +453,12 @@ export function CollabProvider({ children }: { children: ReactNode }) {
     return versions.find(v => String(v.id) === id)?.name || id
   }, [t, myPlans, versions])
 
+  const compareRequest = useRef(0)
   const buildCompare = useCallback(async (a: string, b: string) => {
+    const generation = planGeneration.current
+    const request = ++compareRequest.current
     const [l, r, ln, rn] = await Promise.all([versionModel(a), versionModel(b), nameOfSide(a), nameOfSide(b)])
+    if (generation !== planGeneration.current || request !== compareRequest.current) return
     setCompare({ ids: [a, b], names: [ln, rn], left: l, right: r, diff: diffModels(l, r), bom: diffBom(l, r) })
   }, [versionModel, nameOfSide])
 
@@ -468,6 +486,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
   }, [session, buildCompare, report])
 
   const closeCompare = useCallback(() => {
+    compareRequest.current++
     dropParam('compare')
     setCompare(null)
   }, [])
@@ -507,27 +526,35 @@ export function CollabProvider({ children }: { children: ReactNode }) {
 
   const addPin = useCallback(async (anchor: Anchor, body: string, files: File[]) => {
     if (!session) return
+    const generation = planGeneration.current
     const photos = await upload(files)
+    if (generation !== planGeneration.current || generation.id !== session.id) throw new Error('active plan changed')
     const { id } = await collabApi.newThread(session.id, { anchor, versionId: currentVersionId, body, photos, refs: [] })
+    if (generation !== planGeneration.current) return
     setPinDraft(null)
     await refreshThreads()
+    if (generation !== planGeneration.current) return
     setActiveThread(id)
     nudge()
   }, [session, upload, currentVersionId, refreshThreads, nudge])
 
   const reply = useCallback(async (tid: number, body: string, files: File[], refs: Ref[]) => {
+    const generation = planGeneration.current
+    if (generation.id !== activePlanId || !threads.some(thread => thread.id === tid)) throw new Error('thread is not in the active plan')
     const photos = await upload(files)
+    if (generation !== planGeneration.current) throw new Error('active plan changed')
     await collabApi.reply(tid, { body, photos, refs })
     await refreshThreads()
     nudge()
-  }, [upload, refreshThreads, nudge])
+  }, [activePlanId, threads, upload, refreshThreads, nudge])
 
   const resolve = useCallback(async (tid: number, resolved: boolean) => {
+    if (planGeneration.current.id !== activePlanId || !threads.some(thread => thread.id === tid)) throw new Error('thread is not in the active plan')
     if (resolved) await collabApi.resolve(tid)
     else await collabApi.reopen(tid)
     await refreshThreads()
     nudge()
-  }, [refreshThreads, nudge])
+  }, [activePlanId, threads, refreshThreads, nudge])
 
   const partGone = useCallback((th: Thread) => {
     const pid = th.anchor?.partId
@@ -547,9 +574,10 @@ export function CollabProvider({ children }: { children: ReactNode }) {
   const pinNumber = useCallback((th: Thread) => pinOrder.get(th.id) || 0, [pinOrder])
 
   const focusThread = useCallback((th: Thread) => {
+    if (planGeneration.current.id !== activePlanId || !threads.some(thread => thread.id === th.id)) return
     setActiveThread(th.id)
     if (th.anchor) engine()?.scene.flyToPoint(th.anchor.point)
-  }, [engine])
+  }, [activePlanId, threads, engine])
 
   // —— 版本、成员、复制、交付 ——
   const saveVersion = useCallback(async (name: string) => {
@@ -624,7 +652,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!session || session.id !== createdRef.current?.id || createdRef.current.coverError) return
-    localStorage.removeItem('quadro.shared.created')
+    localStorage.removeItem(storage.accountKey('quadro.shared.created'))
     createdRef.current = null
     setCreatedPlan(null)
   }, [session])
@@ -638,7 +666,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
     const cover = await shotRef.current.coverShot()
     if (!cover) throw new Error(t('collab.create.coverFailed'))
     await collabApi.exportPlan(pending.id, { ...body, cover })
-    localStorage.removeItem('quadro.shared.created')
+    localStorage.removeItem(storage.accountKey('quadro.shared.created'))
     createdRef.current = null
     setCreatedPlan(null)
     notify(t('collab.create.coverSaved'))
@@ -661,7 +689,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
       const created = { id: result.id, name: trimmed, ...(result.coverError ? { coverError: result.coverError } : {}) }
       createdRef.current = created
       setCreatedPlan(created)
-      localStorage.setItem('quadro.shared.created', JSON.stringify(created))
+      localStorage.setItem(storage.accountKey('quadro.shared.created'), JSON.stringify(created))
       if (result.coverError) notify(t('collab.create.coverFailed'), 'warn')
       setMyPlans(list => [...list, { ...created, role: 'owner' }])
       recoverCreatedPlan()

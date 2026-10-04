@@ -246,14 +246,17 @@ export function confirmedComponentMeshes(scene,model,part) {
   const surface=(u,v)=>curved ? (()=>{const a=curvePoint(model,part.a,v),b=curvePoint(model,part.b,part.curveReverse?1-v:v);return a.map((n,i)=>n+(b[i]-n)*u);})() : cor ? cor[0].map((n,i)=>n+(cor[1][i]-n)*u+(cor[3][i]-n)*v) : null;
   if(!surface(0,0))return [];
   const local=(u,v)=>worldToLocal(frame,surface(u,v));
+  // 世界变换不改变几何；曲线采样记录局部曲面，避免同尺寸不同弧度误用缓存。
+  const surfaceKey=JSON.stringify(Array.from({length:37},(_,i)=>[local(0,i/36),local(1,i/36)]),
+    (_,value)=>typeof value==='number'?Math.round(value*1e6)/1e6:value);
   if(spec.feature==='cloth' || spec.feature==='cloth-fourway' || spec.feature==='trampoline') {
     const margin=spec.feature==='trampoline'?0.13:spec.feature==='cloth-fourway'?0.12:0.07;
-    f.add(`fabric:${spec.id}:${JSON.stringify(part.supportTubes)}:${JSON.stringify(frame)}`,()=>new ParametricGeometry((u,v,p)=>p.fromArray(local(margin+u*(1-2*margin),margin+v*(1-2*margin))),32,36),spec.feature==='trampoline'?'#26292b':curved?'#58a677':'#f0d04a',[0,0,0],null,'cloth');
+    f.add(`fabric:${spec.id}:${surfaceKey}`,()=>new ParametricGeometry((u,v,p)=>p.fromArray(local(margin+u*(1-2*margin),margin+v*(1-2*margin))),32,36),spec.feature==='trampoline'?'#26292b':curved?'#58a677':'#f0d04a',[0,0,0],null,'cloth');
     for(const edge of [0,1]) {
       const points=Array.from({length:33},(_,i)=>local(edge?1-margin:margin,i/32));f.tube('fabric-edge-seam:'+edge,points,0.12,'#efe4c1','cloth');
     }
     if(spec.feature!=='trampoline')for(const edge of [0,1]) {
-      f.add(`continuous-sleeve:${spec.id}:${edge}:${JSON.stringify(frame)}:${JSON.stringify(part.supportTubes)}`,()=>new ParametricGeometry((u,v,target)=>{
+      f.add(`continuous-sleeve:${spec.id}:${edge}:${surfaceKey}`,()=>new ParametricGeometry((u,v,target)=>{
         const clearance=spec.feature==='cloth-fourway'?0.12:0.05,param=clearance+u*(1-2*clearance);
         const center=surface(curved?edge:param,curved?param:edge),before=surface(curved?edge:Math.max(0,param-0.01),curved?Math.max(0,param-0.01):edge),after=surface(curved?edge:Math.min(1,param+0.01),curved?Math.min(1,param+0.01):edge);
         const tangent=vec(after).sub(vec(before)).normalize(),cross=tangent.clone().cross(vec(frame.axes[2])).normalize(),normal=cross.clone().cross(tangent).normalize(),angle=v*Math.PI*2;

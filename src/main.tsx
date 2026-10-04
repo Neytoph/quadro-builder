@@ -4,7 +4,7 @@ import './index.css'
 import App from './App'
 import { landedFrom, startAnalytics, track } from './analytics/track'
 import { detect as detectLang } from './i18n'
-import { startSyncIfConfigured } from './sync/bootstrap'
+import { startSyncIfConfigured, syncProbe } from './sync/bootstrap'
 import { rememberSource, SESSIONLESS, VIEW_ONLY } from './entry'
 
 rememberSource()          // 带来源标记打开的，记进 cookie；开源本地版不做
@@ -25,7 +25,7 @@ track('builder.app.open', {
 // 不碰自己的存档，也就不同步；共享方案的访客本来就不用登录。
 // 第二个参数处理"壳是缓存给的、入口闸门没生效"这种情况：退掉 Service Worker
 // 再走一次网络，去哪儿由服务端决定——这里不写死任何地址，换个部署也成立。
-if (!SESSIONLESS) startSyncIfConfigured(undefined, () => {
+startSyncIfConfigured(undefined, SESSIONLESS ? undefined : () => {
   void (async () => {
     try {
       const reg = await navigator.serviceWorker?.getRegistration()
@@ -33,6 +33,7 @@ if (!SESSIONLESS) startSyncIfConfigured(undefined, () => {
     } catch { /* 不支持或被禁用：直接重载，反正没有 SW 拦着 */ }
     location.reload()
   })()
-})
+}, !SESSIONLESS)
 
-createRoot(document.getElementById('root')!).render(<App />)
+// 确认身份后，React 才能读取 inventory、session 和 Yjs 本地库。
+void syncProbe().then(() => createRoot(document.getElementById('root')!).render(<App />))

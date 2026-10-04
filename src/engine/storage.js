@@ -11,6 +11,17 @@ import { AUTOSAVE_KEY } from "./config.js";
 const INDEX_KEY = "quadro.designs.index.v1";
 const PREFIX = "quadro.design.v1.";
 
+// 无同步的本地版继续使用旧库；托管版启动时必须先选择经服务器确认的账户。
+let accountScope = "local";
+let accountEpoch = 0;
+export function setAccountScope(userId) {
+  const next = userId == null ? "anonymous" : `user:${String(userId)}`;
+  if (next !== accountScope) { accountScope = next; accountEpoch++; }
+}
+export function getAccountScope() { return accountScope; }
+export function getAccountEpoch() { return accountEpoch; }
+export function accountKey(key) { return accountScope === "local" ? key : `${key}.${encodeURIComponent(accountScope)}`; }
+
 
 
 /** Alter Autosave-Stand (nur noch für die Übernahme). */
@@ -54,9 +65,9 @@ const LIB_STORE = "designs";
 const DOC_STORE = "docs";
 const SESSION_STORE = "session";
 
-function openLib() {
+function openLib(scope = accountScope) {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(LIB_DB, 2);
+    const req = indexedDB.open(scope === "local" ? LIB_DB : `${LIB_DB}.${encodeURIComponent(scope)}`, 2);
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains(LIB_STORE)) db.createObjectStore(LIB_STORE, { keyPath: "id" });
@@ -70,7 +81,9 @@ function openLib() {
 
 /** Transaktion auf einem beliebigen Speicher der Datenbank. */
 export function dbTx(storeName, mode, fn) {
+  const epoch = accountEpoch;
   return openLib().then((db) => new Promise((resolve, reject) => {
+    if (epoch !== accountEpoch) { db.close(); reject(new Error("account changed")); return; }
     const tx = db.transaction(storeName, mode);
     const out = fn(tx.objectStore(storeName));
     tx.oncomplete = () => { db.close(); resolve(out instanceof IDBRequest ? out.result : out); };
@@ -80,6 +93,24 @@ export function dbTx(storeName, mode, fn) {
 }
 
 export const DB_STORES = { docs: DOC_STORE, session: SESSION_STORE };
+
+/** 旧版没有账户归属：只在用户主动备份时读取，不将内容写入当前账户库。 */
+export async function legacyBackup() {
+  const db = await openLib("local");
+  try {
+    const read = name => new Promise((resolve, reject) => {
+      const tx = db.transaction(name, "readonly");
+      const request = tx.objectStore(name).getAll();
+      tx.oncomplete = () => resolve(request.result || []);
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+    const [documents, sessions, library] = await Promise.all([read(DOC_STORE), read(SESSION_STORE), read(LIB_STORE)]);
+    return { format: "quadro.legacy-backup.v1", documents, sessions, library,
+      namedDrafts: listNames().map(name => ({ name, data: loadNamed(name) })),
+      autosave: loadAutosave(), inventory: JSON.parse(localStorage.getItem("quadro.inventory.v1") || "null") };
+  } finally { db.close(); }
+}
 
 function libTx(mode, fn) {
   return dbTx(LIB_STORE, mode, fn);
@@ -180,24 +211,24 @@ const INV_KEY = "quadro.inventory.v1";
 const INV_META_KEY = "quadro.inventory.meta.v1";   // { rev, dirty, updatedAt }
 
 export function loadInventory() {
-  try { return JSON.parse(localStorage.getItem(INV_KEY)) || null; }
+  try { return JSON.parse(localStorage.getItem(accountKey(INV_KEY))) || null; }
   catch { return null; }
 }
 
 export function inventoryMeta() {
   try {
-    const meta = JSON.parse(localStorage.getItem(INV_META_KEY)) || {};
+    const meta = JSON.parse(localStorage.getItem(accountKey(INV_META_KEY))) || {};
     return { rev: meta.rev || 0, dirty: !!meta.dirty, updatedAt: meta.updatedAt || 0 };
   } catch { return { rev: 0, dirty: false, updatedAt: 0 }; }
 }
 
 function saveInventoryMeta(meta) {
-  localStorage.setItem(INV_META_KEY, JSON.stringify(meta));
+  localStorage.setItem(accountKey(INV_META_KEY), JSON.stringify(meta));
 }
 
 /** Bestand schreiben. Ohne Gegenrede gilt er als noch nicht hochgeladen. */
 export function saveInventory(inv, { dirty = true, rev = null } = {}) {
-  localStorage.setItem(INV_KEY, JSON.stringify(inv));
+  localStorage.setItem(accountKey(INV_KEY), JSON.stringify(inv));
   const meta = inventoryMeta();
   saveInventoryMeta({
     rev: rev == null ? meta.rev : rev,
@@ -208,7 +239,7 @@ export function saveInventory(inv, { dirty = true, rev = null } = {}) {
 
 /** Serverstand uebernehmen. */
 export function putRemoteInventory(record) {
-  localStorage.setItem(INV_KEY, JSON.stringify(record.data || {}));
+  localStorage.setItem(accountKey(INV_KEY), JSON.stringify(record.data || {}));
   saveInventoryMeta({ rev: record.rev || 0, dirty: false, updatedAt: record.updatedAt || Date.now() });
   return record;
 }

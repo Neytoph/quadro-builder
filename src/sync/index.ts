@@ -53,42 +53,65 @@ class ConflictError extends Error {
 }
 
 export function createSync(opts: SyncOptions = {}) {
-  const { baseUrl, intervalMs = 30_000, fetchImpl = globalThis.fetch, onEvent } = opts
+  const { baseUrl, intervalMs = 30_000, fetchImpl = globalThis.fetch, onEvent, accountId, onIdentityChange } = opts
   const enabled = Boolean(baseUrl)
   let timer: ReturnType<typeof setInterval> | null = null
   // 正在跑的那一轮。存的是 Promise 而不是一个布尔值，调用方等 syncNow()
   // 才等得到结果——「存完马上发到社区」要的就是这个：那一刻可能正好有
   // 一轮在跑，返回 undefined 就成了「以为推完了，其实刚开始」。
   let inflight: Promise<void> | null = null
+  let stopped = false
+  const controller = new AbortController()
+  const scopeEpoch = storage.getAccountEpoch()
+  function active() {
+    if (stopped || storage.getAccountEpoch() !== scopeEpoch) throw new DOMException('account changed', 'AbortError')
+  }
 
   const emit = (e: SyncEvent) => { try { onEvent?.(e) } catch { /* 回调自己的错不该拖垮同步 */ } }
 
   async function call<T>(path: string, init?: RequestInit): Promise<T> {
+    active()
+    if (!accountId || storage.getAccountScope() !== `user:${accountId}`) throw new Error('sync requires a verified account')
     const res = await fetchImpl(`${baseUrl}${path}`, {
       ...init,
       credentials: 'include',           // 会话 cookie 由网关下发
-      headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) },
+      signal: controller.signal,
+      headers: { 'Content-Type': 'application/json', ...(init?.headers || {}), 'X-Builder-User-ID': accountId },
     })
+    active()
+    if (res.status === 401 || (res.status === 409 && res.headers.get('X-Builder-User-ID') !== accountId)) {
+      stop()
+      onIdentityChange?.()
+      throw new Error('sync account changed')
+    }
+    if (res.headers.get('X-Builder-User-ID') !== accountId) throw new Error('sync response account mismatch')
     if (res.status === 402) {
       const b = await res.json().catch(() => ({}))
+      active()
       throw new QuotaError(b.feature ?? 'designs', b.used ?? 0, b.limit ?? 0)
     }
     if (res.status === 409) {
       const b = await res.json().catch(() => ({}))
+      active()
       throw new ConflictError(b.remote as RemoteDoc)
     }
     if (!res.ok) throw new Error(`${init?.method ?? 'GET'} ${path} → ${res.status}`)
-    return res.status === 204 ? (undefined as T) : ((await res.json()) as T)
+    const result = res.status === 204 ? (undefined as T) : ((await res.json()) as T)
+    active()
+    return result
   }
 
   /** 冲突不丢数据：本地版本另存一份，再接受服务端版本。 */
   async function forkConflict(local: DocRecord, remote: RemoteDoc): Promise<void> {
+    active()
     const copy = await docs.saveDoc({
       docId: undefined,                 // 新建：engine 侧会生成 id
       name: `${local.name}（冲突副本）`,
       data: local.data,
     })
+    active()
     if (local.cover) await docs.setDocCover(copy.id, local.cover)
+    active()
     await docs.putRemoteDoc(remote)
     emit({ type: 'conflict', id: local.id, copyId: copy.id })
   }
@@ -100,6 +123,7 @@ export function createSync(opts: SyncOptions = {}) {
   async function push(): Promise<void> {
     const all = (await docs.allRecords()) as DocRecord[]
     for (const doc of all.filter((d) => d.dirty)) {
+      active()
       // 记下这一刻的 updatedAt：上传期间用户可能又改了，
       // markDocSynced 靠它判断该不该清 dirty。
       const stamp = doc.updatedAt
@@ -124,6 +148,7 @@ export function createSync(opts: SyncOptions = {}) {
         }
         emit({ type: 'pushed', id: doc.id, rev: doc.rev })
       } catch (err) {
+        active()
         if (err instanceof ConflictError) { await forkConflict(doc, err.remote); continue }
         if (err instanceof QuotaError) {
           // 配额用尽：保持 dirty，停止本轮推送，别把服务器打满。
@@ -143,8 +168,10 @@ export function createSync(opts: SyncOptions = {}) {
 
     const local = new Map(
       ((await docs.allRecords()) as DocRecord[]).map((d) => [d.id, d]))
+    active()
     let n = 0
     for (const item of items) {
+      active()
       if (local.get(item.id)?.dirty) continue        // 本地更新，别覆盖
       await docs.putRemoteDoc(item)
       n++
@@ -170,10 +197,11 @@ export function createSync(opts: SyncOptions = {}) {
    * 只有他自己知道（在这台机器上减到 3，不代表另一台的 8 是错的）。
    */
   function stashInventoryConflict(local: unknown): string {
+    const key = storage.accountKey(INV_STASH_KEY)
     try {
-      localStorage.setItem(INV_STASH_KEY, JSON.stringify({ at: Date.now(), inventory: local }))
+      localStorage.setItem(key, JSON.stringify({ at: Date.now(), inventory: local }))
     } catch { /* 隐私模式下存不了，那就只剩事件 */ }
-    return INV_STASH_KEY
+    return key
   }
 
   async function pushInventory(): Promise<void> {
@@ -190,6 +218,7 @@ export function createSync(opts: SyncOptions = {}) {
       storage.markInventorySynced(r.rev, stamp)
       emit({ type: 'inventory-pushed', rev: r.rev })
     } catch (err) {
+      active()
       if (err instanceof ConflictError) {
         const remote = err.remote as unknown as RemoteInventory
         const key = stashInventoryConflict(local)
@@ -213,31 +242,41 @@ export function createSync(opts: SyncOptions = {}) {
   async function round(): Promise<void> {
     emit({ type: 'start' })
     try {
+      active()
+      const response = await fetchImpl(`${baseUrl}/identity`, { credentials: 'include', signal: controller.signal, cache: 'no-store' })
+      active()
+      if (response.status === 401 || response.status === 403) { stop(); onIdentityChange?.(); return }
+      if (!response.ok) throw new Error(`GET /identity → ${response.status}`)
+      const identity = await response.json() as { userId?: string }
+      active()
+      if (identity.userId !== accountId) { stop(); onIdentityChange?.(); return }
       await push()
       await pull()
       await pushInventory()
       await pullInventory()
       emit({ type: 'idle', rev: await readCursor() })
     } catch (error) {
-      emit({ type: 'error', error })
+      if (!stopped && storage.getAccountEpoch() === scopeEpoch) emit({ type: 'error', error })
     }
   }
 
   /** 跑一轮。已经有一轮在跑就把那一轮给出去，两边都能等到它结束。 */
   function syncNow(): Promise<void> {
-    if (!enabled) return Promise.resolve()
+    if (!enabled || stopped) return Promise.resolve()
     if (!inflight) inflight = round().finally(() => { inflight = null })
     return inflight
   }
 
   function start(): void {
-    if (!enabled || timer) return
+    if (!enabled || stopped || timer) return
     docs.setSyncMode(true)          // 让删除留下墓碑，否则服务端的删不掉
     void syncNow()
     if (intervalMs > 0) timer = setInterval(() => void syncNow(), intervalMs)
   }
 
   function stop(): void {
+    stopped = true
+    controller.abort()
     if (timer) { clearInterval(timer); timer = null }
     docs.setSyncMode(false)
   }

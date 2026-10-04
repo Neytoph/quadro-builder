@@ -4,6 +4,10 @@ import { LANGS, useI18n } from '../i18n'
 import { ONBOARDING_EVENT } from './Onboarding'
 import { useCollab } from '../collab/CollabContext'
 import BatchImport from '../collab/ui/BatchImport'
+import { storage } from '../engine-api'
+import { syncConfigured } from '../sync/bootstrap'
+import { legacyBackupWithTabs } from '../collab/legacyBackup'
+import { Modal } from '../collab/ui/Modals'
 
 const btn = 'text-sm rounded-lg border border-gray-700 bg-gray-800 hover:border-teal-400 px-3 py-2.5 text-left cursor-pointer leading-snug'
 
@@ -13,6 +17,14 @@ export default function FilePanel() {
   const { t, lang, setLang } = useI18n()
   const fileRef = useRef<HTMLInputElement>(null)
   const [batch, setBatch] = useState(false)
+  const [backingUp, setBackingUp] = useState(false)
+  const [legacy, setLegacy] = useState<Awaited<ReturnType<typeof legacyBackupWithTabs>> | null>(null)
+  const legacyModels = legacy ? [
+    ...(legacy.documents as Array<{ name: string; data: unknown }>),
+    ...legacy.tabModels,
+    ...legacy.namedDrafts,
+    { name: t('tab.untitled'), data: legacy.autosave },
+  ].filter(row => row.data && typeof row.data === 'object' && Array.isArray((row.data as { nodes?: unknown }).nodes)) : []
   // 共享方案随改随同步，没有「保存」；「另存为」存一份到自己的设计里
   const plan = collab.mode === 'plan'
 
@@ -27,6 +39,12 @@ export default function FilePanel() {
         <button onClick={() => setBatch(true)} className={btn} data-ui="batch-open">{t('batch.open')}</button>
         <button onClick={api.exportQdf} className={btn}>{t('btn.exportQdf')}</button>
         <button onClick={api.exportJson} className={btn}>{t('btn.exportJson')}</button>
+        {syncConfigured() && <button disabled={backingUp} className={btn} onClick={() => {
+          if (!window.confirm(t('saves.legacyBackupConfirm'))) return
+          setBackingUp(true)
+          void legacyBackupWithTabs().then(setLegacy)
+            .catch(error => api.notify(String(error), 'err')).finally(() => setBackingUp(false))
+        }}>{t('saves.legacyBackup')}</button>}
         <button onClick={api.exportPng} className={btn}>{t('btn.exportPng')}</button>
         <button
           onClick={() => void api.exportAssemblyPdf()}
@@ -39,6 +57,17 @@ export default function FilePanel() {
           onChange={e => { const f = e.target.files?.[0]; if (f) void api.importFile(f); e.target.value = '' }} />
       </div>
       {batch && <BatchImport onClose={() => setBatch(false)} />}
+      {legacy && <Modal onClose={() => setLegacy(null)} label={t('saves.legacyBackup')}>
+        <p className="text-sm mb-3">{t('saves.legacyBackupHint')}</p>
+        <button className={btn} onClick={() => storage.exportFile(legacy, 'quadro-old-device-backup.json')}>{t('saves.legacyBackupAll')}</button>
+        {!legacyModels.length && <p className="text-sm mt-3">{t('saves.empty')}</p>}
+        <div className="flex flex-col gap-2 mt-3 max-h-[50vh] overflow-auto">
+          {legacyModels.map((row, index) => <button key={index} className={btn} onClick={() => {
+            const name = String(row.name || t('tab.untitled')).replace(/[\\/:*?"<>|]/g, '_')
+            storage.exportFile(row.data, `${name}.json`)
+          }}>{t('saves.legacyDownload', { name: row.name || t('tab.untitled') })}</button>)}
+        </div>
+      </Modal>}
 
       <div className="mt-4 pt-3 border-t border-gray-800">
         <div className="text-[10px] uppercase tracking-wider text-gray-400 mb-1.5">{t('section.room')}</div>
