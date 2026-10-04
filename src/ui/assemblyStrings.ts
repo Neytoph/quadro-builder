@@ -2,7 +2,7 @@ import type { Lang } from '../i18n'
 
 const zh = {
   preassemblyHint: '零件分开展示；关闭“装配动作”可查看拼好的框架，再进行下一步安装。',
-  title: '安装说明书预览', subtitle: '先拼好各个区域，再连接成完整造型。画面与 PDF 使用同一份模型快照。',
+  title: '安装说明书预览', subtitle: '按层搭建主体，再安装尖顶和其他配件。画面与 PDF 使用同一份模型快照。',
   close: '关闭', regions: '拼装区域', steps: '拼装步骤', diagnostics: '需要检查', ready: '计划可以导出', blocked: '请先处理下列问题，再导出说明书。',
   auto: '自动划分', save: '保存区域设置', saved: '区域设置已保存，可撤销。', stale: '源模型已更新。当前仍预览打开时的快照；重新打开可读取最新模型。',
   split: '拆分所选零件', merge: '与下一区域合并', up: '上移', down: '下移', parts: '零件', edit: '选择零件', name: '区域名称', newRegion: '新区域',
@@ -26,6 +26,8 @@ const de: Strings = {
   title: 'Vorschau der Bauanleitung', subtitle: 'Zuerst die Bereiche bauen, dann das gesamte Modell verbinden. Vorschau und PDF verwenden denselben Modellstand.', close: 'Schließen', regions: 'Baubereiche', steps: 'Bauschritte', diagnostics: 'Bitte prüfen', ready: 'Bereit zum Export', blocked: 'Vor dem Export die folgenden Probleme beheben.', auto: 'Automatisch aufteilen', save: 'Bereiche speichern', saved: 'Bereiche gespeichert. Die Änderung lässt sich rückgängig machen.', stale: 'Das Ausgangsmodell wurde geändert. Die Vorschau behält ihren Modellstand; zum Aktualisieren erneut öffnen.', split: 'Gewählte Teile abtrennen', merge: 'Mit nächstem Bereich verbinden', up: 'Nach oben', down: 'Nach unten', parts: 'Teile', edit: 'Teile wählen', name: 'Bereichsname', newRegion: 'Neuer Bereich', previous: 'Zurück', next: 'Weiter', all: 'Gesamtes Modell', action: 'Montagebewegung', rotate: 'Ziehen zum Drehen; mit Rad oder zwei Fingern zoomen.', export: 'PDF exportieren', exporting: 'PDF wird erstellt', order: 'Aufbaurichtung', locate: 'Problem anzeigen', repair: 'Korrektur ansehen', apply: 'Im Ausgangsmodell anwenden', discard: 'Korrektur verwerfen', repairTitle: 'Korrekturvorschau', repairHint: 'Änderungen und Bauschritte vor dem Anwenden prüfen. Änderungen lassen sich rückgängig machen.', readonly: 'Schreibgeschütztes Modell: Änderungen gelten nur für dieses PDF.', change: 'Änderung', before: 'Vorher', after: 'Nachher', dependencies: 'Zuerst fertigstellen', attach: 'Bereiche verbinden', preassemble: 'Bereich vormontieren', build: 'Teile montieren', noRepair: 'Keine automatische Korrektur verfügbar. Diese Teile im Modell prüfen.', failedApply: 'Modell oder Berechtigungen wurden geändert. Vorschau erneut öffnen.', remove: 'Kollidierendes Teil entfernen', connectors: 'Kupplungen', tubes: 'Rohre', panels: 'Platten', textiles: 'Textilien', slides: 'Rutschen', fittings: 'Zubehör', screws: 'Schrauben', reinforcements: 'Verstärkungen', duplicatePort: 'Mehrere Teile belegen denselben Kupplungsanschluss. Markiertes Bogenrohr und kurze Stütze prüfen.', invalidConfig: 'Bereichseinstellungen sind veraltet. Automatisch aufteilen oder Teilezuordnung ändern.',
 }
 export const assemblyStrings: Record<Lang, Strings> = { zh, en, de }
+en.subtitle = 'Build the structure layer by layer, then fit the roof and other accessories. The preview and PDF use the same model snapshot.'
+de.subtitle = 'Den Aufbau Ebene für Ebene bauen, dann Dach und Zubehör montieren. Vorschau und PDF verwenden denselben Modellstand.'
 
 export const assemblyPdfStrings: Record<Lang, Record<string, string>> = {
   zh: { actionView: '装配动作', completeView: '装好后', regionOverview: '拼装区域总览', regionShape: '区域形状', regionLocation: '在完整造型中的位置', regionOrder: '拼装顺序', finalTitle: '完整造型', detailTitle: '连接细节', instructionsTitle: '安装说明' },
@@ -35,6 +37,18 @@ export const assemblyPdfStrings: Record<Lang, Record<string, string>> = {
 
 assemblyPdfStrings.zh.contextHint = '操作图暂时隐藏周围零件；完整形态见区域页和成品页。'
 assemblyPdfStrings.zh.beforeView = '装配前'
+assemblyPdfStrings.zh.layerAction = '本层安装'
+assemblyPdfStrings.zh.layerComplete = '本层装好后'
+assemblyPdfStrings.zh.layerHint = '灰色是已装主体，彩色是本层新增件；先拼好本层框架，再按箭头套入对应立柱。'
+assemblyPdfStrings.zh.bodyHint = '保留已装主体，彩色突出本步新增件，按层逐步搭建。'
+assemblyPdfStrings.en.layerAction = 'Install this layer'
+assemblyPdfStrings.en.layerComplete = 'Layer completed'
+assemblyPdfStrings.en.layerHint = 'Grey shows the built structure; colour shows this layer. Assemble its frames, then lower each onto the matching uprights as shown.'
+assemblyPdfStrings.en.bodyHint = 'The built structure stays visible. Colour highlights new parts as you build layer by layer.'
+assemblyPdfStrings.de.layerAction = 'Diese Ebene montieren'
+assemblyPdfStrings.de.layerComplete = 'Ebene fertig montiert'
+assemblyPdfStrings.de.layerHint = 'Grau zeigt den bestehenden Aufbau, Farbe die neue Ebene. Rahmen zusammensetzen und nach den Pfeilen auf die passenden Stützen absenken.'
+assemblyPdfStrings.de.bodyHint = 'Der bestehende Aufbau bleibt sichtbar. Neue Teile sind farbig hervorgehoben; Ebene für Ebene bauen.'
 assemblyPdfStrings.en.beforeView = 'Before assembly'
 assemblyPdfStrings.de.beforeView = 'Vor der Montage'
 assemblyPdfStrings.zh.preassemblyBefore = '预拼零件'

@@ -5,7 +5,7 @@ import { BuildModel } from './model.js'
 import { parseQDF } from './qdfimport.js'
 import { computeAssemblyPlan, assemblyState } from './assemblyPlan.js'
 
-const evidenceDir = '../qa/frame-followup'
+const evidenceDir = '../qa/layer-followup'
 const records: any[] = []
 beforeAll(async () => { await loadCatalog(); mkdirSync(evidenceDir, { recursive: true }) })
 afterAll(() => writeFileSync(`${evidenceDir}/frame-engine-evidence.json`, JSON.stringify(records, null, 2)))
@@ -17,43 +17,50 @@ function load(file: string) {
 }
 const stepRecord = (s: any) => ({ id: s.id, title: s.title, y: s.y, kind: s.kind, action: s.action, nodeIds: s.nodeIds, tubeIds: s.tubeIds, partIds: s.partIds, interfaceIds: s.interfaceIds })
 
-describe('上层水平框架真实预装与套入', () => {
+describe('本层框架连续展示与真实下套', () => {
   it('记录C0179本轮计划，保留原始比较快照', () => {
     const model = load('qdf/C0179.qdf'), plan = computeAssemblyPlan(model)
     records.push({ file: 'C0179', steps: plan.steps.map(stepRecord), frameModules: plan.frameModules, canExport: plan.canExport, diagnostics: plan.diagnostics })
   })
 
-  it('C0179的20/80/120cm全部水平框架连同顶接头旁拼，下方立柱先装且不随模块移动', () => {
+  it('C0179的20/80/120cm各合并为一层，39根横管和顶接头真实下套且立柱不移动', () => {
     const model = load('qdf/C0179.qdf'), before = model.toJSON(), plan = computeAssemblyPlan(model)
     expect(plan.canExport, JSON.stringify(plan.diagnostics)).toBe(true)
-    const baseline = existsSync(`${evidenceDir}/C0179-baseline.json`) ? JSON.parse(readFileSync(`${evidenceDir}/C0179-baseline.json`, 'utf8')) : null
+    const baselineFile = '../qa/frame-followup/C0179-baseline.json'
+    const baseline = existsSync(baselineFile) ? JSON.parse(readFileSync(baselineFile, 'utf8')) : null
+    expect(plan.steps.some((s: any) => s.action.scope === 'parts' && s.action.type === 'preassemble')).toBe(false)
     for (const [y, count] of [[20, 4], [80, 21], [120, 14]]) {
-      const modules = plan.frameModules.filter((m: any) => m.y === y && m.status === 'preassembled')
+      const modules = plan.frameModules.filter((m: any) => m.y === y && m.status === 'lowerable')
       const ids = modules.flatMap((m: any) => m.tubeIds)
       expect(ids).toHaveLength(count)
       if (baseline) expect(ids.sort()).toEqual(baseline.steps.find((s: any) => s.y === y && s.kind === 'frame').tubeIds.sort())
+      const layerIndices = plan.steps.map((s: any, i: number) => s.y === y && s.action.layer && s.regionId === modules[0].regionId ? i : -1).filter((i: number) => i >= 0)
+      expect(layerIndices).toHaveLength(1)
+      const index = layerIndices[0], step = plan.steps[index]
+      expect(step.tubeIds).toHaveLength(count)
+      expect(step.action.modules).toHaveLength(modules.length)
+      expect(step.instructions.join(' ')).toMatch(/先拼好|Preassemble|vormontieren/)
+      expect(step.parts.tubes.reduce((n: number, r: any) => n + r.count, 0)).toBe(count)
+      const installing = assemblyState(plan, index, { action: true }), installed = assemblyState(plan, index)
+      expect(installing.actionStage).toBe('installation')
+      for (const id of plan.steps.slice(0, index).flatMap((s: any) => s.partIds)) { expect(installing.visible.has(id)).toBe(true); expect(installing.transforms.has(id)).toBe(false) }
+      expect(installing.arrows.length).toBeGreaterThan(0)
+      for (const arrow of installing.arrows) { expect(arrow.direction).toEqual([0, -1, 0]); expect(arrow.from[1]).toBeGreaterThan(arrow.to[1]); expect(arrow.from[0]).toBe(arrow.to[0]); expect(arrow.from[2]).toBe(arrow.to[2]) }
       for (const module of modules) {
-        const preIndex = plan.steps.findIndex((s: any) => s.id === module.prepareStepId), attachIndex = plan.steps.findIndex((s: any) => s.id === module.attachStepId)
-        const attach = plan.steps[attachIndex]
-        expect(attachIndex).toBe(preIndex + 1)
-        expect(Object.values(attach.parts).flat()).toEqual([])
-        const beforeState = assemblyState(plan, preIndex, { action: true }), prepared = assemblyState(plan, preIndex)
-        expect(beforeState.actionStage).toBe('before'); expect(beforeState.arrows).toEqual([])
+        expect(module.installStepId).toBe(step.id)
         for (const id of module.partIds) {
-          expect(beforeState.visible.has(id)).toBe(false)
-          expect(prepared.visible.has(id)).toBe(true)
-          expect(prepared.transforms.get(id)).toEqual(module.prepareTranslation)
+          expect(installing.visible.has(id)).toBe(true)
+          expect(installed.visible.has(id)).toBe(true)
+          expect(installing.transforms.get(id)).toEqual(module.installationTranslation)
+          expect(installed.transforms.has(id)).toBe(false)
+          expect(plan.steps.slice(0, index).some((s: any) => s.partIds.includes(id))).toBe(false)
         }
-        const installing = assemblyState(plan, attachIndex, { action: true }), installed = assemblyState(plan, attachIndex)
-        expect(installing.arrows.length).toBeGreaterThan(0)
-        for (const arrow of installing.arrows) { expect(arrow.direction.map((v: number) => v || 0)).toEqual([0, -1, 0]); expect(arrow.from[1]).toBeGreaterThan(arrow.to[1]); expect(arrow.from[0]).toBe(arrow.to[0]); expect(arrow.from[2]).toBe(arrow.to[2]) }
-        for (const id of module.partIds) { expect(installing.transforms.get(id)).toEqual(module.installationTranslation); expect(installed.transforms.has(id)).toBe(false) }
         for (const mark of plan.interfaces.filter((m: any) => m.assemblyId === module.id) as any[]) {
           const supportIndex = plan.steps.findIndex((s: any) => s.id === mark.supportStepId)
-          expect(supportIndex).toBeLessThan(preIndex)
+          expect(supportIndex).toBeLessThan(index)
           expect(installing.transforms.has(mark.supportTubeId)).toBe(false)
           expect(installing.visible.has(mark.supportTubeId)).toBe(true)
-          expect(plan.steps.slice(0, preIndex).some((s: any) => s.nodeIds.includes(mark.nodeId))).toBe(false)
+          expect(plan.steps.slice(0, index).some((s: any) => s.nodeIds.includes(mark.nodeId))).toBe(false)
         }
         expect(module.installation.pathVerified).toBe(true)
         for (let i = 0; i < module.installation.pathSamples.length; i++) {
@@ -61,6 +68,7 @@ describe('上层水平框架真实预装与套入', () => {
           expect(Math.hypot(...a.map((v: number, j: number) => v - b[j])) / (module.installation.pathSamples[i] - 1)).toBeLessThanOrEqual(geometry().tubeRadius + 1e-8)
         }
       }
+      for (const id of step.action.inPlacePartIds) { expect(installing.transforms.has(id)).toBe(false); expect(installing.visible.has(id)).toBe(false); expect(installed.visible.has(id)).toBe(true) }
     }
     expect(new Set(plan.interfaces.map((m: any) => m.id)).size).toBe(plan.interfaces.length)
     expect(plan.fixingPoints).toEqual([]); expect(plan.steps.some((s: any) => s.action.type === 'fix')).toBe(false)
@@ -89,7 +97,7 @@ describe('上层水平框架真实预装与套入', () => {
     expect(blocked, JSON.stringify(plan.frameModules)).toBeTruthy()
     expect(blocked.obstruction.obstacleTubeId).toBe(blocker.id)
     expect(blocked.status).toBe('in-place')
-    expect(plan.steps.some((s: any) => s.action.scope === 'parts' && s.action.assemblyId === blocked.id)).toBe(false)
+    expect(plan.steps.some((s: any) => s.action.modules?.some((m: any) => m.id === blocked.id))).toBe(false)
     expect(plan.ledger.conserved).toBe(true)
   })
 
@@ -100,16 +108,31 @@ describe('上层水平框架真实预装与套入', () => {
       for (const [from, to] of [[a, b], [a, c], [b, d], [c, d]]) model.addTube(from.id, to.id, 'T35', 'blue', 35)
     }
     const plan = computeAssemblyPlan(model), region = plan.regions.filter((r: any) => r.kind === 'body')[1]
-    const module = plan.frameModules.find((m: any) => m.regionId === region.id && m.status === 'preassembled')!
+    const module = plan.frameModules.find((m: any) => m.regionId === region.id && m.status === 'lowerable')!
     expect(module).toBeTruthy()
-    const preIndex = plan.steps.findIndex((s: any) => s.id === module.prepareStepId), attachIndex = plan.steps.findIndex((s: any) => s.id === module.attachStepId)
-    const prepared = assemblyState(plan, preIndex), installing = assemblyState(plan, attachIndex, { action: true }), installed = assemblyState(plan, attachIndex)
+    const index = plan.steps.findIndex((s: any) => s.id === module.installStepId)
+    const installing = assemblyState(plan, index, { action: true }), installed = assemblyState(plan, index)
     for (const id of module.partIds) {
-      expect(prepared.transforms.get(id)).toEqual(module.prepareTranslation.map((v: number, i: number) => v + region.detachedTranslation[i]))
       expect(installing.transforms.get(id)).toEqual(module.installationTranslation.map((v: number, i: number) => v + region.detachedTranslation[i]))
       expect(installed.transforms.get(id)).toEqual(region.detachedTranslation)
     }
     for (const mark of plan.interfaces.filter((m: any) => m.assemblyId === module.id)) expect(installing.transforms.get(mark.supportTubeId)).toEqual(region.detachedTranslation)
     expect(assemblyState(plan, plan.steps.length - 1).transforms.size).toBe(0)
+  })
+
+  it('同层状态按各模块自己的clearance生成动作，不把互不相连的框架伪造为一整块', () => {
+    const plan = computeAssemblyPlan(load('qdf/C0179.qdf'))
+    const index = plan.steps.findIndex((s: any) => s.y === 80 && s.action.layer), step = plan.steps[index]
+    // 状态接口的独立位移回归：仅调整测试快照，不作为物理路径验证证据。
+    step.action.modules = step.action.modules.map((m: any, i: number) => ({ ...m, translation: [0, 18 + 5 * i, 0] }))
+    const state = assemblyState(plan, index, { action: true })
+    expect(new Set(step.action.modules.map((m: any) => m.translation[1])).size).toBe(4)
+    const used = new Set()
+    for (const module of step.action.modules) {
+      for (const id of module.partIds) { expect(used.has(id)).toBe(false); used.add(id); expect(state.transforms.get(id)).toEqual(module.translation) }
+      for (const arrow of state.arrows.filter((a: any) => a.assemblyId === module.id)) { expect(arrow.from[1] - arrow.to[1]).toBe(module.translation[1]); expect(arrow.direction).toEqual([0, -1, 0]) }
+    }
+    expect(state.arrows).toHaveLength(step.interfaceIds.length)
+    expect(assemblyState(plan, index).transforms.size).toBe(0)
   })
 })

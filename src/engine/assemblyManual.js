@@ -826,6 +826,8 @@ export function assemblyFocusBounds(scene, model, plan, step, state) {
 // This is a presentation filter: the frozen model, inventory and installed state stay intact.
 export function assemblyPresentationState(model, plan, step, state, { detail = false } = {}) {
   if (!state || !step) return state;
+  // 整层操作保留全部已装主体，才能把上方的新框架对应回原位置。
+  if (!detail && (step.action?.layer || ['frame', 'risers', 'panels'].includes(step.kind))) return { ...state, contextFiltered: false };
   const region = plan.regions.find(region => region.id === step.regionId);
   const modulePreassembly = step.action?.scope === 'parts' && step.action.type === 'preassemble';
   const moduleInstallation = step.action?.scope === 'parts' && step.action.type === 'attach';
@@ -1100,13 +1102,16 @@ export async function exportAssemblyPdf(opts) {
           const consumed = paintCover(ctx, { front: front.img, back: back.img, copy: coverCopy, items: descriptor.items, icons, fill: sceneFill(scene), stamp, partsH: descriptor.partsH });
           if (consumed !== descriptor.items.length) throw manualError('pagination', '总料表分页与实际绘制不一致');
         } else {
-          let state, completed, heading, instructions = [], leftLabel = copy.actionView, rightLabel = copy.completeView, bounds, leftFocus, rightFocus, roofCoverDetail = false, modulePreassembly = false;
+          let state, completed, heading, instructions = [], leftLabel = copy.actionView, rightLabel = copy.completeView, bounds, leftFocus, rightFocus, roofCoverDetail = false, modulePreassembly = false, layer = false, bodyContext = false;
           if (descriptor.type === 'step' || descriptor.type === 'detail') {
             state = assemblyState(plan, descriptor.index, { action: true }); completed = assemblyState(plan, descriptor.index, { action: false });
             state = assemblyPresentationState(model, plan, steps[descriptor.index], state, { detail: descriptor.type === 'detail' });
             completed = assemblyPresentationState(model, plan, steps[descriptor.index], completed, { detail: descriptor.type === 'detail' });
             if (descriptor.type === 'step' && state.actionStage === 'before' && !state.arrows?.length) leftLabel = copy.beforeView || copy.actionView;
             modulePreassembly = steps[descriptor.index].action?.scope === 'parts' && steps[descriptor.index].action.type === 'preassemble';
+            layer = !!steps[descriptor.index].action?.layer;
+            bodyContext = descriptor.type === 'step' && ['frame', 'risers', 'panels'].includes(steps[descriptor.index].kind);
+            if (layer) { leftLabel = copy.layerAction || copy.actionView; rightLabel = copy.layerComplete || copy.completeView; }
             if (modulePreassembly) {
               leftLabel = copy.preassemblyBefore || copy.beforeView || copy.actionView;
               rightLabel = copy.preassemblyComplete || copy.completeView;
@@ -1163,7 +1168,7 @@ export async function exportAssemblyPdf(opts) {
               image.marks.push(...positions.map((point, i) => ({ ...point, num: plan.regions[i]?.label || `R${i + 1}` })));
             }
           }
-          const consumed = paintStep(ctx, { front: left.img, back: right.img, copy: { ...copy, front: leftLabel, back: rightLabel, contextHint: modulePreassembly ? copy.preassemblyHint : roofCoverDetail ? copy.roofCoverHint : ['step', 'detail'].includes(descriptor.type) ? copy.contextHint : '' }, heading, items: descriptor.items || [], icons, k: currentPage, n: total, fill: sceneFill(scene), frontMarks: left.marks, backMarks: right.marks, instructions, stamp, partsH: descriptor.partsH });
+          const consumed = paintStep(ctx, { front: left.img, back: right.img, copy: { ...copy, front: leftLabel, back: rightLabel, contextHint: layer ? copy.layerHint : bodyContext ? copy.bodyHint : modulePreassembly ? copy.preassemblyHint : roofCoverDetail ? copy.roofCoverHint : ['step', 'detail'].includes(descriptor.type) ? copy.contextHint : '' }, heading, items: descriptor.items || [], icons, k: currentPage, n: total, fill: sceneFill(scene), frontMarks: left.marks, backMarks: right.marks, instructions, stamp, partsH: descriptor.partsH });
           if (consumed !== (descriptor.items?.length || 0)) throw manualError('pagination', '步骤料表分页与实际绘制不一致');
           const box = pageBox;
           if (descriptor.type !== 'detail') drawArrows(ctx, left.img, mm(box.x0), mm(box.imgY), mm(box.imgW), mm(box.imgH), left.arrows);

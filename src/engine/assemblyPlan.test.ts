@@ -8,7 +8,7 @@ import { proposeAssemblyRepairs, resolveNodeConnection } from './connectionResol
 
 beforeAll(async () => { await loadCatalog() })
 const evidence: any[] = []
-afterAll(() => { mkdirSync('../qa/frame-followup', { recursive: true }); writeFileSync('../qa/frame-followup/engine-evidence.json', JSON.stringify(evidence, null, 2)) })
+afterAll(() => { mkdirSync('../qa/layer-followup', { recursive: true }); writeFileSync('../qa/layer-followup/engine-evidence.json', JSON.stringify(evidence, null, 2)) })
 const load = (file: string) => {
   const model = new BuildModel()
   const text = readFileSync(`public/${file}`, 'utf8')
@@ -164,7 +164,7 @@ describe('真实装配区域、连接件与物料守恒', () => {
     expect(assemblyState(plan, pre).transforms.size).toBeGreaterThan(0)
     expect(assemblyState(plan, attach).transforms.size).toBe(0)
     expect(Object.values(plan.steps[attach].parts).flat()).toEqual([])
-    expect(plan.steps.filter((s: any) => !['attach', 'join', 'fix'].includes(s.action.type)).every((s: any) => s.interfaceIds.length === 0)).toBe(true)
+    expect(plan.steps.filter((s: any) => !s.action.layer && !['attach', 'join'].includes(s.action.type)).every((s: any) => s.interfaceIds.length === 0)).toBe(true)
     expect(plan.canExport).toBe(true)
   })
 })

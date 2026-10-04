@@ -465,14 +465,14 @@ export function computeAssemblyPlan(model, config = model.assemblyConfig || {}, 
     if (action.type !== 'attach') for (const partId of partIds) { if (owner.has(partId)) diagnostics.push({ code: 'DUPLICATE_PART_STEP', severity: 'error', message: '同一部件被重复安装。', partIds: [partId], nodeIds: [] }); owner.set(partId, steps.length - 1); }
     return step;
   };
-  const preassembleUpperFrames = (r, frame, nodeIds, y) => {
-    const handledTubes = new Set(), handledNodes = new Set();
+  const planUpperFrames = (r, frame, nodeIds, y) => {
+    const modules = [], installedInLayer = [];
     const physical = frame.filter(t => !t.arm && !t.link && !t.bow);
     const byNode = new Map();
     for (const t of physical) for (const id of [t.a, t.b]) { if (!byNode.has(id)) byNode.set(id, []); byNode.get(id).push(t.id); }
     const tubeGroups = components(physical.map(t => t.id), id => { const t = model.tubes.get(id); return [t.a, t.b].flatMap(n => byNode.get(n) || []); });
     for (const tubeIds of tubeGroups) {
-      const installedTubeIds = [...owner.keys()].filter(id => model.tubes.has(id));
+      const installedTubeIds = [...owner.keys()].filter(id => model.tubes.has(id)).concat(installedInLayer);
       const moduleNodes = [...new Set(tubeIds.flatMap(id => { const t = model.tubes.get(id); return [t.a, t.b]; }))];
       const module = { id: `frame-${r.id}-${frameModules.length + 1}`, regionId: r.id, y, nodeIds: moduleNodes, tubeIds, partIds: [...moduleNodes, ...tubeIds], status: 'in-place', interfaceIds: [] };
       const supports = installedTubeIds.map(id => model.tubes.get(id)).filter(t => !t.arm && !t.link && moduleNodes.some(id => {
@@ -501,19 +501,11 @@ export function computeAssemblyPlan(model, config = model.assemblyConfig || {}, 
         const mark = { id: `interface-${interfaces.length + 1}`, sourceRegionId: r.id, targetRegionId: r.id, assemblyId: module.id, nodeId, supportTubeId: t.id, supportStepId: steps[owner.get(t.id)]?.id, position: point(n), direction: [0, -1, 0], attachment: 'upper-frame' };
         interfaces.push(mark); return mark;
       });
-      const action = { scope: 'parts', assemblyId: module.id, partIds: module.partIds, detached: true };
-      const pre = createStep(r, { nodeIds: moduleNodes, tubeIds }, { ...action, type: 'preassemble', translation: side }, copy(`${r.name}：预拼 ${Math.round(y)} cm 框架与接头`, `${r.name}: preassemble frame at ${Math.round(y)} cm`, `${r.name}: Rahmen auf ${Math.round(y)} cm vormontieren`));
-      pre.y = y; pre.frameModuleId = module.id;
-      pre.instructions = [copy('在旁边组装横管与本层接头；立柱保留在主体。', 'Assemble tubes and connectors beside the structure; leave uprights in place.', 'Rohre und Kupplungen daneben montieren; Stützen bleiben am Aufbau.')];
-      const attach = createStep(r, { nodeIds: moduleNodes, tubeIds }, { ...action, type: 'attach', translation: above, detached: false, direction: [0, -1, 0] }, copy(`${r.name}：${Math.round(y)} cm 框架向下套入`, `${r.name}: lower frame onto uprights at ${Math.round(y)} cm`, `${r.name}: Rahmen auf ${Math.round(y)} cm von oben aufsetzen`));
-      attach.y = y; attach.frameModuleId = module.id; attach.interfaceIds = marks.map(m => m.id);
-      attach.instructions = [copy('对齐所有向下接口，将完整框架竖直套入已装立柱。', 'Align all downward ports and lower the complete frame onto the uprights.', 'Alle unteren Anschlüsse ausrichten und den Rahmen auf die Stützen absenken.')];
-      attach.dependsOn = [...new Set([...attach.dependsOn, ...marks.map(m => m.supportStepId).filter(Boolean)])];
-      Object.assign(module, { status: 'preassembled', prepareStepId: pre.id, attachStepId: attach.id, interfaceIds: attach.interfaceIds, prepareTranslation: side, installationTranslation: above, transportPath, installation: { direction: [0, -1, 0], commonAxis: true, pathVerified: true, sampleSpacing: geometry().tubeRadius || 2.45, pathSamples: transportPath.slice(1).map((p, i) => Math.ceil(distance(transportPath[i], p) / (geometry().tubeRadius || 2.45)) + 1) } });
+      Object.assign(module, { status: 'lowerable', interfaceIds: marks.map(m => m.id), installationTranslation: above, transportPath, installation: { direction: [0, -1, 0], commonAxis: true, pathVerified: true, sampleSpacing: geometry().tubeRadius || 2.45, pathSamples: transportPath.slice(1).map((p, i) => Math.ceil(distance(transportPath[i], p) / (geometry().tubeRadius || 2.45)) + 1) } });
       frameModules.push(module);
-      for (const id of tubeIds) handledTubes.add(id); for (const id of moduleNodes) handledNodes.add(id);
+      modules.push(module); installedInLayer.push(...tubeIds);
     }
-    return { handledTubes, handledNodes };
+    return modules;
   };
   for (const r of regions) {
     const preassemble = ['roof', 'ramp', 'slide'].includes(r.kind);
@@ -588,10 +580,21 @@ export function computeAssemblyPlan(model, config = model.assemblyConfig || {}, 
         const clampIds = keys.clampIds.filter(id => bucket(model.clamps.get(id).y) === y);
         const at = keys.tubeIds.map(id => model.tubes.get(id)).filter(t => bucket(Math.min(model.nodes.get(t.a).y, model.nodes.get(t.b).y)) === y);
         const frame = at.filter(t => Math.abs(model.nodes.get(t.a).y - model.nodes.get(t.b).y) <= EPS), risers = at.filter(t => !frame.includes(t));
-        const { handledTubes, handledNodes } = preassembleUpperFrames(r, frame, nodeIds, y);
-        const remainingNodes = nodeIds.filter(id => !handledNodes.has(id)), remainingFrame = frame.filter(t => !handledTubes.has(t.id));
-        if (remainingNodes.length || remainingFrame.length || clampIds.length) {
-          const s = createStep(r, { nodeIds: remainingNodes, tubeIds: remainingFrame.map(t => t.id), clampIds }, buildAction, copy(`${r.name}：${Math.round(y)} cm 框架`, `${r.name}: frame at ${Math.round(y)} cm`, `${r.name}: Rahmen auf ${Math.round(y)} cm`)); s.y = y; s.kind = 'frame';
+        const modules = planUpperFrames(r, frame, nodeIds, y);
+        if (nodeIds.length || frame.length || clampIds.length) {
+          const action = modules.length ? { type: 'build', scope: 'parts', layer: true, modules: modules.map(m => ({ id: m.id, partIds: m.partIds, translation: m.installationTranslation, interfaceIds: m.interfaceIds })) } : buildAction;
+          const title = modules.length ? copy(`${r.name}：${Math.round(y)} cm 本层框架向下套入`, `${r.name}: lower frames at ${Math.round(y)} cm`, `${r.name}: Rahmen auf ${Math.round(y)} cm absenken`) : copy(`${r.name}：${Math.round(y)} cm 框架`, `${r.name}: frame at ${Math.round(y)} cm`, `${r.name}: Rahmen auf ${Math.round(y)} cm`);
+          const s = createStep(r, { nodeIds, tubeIds: frame.map(t => t.id), clampIds }, action, title); s.y = y; s.kind = 'frame';
+          if (modules.length) {
+            const moving = new Set(modules.flatMap(m => m.partIds));
+            s.action.inPlacePartIds = s.partIds.filter(id => !moving.has(id));
+            s.interfaceIds = modules.flatMap(m => m.interfaceIds);
+            const marks = interfaces.filter(m => s.interfaceIds.includes(m.id));
+            s.dependsOn = [...new Set([...s.dependsOn, ...marks.map(m => m.supportStepId).filter(Boolean)])];
+            s.instructions = [copy('先拼好本层各框架与接头，再分别对齐立柱向下套入。', 'Preassemble each frame with connectors, then lower each onto its uprights.', 'Rahmen mit Kupplungen vormontieren, dann jeweils auf die Stützen absenken.')];
+            if (s.action.inPlacePartIds.length) s.instructions.push(copy('其余本层部件在位安装，不随框架下移。', 'Fit remaining parts in place; they do not move with the frames.', 'Übrige Teile vor Ort montieren; sie bewegen sich nicht mit den Rahmen.'));
+            for (const module of modules) module.installStepId = s.id;
+          }
         }
         if (risers.length) { const s = createStep(r, { tubeIds: risers.map(t => t.id) }, buildAction, copy(`${r.name}：向上安装立柱`, `${r.name}: install uprights`, `${r.name}: Stützen einsetzen`)); s.y = y; s.kind = 'risers'; }
       }
@@ -686,6 +689,17 @@ export function assemblyState(plan, index, { action = false } = {}) {
       arrows.push({ id: mark.id, from: to.map((v, i) => v + translation[i]), to, direction: norm(translation.map(v => -v)), regionId: step.regionId });
     }
   }
+  if (action && step?.action?.layer) {
+    const regionTranslation = detached.get(step.regionId) || [0, 0, 0];
+    for (const module of step.action.modules) {
+      for (const id of module.partIds) if (visible.has(id)) transforms.set(id, module.translation.map((v, axis) => v + regionTranslation[axis]));
+      for (const id of module.interfaceIds) {
+        const mark = plan.interfaces.find(m => m.id === id), to = mark.position.map((v, axis) => v + regionTranslation[axis]);
+        arrows.push({ id, assemblyId: module.id, from: to.map((v, axis) => v + module.translation[axis]), to, direction: [0, -1, 0], regionId: step.regionId });
+      }
+    }
+    for (const id of step.action.inPlacePartIds || []) { visible.delete(id); current.delete(id); done.delete(id); transforms.delete(id); hiddenNewParts.add(id); }
+  }
   if (action) for (const operation of step?.action?.operations || []) {
     const regionTranslation = detached.get(step.regionId) || [0, 0, 0];
     for (const id of operation.partIds) if (visible.has(id)) transforms.set(id,
@@ -697,7 +711,7 @@ export function assemblyState(plan, index, { action = false } = {}) {
     for (const id of step.action.partIds) {
       visible.delete(id); current.delete(id); done.delete(id); transforms.delete(id); hiddenNewParts.add(id);
     }
-  } else if (action && ['build', 'preassemble'].includes(step?.action?.type)) {
+  } else if (action && ['build', 'preassemble'].includes(step?.action?.type) && !step.action.layer) {
     const moving = new Set((step.action.operations || []).flatMap(operation => operation.partIds));
     const beforeKeys = ['tubeIds', 'panelIds', 'textileIds', 'slideIds', 'fittingIds', 'clampIds'];
     // 只新增接头的步骤也展示装配前；纯拓扑 link 不代表新增实体管。
@@ -707,5 +721,5 @@ export function assemblyState(plan, index, { action = false } = {}) {
       visible.delete(id); current.delete(id); done.delete(id); transforms.delete(id); hiddenNewParts.add(id);
     }
   }
-  return { done, current, visible, transforms, arrows, interfaceMarks, hiddenNewParts, actionStage: action && hiddenNewParts.size ? 'before' : 'installation', fixingPoints: (plan.fixingPoints || []).filter(p => p.stepId === step?.id) };
+  return { done, current, visible, transforms, arrows, interfaceMarks, hiddenNewParts, actionStage: action && hiddenNewParts.size && !step?.action?.layer ? 'before' : 'installation', fixingPoints: (plan.fixingPoints || []).filter(p => p.stepId === step?.id) };
 }

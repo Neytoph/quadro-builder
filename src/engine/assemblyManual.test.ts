@@ -15,33 +15,40 @@ const assetEvidence: any[] = []
 afterAll(() => { mkdirSync('.work', { recursive: true }); writeFileSync('.work/assembly-pdf-assets.json', JSON.stringify(assetEvidence, null, 2)) })
 
 describe('说明书材料编号', () => {
-  it('C0179预拼页只呈现本模块零件，分开图不制造插接箭头或修改模型状态', () => {
+  it('C0179整层安装保留已装主体，顶层框架与接头一同下套且不修改模型状态', () => {
     const model = new BuildModel()
     model.loadJSON(parseQDF(readFileSync('public/qdf/C0179.qdf', 'utf8'), { tubes: buildableTubes(), panels: panels(), connectorSize: geometry().connectorSize, mergeEps: 2 }))
     const plan = computeAssemblyPlan(model)
-    const index = plan.steps.findIndex((step: any) => step.y === 20 && step.action.scope === 'parts' && step.action.type === 'preassemble')
+    const index = plan.steps.findIndex((step: any) => step.y === 20 && step.action.layer)
     expect(index).toBeGreaterThanOrEqual(0)
     const step = plan.steps[index], before = assemblyState(plan, index, { action: true }), after = assemblyState(plan, index)
     const saved = JSON.stringify(model.toJSON()), originalVisible = [...before.visible]
     const left = assemblyPresentationState(model, plan, step, before), right = assemblyPresentationState(model, plan, step, after)
-    expect([...left.visible].sort()).toEqual([...step.action.partIds].sort())
-    expect([...right.visible].sort()).toEqual([...step.action.partIds].sort())
-    expect(left.arrows).toEqual([])
-    for (const id of step.nodeIds) expect(left.transforms.get(id)).toEqual(right.transforms.get(id))
-    for (const id of step.tubeIds) expect(left.transforms.get(id)).toEqual(right.transforms.get(id).map((v: number, axis: number) => v + (axis === 1 ? 8 : 0)))
+    expect([...left.visible].sort()).toEqual([...before.visible].sort())
+    expect([...right.visible].sort()).toEqual([...after.visible].sort())
+    expect(left.contextFiltered).toBe(false)
+    expect(left.arrows).toHaveLength(4)
+    for (const module of step.action.modules) for (const id of module.partIds) {
+      expect(left.transforms.get(id)).toEqual(module.translation)
+      expect(right.transforms.has(id)).toBe(false)
+    }
+    for (const id of before.done) expect(left.transforms.has(id)).toBe(false)
     expect([...before.visible]).toEqual(originalVisible)
-    expect(before.hiddenNewParts.size).toBe(step.action.partIds.length)
+    expect(before.hiddenNewParts.size).toBe(0)
     expect(JSON.stringify(model.toJSON())).toBe(saved)
   })
-  it('C0179局部下套页保留真实立柱到基础，排除无关平台并保持支撑原位', () => {
+  it('C0179 80cm整层页同时呈现四个独立框架及完整已装主体', () => {
     const model = new BuildModel()
     model.loadJSON(parseQDF(readFileSync('public/qdf/C0179.qdf', 'utf8'), { tubes: buildableTubes(), panels: panels(), connectorSize: geometry().connectorSize, mergeEps: 2 }))
     const plan = computeAssemblyPlan(model)
-    const index = plan.steps.findIndex((step: any) => step.y === 20 && step.action.scope === 'parts' && step.action.type === 'attach')
+    const index = plan.steps.findIndex((step: any) => step.y === 80 && step.action.layer)
     const step = plan.steps[index], state = assemblyState(plan, index, { action: true })
     const presented = assemblyPresentationState(model, plan, step, state)
-    expect(presented.visible.size).toBeLessThan(state.visible.size)
-    for (const id of step.action.partIds) expect(presented.visible.has(id)).toBe(true)
+    expect(presented.visible.size).toBe(state.visible.size)
+    expect(step.action.modules).toHaveLength(4)
+    const moduleTubes = step.action.modules.flatMap((module: any) => module.partIds.filter((id: string) => model.tubes.has(id)))
+    expect(moduleTubes).toHaveLength(21)
+    for (const module of step.action.modules) for (const id of module.partIds) expect(presented.visible.has(id)).toBe(true)
     for (const mark of presented.interfaceMarks) {
       expect(presented.visible.has(mark.supportTubeId)).toBe(true)
       expect(presented.transforms.has(mark.supportTubeId)).toBe(false)
@@ -50,8 +57,9 @@ describe('说明书材料编号', () => {
       expect(presented.visible.has(support.b)).toBe(true)
     }
     expect([...presented.visible].some(id => model.nodes.get(id)?.y === 0)).toBe(true)
-    // 原模型这一低平台有四根横管与四根立柱，基础横管接向其他平台。
-    expect([...presented.visible].filter(id => model.tubes.has(id))).toHaveLength(8)
+    const installedTubes = [...state.done].filter(id => model.tubes.has(id))
+    expect(installedTubes.length).toBeGreaterThan(21)
+    for (const id of installedTubes) expect(presented.visible.has(id)).toBe(true)
     expect(presented.arrows.every((arrow: any) => arrow.from[1] > arrow.to[1])).toBe(true)
   })
   it('C0179 第2步全部7种零件留在步骤页，管35 cm不再单独占页', () => {
