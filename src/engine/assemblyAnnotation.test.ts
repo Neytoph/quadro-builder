@@ -1,7 +1,8 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { drawManualArrows, layoutOperationCallouts, projectedOperationArrowHead, projectOperationMarks } from './assemblyManual.js'
 import { BuildModel } from './model.js'
-import { loadCatalog } from './catalog.js'
+import { buildableTubes, loadCatalog } from './catalog.js'
+import { assemblyDetailState } from './assemblyPlan.js'
 
 beforeAll(async () => { await loadCatalog() })
 
@@ -137,5 +138,40 @@ describe('projected assembly annotations without model planning', () => {
     expect(strokes.filter(stroke => stroke.path.length === 2).map(stroke => stroke.path[0])).toEqual([[160, 110], [160, 110], [160, 110], [160, 110]])
     expect(strokes.some(stroke => stroke.color === '#b33d00')).toBe(false)
     expect(state.arrows).toEqual([])
+  })
+
+  it('a connector hidden by the real detail-state action appears with its number only at its actual completed position', () => {
+    const model = new BuildModel()
+    const corners = [[10, 20, 20], [50, 20, 20], [50, 20, 60], [10, 20, 60]].map(p => model.addNode(p[0], p[1], p[2]))
+    for (let i = 0; i < 4; i++) model.addTube(corners[i].id, corners[(i + 1) % 4].id, buildableTubes()[0].id, 1, 40)
+    const corner = corners[0], snapshot = model.toJSON()
+    // Isolate the production rendering-state contract, without computing a
+    // native fixture plan or pretending this partial frame is exportable.
+    const operation = { id: 'orient-corner', type: 'orient-connector', order: 3, partIds: [corner.id], consumesPartIds: [corner.id] }
+    const group = { id: 'orient-detail', operationIds: [operation.id], partIds: [corner.id] }
+    const plan = { interfaces: [], regions: [{ id: 'body', tubeIds: [...model.tubes.keys()] }], steps: [{ id: 'frame', regionId: 'body', y: 20,
+      partIds: [corner.id], operations: [operation], detailGroups: [group], interfaceIds: [] }] }
+    const action = assemblyDetailState(plan, 0, group.id, { action: true }), completed = assemblyDetailState(plan, 0, group.id, { action: false })
+    expect(action.visible.has(corner.id)).toBe(false)
+    expect(completed.visible.has(corner.id)).toBe(true)
+    expect(action.arrows).toEqual([])
+    expect(completed.arrows).toEqual([])
+    const positions: number[][] = []
+    const scene = { projectWorld: (points: number[][]) => { positions.push(...points); return points.map(p => ({ u: p[0] / 100, v: p[1] / 100 })) } }
+    const beforeMarks = projectOperationMarks(scene, model, action, 4 / 3), afterMarks = projectOperationMarks(scene, model, completed, 4 / 3)
+    expect(beforeMarks).toEqual([])
+    expect(afterMarks).toEqual([{ u: 0.1, v: 0.2, order: 3 }])
+    expect(positions).toEqual([[10, 20, 20]])
+    const texts: string[] = [], paints: string[] = []
+    const canvas: any = { measureText: (text: string) => ({ width: text.length * 18 }), fillText: (text: string) => texts.push(text),
+      stroke: () => paints.push(canvas.strokeStyle), fill: () => paints.push(canvas.fillStyle) }
+    const ctx = new Proxy(canvas, { get: (target, name) => name in target ? target[name] : () => {} })
+    drawManualArrows(ctx, { width: 400, height: 300 }, 100, 50, 400, 300, [], [], true, beforeMarks)
+    expect(texts).toEqual([])
+    drawManualArrows(ctx, { width: 400, height: 300 }, 100, 50, 400, 300, [], [], true, afterMarks)
+    expect(texts).toEqual(['③'])
+    expect(paints).not.toContain('#b33d00')
+    expect(completed.visible.has(corners[1].id)).toBe(false)
+    expect(model.toJSON()).toEqual(snapshot)
   })
 })

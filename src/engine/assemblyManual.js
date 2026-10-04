@@ -1341,6 +1341,7 @@ function paintDetailRow(ctx, { group, left, right, location, icons, copy, y, hei
   const box = { x0: M, x1: 133.5, imgY, imgW: 124, imgH };
   paintPair(ctx, left.img, right.img, box, { front: copy.actionView, back: copy.completeView }, fill, left.marks, right.marks, true);
   drawManualArrows(ctx, left.img, mm(box.x0), mm(imgY), mm(box.imgW), mm(imgH), left.arrows, left.marks, true, left.operationMarks);
+  drawManualArrows(ctx, right.img, mm(box.x1), mm(imgY), mm(box.imgW), mm(imgH), [], right.marks, true, right.operationMarks);
   const legendY = imgY + imgH + 2;
   const consumed = paintLegend(ctx, group.items, icons, mm(M), mm(legendY), mm(245), mm(y + height));
   if (consumed !== group.items.length) throw manualError('pagination', '局部材料参考绘制空间不足');
@@ -1367,6 +1368,7 @@ function paintCompactDetail(ctx, { group, left, right, location, icons, copy, x,
   const completeY = imgY + imgH + 2;
   drawShot(ctx, right.img, mm(x), mm(completeY), mm(width), mm(imgH), fill);
   drawMarks(ctx, right.img, mm(x), mm(completeY), mm(width), mm(imgH), right.marks, true);
+  drawManualArrows(ctx, right.img, mm(x), mm(completeY), mm(width), mm(imgH), [], right.marks, true, right.operationMarks);
   paintCaption(ctx, `${copy.completeView} · ${directionLabel(group, copy)}`, mm(x), mm(completeY), mm(imgH));
   const legendY = completeY + imgH + 2;
   paintDetailReferences(ctx, group.items, icons, mm(x), mm(legendY), mm(104.5));
