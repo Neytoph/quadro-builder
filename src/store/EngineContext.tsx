@@ -1107,7 +1107,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     })
   }, [])
 
-  const newTab = useCallback(() => {
+  // 地址导入内部也需要空白标签页；它继续兑现针对最终入口模型的预览请求。
+  const createEmptyTab = useCallback(() => {
     track('builder.design.new')
     snapshotActive()
     const e2 = eng.current
@@ -1119,6 +1120,12 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     applyTab(tab)
     syncTabs()
   }, [applyTab, snapshotActive, syncTabs, t])
+
+  // 用户主动新建意味着已离开此前的入口目标，取消仍在等待的手册预览。
+  const newTab = useCallback(() => {
+    pendingManualOpen.current = false
+    createEmptyTab()
+  }, [createEmptyTab])
 
   const activateTab = useCallback((tabId: string) => {
     if (tabId === activeRef.current) return
@@ -1205,6 +1212,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
 
   const closeTab = useCallback((tabId: string) => {
     const closing = tabsRef.current.find(x => x.tabId === tabId)
+    // 关闭当前页会换到别的模型；关闭后台页不改变预览请求的目标。
+    if (closing && tabId === activeRef.current) pendingManualOpen.current = false
     const rest = tabsRef.current.filter(x => x.tabId !== tabId)
     if (closing) void dropTabDoc(closing.tabId, closing.local)
     if (!rest.length) {
@@ -2108,7 +2117,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       if (!data) { notify(t('toast.shareInvalid'), 'err'); return }
       const e2 = eng.current
       if (!e2) return
-      if (modelPartCount(e2.model.toJSON()) > 0) newTab()
+      if (modelPartCount(e2.model.toJSON()) > 0) createEmptyTab()
       // 当前是共享方案的标签页时 applyModelJson 自己会新开一个
       if (!applyModelJson(data, { undoable: false })) { notify(t('toast.shareInvalid'), 'err'); return }
       const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
@@ -2121,7 +2130,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       if (ent.copy && !VIEW_ONLY) await copyToAccount()
       setEntryReady(true)
     })().catch(err => notify(err instanceof Error ? err.message : String(err), 'err'))
-  }, [ready, applyModelJson, copyToAccount, newTab, notify, syncTabs, t])
+  }, [ready, applyModelJson, copyToAccount, createEmptyTab, notify, syncTabs, t])
 
   // 注册完从注册页回来（?export=）：确认登录上了，问一句要不要接着导出。
   // 下载要由一次点击触发，浏览器才不会拦，所以不直接开始。
