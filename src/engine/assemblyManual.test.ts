@@ -105,7 +105,7 @@ describe('说明书材料编号', () => {
 
   it('s33 两条面板物料不再溢出封面成为稀疏续页', () => {
     const model = new BuildModel()
-    model.loadJSON(JSON.parse(readFileSync('public/assembly-fixtures/s33.json', 'utf8')))
+    model.loadJSON(JSON.parse(readFileSync('tests/fixtures/assembly/s33.json', 'utf8')))
     const items = coverItems(computeBOM(model))
     const ctx = { font: '', measureText: (text: string) => ({ width: [...text].length * 20 }) }
     const layout = measureManualLegend(ctx, items, 2450)
@@ -145,7 +145,7 @@ describe('说明书材料编号', () => {
   })
   it('s33 说明书不生成固定检查步骤或螺丝位置', () => {
     const model = new BuildModel()
-    expect(model.loadJSON(JSON.parse(readFileSync('public/assembly-fixtures/s33.json', 'utf8'))).ok).toBe(true)
+    expect(model.loadJSON(JSON.parse(readFileSync('tests/fixtures/assembly/s33.json', 'utf8'))).ok).toBe(true)
     const plan = computeAssemblyPlan(model)
     expect(plan.steps.some((step: any) => step.action.type === 'fix')).toBe(false)
     expect(plan.fixingPoints).toEqual([])
@@ -170,8 +170,8 @@ describe('说明书材料编号', () => {
     expect(() => numberStepItems([{ key: 'unknown', id: 'unknown', count: 1 }], [])).toThrow('材料未列入总料表')
   })
 
-  it.each(['qdf/B0012.qdf', 'qdf/C0005.qdf', 'qdf/C0013.qdf', 'qdf/C0156.qdf', 'qdf/C0179.qdf', 'assembly-fixtures/s33.json', 'assembly-fixtures/s36.json'])('%s 说明书物料图片存在且不统计螺丝', file => {
-      const text = readFileSync(`public/${file}`, 'utf8')
+  it.each(['qdf/B0012.qdf', 'qdf/C0005.qdf', 'qdf/C0013.qdf', 'qdf/C0156.qdf', 'qdf/C0179.qdf', 'tests/fixtures/assembly/s33.json', 'tests/fixtures/assembly/s36.json'])('%s 说明书物料图片存在且不统计螺丝', file => {
+      const text = readFileSync(file.endsWith('.qdf') ? `public/${file}` : file, 'utf8')
       const data = file.endsWith('.qdf') ? parseQDF(text, { tubes: buildableTubes(), panels: panels(), connectorSize: geometry().connectorSize, mergeEps: 2 }) : JSON.parse(text)
       const model = new BuildModel()
       expect(model.loadJSON(data).ok).toBe(true)

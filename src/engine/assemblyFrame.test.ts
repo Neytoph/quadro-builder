@@ -1,11 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { loadCatalog, buildableTubes, panels, geometry } from './catalog.js'
 import { BuildModel } from './model.js'
 import { parseQDF } from './qdfimport.js'
 import { computeAssemblyPlan, assemblyState } from './assemblyPlan.js'
 
-const evidenceDir = '../qa/layer-followup'
+const evidenceDir = '.work/assembly-qa'
 const records: any[] = []
 beforeAll(async () => { await loadCatalog(); mkdirSync(evidenceDir, { recursive: true }) })
 afterAll(() => writeFileSync(`${evidenceDir}/frame-engine-evidence.json`, JSON.stringify(records, null, 2)))
@@ -26,14 +26,13 @@ describe('本层框架连续展示与真实下套', () => {
   it('C0179的20/80/120cm各合并为一层，39根横管和顶接头真实下套且立柱不移动', () => {
     const model = load('qdf/C0179.qdf'), before = model.toJSON(), plan = computeAssemblyPlan(model)
     expect(plan.canExport, JSON.stringify(plan.diagnostics)).toBe(true)
-    const baselineFile = '../qa/frame-followup/C0179-baseline.json'
-    const baseline = existsSync(baselineFile) ? JSON.parse(readFileSync(baselineFile, 'utf8')) : null
+    const baseline = JSON.parse(readFileSync('tests/fixtures/assembly/C0179-baseline.json', 'utf8'))
     expect(plan.steps.some((s: any) => s.action.scope === 'parts' && s.action.type === 'preassemble')).toBe(false)
     for (const [y, count] of [[20, 4], [80, 21], [120, 14]]) {
       const modules = plan.frameModules.filter((m: any) => m.y === y && m.status === 'lowerable')
       const ids = modules.flatMap((m: any) => m.tubeIds)
       expect(ids).toHaveLength(count)
-      if (baseline) expect(ids.sort()).toEqual(baseline.steps.find((s: any) => s.y === y && s.kind === 'frame').tubeIds.sort())
+      expect(ids.sort()).toEqual(baseline.steps.find((s: any) => s.y === y && s.kind === 'frame').tubeIds.sort())
       const layerIndices = plan.steps.map((s: any, i: number) => s.y === y && s.action.layer && s.regionId === modules[0].regionId ? i : -1).filter((i: number) => i >= 0)
       expect(layerIndices).toHaveLength(1)
       const index = layerIndices[0], step = plan.steps[index]

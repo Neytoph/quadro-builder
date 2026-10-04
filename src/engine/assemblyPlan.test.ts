@@ -8,10 +8,10 @@ import { proposeAssemblyRepairs, resolveNodeConnection } from './connectionResol
 
 beforeAll(async () => { await loadCatalog() })
 const evidence: any[] = []
-afterAll(() => { mkdirSync('../qa/layer-followup', { recursive: true }); writeFileSync('../qa/layer-followup/engine-evidence.json', JSON.stringify(evidence, null, 2)) })
+afterAll(() => { mkdirSync('.work/assembly-qa', { recursive: true }); writeFileSync('.work/assembly-qa/engine-evidence.json', JSON.stringify(evidence, null, 2)) })
 const load = (file: string) => {
   const model = new BuildModel()
-  const text = readFileSync(`public/${file}`, 'utf8')
+  const text = readFileSync(file.endsWith('.qdf') ? `public/${file}` : file, 'utf8')
   const data = file.endsWith('.qdf') ? parseQDF(text, { tubes: buildableTubes(), panels: panels(), connectorSize: geometry().connectorSize, mergeEps: 2 }) : JSON.parse(text)
   expect(model.loadJSON(data).ok).toBe(true)
   return model
@@ -26,7 +26,7 @@ describe('真实装配区域、连接件与物料守恒', () => {
     expect(plan.regions.some((r: any) => r.id === cover.supportRegionId)).toBe(true)
     expect(plan.steps.filter((s: any) => s.regionId === cover.id).map((s: any) => s.action.type)).toContain('attach')
   })
-  it.each(['qdf/B0012.qdf', 'qdf/C0005.qdf', 'qdf/C0013.qdf', 'qdf/C0156.qdf', 'qdf/C0179.qdf', 'assembly-fixtures/s33.json', 'assembly-fixtures/s36.json'])('%s 全部实体仅一次归属且 BOM 守恒', file => {
+  it.each(['qdf/B0012.qdf', 'qdf/C0005.qdf', 'qdf/C0013.qdf', 'qdf/C0156.qdf', 'qdf/C0179.qdf', 'tests/fixtures/assembly/s33.json', 'tests/fixtures/assembly/s36.json'])('%s 全部实体仅一次归属且 BOM 守恒', file => {
     const model = load(file), plan: any = computeAssemblyPlan(model)
     expect(plan.regions.length).toBeGreaterThan(1)
     expect(plan.ledger.rows.filter((r: any) => !r.conserved)).toEqual([])
@@ -41,7 +41,7 @@ describe('真实装配区域、连接件与物料守恒', () => {
   })
 
   it('s36 用弯管切线识别重复端口，真实修正移除两根 T15并保留支撑和料表', () => {
-    const model = load('assembly-fixtures/s36.json'), before = model.toJSON()
+    const model = load('tests/fixtures/assembly/s36.json'), before = model.toJSON()
     for (const id of ['n35', 'n37']) {
       const connection = resolveNodeConnection(model, id)
       expect(connection.type).toBe('3way')
@@ -58,11 +58,11 @@ describe('真实装配区域、连接件与物料守恒', () => {
     const repaired = new BuildModel(); expect(repaired.loadJSON(repair.data).ok).toBe(true)
     const repairedPlan = computeAssemblyPlan(repaired)
     expect(repairedPlan.canExport, JSON.stringify(repairedPlan.diagnostics)).toBe(true)
-    evidence.push({ file: 'assembly-fixtures/s36.json repaired', canExport: true, changes: repair.changes, bomChanges: repair.bomChanges, validation: repair.validation })
+    evidence.push({ file: 'tests/fixtures/assembly/s36.json repaired', canExport: true, changes: repair.changes, bomChanges: repair.bomChanges, validation: repair.validation })
   })
 
   it('尖顶两斜管与顶端弯头一起预装，安装动作分离且不重复计料', () => {
-    const model = load('assembly-fixtures/s36.json'), plan = computeAssemblyPlan(model)
+    const model = load('tests/fixtures/assembly/s36.json'), plan = computeAssemblyPlan(model)
     const roof = plan.regions.find((r: any) => r.kind === 'roof')!
     expect(roof).toBeTruthy()
     expect(roof.nodeIds).toContain('n274'); expect(roof.tubeIds.length).toBeGreaterThanOrEqual(2)
@@ -109,7 +109,7 @@ describe('真实装配区域、连接件与物料守恒', () => {
   })
 
   it('反转用户区域顺序不改变接口支撑来源，topo排序保留稳定物理依赖', () => {
-    const model = load('assembly-fixtures/s33.json'), original = computeAssemblyPlan(model)
+    const model = load('tests/fixtures/assembly/s33.json'), original = computeAssemblyPlan(model)
     const config = { version: 1, regions: original.regions.map((r: any) => ({ id: r.id, name: r.name, partIds: r.partIds })), order: original.regions.map((r: any) => r.id).reverse() }
     const reversed = computeAssemblyPlan(model, config)
     expect(reversed.interfaces.map((i: any) => [i.sourceRegionId, i.targetRegionId, i.nodeId])).toEqual(original.interfaces.map((i: any) => [i.sourceRegionId, i.targetRegionId, i.nodeId]))
@@ -118,7 +118,7 @@ describe('真实装配区域、连接件与物料守恒', () => {
   })
 
   it('屋顶共同竖直插接轴通过真实管径通道检查，横穿安装空间的管件被定位阻止', () => {
-    const model = load('assembly-fixtures/s33.json'), clear = computeAssemblyPlan(model)
+    const model = load('tests/fixtures/assembly/s33.json'), clear = computeAssemblyPlan(model)
     const roof = clear.regions.find((r: any) => r.kind === 'roof')!
     expect(roof.installation.commonAxis).toBe(true); expect(roof.installation.pathVerified).toBe(true)
     expect(roof.detachedTranslation[1]).toBeGreaterThan(0)
@@ -143,7 +143,7 @@ describe('真实装配区域、连接件与物料守恒', () => {
   })
 
   it('修正保留区域编辑并清理删去管件后的空区域和order引用', () => {
-    const model = load('assembly-fixtures/s36.json')
+    const model = load('tests/fixtures/assembly/s36.json')
     model.assemblyConfig = { version: 1, regions: [{ id: 'removed-riser', name: '冲突柱', partIds: ['t45', 't47'] }], order: ['removed-riser'] }
     const proposal = proposeAssemblyRepairs(model, ['n35', 'n37'])
     expect(proposal.canApply).toBe(true)
