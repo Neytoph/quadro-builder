@@ -5,8 +5,9 @@
 //
 // 三条规矩，和后端那边是一套（gateway/internal/events）：
 //
-//  1. 没配 VITE_ANALYTICS_URL 就完全空转。开源本地版不配，
+//  1. 没配 VITE_ANALYTICS_URL 就不记录统计。开源本地版不配，
 //     一个字节都不会往外发——这和 sync 的处理方式一致。
+//     成功动作仍可通过本地窗口事件通知托管页面，只传动作名称。
 //  2. 只记"做了什么"，不记"是谁在哪"：没有 IP、没有 UA 原文、
 //     没有任何用户输入。props 里只放枚举和数字。
 //     理由很实际：这库要能随手打开看。
@@ -42,6 +43,10 @@ const MAX_BATCH = 20
 const TIME_TICK_MS = 5000
 const TIME_REPORT_MS = 15000
 const ACTIVE_WINDOW_MS = 30000
+// 托管页面可订阅成功动作、提交有限的入口统计；不传模型或用户输入。
+const SITE_ACTIONS = new Set(['builder.design.save', 'builder.design.saveAs', 'builder.export.manual.done'])
+const SITE_TRACK_NAMES = new Set(['builder.wechat.open', 'builder.wechat.download', 'builder.wechat.prompt'])
+const SITE_TRACK_SOURCES = new Set(['home', 'chat', 'builder-help', 'builder-save', 'builder-manual'])
 
 type Props = Record<string, string | number | boolean>
 type Queued = { name: string; props?: Props }
@@ -132,6 +137,11 @@ function flush(beacon = false): void {
 
 /** 记一个动作。名字要分层：`builder.对象.动作`。 */
 export function track(name: string, props?: Props): void {
+  if (SITE_ACTIONS.has(name) && typeof window !== 'undefined') {
+    try {
+      window.dispatchEvent(new CustomEvent('quadro-builder:action', { detail: { name } }))
+    } catch { /* 托管页面通知不影响原动作和统计 */ }
+  }
   if (!URL_) return
   queue.push({ name, props: { ...props, visit } })
   if (queue.length >= MAX_BATCH) { flush(); return }
@@ -151,8 +161,21 @@ export function flushNow(): void {
   flush(true)
 }
 
+function trackSiteEvent(event: Event): void {
+  const detail: unknown = (event as CustomEvent<unknown>).detail
+  if (!detail || typeof detail !== 'object' || Array.isArray(detail)) return
+  const { name, props } = detail as { name?: unknown; props?: unknown }
+  if (typeof name !== 'string' || !SITE_TRACK_NAMES.has(name)) return
+  if (!props || typeof props !== 'object' || Array.isArray(props)) return
+  const source = (props as { source?: unknown }).source
+  if (typeof source !== 'string' || !SITE_TRACK_SOURCES.has(source)) return
+  track(name, { source })
+}
+
 /** 挂在页面生命周期上。App 挂载时调一次就够。 */
 export function startAnalytics(): void {
+  // 同一个监听函数重复注册也只运行一次；入站名称不在成功动作里，不会循环。
+  window.addEventListener('quadro-builder:track', trackSiteEvent)
   if (!URL_) return
   let lastTick = performance.now()
   let lastInput = -Infinity
