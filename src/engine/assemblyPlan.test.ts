@@ -137,11 +137,15 @@ describe('真实装配区域、连接件与物料守恒', () => {
   it('反转用户区域顺序不改变接口支撑来源，topo排序保留稳定物理依赖', () => {
     const model = load('assembly-fixtures/s33.json'), original = computeAssemblyPlan(model)
     const config = { version: 1, regions: original.regions.map((r: any) => ({ id: r.id, name: r.name, partIds: r.partIds })), order: original.regions.map((r: any) => r.id).reverse() }
+    const restored = computeAssemblyPlan(model, { ...config, order: original.regions.map((r: any) => r.id) })
     const reversed = computeAssemblyPlan(model, config)
     expect(reversed.interfaces.map((i: any) => [i.sourceRegionId, i.targetRegionId, i.nodeId])).toEqual(original.interfaces.map((i: any) => [i.sourceRegionId, i.targetRegionId, i.nodeId]))
     expect(reversed.canExport).toBe(original.canExport)
     const blockers = (plan: any) => plan.diagnostics.filter((item: any) => item.severity === 'error').map((item: any) => [item.code, [...item.partIds].sort().join('|')].join(':')).sort()
-    expect(blockers(reversed)).toEqual(blockers(original))
+    expect(blockers(restored)).toEqual(blockers(original))
+    // Reversing independent regions may introduce a different real obstacle.
+    // Interface support remains invariant; the new path must still fail closed.
+    for (const plan of [original, restored, reversed]) for (const clampId of ['k52', 'k53']) expect(plan.diagnostics.some((d: any) => d.code === 'PRETHREAD_METHOD_UNVERIFIED' && d.partIds.includes(clampId))).toBe(true)
     for (const step of reversed.steps) for (const id of step.dependsOn) expect(reversed.steps.findIndex((s: any) => s.id === id)).toBeLessThan(reversed.steps.indexOf(step))
   })
 
