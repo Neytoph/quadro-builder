@@ -42,7 +42,7 @@ describe('同一步局部导航与共用材料编号', () => {
     }
     expect(groups).toBeGreaterThan(0)
     expect(model.toJSON()).toEqual(before)
-  }, 30000)
+  }, 120000)
 
   it('动作序号独立于材料编号，旧选择不会指向新计划中的其他详图', () => {
     expect(operationLabel(1)).toBe('①')

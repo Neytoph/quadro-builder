@@ -73,6 +73,8 @@ describe('one reading step per layer', () => {
     ];
     floor.action.inPlacePartIds = [];
     plan.interfaces.push({ id: 'left-port', position: [0, 0, 0] }, { id: 'right-port', position: [40, 0, 0] });
+    // The later column has a real motion, but the layer overview hides it.
+    plan.steps[1].action.operations = [{ id: 'future-column-insertion', partIds: ['column-pipe'], translation: [0, 12, 0], position: [0, 0, 0], direction: [0, -1, 0] }];
     consolidateLayerSteps(plan, (_group: string, row: any) => row.key);
     const action = assemblyState(plan, 0, { action: true }), complete = assemblyState(plan, 0, { action: false });
     expect(action.arrows.map((a: any) => a.assemblyId)).toEqual(['left-frame', 'right-frame']);

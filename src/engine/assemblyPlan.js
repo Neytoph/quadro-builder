@@ -724,6 +724,9 @@ export function assemblyState(plan, index, { action = false } = {}) {
     for (const id of step.action.inPlacePartIds || []) { visible.delete(id); current.delete(id); done.delete(id); transforms.delete(id); hiddenNewParts.add(id); }
   }
   if (action) for (const operation of step?.action?.operations || []) {
+    // A merged layer overview lowers its frames first. Later in-place parts
+    // are hidden above, so their arrows belong only to their ordered details.
+    if (step.action.layer && !operation.partIds.some(id => visible.has(id))) continue;
     const regionTranslation = detached.get(step.regionId) || [0, 0, 0];
     for (const id of operation.partIds) if (visible.has(id)) transforms.set(id,
       operation.translation.map((v, axis) => v + (transforms.get(id)?.[axis] || 0)));

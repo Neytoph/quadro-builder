@@ -124,8 +124,8 @@ describe('本层框架连续展示与真实下套', () => {
     const index = plan.steps.findIndex((s: any) => s.id === module.installStepId)
     const installing = assemblyState(plan, index, { action: true }), installed = assemblyState(plan, index)
     for (const id of module.partIds) {
-      expect(installing.transforms.get(id)).toEqual(module.installationTranslation.map((v: number, i: number) => v + region.detachedTranslation[i]))
-      expect(region.detachedTranslation).toEqual([0, 0, 0])
+      expect(plan.steps[index].action.detached).toBe(false)
+      expect(installing.transforms.get(id)).toEqual(module.installationTranslation)
       expect(installed.transforms.has(id)).toBe(false)
     }
     for (const mark of plan.interfaces.filter((m: any) => m.assemblyId === module.id)) expect(installing.transforms.has(mark.supportTubeId)).toBe(false)
