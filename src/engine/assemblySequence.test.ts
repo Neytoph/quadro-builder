@@ -4,6 +4,9 @@ import {loadCatalog} from './catalog.js';
 import {BuildModel} from './model.js';
 import {computeAssemblyPlan,assemblyDetailState,assemblyState} from './assemblyPlan.js';
 import {nativeAccessorySupport} from './assemblyAccessoryMethods.js';
+import {componentInstallCopy,componentPartId} from './accessoryInfo.js';
+import {createConfirmedComponentFixture} from './confirmedComponentExample.js';
+import {setLang,getLang} from './i18n.js';
 import {createCoreChannels} from './assemblyCoreChannels.js';
 import {scheduleAssemblyAccessories,addAssemblyOperations} from './assemblyOperations.js';
 beforeAll(async()=>{await loadCatalog();});
@@ -34,7 +37,11 @@ describe('ordered build methods',()=>{
   it('closes a square by moving a subframe rather than forcing the final tube into two fixed ends',()=>{const {m}=square(),p=computeAssemblyPlan(m);expect(p.diagnostics.filter((d:any)=>d.code.includes('CLOSURE'))).toEqual([]);const ops=p.steps.flatMap((s:any)=>s.operations);expect(ops.some((o:any)=>o.type==='join-subframes'&&o.closureMethod==='common-axis-subframe-join')).toBe(true);expect(ops.filter((o:any)=>o.type==='insert-tube').every((o:any)=>o.openPorts?.length)).toBe(true);const step=p.steps[0],group=step.detailGroups[0],state=assemblyDetailState(p,0,group.id,{action:false});const future=step.operations.slice(3).flatMap((o:any)=>o.consumesPartIds);expect(future.filter((id:string)=>!group.partIds.includes(id)).every((id:string)=>!state.visible.has(id))).toBe(true);});
   it('orders continuous cloth threading before both carrier insertions and never claims an unchecked thread method',()=>{const {m,tubes}=square(),tx=m.addTextile(tubes[0].id,tubes[2].id,0,40,'blue')!;const steps=stepsFor(m);steps[3].textileIds=[tx.id];steps[3].partIds.push(tx.id);scheduleAssemblyAccessories(m,steps,[]);expect(steps[0].textileIds).toContain(tx.id);expect(steps.slice(1).some(s=>s.textileIds.includes(tx.id))).toBe(false);const p=computeAssemblyPlan(m),ops=p.steps.flatMap((s:any)=>s.operations),thread=ops.find((o:any)=>o.type==='prethread-accessory'&&o.partIds.includes(tx.id))!;expect(thread.carrierPartIds.sort()).toEqual([tubes[0].id,tubes[2].id].sort());for(const id of thread.carrierPartIds)expect(ops.indexOf(thread)).toBeLessThan(ops.findIndex((o:any)=>o.type==='insert-tube'&&o.partIds.includes(id)));expect(thread.translation.every(Number.isFinite)).toBe(true);expect(thread.verification.methodChecked).toBe(true);expect(ops.filter((o:any)=>o.consumesPartIds.includes(tx.id))).toHaveLength(1);if(!thread.verification.methodChecked)expect(p.diagnostics.some((d:any)=>d.code==='PRETHREAD_METHOD_UNVERIFIED'&&d.partIds.includes(tx.id))).toBe(true);});
   it('threads a floating wheel through its tube but requires an explicit bearing for a multifunction wheel',()=>{const {m,tubes}=square(),floating:any=m.addFitting('floating-wheel2',20,0,0)!,multi=m.addFitting('multi-wheel2',20,0,40)!;floating.tube=tubes[0].id;const steps=stepsFor(m);steps[3].fittingIds=[floating.id,multi.id];steps[3].partIds.push(floating.id,multi.id);const diagnostics:any[]=[];scheduleAssemblyAccessories(m,steps,diagnostics);expect(steps[0].fittingIds).toContain(floating.id);expect(diagnostics.some(d=>d.code==='MISSING_WHEEL_BEARING'&&d.partIds.includes(multi.id))).toBe(true);});
-  it('places a panel after all its perimeter support tubes and before a subsequent riser',()=>{const {m,n,tubes}=square(),panel=m.addPanel(tubes[0].id,tubes[2].id,0,40,'panel_40x40','blue')!;const top=m.addNode(0,40,0),riser=m.addTube(n[0].id,top.id,'T35','blue',35)!;const steps=stepsFor(m);steps.push({...steps[0],id:'cover',partIds:[panel.id],tubeIds:[],panelIds:[panel.id]});scheduleAssemblyAccessories(m,steps,[]);expect(steps.findIndex(s=>s.panelIds.includes(panel.id))).toBeLessThan(steps.findIndex(s=>s.tubeIds.includes(riser.id)));expect(steps.flatMap(s=>s.panelIds)).toEqual([panel.id]);});
+  it('places a native standard panel after all its perimeter support tubes and before a subsequent riser',()=>{const {m,n,tubes}=square();
+    // addPanel currently creates an appearance-v2 confirmed component. This
+    // fixture explicitly represents the compatible legacy native JSON schema
+    // so it continues to test ordinary-panel scheduling, not special methods.
+    const panel={id:'native-standard-panel',a:tubes[0].id,b:tubes[2].id,t0:0,len:40,panelId:'panel_40x40',color:'blue',side:1};m.panels.set(panel.id,panel);const top=m.addNode(0,40,0),riser=m.addTube(n[0].id,top.id,'T35','blue',35)!;const steps=stepsFor(m);steps.push({...steps[0],id:'cover',partIds:[panel.id],tubeIds:[],panelIds:[panel.id]});scheduleAssemblyAccessories(m,steps,[]);expect(steps.findIndex(s=>s.panelIds.includes(panel.id))).toBeLessThan(steps.findIndex(s=>s.tubeIds.includes(riser.id)));expect(steps.flatMap(s=>s.panelIds)).toEqual([panel.id]);});
   it('blocks an unknown accessory geometry instead of certifying an arbitrary bounding cube',()=>{const {m}=square();m.addFitting('unrecognised-installation',20,10,20);const p=computeAssemblyPlan(m);expect(p.canExport).toBe(false);expect(p.diagnostics.some((d:any)=>d.code==='UNKNOWN_INSTALLATION_GEOMETRY')).toBe(true);expect(p.verification.methodChecked).toBe(false);});
   it('does not certify an unknown mounting method merely because a bounding box was supplied',()=>{const {m}=square();m.addFitting('unrecognised-installation',100,10,20,{w:1,h:1,d:1});const p=computeAssemblyPlan(m);expect(p.canExport).toBe(false);expect(p.diagnostics.some((d:any)=>d.code==='UNKNOWN_INSTALLATION_GEOMETRY')).toBe(true);expect(p.verification.methodChecked).toBe(false);});
 });
@@ -84,4 +91,41 @@ describe('native mounting methods',()=>{
     expect(shaft.verification.methodChecked&&shaft.verification.pathChecked).toBe(true);
   });
   it('resolves a bearing with no tube reference using the actual free connector port',()=>{const m=new BuildModel(),a=m.addNode(0,40,0),b=m.addNode(0,0,0),c=m.addNode(0,40,40);m.addTube(a.id,b.id,'T35','blue',35);m.addTube(a.id,c.id,'T35','blue',35);const f=m.addFitting('bearing2',0,40,0)!;expect((f as any).tube).toBeFalsy();expect(nativeAccessorySupport(m,f.id)).toMatchObject({valid:true,supportIds:[a.id],mount:{position:[0,40,0],direction:[1,0,0]}});});
+});
+
+
+describe('special component installation instructions',()=>{
+  it('retains the dedicated busy-board fixing method in every language and local action group',()=>{
+    const m=new BuildModel(),n=[[0,0,0],[40,0,0],[40,40,0],[0,40,0]].map(p=>m.addNode(...p)),tubes=n.map((a,i)=>m.addTube(a.id,n[(i+1)%4].id,'T35','blue',35)!);
+    const candidate=m.panelAccessoryMounts('panel_40x40_busy',{screwAxis:'horizontal'}).find((mount:any)=>mount.valid),panel:any=m.addPanelAccessory(candidate,'green');expect(panel).toBeTruthy();
+    const saved=m.toJSON(),previousLanguage=getLang();
+    try{for(const lang of ['zh','en','de']){
+      setLang(lang);const expected=componentInstallCopy(componentPartId(panel),panel),p=computeAssemblyPlan(m),steps=p.steps.filter((step:any)=>step.partIds.includes(panel.id)),step=steps[0],op=step.operations.find((op:any)=>op.type==='fit-accessory'&&op.partIds.includes(panel.id))!;
+      expect(steps).toHaveLength(1);expect(step.kind).toBe('accessories');expect(step.title).toBe(expected.title);expect(step.instructions).toEqual(expected.instructions);
+      expect(op.instructions).toEqual(expected.instructions);expect(op.installationCopyBasis).toBe('component-catalog-special-instructions');
+      expect(op.instructions.join(' ')).toMatch(/对边|opposite|gegenüberliegenden/);
+      expect(op.referencePartIds.sort()).toEqual(tubes.map(t=>t.id).sort());expect(op.verification.supportPoses.every((support:any)=>support.installed)).toBe(true);
+      // Preserving a special instruction must not suppress its existing
+      // conservative clip/connector obstruction or certify an unproved fit.
+      expect(op.verification.pathChecked).toBe(false);expect(op.verification.methodChecked).toBe(false);expect(p.canExport).toBe(false);
+      expect(p.diagnostics.some((diagnostic:any)=>diagnostic.code==='ACCESSORY_INSTALLATION_INVALID')).toBe(false);
+      const blocked=p.diagnostics.find((diagnostic:any)=>diagnostic.code==='ACCESSORY_INSTALLATION_PATH_UNRESOLVED'&&diagnostic.partIds.includes(panel.id))!;
+      expect(blocked.details.failures.every((failure:any)=>failure.movingPartId===panel.id&&failure.obstaclePartId===n[0].id)).toBe(true);
+      const groups=step.detailGroups.filter((group:any)=>group.operationIds.includes(op.id));expect(groups).toHaveLength(1);expect(groups[0].instructions).toEqual(expected.instructions);
+      expect(p.ledger.instances.filter((instance:any)=>instance.partIds.includes(panel.id)).every((instance:any)=>instance.stepId===step.id)).toBe(true);
+      expect(p.steps.flatMap((step:any)=>step.operations).filter((op:any)=>op.consumesPartIds.includes(panel.id))).toHaveLength(1);
+      expect(m.toJSON()).toEqual(saved);
+    }}finally{setLang(previousLanguage);}
+  },30000);
+  it('preserves confirmed component installation copy without adding a frame fixing hint',()=>{
+    const {model,part}=createConfirmedComponentFixture('panel_40x20_climbing'),previousLanguage=getLang();
+    try{for(const lang of ['zh','en','de']){
+      setLang(lang);const expected=componentInstallCopy(componentPartId(part),part),plan=computeAssemblyPlan(model),step=plan.steps.find((step:any)=>step.partIds.includes(part.id))!,operation=step.operations.find((operation:any)=>operation.type==='fit-accessory'&&operation.partIds.includes(part.id))!;
+      expect(step.kind).toBe('accessories');expect(step.instructions).toEqual(expected.instructions);expect(operation.instructions).toEqual(expected.instructions);
+      expect(step.instructions).toHaveLength(3);expect(operation.verification.supportPoses.every((support:any)=>support.installed)).toBe(true);expect(operation.verification.pathChecked).toBe(false);expect(operation.verification.methodChecked).toBe(false);expect(plan.canExport).toBe(false);
+      const blocker=plan.diagnostics.find((diagnostic:any)=>diagnostic.code==='ACCESSORY_INSTALLATION_PATH_UNRESOLVED'&&diagnostic.partIds.includes(part.id))!;
+      expect(blocker.details.failures.every((failure:any)=>failure.obstaclePartId==='n1'&&failure.translation[2]>=0)).toBe(true);
+      expect(plan.steps.flatMap((step:any)=>step.operations).filter((operation:any)=>operation.consumesPartIds.includes(part.id))).toHaveLength(1);
+    }}finally{setLang(previousLanguage);}
+  },30000);
 });
