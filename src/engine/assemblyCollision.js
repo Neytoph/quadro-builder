@@ -242,8 +242,30 @@ function entryPanelContact(model,id,obstacleId,a,b,delta,end,pad,obstacleOffset,
   for(const plane of planes){const outside=clipPolygonPlane(a.points,plane.origin,plane.normal,true);for(let i=1;i<outside.length-1;i++)if(assemblyShapesOverlap(move({kind:'triangle',points:[outside[0],outside[i],outside[i+1]]},delta),move(b,obstacleOffset),pad))return false;}
   return true;
 }
+function linerSleeveContact(model,id,obstacleId,a,b,delta,end,pad,obstacleOffset,contracts){
+  const movingLiner=model.fittings?.has(id),linerId=movingLiner?id:obstacleId,nodeId=movingLiner?obstacleId:id,contract=contracts.get(`${linerId}:${nodeId}`),liner=model.fittings?.get(linerId),node=model.nodes.get(nodeId);
+  if(!contract||contract.linerId!==linerId||contract.nodeId!==nodeId||!['pool2','pool-small2'].includes(liner?.kind)||!node||a.kind!=='triangle'||b.kind!=='triangle')return false;
+  const carriers=contract.carrierPartIds?.map(id=>model.tubes.get(id));if(carriers?.length!==2||carriers.some(t=>!t||t.arm||t.link||t.bow||![t.a,t.b].includes(nodeId)))return false;
+  const basis=axes(liner.quat),width=liner.w||(liner.kind==='pool2'?120:80),depth=liner.d||(liner.kind==='pool2'?160:120),poolOrigin=xyz(liner),corners=[[-width/2,0,0],[width/2,0,0],[width/2,0,depth],[-width/2,0,depth]].map(p=>poolOrigin.map((v,i)=>v+basis.reduce((sum,d,k)=>sum+d[i]*p[k],0)));
+  if(!carriers.every(t=>corners.some((p,i)=>[t.a,t.b].every(id=>segmentDistance(xyz(model.nodes.get(id)),xyz(model.nodes.get(id)),p,corners[(i+1)%4])<.6))))return false;
+  const directions=carriers.map(t=>unit(model._tubeDirAt(t,node,model.nodes.get(t.a===nodeId?t.b:t.a)))),axis=directions[0];
+  if(dot(axis,directions[1])>-.995||Math.abs(dot(axis,unit(contract.axis||[])))<.995)return false;
+  const resolved=resolveNodeConnection(model,node);if(![1,-1].every(sign=>resolved.renderDirs.some(d=>dot(unit(d),axis)*sign>.995)))return false;
+  const relative=sub(delta,obstacleOffset);if(Math.hypot(...sub(end,obstacleOffset))>1e-6||Math.hypot(...relative)+Math.hypot(...pad)>7.5+1e-6)return false;
+  if(Math.hypot(...relative.map((v,i)=>v-axis[i]*dot(relative,axis)))>.01||Math.hypot(...pad)>1e-6&&Math.abs(dot(unit(pad),axis))<.995)return false;
+  const sleeve=movingLiner?a:b,connector=movingLiner?b:a,origin=xyz(node),radiusAt=p=>{const v=sub(p,origin),along=dot(v,axis);return Math.hypot(...v.map((x,i)=>x-axis[i]*along));};
+  // Identify the factory circular sleeve faces by their source vertex radius.
+  // Wall/floor faces have vertices away from this ring and cannot use the rule.
+  if(!sleeve.points.every(p=>radiusAt(p)>=2.50&&radiusAt(p)<=2.54))return false;
+  const radial=unit(cross(axis,Math.abs(axis[1])<.9?[0,1,0]:[1,0,0])),tangent=cross(axis,radial),planes=[{origin:origin.map((v,i)=>v-axis[i]*7.5),normal:axis.map(v=>-v)},{origin:origin.map((v,i)=>v+axis[i]*7.5),normal:axis}];
+  // Only intersections inside the source-native 2.52 cm circle and actual middle
+  // port span explain the sleeve mesh's inward chords; side branches stay solid.
+  for(let k=0;k<64;k++){const angle=k*Math.PI/32,n=radial.map((v,i)=>v*Math.cos(angle)+tangent[i]*Math.sin(angle));planes.push({origin:origin.map((v,i)=>v+n[i]*2.52*Math.cos(Math.PI/64)),normal:n});}
+  for(const plane of planes){const outside=clipPolygonPlane(connector.points,plane.origin,plane.normal,true);for(let i=1;i<outside.length-1;i++){const remaining={kind:'triangle',points:[outside[0],outside[i],outside[i+1]]};if(assemblyShapesOverlap(move(movingLiner?sleeve:remaining,delta),move(movingLiner?remaining:sleeve,obstacleOffset),pad))return false;}}
+  return true;
+}
 /** Full conservative swept geometry; contacts are exempted only inside the mating port. */
-export function checkAssemblyPath(model,movingIds,installedIds,start,end=[0,0,0],{allowMating=true,obstacleTranslations=new Map(),matingContacts=new Map(),entryPanelContacts=new Map(),movingAssemblyIds=movingIds}={}) {
+export function checkAssemblyPath(model,movingIds,installedIds,start,end=[0,0,0],{allowMating=true,obstacleTranslations=new Map(),matingContacts=new Map(),entryPanelContacts=new Map(),linerCarrierContacts=new Map(),movingAssemblyIds=movingIds}={}) {
   const started=performance.now();const timing=()=>{const elapsed=performance.now()-started;if(globalThis.process?.env?.ASSEMBLY_PROFILE && elapsed>200)globalThis.process.stderr.write(JSON.stringify({elapsed:Math.round(elapsed),moving:movingIds.length,installed:installedIds.length,first:movingIds.slice(0,3),start,end})+'\n');};
   const moving=new Set(movingIds),travel=Math.hypot(...sub(start,end)),spacing=geometry().tubeRadius||2.45,count=Math.max(1,Math.ceil(travel/spacing));
   const assemblyMoving=new Set(movingAssemblyIds);
@@ -272,6 +294,7 @@ export function checkAssemblyPath(model,movingIds,installedIds,start,end=[0,0,0]
         if(allowMating&&panelSlotContact(model,id,obstacle.id,a,delta,obstacle.offset))continue;
         if(allowMating&&sharedPanelLipContact(model,id,obstacle.id,a,b,delta,end,pad,obstacle.offset))continue;
         if(allowMating&&entryPanelContact(model,id,obstacle.id,a,b,delta,end,pad,obstacle.offset,entryPanelContacts))continue;
+        if(allowMating&&linerSleeveContact(model,id,obstacle.id,a,b,delta,end,pad,obstacle.offset,linerCarrierContacts))continue;
         // Connector/tube contact at the destination is valid only near the actual node.
         // No whole shared tube is excluded: clip both tubes away from the joint and test again.
         const relative=sub(delta,obstacle.offset),portTube=t||o;
