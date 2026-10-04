@@ -3,13 +3,13 @@ import { Vector3 } from 'three'
 import { BuildModel, SceneManager, colorName, partName, getPartById } from '../engine-api'
 import { assemblyState, assemblyDetailState, computeAssemblyPlan } from '../engine/assemblyPlan.js'
 import { takeModelThumb, waitSceneReady } from '../engine/thumbShot.js'
-import { renderedBounds, assemblyFocusBounds, assemblyPresentationState, assemblyDetailItems, assemblyDetailBounds, assemblyDetailDirection, manualPositionedItems, layoutManualCallouts } from '../engine/assemblyManual.js'
+import { renderedBounds, assemblyFocusBounds, assemblyPresentationState, assemblyDetailItems, assemblyDetailBounds, assemblyDetailDirection, manualPositionedItems, layoutManualCallouts, layoutOperationCallouts, projectedOperationArrowHead } from '../engine/assemblyManual.js'
 import { useEngine, type AssemblyConfig } from '../store/EngineContext'
 import { useI18n } from '../i18n'
 import { assemblyStrings, assemblyDiagnosticText, assemblyPdfStrings } from './assemblyStrings'
 import { UI_ESCAPE_EVENT } from './events'
 import { layoutAssemblyMarks } from './assemblyOverlay'
-import { activeDetail, detailOperations, detailViewName, operationLabel, operationMarkGeometry } from './assemblyDetailPresentation'
+import { activeDetail, detailOperations, detailViewName, operationLabel, operationMarkGeometry, operationCalloutOptions } from './assemblyDetailPresentation'
 import { partImageSrc } from './partImages'
 import './AssemblyPreview.css'
 
@@ -137,9 +137,11 @@ export default function AssemblyPreview() {
           if (from && to) arrows.push({ x1: from.u * width, y1: from.v * height, x2: to.u * width, y2: to.v * height })
         }
         const materialMarks = marks.filter(mark => mark.kind === 'material')
-        const otherMarks = marks.filter(mark => mark.kind !== 'material')
-        const radius = Math.max(12, ...otherMarks.filter(mark => mark.kind === 'operation').map(mark => operationMarkGeometry(mark.label).radius))
-        setOverlay({ width, height, marks: [...layoutManualCallouts(materialMarks, width, height, 12), ...layoutAssemblyMarks(otherMarks, width, height, { radius })], arrows })
+        const placedMaterials = layoutManualCallouts(materialMarks, width, height, 12)
+        const operationMarks = marks.filter(mark => mark.kind === 'operation').map(mark => ({ ...mark, boxWidth: operationMarkGeometry(mark.label).width, boxHeight: 26 }))
+        const placedOperations = layoutOperationCallouts(operationMarks, width, height, operationCalloutOptions(arrows, placedMaterials))
+        const interfaceMarks = layoutAssemblyMarks(marks.filter(mark => !mark.kind), width, height, { radius: 12 })
+        setOverlay({ width, height, marks: [...placedMaterials, ...placedOperations, ...interfaceMarks], arrows })
       }
       const tints = marked.length ? new Map(marked.map(id => [id, '#dc603e'])) : null
       v.scene.renderModel(v.model, null, { assembly, tints, dimUntinted: !!marked.length })
@@ -259,11 +261,19 @@ export default function AssemblyPreview() {
         <div className="assembly-drawing">
         <div ref={host} className="assembly-preview-host" data-testid="assembly-preview-canvas" />
         <svg className="assembly-interface-overlay" viewBox={`0 0 ${overlay.width} ${overlay.height}`} aria-hidden="true" data-testid="assembly-interface-overlay">
-          <defs><marker id="assembly-arrowhead" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" refX="7.2" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#ea580c" /></marker></defs>
-          {overlay.arrows.map((a, i) => <line key={`a-${i}`} {...a} stroke="#ea580c" strokeWidth="1.8" markerEnd="url(#assembly-arrowhead)" />)}
-          {overlay.marks.map((m, i) => <g key={`m-${i}`} transform={`translate(${m.x},${m.y})`} data-mark-kind={m.kind || 'interface'} data-testid={m.kind === 'material' ? 'assembly-detail-material' : m.kind === 'operation' ? 'assembly-detail-operation' : undefined}>
+          {overlay.marks.map((m, i) => <g key={`leader-${i}`} transform={`translate(${m.x},${m.y})`}>
             <line x1="0" y1="0" x2={m.anchorX - m.x} y2={m.anchorY - m.y} stroke={m.kind === 'operation' ? '#1b7650' : '#ea580c'} strokeWidth="1" />
             <circle cx={m.anchorX - m.x} cy={m.anchorY - m.y} r="2" fill={m.kind === 'operation' ? '#1b7650' : '#ea580c'} />
+          </g>)}
+          {overlay.arrows.map((a, i) => {
+            const head = projectedOperationArrowHead(a, 8)
+            return head && <g key={`a-${i}`} data-testid="assembly-detail-arrow">
+              <line {...a} stroke="#fff" strokeWidth="5.5" strokeLinecap="round" />
+              <line {...a} stroke="#c2410c" strokeWidth="2.5" strokeLinecap="round" />
+              <polygon points={[head.tip, head.left, head.right].map(point => point.join(',')).join(' ')} fill="#c2410c" stroke="#fff" strokeWidth="2" strokeLinejoin="round" paintOrder="stroke" />
+            </g>
+          })}
+          {overlay.marks.map((m, i) => <g key={`m-${i}`} transform={`translate(${m.x},${m.y})`} data-mark-kind={m.kind || 'interface'} data-placement-clear={m.kind === 'operation' ? m.placementClear : undefined} data-testid={m.kind === 'material' ? 'assembly-detail-material' : m.kind === 'operation' ? 'assembly-detail-operation' : undefined}>
             {m.kind === 'operation' ? <rect x={-operationMarkGeometry(m.label).width / 2} y="-13" width={operationMarkGeometry(m.label).width} height="26" rx="5" fill="#edf6ec" stroke="#1b7650" strokeWidth="1.5" /> : <circle r="12" fill="#fffaf3" stroke="#ea580c" strokeWidth="2" />}
             <text textAnchor="middle" dominantBaseline="central" fill={m.kind === 'operation' ? '#176441' : '#9a4113'} fontSize={m.kind === 'operation' ? operationMarkGeometry(m.label).fontSize : 11} fontWeight="700">{m.label}</text>
           </g>)}

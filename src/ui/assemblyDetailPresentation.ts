@@ -11,6 +11,12 @@ export function operationMarkGeometry(label: string) {
   return { width, fontSize, radius: Math.max(13, width / 2) }
 }
 
+// Keep presentation clearance separate from the engine's physical path. Both
+// painters protect the projected shaft and arrowhead without moving either end.
+export function operationCalloutOptions(arrows: { x1: number; y1: number; x2: number; y2: number }[], materialMarks: { x: number; y: number }[]) {
+  return { arrows, materialMarks, gap: 6, arrowClearance: 8, padding: 3 }
+}
+
 export function detailOperations(step: { operations?: Operation[] }, group?: DetailGroup | null): Operation[] {
   const selected = group ? new Set(group.operationIds) : null
   return (step.operations || []).filter(operation => !selected || selected.has(operation.id)).sort((a, b) => a.order - b.order)
