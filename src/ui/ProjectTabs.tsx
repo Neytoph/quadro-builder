@@ -128,6 +128,7 @@ export default function ProjectTabs() {
           </div>
         ))}
       </div>
+      <span data-site-slot="help" hidden />
       <ShareCluster />
     </div>
   )
