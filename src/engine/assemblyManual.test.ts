@@ -3,7 +3,7 @@ import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { BuildModel } from './model.js'
 import { loadCatalog, buildableTubes, panels, geometry } from './catalog.js'
 import { computeBOM } from './bom.js'
-import { computeAssemblyPlan, assemblyState } from './assemblyPlan.js'
+import { computeAssemblyPlan, assemblyState, assemblyDetailState } from './assemblyPlan.js'
 import { coverItems, numberStepItems, stepItems, assemblyPresentationState, measureManualLegend, manualPartsHeight, assemblyDetailItems, assemblyDetailDirection, wrapManualText, manualStepTextLayout, manualStepDetailDescriptors, layoutManualCallouts, manualTextPageLayout, manualDetailPageLayout, manualActionLabelBox, manualSafetyDescriptor, MANUAL_TEXT_MM, MANUAL_AUX_MM } from './assemblyManual.js'
 import { parseQDF } from './qdfimport.js'
 import { partImageSrc } from '../ui/partImages'
@@ -261,12 +261,39 @@ describe('说明书材料编号', () => {
   it('C0005 顶棚安装保留完整支撑框架，供底部视角核对固定杆', () => {
     const { model, plan } = manualFixture('qdf/C0005.qdf')
     const cover = plan.regions.find((r: any) => r.accessoryType === 'roof-cover')
-    const index = plan.steps.findIndex((s: any) => s.regionId === cover.id && s.action.type === 'attach')
+    expect(cover).toBeDefined()
+    const index = plan.steps.findIndex((s: any) => s.regionId === cover.id && s.operations.some((op: any) => op.type === 'fit-accessory' && op.partIds.some((id: string) => model.slides.get(id)?.kind === 'roof2')))
+    expect(index).toBeGreaterThanOrEqual(0)
+    const step = plan.steps[index], operation = step.operations.find((op: any) => op.type === 'fit-accessory' && op.partIds.some((id: string) => model.slides.get(id)?.kind === 'roof2'))
+    expect(step.action.type).toBe('build')
+    expect(step.action.detached).toBe(false)
+    expect(operation.placementTranslation).toEqual([0, 0, 0])
+    expect(operation.translation).toEqual([0, 18, 0])
+    const group = step.detailGroups.find((group: any) => group.operationIds.includes(operation.id))
+    expect(assemblyDetailDirection(group, step)[1]).toBeLessThan(0)
     const support = plan.regions.find((r: any) => r.id === cover.supportRegionId)
-    const presented = assemblyPresentationState(model, plan, plan.steps[index], assemblyState(plan, index, { action: false }), { detail: true })
+    const saved = JSON.stringify(model.toJSON())
+    const before = assemblyDetailState(plan, index, group.id, { action: true }), after = assemblyDetailState(plan, index, group.id, { action: false })
+    const original = [...before.visible]
+    const action = assemblyPresentationState(model, plan, step, before, { detail: true })
+    const presented = assemblyPresentationState(model, plan, step, after, { detail: true })
+    expect(action.contextFiltered).toBe(true)
+    expect(presented.contextFiltered).toBe(true)
     expect(support.tubeIds.length).toBeGreaterThan(0)
-    for (const id of support.tubeIds) expect(presented.visible.has(id)).toBe(true)
-    for (const id of cover.slideIds) expect(presented.visible.has(id)).toBe(true)
+    for (const id of support.tubeIds) {
+      expect(action.visible.has(id)).toBe(true)
+      expect(presented.visible.has(id)).toBe(true)
+      expect(action.transforms.get(id) || [0, 0, 0]).toEqual([0, 0, 0])
+      expect(presented.transforms.get(id) || [0, 0, 0]).toEqual([0, 0, 0])
+    }
+    for (const id of cover.slideIds) {
+      expect(action.visible.has(id)).toBe(true)
+      expect(presented.visible.has(id)).toBe(true)
+      expect(action.transforms.get(id)).toEqual([0, 18, 0])
+      expect(presented.transforms.get(id) || [0, 0, 0]).toEqual([0, 0, 0])
+    }
+    expect([...before.visible]).toEqual(original)
+    expect(JSON.stringify(model.toJSON())).toBe(saved)
   })
   it('C0005 滑梯本体按原位分件步骤绘图，详情过滤遮挡板且不修改冻结模型或零件状态', () => {
     const { model, plan } = manualFixture('qdf/C0005.qdf')
