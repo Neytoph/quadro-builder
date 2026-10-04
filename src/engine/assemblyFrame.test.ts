@@ -56,7 +56,7 @@ describe('本层框架连续展示与真实下套', () => {
       expect(installing.actionStage).toBe('installation')
       for (const id of plan.steps.slice(0, index).flatMap((s: any) => s.partIds)) { expect(installing.visible.has(id)).toBe(true); expect(installing.transforms.has(id)).toBe(false) }
       expect(installing.arrows.length).toBeGreaterThan(0)
-      for (const arrow of installing.arrows) { expect(arrow.direction).toEqual([0, -1, 0]); expect(arrow.from[1]).toBeGreaterThan(arrow.to[1]); expect(arrow.from[0]).toBe(arrow.to[0]); expect(arrow.from[2]).toBe(arrow.to[2]) }
+      for (const arrow of installing.arrows) { expect(arrow.direction[0]).toBeCloseTo(0, 8); expect(arrow.direction[1]).toBe(-1); expect(arrow.direction[2]).toBeCloseTo(0, 8); expect(arrow.from[1]).toBeGreaterThan(arrow.to[1]); expect(arrow.from[0]).toBe(arrow.to[0]); expect(arrow.from[2]).toBe(arrow.to[2]) }
       for (const module of modules) {
         expect(module.installStepId).toBe(step.id)
         for (const id of module.partIds) {

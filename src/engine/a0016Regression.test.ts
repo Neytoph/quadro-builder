@@ -5,7 +5,7 @@ import { loadCatalog, buildableTubes, panels, geometry } from './catalog.js'
 import { BuildModel } from './model.js'
 import { parseQDF } from './qdfimport.js'
 import { computeBOM, resolveNodeConnection } from './bom.js'
-import { computeAssemblyPlan, assemblyState } from './assemblyPlan.js'
+import { computeAssemblyPlan, assemblyState, assemblyDetailState } from './assemblyPlan.js'
 import { SceneManager } from './scene.js'
 import { buildQDF } from './qdfexport.js'
 
@@ -40,7 +40,8 @@ describe('官方 A0016 旋转 C45 与真实装配动作', () => {
     }
     const plan = computeAssemblyPlan(model)
     expect(plan.canExport, JSON.stringify(plan.diagnostics)).toBe(true)
-    expect(plan.regions.filter((r: any) => r.kind === 'ramp').every((r: any) => r.installation.mode === 'in-place')).toBe(true)
+    expect(plan.regions.filter((r: any) => r.kind === 'ramp').every((r: any) => r.installation.commonAxis && r.installation.pathVerified)).toBe(true)
+    expect(plan.interfaces.filter((m: any) => m.directionBasis === 'qdf-file-C45-mouth-and-matching-receiver-axis')).toHaveLength(4)
     expect(plan.interfaces.filter((m: any) => m.attachment !== 'upper-frame')).toHaveLength(4)
     expect(plan.interfaces.filter((m: any) => m.attachment === 'upper-frame')).toHaveLength(4)
     expect(assemblyState(plan, plan.steps.length - 1).transforms.size).toBe(0)
@@ -58,17 +59,20 @@ describe('官方 A0016 旋转 C45 与真实装配动作', () => {
     expect(computeBOM(model).connectors.find((row: any) => row.type === 'diagonal')?.count).toBe(expected)
   })
 
-  it('单端立柱沿真实轴线展示待插位置，完成态与源模型不受影响', () => {
+  it('合层后的四根立柱仍有独立沿真实轴线的详图动作，完成态与源模型不受影响', () => {
     const model = load(), before = model.toJSON(), plan = computeAssemblyPlan(model)
-    const index = plan.steps.findIndex((s: any) => s.kind === 'risers')
-    const action = assemblyState(plan, index, { action: true }), complete = assemblyState(plan, index)
-    expect(action.arrows).toHaveLength(4)
-    for (const id of plan.steps[index].tubeIds) {
-      if (model.tubes.get(id)!.link) continue;
-      expect(action.transforms.get(id)?.[1]).toBeGreaterThan(0)
-      expect(complete.transforms.has(id)).toBe(false)
+    const columns = [...model.tubes.values()].filter((tube: any) => !tube.arm && !tube.link && Math.abs(model.nodes.get(tube.a)!.y - model.nodes.get(tube.b)!.y) > 10 && Math.hypot(model.nodes.get(tube.a)!.x - model.nodes.get(tube.b)!.x, model.nodes.get(tube.a)!.z - model.nodes.get(tube.b)!.z) < 0.01)
+    expect(columns).toHaveLength(4)
+    for (const tube of columns) {
+      const index = plan.steps.findIndex((step: any) => step.operations.some((op: any) => op.type === 'insert-tube' && op.partIds.includes(tube.id)))
+      const step = plan.steps[index], op = step.operations.find((op: any) => op.type === 'insert-tube' && op.partIds.includes(tube.id))
+      const group = step.detailGroups.find((group: any) => group.operationIds.includes(op.id))
+      const action = assemblyDetailState(plan, index, group.id, { action: true }), complete = assemblyDetailState(plan, index, group.id)
+      expect(op.direction[1]).toBeLessThan(-0.99)
+      expect(action.arrows.some((arrow: any) => arrow.id === op.id && arrow.direction[1] < -0.99)).toBe(true)
+      const a = action.transforms.get(tube.id) || [0, 0, 0], b = complete.transforms.get(tube.id) || [0, 0, 0]
+      expect(a.map((v: number, axis: number) => v - b[axis])).toEqual(op.translation)
     }
-    expect(action.arrows.every((a: any) => a.direction[1] < -0.99)).toBe(true)
     expect(model.toJSON()).toEqual(before)
   })
 
@@ -83,27 +87,34 @@ describe('官方 A0016 旋转 C45 与真实装配动作', () => {
     expect(plan.steps.some((s: any) => s.action.scope === 'parts' && s.action.type === 'preassemble')).toBe(false)
   })
 
-  it('单独安装C45和承载接头的步骤在前图保留主体、后图显示新增接头', () => {
+  it('C45随真实坡道框架预装，详图接合时接头可见且没有独立假主体', () => {
     const model = load(), plan = computeAssemblyPlan(model)
-    const index = plan.steps.findIndex((step: any) => step.kind === 'frame' && step.nodeIds.some((id: string) => model.nodes.get(id)?.c45file) && !step.parts.tubes.length)
-    expect(index).toBeGreaterThan(-1)
-    const before = assemblyState(plan, index, { action: true }), after = assemblyState(plan, index)
-    expect(before.actionStage).toBe('before')
-    for (const id of plan.steps[index].nodeIds) { expect(before.visible.has(id)).toBe(false); expect(after.visible.has(id)).toBe(true) }
-    for (const id of plan.steps[index - 1].tubeIds) expect(before.visible.has(id)).toBe(true)
-    expect(before.arrows).toEqual([])
+    for (const corner of [...model.nodes.values()].filter((node: any) => node.c45file)) {
+      const region = plan.regions.find((region: any) => region.ownedNodeIds.includes(corner.id))!
+      expect(region.kind).toBe('ramp')
+      const index = plan.steps.findIndex((step: any) => step.action.type === 'preassemble' && step.nodeIds.includes(corner.id))
+      expect(index).toBeGreaterThan(-1)
+      const step = plan.steps[index], op = step.operations.find((op: any) => ['insert-tube', 'join-subframes'].includes(op.type) && (op.referencePartIds.includes(corner.id) || op.partIds.includes(corner.id)))!
+      expect(op).toBeTruthy()
+      const group = step.detailGroups.find((group: any) => group.operationIds.includes(op.id))!
+      const action = assemblyDetailState(plan, index, group.id, { action: true }), complete = assemblyDetailState(plan, index, group.id)
+      expect(action.visible.has(corner.id)).toBe(true)
+      expect(complete.visible.has(corner.id)).toBe(true)
+      expect(plan.steps.flatMap((step: any) => step.operations).filter((op: any) => op.consumesPartIds.includes(corner.id))).toHaveLength(1)
+    }
   })
 
-  it('预装模块的插管位移叠加区域分离，完成单步仍保留区域分离', () => {
-    const model = new BuildModel()
-    for (const x of [0, 160]) {
-      const a = model.addNode(x, 0, 0), b = model.addNode(x + 40, 0, 0), c = model.addNode(x, 40, 0)
-      model.addTube(a.id, b.id, 'T35', 'red', 35); model.addTube(a.id, c.id, 'T35', 'blue', 35)
-    }
-    const plan = computeAssemblyPlan(model), index = plan.steps.findIndex((s: any) => s.action.type === 'preassemble' && s.kind === 'risers')
+  it('真实预装坡道的插管位移叠加区域分离，完成单步仍保留预装位置', () => {
+    const model = load(), before = model.toJSON(), plan = computeAssemblyPlan(model)
+    const index = plan.steps.findIndex((step: any) => step.action.type === 'preassemble' && plan.regions.find((region: any) => region.id === step.regionId)?.kind === 'ramp')
     expect(index).toBeGreaterThan(-1)
-    const id = plan.steps[index].tubeIds[0], a = assemblyState(plan, index, { action: true }), b = assemblyState(plan, index)
-    expect(a.transforms.get(id)?.[1]).toBeGreaterThan(b.transforms.get(id)![1])
+    const step = plan.steps[index], region = plan.regions.find((region: any) => region.id === step.regionId)!, op = step.operations.find((op: any) => op.type === 'insert-tube')!, id = op.partIds[0]
+    expect(Math.hypot(...region.detachedTranslation)).toBeGreaterThan(0)
+    const group = step.detailGroups.find((group: any) => group.operationIds.includes(op.id))!, action = assemblyDetailState(plan, index, group.id, { action: true }), complete = assemblyDetailState(plan, index, group.id)
+    const a = action.transforms.get(id) || [0, 0, 0], b = complete.transforms.get(id) || [0, 0, 0]
+    expect(a.map((v: number, axis: number) => v - b[axis])).toEqual(op.translation)
+    expect(b).toEqual(op.placementTranslation)
     expect(assemblyState(plan, plan.steps.length - 1).transforms.size).toBe(0)
+    expect(model.toJSON()).toEqual(before)
   })
 })
