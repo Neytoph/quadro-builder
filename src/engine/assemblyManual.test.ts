@@ -4,7 +4,7 @@ import { BuildModel } from './model.js'
 import { loadCatalog, buildableTubes, panels, geometry } from './catalog.js'
 import { computeBOM } from './bom.js'
 import { computeAssemblyPlan, assemblyState } from './assemblyPlan.js'
-import { coverItems, numberStepItems, stepItems, assemblyPresentationState, measureManualLegend, manualPartsHeight, assemblyDetailItems, assemblyDetailDirection, wrapManualText, manualStepTextLayout, manualStepDetailDescriptors, layoutManualCallouts, MANUAL_TEXT_MM, MANUAL_AUX_MM } from './assemblyManual.js'
+import { coverItems, numberStepItems, stepItems, assemblyPresentationState, measureManualLegend, manualPartsHeight, assemblyDetailItems, assemblyDetailDirection, wrapManualText, manualStepTextLayout, manualStepDetailDescriptors, layoutManualCallouts, manualTextPageLayout, manualDetailPageLayout, manualActionLabelBox, MANUAL_TEXT_MM, MANUAL_AUX_MM } from './assemblyManual.js'
 import { parseQDF } from './qdfimport.js'
 import { partImageSrc } from '../ui/partImages'
 
@@ -15,6 +15,35 @@ const assetEvidence: any[] = []
 afterAll(() => { mkdirSync('.work', { recursive: true }); writeFileSync('.work/assembly-pdf-assets.json', JSON.stringify(assetEvidence, null, 2)) })
 
 describe('说明书材料编号', () => {
+  it('带二维码的长说明与长区域标题按安全高度续页，不覆盖二维码', () => {
+    const ctx = { font: '', measureText: (text: string) => ({ width: [...text].length * 20 }) }
+    const title = 'Sehr lange Bereichsbezeichnung mit mehreren Montagehinweisen '.repeat(8)
+    const lines = Array.from({ length: 80 }, (_, i) => `动作 ${i + 1}：完整保留正文与安装方向，先穿入套件再安装另一端接头。`)
+    const layout = manualTextPageLayout(ctx, title, lines, { host: 'xiaomaifang.com' })
+    expect(layout.titleLines.length).toBeGreaterThan(1)
+    expect(layout.titleLines.join(' ').replace(/\s/g, '')).toBe(title.replace(/\s/g, ''))
+    expect(layout.bodyY).toBeGreaterThan(18)
+    const chunks = []
+    for (let offset = 0; offset < layout.lines.length; offset += layout.capacity) chunks.push(layout.lines.slice(offset, offset + layout.capacity))
+    expect(chunks.flat()).toEqual(layout.lines)
+    for (const chunk of chunks) expect(layout.bodyY + (chunk.length - 1) * 5 + MANUAL_TEXT_MM).toBeLessThanOrEqual(layout.bodyBottom)
+    expect(layout.bodyBottom).toBeLessThan(187.4)
+    const details = manualDetailPageLayout(ctx, title, 'Materialnummern dienen zur Orientierung; Mengen sind im Hauptschritt enthalten.')
+    expect(details.referenceY).toBeGreaterThan(5 + (details.titleLines.length - 1) * 5.4 + 4.4)
+    expect(details.bodyY).toBeGreaterThan(details.referenceY + (details.referenceLines.length - 1) * 4.2 + MANUAL_AUX_MM)
+    expect(details.bodyY + details.availableHeight).toBe(193)
+    const legend = manualTextPageLayout(ctx, title, [], { host: 'xiaomaifang.com' })
+    expect(legend.bodyY).toBeGreaterThan(5 + (legend.titleLines.length - 1) * 5.4 + 4.4)
+  })
+  it('全局动作134的标号白底按真实字宽放大并留在图框内', () => {
+    const ctx = { font: '', measureText: (text: string) => ({ width: [...text].length * 22 }) }
+    const rect = { x: 50, y: 30, w: 800, h: 600 }
+    const box = manualActionLabelBox(ctx, 134, [848, 200], rect)
+    expect(box.label).toBe('(134)')
+    expect(box.width).toBeGreaterThan(50)
+    expect(box.x + box.width / 2).toBeLessThanOrEqual(rect.x + rect.w)
+    expect(box.x - box.width / 2).toBeGreaterThanOrEqual(rect.x)
+  })
   it('纸面正文字号至少10pt，辅助字至少9pt；长指令换行后保留全文', () => {
     expect(MANUAL_TEXT_MM * 72 / 25.4).toBeGreaterThanOrEqual(10)
     expect(MANUAL_AUX_MM * 72 / 25.4).toBeGreaterThanOrEqual(9)

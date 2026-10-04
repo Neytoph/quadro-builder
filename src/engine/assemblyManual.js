@@ -1018,14 +1018,22 @@ function drawArrows(ctx, img, x, y, w, h, arrows) {
     ctx.lineTo(to[0] - mm(3) * Math.cos(angle + 0.45), to[1] - mm(3) * Math.sin(angle + 0.45));
     ctx.closePath(); ctx.fill();
     if (arrow.order) {
-      const label = arrow.order <= 20 ? String.fromCodePoint(0x2460 + arrow.order - 1) : `(${arrow.order})`;
-      const lx = Math.max(x + mm(4), Math.min(x + w - mm(4), from[0])), ly = Math.max(y + mm(4), Math.min(y + h - mm(9), from[1] - mm(4)));
-      ctx.fillStyle = 'rgba(255,255,255,0.95)'; ctx.fillRect(lx - mm(2.5), ly - mm(2.5), mm(5), mm(5));
-      ctx.font = font(600, mm(MANUAL_TEXT_MM)); ctx.fillStyle = INK; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(label, lx, ly);
+      const box = manualActionLabelBox(ctx, arrow.order, from, { x, y, w, h });
+      ctx.fillStyle = 'rgba(255,255,255,0.95)'; ctx.fillRect(box.x - box.width / 2, box.y - box.height / 2, box.width, box.height);
+      ctx.fillStyle = INK; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(box.label, box.x, box.y);
       ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillStyle = ACCENT;
     }
   }
   ctx.restore();
+}
+
+export function manualActionLabelBox(ctx, order, from, rect) {
+  const label = order <= 20 ? String.fromCodePoint(0x2460 + order - 1) : `(${order})`;
+  ctx.font = font(600, mm(MANUAL_TEXT_MM));
+  const width = Math.max(mm(5), ctx.measureText(label).width + mm(2)), height = mm(5);
+  const x = Math.max(rect.x + width / 2 + mm(1), Math.min(rect.x + rect.w - width / 2 - mm(1), from[0]));
+  const y = Math.max(rect.y + height / 2 + mm(1), Math.min(rect.y + rect.h - mm(9), from[1] - mm(4)));
+  return { label, x, y, width, height };
 }
 
 export function manualPartsHeight(ctx, items, maxW, cover = false) {
@@ -1036,7 +1044,7 @@ export function manualPartsHeight(ctx, items, maxW, cover = false) {
   return Math.min(maxHeight, Math.max(cover ? 54 : 47, Math.ceil(height + 6)));
 }
 
-function legendChunks(items, cover, icons, stamp) {
+function legendChunks(items, cover, icons, stamp, title = '') {
   const chunks = [];
   let consumed = 0;
   const measurement = newPageCanvas();
@@ -1047,7 +1055,7 @@ function legendChunks(items, cover, icons, stamp) {
   while (consumed < items.length) {
     const { c, ctx } = newPageCanvas();
     const box = cover ? coverBox(partsH) : stepBox(partsH);
-    const y = chunks.length ? mm(17) : mm(box.imgY + box.imgH + (cover ? 5.7 : 5.2));
+    const y = chunks.length ? mm(manualTextPageLayout(ctx, title, [], stamp).bodyY) : mm(box.imgY + box.imgH + (cover ? 5.7 : 5.2));
     const count = paintLegend(ctx, items.slice(consumed), icons, mm(M), y, maxW, mm(PAGE_H - (chunks.length ? M : 3)));
     c.width = c.height = 0;
     if (!count) throw new Error('材料图例没有可用分页空间');
@@ -1076,11 +1084,32 @@ function instructionChunks(instructions) {
 }
 
 function paintTextPage(ctx, title, lines, stamp) {
+  const layout = manualTextPageLayout(ctx, title, lines, stamp);
+  if (layout.lines.length > layout.capacity) throw manualError('pagination', '正文续页超过安全打印区域');
   ctx.fillStyle = INK; ctx.font = font(600, mm(4.4)); ctx.textBaseline = 'top';
-  ctx.fillText(ellipsize(ctx, title, mm(PAGE_W - M * 2)), mm(M), mm(5));
+  layout.titleLines.forEach((line, i) => ctx.fillText(line, mm(M), mm(5 + i * 5.4)));
   if (stamp) paintStamp(ctx, stamp, STAMP_QR_STEP, false);
   ctx.font = font(400, mm(MANUAL_TEXT_MM));
-  lines.forEach((line, i) => ctx.fillText(line, mm(M), mm(18 + i * 5)));
+  layout.lines.forEach((line, i) => ctx.fillText(line, mm(M), mm(layout.bodyY + i * 5)));
+}
+
+/** @param {any | null} [stamp] */
+export function manualTextPageLayout(ctx, title, lines, stamp = null) {
+  ctx.font = font(600, mm(4.4));
+  const titleLines = wrapManualText(ctx, title, mm(PAGE_W - M * 2));
+  const bodyY = Math.max(18, 7 + titleLines.length * 5.4);
+  const stampTop = PAGE_H - 2.5 - 2.3 - 0.8 - STAMP_QR_STEP;
+  const bodyBottom = stamp ? stampTop - 2 : PAGE_H - M;
+  const capacity = Math.floor((bodyBottom - bodyY - MANUAL_TEXT_MM) / 5) + 1;
+  if (capacity < 1) throw manualError('pagination', '正文续页标题超过单页容量');
+  ctx.font = font(400, mm(MANUAL_TEXT_MM));
+  return { titleLines, bodyY, bodyBottom, capacity, lines: lines.flatMap(line => wrapManualText(ctx, line, mm(PAGE_W - M * 2))) };
+}
+
+function manualTextDescriptors(ctx, title, lines, stamp) {
+  const layout = manualTextPageLayout(ctx, title, lines, stamp), descriptors = [];
+  for (let offset = 0; offset < layout.lines.length; offset += layout.capacity) descriptors.push({ type: 'instructions', title, lines: layout.lines.slice(offset, offset + layout.capacity) });
+  return descriptors;
 }
 
 function manualSafetyCopy() {
@@ -1102,7 +1131,7 @@ export function manualStepTextLayout(ctx, heading, instructions, contextHint = '
   return { instructionLines, remainingLines: allLines.slice(capacity), headerH: Math.max(20, Math.ceil(7 + headingLines.length * 5.4 + instructionLines.length * 4.6 + contextH)) };
 }
 
-export function manualDetailPageGroups(ctx, groups, copy) {
+export function manualDetailPageGroups(ctx, groups, copy, availableHeight = 173) {
   const pages = [];
   let page = [];
   for (const group of groups) {
@@ -1111,7 +1140,7 @@ export function manualDetailPageGroups(ctx, groups, copy) {
     ctx.font = font(400, mm(MANUAL_TEXT_MM));
     const lines = (group.instructions || []).flatMap(line => wrapManualText(ctx, line, mm(138.5)));
     const legendH = Math.max(30, measureDetailReferences(ctx, group.items, mm(104.5)).height / PX);
-    const compact = titleLines.length * 4.6 + lines.length * 4.6 + 7 + legendH + 96 <= 173;
+    const compact = titleLines.length * 4.6 + lines.length * 4.6 + 7 + legendH + 96 <= availableHeight;
     if (!compact) {
       if (page.length) { pages.push(page); page = []; }
       ctx.font = font(600, mm(MANUAL_TEXT_MM));
@@ -1119,7 +1148,7 @@ export function manualDetailPageGroups(ctx, groups, copy) {
       ctx.font = font(400, mm(MANUAL_TEXT_MM));
       const wideLines = (group.instructions || []).flatMap(line => wrapManualText(ctx, line, mm(245)));
       const height = 9 + wideTitleLines.length * 4.6 + wideLines.length * 4.6 + 46 + measureManualLegend(ctx, group.items, mm(245)).height / PX;
-      if (height > 180) throw manualError('details', `局部动作说明超过单页容量: ${group.id}`);
+      if (height > availableHeight) throw manualError('details', `局部动作说明超过单页容量: ${group.id}`);
       pages.push([{ ...group, titleLines: wideTitleLines, lines: wideLines, height, wide: true }]);
     } else {
       page.push({ ...group, titleLines, lines, legendH, compact: true });
@@ -1171,7 +1200,18 @@ export function manualStepDetailDescriptors(ctx, model, plan, index, itemsCover,
     const instructions = operations.length ? operations.flatMap(operation => (operation.instructions || []).map(line => `${operation.order >= 1 && operation.order <= 20 ? String.fromCodePoint(0x2460 + operation.order - 1) : `(${operation.order})`} ${line}`)) : group.instructions;
     return { ...group, instructions, items: assemblyDetailItems(model, plan, step, group, itemsCover) };
   });
-  return manualDetailPageGroups(ctx, groups, copy).map((groups, continuationIndex) => ({ type: 'details', index, heading, groups, continuationIndex, countsMaterials: false }));
+  const pageLayout = manualDetailPageLayout(ctx, `${heading} · ${copy.detailTitle}`, `${copy.detailReference || ''} · ${copy.continuation || ''}`);
+  return manualDetailPageGroups(ctx, groups, copy, pageLayout.availableHeight).map((groups, continuationIndex) => ({ type: 'details', index, heading, groups, continuationIndex, countsMaterials: false, pageLayout }));
+}
+
+export function manualDetailPageLayout(ctx, title, reference) {
+  ctx.font = font(600, mm(4.4));
+  const titleLines = wrapManualText(ctx, title, mm(PAGE_W - M * 2));
+  ctx.font = font(400, mm(MANUAL_AUX_MM));
+  const referenceLines = wrapManualText(ctx, reference, mm(PAGE_W - M * 2));
+  const referenceY = 5 + titleLines.length * 5.4 + 1.2;
+  const bodyY = Math.max(20, Math.ceil(referenceY + referenceLines.length * 4.2 + 3));
+  return { titleLines, referenceLines, referenceY, bodyY, availableHeight: PAGE_H - 17 - bodyY };
 }
 
 function directionLabel(group, copy) {
@@ -1279,7 +1319,7 @@ export async function exportAssemblyPdf(opts) {
   const itemsCover = coverItems(plan.bom || opts.bom || computeBOM(model));
   for (const item of itemsCover) item.instanceIds = [...new Set((plan.ledger?.instances || []).filter(row => row.group === item.kind && row.key === item.ledgerKey).flatMap(row => row.partIds))];
   const icons = await loadIcons(itemsCover);
-  const coverLayout = legendChunks(itemsCover, true, icons, stamp);
+  const coverLayout = legendChunks(itemsCover, true, icons, stamp, copy.bomTitle);
   const descriptors = [{ type: 'cover', items: coverLayout.chunks[0], partsH: coverLayout.partsH }, ...coverLayout.chunks.slice(1).map(items => ({ type: 'legend', title: copy.bomTitle, items }))];
   descriptors.push({ type: 'safety', title: copy.safetyTitle, lines: instructionChunks([copy.safetyNotice, copy.safetySource, 'https://quadroworld.com/files/manuals/Sicherheitsanweisung.pdf'])[0] });
   descriptors.push({ type: 'overview' });
@@ -1288,7 +1328,7 @@ export async function exportAssemblyPdf(opts) {
     const step = steps[index];
     const heading = (copy.stepHeading || '{k}/{n} · {title}').replace('{k}', String(index + 1)).replace('{n}', String(steps.length)).replace('{kind}', kindLabel(step.kind, copy)).replace('{title}', step.title || '');
     const items = numberStepItems(stepItems(model, step), itemsCover);
-    const { chunks, partsH } = legendChunks(items, false, icons, stamp);
+    const { chunks, partsH } = legendChunks(items, false, icons, stamp, `${heading} · ${copy.thisStep}`);
     const instructions = step.instructions || [];
     const measurement = newPageCanvas();
     const contextHint = step.action?.layer ? copy.layerHint : ['frame', 'risers', 'panels'].includes(step.kind) ? copy.bodyHint : step.action?.type === 'preassemble' ? copy.preassemblyHint : copy.contextHint;
@@ -1296,8 +1336,8 @@ export async function exportAssemblyPdf(opts) {
     descriptors.push({ type: 'step', index, heading, items: chunks[0], allItems: items, partsH, instructions, ...textLayout });
     descriptors.push(...chunks.slice(1).map(items => ({ type: 'legend', title: `${heading} · ${copy.thisStep}`, items })));
     descriptors.push(...manualStepDetailDescriptors(measurement.ctx, model, plan, index, itemsCover, copy));
+    descriptors.push(...manualTextDescriptors(measurement.ctx, `${heading} · ${copy.instructionsTitle}`, textLayout.remainingLines, stamp));
     measurement.c.width = measurement.c.height = 0;
-    for (let offset = 0; offset < textLayout.remainingLines.length; offset += 35) descriptors.push({ type: 'instructions', title: `${heading} · ${copy.instructionsTitle}`, lines: textLayout.remainingLines.slice(offset, offset + 35) });
   }
   descriptors.push({ type: 'final' });
   const textMeasurement = newPageCanvas();
@@ -1311,8 +1351,7 @@ export async function exportAssemblyPdf(opts) {
       : [(plan.interfaces || []).filter(marker => marker.attachment !== 'upper-frame').map(marker => `I${marker.id.split('-').at(-1)}`).join(' · ')];
     const layout = manualStepTextLayout(textMeasurement.ctx, heading, instructions);
     Object.assign(descriptor, layout);
-    const continuations = [];
-    for (let offset = 0; offset < layout.remainingLines.length; offset += 35) continuations.push({ type: 'instructions', title: `${heading} · ${copy.instructionsTitle}`, lines: layout.remainingLines.slice(offset, offset + 35) });
+    const continuations = manualTextDescriptors(textMeasurement.ctx, `${heading} · ${copy.instructionsTitle}`, layout.remainingLines, stamp);
     descriptors.splice(position + 1, 0, ...continuations); position += continuations.length;
   }
   textMeasurement.c.width = textMeasurement.c.height = 0;
@@ -1362,15 +1401,19 @@ export async function exportAssemblyPdf(opts) {
       try {
         if (descriptor.type === 'legend') {
           paintTextPage(ctx, descriptor.title, [], stamp);
-          paintLegend(ctx, descriptor.items, icons, mm(M), mm(17), mm(PAGE_W - M * 2) - (stamp ? stampWidth(ctx, stamp, STAMP_QR_STEP, false) + mm(STAMP_GAP) : 0), mm(PAGE_H - M));
+          const legendY = manualTextPageLayout(ctx, descriptor.title, [], stamp).bodyY;
+          const consumed = paintLegend(ctx, descriptor.items, icons, mm(M), mm(legendY), mm(PAGE_W - M * 2) - (stamp ? stampWidth(ctx, stamp, STAMP_QR_STEP, false) + mm(STAMP_GAP) : 0), mm(PAGE_H - M));
+          if (consumed !== descriptor.items.length) throw manualError('pagination', '材料续页标题与料表空间不一致');
         } else if (descriptor.type === 'instructions' || descriptor.type === 'safety') paintTextPage(ctx, descriptor.title, descriptor.lines, stamp);
         else if (descriptor.type === 'details') {
           paintTextPage(ctx, `${descriptor.heading} · ${copy.detailTitle}`, [], stamp);
           ctx.font = font(400, mm(MANUAL_AUX_MM)); ctx.fillStyle = MUTED;
-          ctx.fillText(`${copy.detailReference}${descriptor.continuationIndex ? ` · ${copy.continuation}` : ''}`, mm(M), mm(11));
+          const pageLayout = descriptor.pageLayout;
+          const referenceLines = wrapManualText(ctx, `${copy.detailReference}${descriptor.continuationIndex ? ` · ${copy.continuation}` : ''}`, mm(PAGE_W - M * 2));
+          referenceLines.forEach((line, i) => ctx.fillText(line, mm(M), mm(pageLayout.referenceY + i * 4.2)));
           for (let groupIndex = 0; groupIndex < descriptor.groups.length; groupIndex++) {
             const group = descriptor.groups[groupIndex];
-            const height = 173;
+            const height = pageLayout.availableHeight;
             const state = assemblyDetailState(plan, descriptor.index, group.id, { action: true });
             const completed = assemblyDetailState(plan, descriptor.index, group.id, { action: false });
             scene.renderModel(model, null, { assembly: state }); const beforeBounds = assemblyDetailBounds(scene, model, plan, steps[descriptor.index], state);
@@ -1385,8 +1428,8 @@ export async function exportAssemblyPdf(opts) {
             const locationState = assemblyState(plan, descriptor.index, { action: false });
             locationState.current = new Set(group.partIds); locationState.done = new Set([...locationState.visible].filter(id => !locationState.current.has(id)));
             const location = await shot(locationState, 0, [], fullBounds, [1, 0.65, 1], { imgW: 31, imgH: 26 }, true);
-            if (group.compact) paintCompactDetail(ctx, { group, left, right, location, icons, copy, x: M + groupIndex * 144.5, y: 20, height, fill: sceneFill(scene) });
-            else paintDetailRow(ctx, { group, left, right, location, icons, copy, y: 20, height, fill: sceneFill(scene) });
+            if (group.compact) paintCompactDetail(ctx, { group, left, right, location, icons, copy, x: M + groupIndex * 144.5, y: pageLayout.bodyY, height, fill: sceneFill(scene) });
+            else paintDetailRow(ctx, { group, left, right, location, icons, copy, y: pageLayout.bodyY, height, fill: sceneFill(scene) });
           }
         }
         else if (descriptor.type === 'cover') {
