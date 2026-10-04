@@ -124,7 +124,7 @@ describe('projected assembly annotations without model planning', () => {
     } }
     const operationMarks = projectOperationMarks(scene, model, state, 4 / 3)
     expect(projectedPositions).toEqual([[15, 20, 20], [15, 20, 20]])
-    expect(operationMarks.map(mark => mark.order)).toEqual([3, 134])
+    expect(operationMarks.map((mark: { order: number }) => mark.order)).toEqual([3, 134])
     expect(model.toJSON()).toEqual(snapshot)
     let path: number[][] = []
     const strokes: { color: string; path: number[][] }[] = []
