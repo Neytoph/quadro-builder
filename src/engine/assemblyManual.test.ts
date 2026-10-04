@@ -4,7 +4,7 @@ import { BuildModel } from './model.js'
 import { loadCatalog, buildableTubes, panels, geometry } from './catalog.js'
 import { computeBOM } from './bom.js'
 import { computeAssemblyPlan, assemblyState } from './assemblyPlan.js'
-import { coverItems, numberStepItems, stepItems, assemblyPresentationState, measureManualLegend, manualPartsHeight } from './assemblyManual.js'
+import { coverItems, numberStepItems, stepItems, assemblyPresentationState, measureManualLegend, manualPartsHeight, assemblyDetailItems, assemblyDetailDirection, wrapManualText, manualStepTextLayout, manualStepDetailDescriptors, layoutManualCallouts, MANUAL_TEXT_MM, MANUAL_AUX_MM } from './assemblyManual.js'
 import { parseQDF } from './qdfimport.js'
 import { partImageSrc } from '../ui/partImages'
 
@@ -15,6 +15,63 @@ const assetEvidence: any[] = []
 afterAll(() => { mkdirSync('.work', { recursive: true }); writeFileSync('.work/assembly-pdf-assets.json', JSON.stringify(assetEvidence, null, 2)) })
 
 describe('说明书材料编号', () => {
+  it('纸面正文字号至少10pt，辅助字至少9pt；长指令换行后保留全文', () => {
+    expect(MANUAL_TEXT_MM * 72 / 25.4).toBeGreaterThanOrEqual(10)
+    expect(MANUAL_AUX_MM * 72 / 25.4).toBeGreaterThanOrEqual(9)
+    const ctx = { font: '', measureText: (text: string) => ({ width: [...text].length * 20 }) }
+    const instruction = '先将闭环套件穿入管件，再把管件沿着指定插口方向插入，最后安装另一端接头。'.repeat(60)
+    expect(wrapManualText(ctx, instruction, 300).join('')).toBe(instruction)
+    const layout = manualStepTextLayout(ctx, '步骤 2：安装本层', [instruction])
+    expect([...layout.instructionLines, ...layout.remainingLines].join('')).toBe(instruction)
+    expect(layout.remainingLines.length).toBeGreaterThan(0)
+    expect(layout.headerH).toBeLessThanOrEqual(52)
+  })
+  it('局部材料只沿用封面编号，范围只包含本组且排除仅用于定位的支撑件', () => {
+    const cover = [{ key: 'T35|red', ledgerKey: 'T35|red', num: 7, kind: 'tubes', name: '管35cm', count: 9, instanceIds: ['a', 'b'] }, { key: 'connectors:3', ledgerKey: '3', num: 2, kind: 'connectors', name: '接头', count: 5, instanceIds: ['c'] }]
+    const items = assemblyDetailItems({}, { ledger: { instances: [] } }, {}, { id: 'g', partIds: ['b', 'c'], materialKeys: ['tubes:T35|red'] }, cover)
+    expect(items).toHaveLength(1)
+    expect(items[0].num).toBe(7)
+    expect(items[0].instanceIds).toEqual(['b'])
+    expect(items[0].referenceOnly).toBe(true)
+    expect(cover[0].instanceIds).toEqual(['a', 'b'])
+  })
+  it('最多六个实际圆圈，侧边引线保留真实投影点且不叠号', () => {
+    const marks = Array.from({ length: 6 }, (_, i) => ({ label: String(i + 1), x: 100 + i * 10, y: 100 }))
+    const placed = layoutManualCallouts(marks, 800, 600, 28)
+    expect(placed).toHaveLength(6)
+    expect(new Set(placed.map(mark => `${mark.x},${mark.y}`)).size).toBe(6)
+    placed.forEach(mark => expect(mark.anchorY).toBe(100))
+    expect(() => layoutManualCallouts([...marks, marks[0]], 800, 600, 28)).toThrow('超过六个')
+    expect(assemblyDetailDirection({ viewDirection: 'back' })).toEqual([-1, 0.65, -1])
+    expect(assemblyDetailDirection({ viewDirection: 'bottom' })).toEqual([1, -0.65, 1])
+    const group = { viewDirection: 'front', operationIds: ['diagonal'] }
+    const step = { operations: [{ id: 'diagonal', direction: [1, 1, 1] }] }
+    const direction = assemblyDetailDirection(group, step)
+    expect(Math.abs(direction.reduce((sum: number, value: number) => sum + value, 0)) / Math.hypot(...direction) / Math.sqrt(3)).toBeLessThan(0.5)
+    expect(assemblyDetailDirection({ ...group, viewDirection: 'back' }, step)).toEqual([-1, 0.65, -1])
+  })
+  it.each(['C0179', 'C0005', 'C0013'])('%s 局部续页保留主步骤号，每组仅一次且不重复计料', name => {
+    const model = new BuildModel()
+    model.loadJSON(parseQDF(readFileSync(`public/qdf/${name}.qdf`, 'utf8'), { tubes: buildableTubes(), panels: panels(), connectorSize: geometry().connectorSize, mergeEps: 2 }))
+    const plan = computeAssemblyPlan(model)
+    const cover = coverItems(plan.bom)
+    const ctx = { font: '', measureText: (text: string) => ({ width: [...text].length * 16 }) }
+    const copy = { stepHeading: '{k}/{n} · {title}', detailTitle: '局部动作详图' }
+    for (let index = 0; index < plan.steps.length; index++) {
+      const descriptors = manualStepDetailDescriptors(ctx, model, plan, index, cover, copy)
+      expect(descriptors.flatMap((page: any) => page.groups.map((group: any) => group.id))).toEqual(plan.steps[index].detailGroups.map((group: any) => group.id))
+      for (const descriptor of descriptors) {
+        expect(descriptor.index).toBe(index)
+        expect(descriptor.heading.startsWith(`${index + 1}/${plan.steps.length}`)).toBe(true)
+        expect(descriptor.countsMaterials).toBe(false)
+        expect(descriptor.groups.length).toBeLessThanOrEqual(2)
+        for (const group of descriptor.groups) {
+          expect(group.items.length).toBeLessThanOrEqual(6)
+          expect(group.items.every((item: any) => item.referenceOnly)).toBe(true)
+        }
+      }
+    }
+  })
   it('C0179整层安装保留已装主体，顶层框架与接头一同下套且不修改模型状态', () => {
     const model = new BuildModel()
     model.loadJSON(parseQDF(readFileSync('public/qdf/C0179.qdf', 'utf8'), { tubes: buildableTubes(), panels: panels(), connectorSize: geometry().connectorSize, mergeEps: 2 }))
@@ -185,5 +242,5 @@ describe('说明书材料编号', () => {
         expect(existsSync(`public/${image.src!.replace(/^\//, '')}`), `${file}: ${image.src}`).toBe(true)
       }
       assetEvidence.push({ file, rows: items.length, images, missingPictures: [] })
-  })
+  }, 30000)
 })
