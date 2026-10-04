@@ -90,7 +90,7 @@ describe('真实装配区域、连接件与物料守恒', () => {
     const pre = plan.steps.findIndex((s: any) => s.regionId === roof.id && s.action.type === 'preassemble')
     const attach = plan.steps.findIndex((s: any) => s.regionId === roof.id && s.action.type === 'attach')
     expect(plan.steps[pre].nodeIds).toContain('n274')
-    // One main layer now also includes its two vertical support motions.
+    // The preassembly also owns its two C45 topology arms (no extra tubes).
     expect([...plan.steps[pre].tubeIds].sort()).toEqual(['m267', 'm269', 't275', 't276'])
     expect(assemblyState(plan, pre).transforms.has('n274')).toBe(true)
     expect(assemblyState(plan, attach, { action: true }).transforms.has('n274')).toBe(true)
