@@ -8,7 +8,7 @@ import { proposeAssemblyRepairs, resolveNodeConnection } from './connectionResol
 
 beforeAll(async () => { await loadCatalog() })
 const evidence: any[] = []
-afterAll(() => { mkdirSync('.work', { recursive: true }); writeFileSync('.work/assembly-engine-evidence.json', JSON.stringify(evidence, null, 2)) })
+afterAll(() => { mkdirSync('../qa/frame-followup', { recursive: true }); writeFileSync('../qa/frame-followup/engine-evidence.json', JSON.stringify(evidence, null, 2)) })
 const load = (file: string) => {
   const model = new BuildModel()
   const text = readFileSync(`public/${file}`, 'utf8')
@@ -35,12 +35,9 @@ describe('真实装配区域、连接件与物料守恒', () => {
     expect(new Set(ids).size).toBe(ids.length)
     expect(ids.length).toBe([...model.nodes.values(), ...model.tubes.values(), ...model.panels.values(), ...model.textiles.values(), ...model.slides.values(), ...model.fittings.values(), ...model.clamps.values()].length)
     for (const group of ['tubes', 'connectors', 'panels', 'textiles', 'slides', 'fittings', 'screws', 'reinforcements']) expect(plan.steps.reduce((n: number, s: any) => n + s.parts[group].reduce((sum: number, row: any) => sum + row.count, 0), 0)).toBe(plan.bom[group].reduce((n: number, row: any) => n + row.count, 0))
-    expect(plan.fixingPoints.reduce((sum: number, p: any) => sum + p.count, 0)).toBe(plan.bom.totals.screws)
-    for (const fixing of plan.fixingPoints) {
-      expect(plan.steps.find((s: any) => s.id === fixing.stepId).action.type).toBe('fix')
-      if (fixing.screwId === 'screw_tube') { const tube = model.tubes.get(fixing.partId)!; expect([tube.a, tube.b].map(id => { const n = model.nodes.get(id)!; return [n.x, n.y, n.z] })).toContainEqual(fixing.position) }
-    }
-    evidence.push({ file, parts: ids.length, regions: plan.regions.map((r: any) => ({ id: r.id, kind: r.kind, parts: r.partIds.length, nodeIds: r.nodeIds, tubeIds: r.tubeIds, installation: r.installation })), interfaces: plan.interfaces, actions: plan.steps.map((s: any) => ({ id: s.id, regionId: s.regionId, kind: s.kind, action: s.action.type, detached: !!s.action.detached, tubeIds: s.tubeIds, partCount: s.partIds.length, interfaceIds: s.interfaceIds })), steps: plan.steps.length, bom: plan.bom.totals, ledger: plan.ledger.rows, diagnostics: plan.diagnostics, canExport: plan.canExport })
+    expect(plan.fixingPoints).toEqual([])
+    expect(plan.steps.some((s: any) => s.action.type === 'fix')).toBe(false)
+    evidence.push({ file, parts: ids.length, regions: plan.regions.map((r: any) => ({ id: r.id, kind: r.kind, parts: r.partIds.length, nodeIds: r.nodeIds, tubeIds: r.tubeIds, installation: r.installation })), frameModules: plan.frameModules, interfaces: plan.interfaces, actions: plan.steps.map((s: any) => ({ id: s.id, regionId: s.regionId, kind: s.kind, action: s.action.type, scope: s.action.scope, detached: !!s.action.detached, tubeIds: s.tubeIds, partCount: s.partIds.length, interfaceIds: s.interfaceIds })), steps: plan.steps.length, bom: plan.bom.totals, ledger: plan.ledger.rows, diagnostics: plan.diagnostics, canExport: plan.canExport })
   })
 
   it('s36 用弯管切线识别重复端口，真实修正移除两根 T15并保留支撑和料表', () => {
@@ -162,7 +159,7 @@ describe('真实装配区域、连接件与物料守恒', () => {
     }
     const plan = computeAssemblyPlan(model), bodies = plan.regions.filter((r: any) => r.kind === 'body')
     expect(bodies).toHaveLength(2)
-    const pre = plan.steps.findIndex((s: any) => s.regionId === bodies[1].id && s.action.type === 'preassemble'), attach = plan.steps.findIndex((s: any) => s.regionId === bodies[1].id && s.action.type === 'attach')
+    const pre = plan.steps.findIndex((s: any) => s.regionId === bodies[1].id && s.action.type === 'preassemble' && s.action.scope !== 'parts'), attach = plan.steps.findIndex((s: any) => s.regionId === bodies[1].id && s.action.type === 'attach' && s.action.scope !== 'parts')
     expect(pre).toBeGreaterThan(-1); expect(attach).toBeGreaterThan(pre)
     expect(assemblyState(plan, pre).transforms.size).toBeGreaterThan(0)
     expect(assemblyState(plan, attach).transforms.size).toBe(0)

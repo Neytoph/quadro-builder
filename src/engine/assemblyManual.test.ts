@@ -1,18 +1,38 @@
-import { beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { BuildModel } from './model.js'
 import { loadCatalog, buildableTubes, panels, geometry } from './catalog.js'
 import { computeBOM } from './bom.js'
 import { computeAssemblyPlan, assemblyState } from './assemblyPlan.js'
-import { coverItems, numberStepItems, stepItems, assemblyFixingGroups, assemblyPresentationState, measureManualLegend, manualPartsHeight } from './assemblyManual.js'
+import { coverItems, numberStepItems, stepItems, assemblyPresentationState, measureManualLegend, manualPartsHeight } from './assemblyManual.js'
 import { parseQDF } from './qdfimport.js'
 import { partImageSrc } from '../ui/partImages'
 
 type ManualItem = { id: string; key: string; kind: string; num: number }
 
 beforeAll(async () => { await loadCatalog() })
+const assetEvidence: any[] = []
+afterAll(() => { mkdirSync('.work', { recursive: true }); writeFileSync('.work/assembly-pdf-assets.json', JSON.stringify(assetEvidence, null, 2)) })
 
 describe('说明书材料编号', () => {
+  it('C0179预拼页只呈现本模块零件，分开图不制造插接箭头或修改模型状态', () => {
+    const model = new BuildModel()
+    model.loadJSON(parseQDF(readFileSync('public/qdf/C0179.qdf', 'utf8'), { tubes: buildableTubes(), panels: panels(), connectorSize: geometry().connectorSize, mergeEps: 2 }))
+    const plan = computeAssemblyPlan(model)
+    const index = plan.steps.findIndex((step: any) => step.y === 20 && step.action.scope === 'parts' && step.action.type === 'preassemble')
+    expect(index).toBeGreaterThanOrEqual(0)
+    const step = plan.steps[index], before = assemblyState(plan, index, { action: true }), after = assemblyState(plan, index)
+    const saved = JSON.stringify(model.toJSON()), originalVisible = [...before.visible]
+    const left = assemblyPresentationState(model, plan, step, before), right = assemblyPresentationState(model, plan, step, after)
+    expect([...left.visible].sort()).toEqual([...step.action.partIds].sort())
+    expect([...right.visible].sort()).toEqual([...step.action.partIds].sort())
+    expect(left.arrows).toEqual([])
+    for (const id of step.nodeIds) expect(left.transforms.get(id)).toEqual(right.transforms.get(id))
+    for (const id of step.tubeIds) expect(left.transforms.get(id)).toEqual(right.transforms.get(id).map((v: number, axis: number) => v + (axis === 1 ? 8 : 0)))
+    expect([...before.visible]).toEqual(originalVisible)
+    expect(before.hiddenNewParts.size).toBe(step.action.partIds.length)
+    expect(JSON.stringify(model.toJSON())).toBe(saved)
+  })
   it('C0179 第2步全部7种零件留在步骤页，管35 cm不再单独占页', () => {
     const model = new BuildModel()
     model.loadJSON(parseQDF(readFileSync('public/qdf/C0179.qdf', 'utf8'), { tubes: buildableTubes(), panels: panels(), connectorSize: geometry().connectorSize, mergeEps: 2 }))
@@ -37,17 +57,19 @@ describe('说明书材料编号', () => {
     expect(manualPartsHeight(ctx, [], 2200)).toBe(47)
   })
 
-  it('C0013 第4步的最后一条加固管留在六行步骤料表中', () => {
+  it('C0013 新步骤的加固件完整分配，料表按实际行高留在图示页', () => {
     const model = new BuildModel()
     model.loadJSON(parseQDF(readFileSync('public/qdf/C0013.qdf', 'utf8'), { tubes: buildableTubes(), panels: panels(), connectorSize: geometry().connectorSize, mergeEps: 2 }))
-    const items = stepItems(model, computeAssemblyPlan(model).steps[3])
+    const plan = computeAssemblyPlan(model)
+    const groups = plan.steps.map((step: any) => stepItems(model, step)).filter((items: any[]) => items.some(item => item.kind === 'reinforcements'))
     const ctx = { font: '', measureText: (text: string) => ({ width: [...text].length * 20 }) }
-    const layout = measureManualLegend(ctx, items, 2450)
-    const partsH = manualPartsHeight(ctx, items, 2450)
-    expect(items.length).toBe(16)
-    expect(layout.height).toBeGreaterThan((82 - 5.7) * 10)
-    expect(layout.height).toBeLessThanOrEqual((partsH - 5.7) * 10)
-    expect(210 - 20 - partsH - 3).toBeGreaterThanOrEqual(85)
+    expect(groups.flat().filter((item: any) => item.kind === 'reinforcements').reduce((sum: number, item: any) => sum + item.count, 0)).toBe(8)
+    for (const items of groups) {
+      const layout = measureManualLegend(ctx, items, 2450)
+      const partsH = manualPartsHeight(ctx, items, 2450)
+      expect(layout.height).toBeLessThanOrEqual((partsH - 5.7) * 10)
+      expect(210 - 20 - partsH - 3).toBeGreaterThanOrEqual(85)
+    }
   })
 
   it('s33 两条面板物料不再溢出封面成为稀疏续页', () => {
@@ -90,14 +112,13 @@ describe('说明书材料编号', () => {
     expect(JSON.stringify(model.toJSON())).toBe(before)
     expect(plan.ledger.conserved).toBe(true)
   })
-  it('s33 固定标号合并同部位但保留全部螺丝数量和固定步骤', () => {
+  it('s33 说明书不生成固定检查步骤或螺丝位置', () => {
     const model = new BuildModel()
     expect(model.loadJSON(JSON.parse(readFileSync('public/assembly-fixtures/s33.json', 'utf8'))).ok).toBe(true)
     const plan = computeAssemblyPlan(model)
-    const marks = assemblyFixingGroups(plan)
-    expect(marks.reduce((n: number, mark: any) => n + mark.count, 0)).toBe(plan.bom.screws.reduce((n: number, row: any) => n + row.count, 0))
-    expect(new Set(marks.map((mark: any) => mark.label)).size).toBe(marks.length)
-    expect(marks.every((mark: any) => plan.steps.some((step: any) => step.id === mark.stepId && step.action.type === 'fix'))).toBe(true)
+    expect(plan.steps.some((step: any) => step.action.type === 'fix')).toBe(false)
+    expect(plan.fixingPoints).toEqual([])
+    expect(plan.ledger.conserved).toBe(true)
   })
   it('原始总 BOM 的管件、连接件有图片目录 ID，各步编号沿用全书编号', () => {
     const model = new BuildModel()
@@ -118,9 +139,7 @@ describe('说明书材料编号', () => {
     expect(() => numberStepItems([{ key: 'unknown', id: 'unknown', count: 1 }], [])).toThrow('材料未列入总料表')
   })
 
-  it('七个真实模型的说明书物料图片在目录中存在且不统计螺丝', () => {
-    const evidence = []
-    for (const file of ['qdf/B0012.qdf', 'qdf/C0005.qdf', 'qdf/C0013.qdf', 'qdf/C0156.qdf', 'qdf/C0179.qdf', 'assembly-fixtures/s33.json', 'assembly-fixtures/s36.json']) {
+  it.each(['qdf/B0012.qdf', 'qdf/C0005.qdf', 'qdf/C0013.qdf', 'qdf/C0156.qdf', 'qdf/C0179.qdf', 'assembly-fixtures/s33.json', 'assembly-fixtures/s36.json'])('%s 说明书物料图片存在且不统计螺丝', file => {
       const text = readFileSync(`public/${file}`, 'utf8')
       const data = file.endsWith('.qdf') ? parseQDF(text, { tubes: buildableTubes(), panels: panels(), connectorSize: geometry().connectorSize, mergeEps: 2 }) : JSON.parse(text)
       const model = new BuildModel()
@@ -134,9 +153,6 @@ describe('说明书材料编号', () => {
         expect(image.src, `${file}: ${image.id}`).toBeTruthy()
         expect(existsSync(`public/${image.src!.replace(/^\//, '')}`), `${file}: ${image.src}`).toBe(true)
       }
-      evidence.push({ file, rows: items.length, images, missingPictures: [] })
-    }
-    mkdirSync('.work', { recursive: true })
-    writeFileSync('.work/assembly-pdf-assets.json', JSON.stringify(evidence, null, 2))
+      assetEvidence.push({ file, rows: items.length, images, missingPictures: [] })
   })
 })

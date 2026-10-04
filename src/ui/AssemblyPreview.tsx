@@ -3,7 +3,7 @@ import { Vector3 } from 'three'
 import { BuildModel, SceneManager, colorName, partName, getPartById } from '../engine-api'
 import { assemblyState, computeAssemblyPlan } from '../engine/assemblyPlan.js'
 import { takeModelThumb, waitSceneReady } from '../engine/thumbShot.js'
-import { renderedBounds, assemblyFocusBounds, assemblyFixingGroups, assemblyPresentationState } from '../engine/assemblyManual.js'
+import { renderedBounds, assemblyFocusBounds, assemblyPresentationState } from '../engine/assemblyManual.js'
 import { useEngine, type AssemblyConfig } from '../store/EngineContext'
 import { useI18n } from '../i18n'
 import { assemblyStrings, assemblyDiagnosticText, assemblyPdfStrings } from './assemblyStrings'
@@ -29,14 +29,12 @@ export default function AssemblyPreview() {
   const [overlay, setOverlay] = useState<{ width: number; height: number; marks: E[]; arrows: E[] }>({ width: 1, height: 1, marks: [], arrows: [] })
   const [viewError, setViewError] = useState<string | null>(null)
   const [index, setIndex] = useState(0)
-  const [fixOffset, setFixOffset] = useState(0)
   const [whole, setWhole] = useState(false)
   const [action, setAction] = useState(true)
   const [marked, setMarked] = useState<string[]>([])
   const [editing, setEditing] = useState<string | null>(null)
   const [chosen, setChosen] = useState<string[]>([])
   const open = !!preview && api.exportManualConfirm
-  useEffect(() => setFixOffset(0), [index, preview?.plan])
 
   useEffect(() => {
     if (!open || !host.current) return
@@ -78,10 +76,7 @@ export default function AssemblyPreview() {
     const v = view.current
     const draw = () => {
       let assembly: E = whole || marked.length ? null : assemblyState(preview.plan, index, { action })
-      const fixings = assembly ? assemblyFixingGroups(preview.plan).filter((mark: E) => mark.stepId === preview.plan.steps[index]?.id).slice(fixOffset, fixOffset + 12) : []
-      if (assembly && fixings.length) assembly.interfaceMarks = []
       if (assembly) {
-        assembly.fixingMarks = fixings
         assembly = assemblyPresentationState(v.model, preview.plan, preview.plan.steps[index], assembly)
       }
       projectOverlay.current = () => {
@@ -100,10 +95,6 @@ export default function AssemblyPreview() {
         for (const arrow of assembly?.arrows || []) {
           const [from, to] = v.scene.projectWorld([arrow.from, arrow.to])
           if (from && to) arrows.push({ x1: from.u * width, y1: from.v * height, x2: to.u * width, y2: to.v * height })
-        }
-        for (const marker of fixings) {
-          const point = v.scene.projectWorld([marker.position])[0]
-          if (point) marks.push({ x: point.u * width, y: point.v * height, label: marker.label })
         }
         setOverlay({ width, height, marks: layoutAssemblyMarks(marks, width, height), arrows })
       }
@@ -127,14 +118,13 @@ export default function AssemblyPreview() {
     v.scene.onMeshesReady = draw
     redraw.current = draw
     draw()
-  }, [preview?.plan, preview?.data, index, whole, action, marked, fixOffset])
+  }, [preview?.plan, preview?.data, index, whole, action, marked])
 
   if (!open || !preview) return null
   const plan = preview.plan
   const config = preview.config
   const ordered = config.order.map(id => config.regions.find(r => r.id === id)!).filter(Boolean)
   const current = plan.steps[index]
-  const currentFixings = assemblyFixingGroups(plan).filter((mark: E) => mark.stepId === current?.id)
   const stale = preview.tabId !== api.activeTabId || JSON.stringify(api.engine()?.model.toJSON()) !== preview.source
   const busy = !!api.exportingManual
   const update = (next: AssemblyConfig) => { api.updateManualConfig(next); setMarked([]) }
@@ -220,8 +210,7 @@ export default function AssemblyPreview() {
         {preview.repair && <div className="assembly-repair" data-testid="assembly-repair-preview"><h3>{s.repairTitle}</h3><p>{s.repairHint}</p>{preview.repair.changes.map((c: E, i: number) => <div className="assembly-repair-change" key={i}><strong>{c.action === 'remove' || c.type === 'remove' ? s.remove : s.change} · {c.catalogPartId ? partName(getPartById(c.catalogPartId)) || c.catalogPartId : names.get(c.tubeId) || c.tubeId || c.partId || c.nodeId}</strong><p>{c.before?.color && colorName(c.before.color)} · {c.tubeId || c.partId} · {c.before?.a} ↔ {c.before?.b}</p>{c.action === 'remove' && <p>{s.duplicatePort}</p>}<details><summary>{s.before} / {s.after}</summary><div className="assembly-small">{s.before}: {JSON.stringify(c.before)}<br />{s.after}: {JSON.stringify(c.after)}</div></details></div>)}{preview.repair.bomChanges?.map((row: E, i: number) => <div className="assembly-part-row" key={i}><span>{row.name || preview.repair.beforeBOM?.[row.group]?.find((r: E) => (r.key || r.type || r.id) === row.key)?.name || row.key || row.id}</span><b>{row.before} → {row.after}</b></div>)}{preview.repair.diagnostics?.map((d: E, i: number) => <p key={i}>{diagnosticText(d)}</p>)}<div className="assembly-preview-tools"><button data-testid="assembly-repair-apply" className="qb-btn qb-btn-sm" disabled={busy || api.readOnly || stale || !preview.repair.canApply} onClick={() => { if (!api.applyManualRepairs()) api.notify(s.failedApply, 'warn') }}>{s.apply}</button><button className="qb-btn qb-btn-ghost qb-btn-sm" disabled={busy} onClick={api.discardManualRepairs}>{s.discard}</button></div></div>}
         {plan.diagnostics.length > 0 && <><h3>{s.diagnostics}</h3>{!preview.repair && plan.diagnostics.some((d: E) => d.repairable) && <button className="qb-btn qb-btn-ghost qb-btn-sm mb-3" disabled={busy} onClick={() => api.reviewManualRepairs([...new Set<string>(plan.diagnostics.filter((d: E) => d.repairable).flatMap((d: E) => d.nodeIds || []))])}>{s.repair}</button>}{plan.diagnostics.map((d: E, i: number) => <div className="assembly-diagnostic" key={i} data-severity={d.severity}><strong>{diagnosticText(d)}</strong><div className="assembly-small">{[...(d.nodeIds || []), ...(d.partIds || [])].join(' · ')}</div><div className="assembly-preview-tools"><button className="qb-btn qb-btn-ghost qb-btn-sm" onClick={() => { setMarked([...new Set<string>([...(d.nodeIds || []), ...(d.partIds || [])])]); setWhole(true) }}>{s.locate}</button></div></div>)}</>}
         <h3>{s.steps} · {plan.steps.length}</h3>
-        {!whole && !marked.length && <p className="assembly-small">{assemblyPdfStrings[lang].contextHint}</p>}
-        {currentFixings.length > 0 && <div className="assembly-preview-tools"><span className="assembly-small">{currentFixings[fixOffset]?.label}–{currentFixings[Math.min(fixOffset + 11, currentFixings.length - 1)]?.label} · {s.fixingPositions}</span><button className="qb-btn qb-btn-ghost qb-btn-sm" disabled={fixOffset === 0} onClick={() => setFixOffset(value => value - 12)}>←</button><button className="qb-btn qb-btn-ghost qb-btn-sm" disabled={fixOffset + 12 >= currentFixings.length} onClick={() => setFixOffset(value => value + 12)}>→</button></div>}
+        {!whole && !marked.length && <p className="assembly-small">{current?.action?.scope === 'parts' && current.action.type === 'preassemble' ? assemblyPdfStrings[lang].preassemblyHint : assemblyPdfStrings[lang].contextHint}</p>}
         <div className="assembly-preview-tools mb-3"><button className="qb-btn qb-btn-ghost qb-btn-sm" aria-pressed={whole} onClick={() => { setWhole(v => !v); setMarked([]) }}>{s.all}</button><button className="qb-btn qb-btn-ghost qb-btn-sm" aria-pressed={action} onClick={() => { setAction(v => !v); setWhole(false); setMarked([]) }}>{s.action}</button></div>
         {plan.steps.map((step: E, i: number) => <button data-testid="assembly-step" className="assembly-step" key={step.id || i} aria-current={i === index} onClick={() => { setIndex(i); setWhole(false); setMarked([]) }}>{i + 1}. {step.title || `${ordered.find(r => r.id === step.regionId)?.name || step.regionId} · ${step.action?.type === 'attach' ? s.attach : step.action?.type === 'preassemble' ? s.preassemble : s.build}`}</button>)}
         {current && <div className="mt-3">{current.dependsOn?.length > 0 && <p>{s.dependencies}: {current.dependsOn.map((id: string) => { const at = plan.steps.findIndex((step: E) => step.id === id); return at >= 0 ? `${at + 1}. ${plan.steps[at].title}` : id }).join(' · ')}</p>}{GROUPS.map(g => (current.parts?.[g]?.length > 0 ? <div key={g}><h3 className="mt-3">{s[g]}</h3>{current.parts[g].map((r: E, i: number) => <div className="assembly-part-row" key={r.key || i}><span>{r.name || r.id || r.key}</span><b>× {r.count}</b></div>)}</div> : null))}</div>}

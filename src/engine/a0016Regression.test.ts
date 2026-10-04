@@ -41,7 +41,8 @@ describe('官方 A0016 旋转 C45 与真实装配动作', () => {
     const plan = computeAssemblyPlan(model)
     expect(plan.canExport, JSON.stringify(plan.diagnostics)).toBe(true)
     expect(plan.regions.filter((r: any) => r.kind === 'ramp').every((r: any) => r.installation.mode === 'in-place')).toBe(true)
-    expect(plan.interfaces).toHaveLength(4)
+    expect(plan.interfaces.filter((m: any) => m.attachment !== 'upper-frame')).toHaveLength(4)
+    expect(plan.interfaces.filter((m: any) => m.attachment === 'upper-frame')).toHaveLength(4)
     expect(assemblyState(plan, plan.steps.length - 1).transforms.size).toBe(0)
     const reopened = new BuildModel(); expect(reopened.loadJSON(model.toJSON()).ok).toBe(true)
     expect(computeBOM(reopened).connectors.find((row: any) => row.type === 'diagonal')?.count).toBe(4)
@@ -71,12 +72,17 @@ describe('官方 A0016 旋转 C45 与真实装配动作', () => {
     expect(model.toJSON()).toEqual(before)
   })
 
-  it('闭合框架的双端横管保留安装前支撑，不绘制伪造的单向插入', () => {
-    const plan = computeAssemblyPlan(load()), index = plan.steps.findIndex((s: any) => s.kind === 'frame' && s.y === 40)
+  it('闭合框架在旁边预拼，不绘制双端横管的伪造单向插入；整体向下套入立柱', () => {
+    const plan = computeAssemblyPlan(load()), index = plan.steps.findIndex((s: any) => s.action.scope === 'parts' && s.action.type === 'preassemble' && s.y === 40)
+    expect(index).toBeGreaterThan(-1)
     const action = assemblyState(plan, index, { action: true }), complete = assemblyState(plan, index)
     expect(action.arrows).toEqual([])
     expect(action.actionStage).toBe('before')
-    for (const id of plan.steps[index].tubeIds) { expect(action.visible.has(id)).toBe(false); expect(complete.visible.has(id)).toBe(true) }
+    for (const id of plan.steps[index].partIds) { expect(action.visible.has(id)).toBe(false); expect(complete.visible.has(id)).toBe(true); expect(complete.transforms.get(id)).toEqual(plan.steps[index].action.translation) }
+    const attach = plan.steps.findIndex((s: any) => s.action.type === 'attach' && s.action.assemblyId === plan.steps[index].action.assemblyId)
+    expect(assemblyState(plan, attach, { action: true }).arrows.every((a: any) => a.direction[1] < -0.99)).toBe(true)
+    expect(assemblyState(plan, attach).transforms.size).toBe(0)
+    expect(Object.values(plan.steps[attach].parts).flat()).toEqual([])
   })
 
   it('单独安装C45和承载接头的步骤在前图保留主体、后图显示新增接头', () => {

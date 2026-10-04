@@ -813,7 +813,6 @@ export function assemblyFocusBounds(scene, model, plan, step, state) {
   const positions = [
     ...(state?.interfaceMarks || []).map(mark => mark.position),
     ...(state?.arrows || []).flatMap(arrow => [arrow.from, arrow.to]),
-    ...(state?.fixingMarks || []).map(mark => mark.position),
   ];
   for (const position of positions) for (let axis = 0; axis < 3; axis++) {
     bounds.min[axis] = Math.min(bounds.min[axis], position[axis] - 8);
@@ -828,9 +827,16 @@ export function assemblyFocusBounds(scene, model, plan, step, state) {
 export function assemblyPresentationState(model, plan, step, state, { detail = false } = {}) {
   if (!state || !step) return state;
   const region = plan.regions.find(region => region.id === step.regionId);
-  const allowed = new Set(state.fixingMarks?.length
-    ? state.fixingMarks.flatMap(mark => mark.partIds)
-    : region?.partIds || step.partIds || []);
+  const modulePreassembly = step.action?.scope === 'parts' && step.action.type === 'preassemble';
+  if (modulePreassembly && state.actionStage === 'before') {
+    const prepared = assemblyState(plan, plan.steps.indexOf(step));
+    const visible = new Set(step.action.partIds);
+    const transforms = new Map([...prepared.transforms].filter(([id]) => visible.has(id)));
+    // 预拼零件图仅分开展示横管，不表达管件的真实插接路径。
+    for (const id of step.tubeIds) transforms.set(id, (transforms.get(id) || [0, 0, 0]).map((v, axis) => v + (axis === 1 ? 8 : 0)));
+    state = { ...state, visible, current: new Set(visible), done: new Set(), transforms, hiddenNewParts: new Set(), arrows: [], actionStage: 'parts' };
+  }
+  const allowed = new Set(modulePreassembly ? step.action.partIds : region?.partIds || step.partIds || []);
   const includeTube = id => {
     const tube = model.tubes.get(id);
     if (tube) { allowed.add(id); allowed.add(tube.a); allowed.add(tube.b); }
@@ -865,27 +871,11 @@ export function assemblyPresentationState(model, plan, step, state, { detail = f
       [...model.tubes.values()].filter(tube => state.visible.has(tube.id)).map(tube => ({ tube, distance: distanceToSegment(tube) })).sort((a, b) => a.distance - b.distance).slice(0, 4).filter(row => row.distance < 35).forEach(row => includeTube(row.tube.id));
     }
   }
-  if (detail && !state.fixingMarks?.length) {
+  if (detail) {
     for (const id of [...allowed]) if (model.panels.has(id) || model.textiles?.has(id)) allowed.delete(id);
   }
   const filter = ids => new Set([...ids].filter(id => allowed.has(id)));
   return { ...state, current: filter(state.current), done: filter(state.done), visible: filter(state.visible), contextFiltered: [...state.visible].some(id => !allowed.has(id)) };
-}
-
-export function assemblyFixingGroups(plan) {
-  const grouped = new Map();
-  for (const point of plan.fixingPoints || []) {
-    if (!point.position?.every(Number.isFinite)) throw manualError('fixings', '固定位置坐标无效');
-    const key = `${point.regionId}:${point.position.map(value => value.toFixed(2)).join(',')}`;
-    let group = grouped.get(key);
-    if (!group) {
-      group = { label: `F${grouped.size + 1}`, position: point.position, regionId: point.regionId, stepId: point.stepId, count: 0, pointIds: [], partIds: [], screwIds: [] };
-      grouped.set(key, group);
-    }
-    group.count += point.count;
-    group.pointIds.push(point.id); group.partIds.push(point.partId); group.screwIds.push(point.screwId);
-  }
-  return [...grouped.values()];
 }
 
 function boundsFor(min, max) {
@@ -903,10 +893,6 @@ function projectStateMarks(scene, state, aspect) {
       const point = scene.projectWorld([position], aspect)[0];
       if (point) marks.push({ ...point, num: `I${String(marker.id).split('-').at(-1)}` });
     }
-  }
-  for (const marker of state?.fixingMarks || []) {
-    const point = scene.projectWorld([marker.position], aspect)[0];
-    if (point) marks.push({ ...point, num: marker.label });
   }
   return marks;
 }
@@ -1025,7 +1011,6 @@ export async function exportAssemblyPdf(opts) {
   const plan = suppliedPlan || computeAssemblyPlan(model, opts.assemblyConfig, opts.order || opts.builder?.assemblyOrder || 'y+');
   if (!plan.canExport) throw manualError('diagnostics', '模型连接诊断尚未通过，无法导出说明书', plan.diagnostics);
   const steps = plan.steps || [];
-  const fixingGroups = assemblyFixingGroups(plan);
   if (!steps.length) throw manualError('empty', '模型没有可导出的装配步骤');
   await document.fonts?.ready;
   const itemsCover = coverItems(plan.bom || opts.bom || computeBOM(model));
@@ -1040,12 +1025,10 @@ export async function exportAssemblyPdf(opts) {
     const heading = (copy.stepHeading || '{k}/{n} · {title}').replace('{k}', String(index + 1)).replace('{n}', String(steps.length)).replace('{kind}', kindLabel(step.kind, copy)).replace('{title}', step.title || '');
     const items = numberStepItems(stepItems(model, step), itemsCover);
     const { chunks, partsH } = legendChunks(items, false, icons, stamp);
-    const fixingMarks = fixingGroups.filter(mark => mark.stepId === step.id);
-    const instructions = [...(step.action?.type === 'fix' ? [copy.fixingHint || 'F 标记指示固定部位；按实物孔位锁紧。'] : []), ...(step.instructions || [])];
-    descriptors.push({ type: 'step', index, heading, items: chunks[0], allItems: items, partsH, instructions, fixingMarks: fixingMarks.slice(0, 12) });
-    for (let offset = 12; offset < fixingMarks.length; offset += 12) descriptors.push({ type: 'fixdetail', index, heading: `${heading} · ${fixingMarks[offset].label}–${fixingMarks[Math.min(offset + 11, fixingMarks.length - 1)].label}`, fixingMarks: fixingMarks.slice(offset, offset + 12), instructions });
+    const instructions = step.instructions || [];
+    descriptors.push({ type: 'step', index, heading, items: chunks[0], allItems: items, partsH, instructions });
     descriptors.push(...chunks.slice(1).map(items => ({ type: 'legend', title: `${heading} · ${copy.thisStep}`, items })));
-    if (step.interfaceIds?.length && (step.action?.type === 'attach' || step.kind === 'join')) descriptors.push({ type: 'detail', index, heading: `${heading} · ${copy.detailTitle}`, items: [], instructions });
+    if (step.interfaceIds?.length && step.action?.scope !== 'parts' && (step.action?.type === 'attach' || step.kind === 'join')) descriptors.push({ type: 'detail', index, heading: `${heading} · ${copy.detailTitle}`, items: [], instructions });
     if (instructions.length > 2 || instructions.some(line => String(line).length > 85)) descriptors.push(...instructionChunks(instructions).map(lines => ({ type: 'instructions', title: `${heading} · ${copy.instructionsTitle}`, lines })));
   }
   descriptors.push({ type: 'final' });
@@ -1099,14 +1082,17 @@ export async function exportAssemblyPdf(opts) {
           const consumed = paintCover(ctx, { front: front.img, back: back.img, copy: coverCopy, items: descriptor.items, icons, fill: sceneFill(scene), stamp, partsH: descriptor.partsH });
           if (consumed !== descriptor.items.length) throw manualError('pagination', '总料表分页与实际绘制不一致');
         } else {
-          let state, completed, heading, instructions = [], leftLabel = copy.actionView, rightLabel = copy.completeView, bounds, leftFocus, rightFocus, roofCoverDetail = false;
-          if (descriptor.type === 'step' || descriptor.type === 'detail' || descriptor.type === 'fixdetail') {
+          let state, completed, heading, instructions = [], leftLabel = copy.actionView, rightLabel = copy.completeView, bounds, leftFocus, rightFocus, roofCoverDetail = false, modulePreassembly = false;
+          if (descriptor.type === 'step' || descriptor.type === 'detail') {
             state = assemblyState(plan, descriptor.index, { action: true }); completed = assemblyState(plan, descriptor.index, { action: false });
-            state.fixingMarks = completed.fixingMarks = descriptor.fixingMarks || [];
-            if (descriptor.fixingMarks?.length) state.interfaceMarks = completed.interfaceMarks = [];
             state = assemblyPresentationState(model, plan, steps[descriptor.index], state, { detail: descriptor.type === 'detail' });
             completed = assemblyPresentationState(model, plan, steps[descriptor.index], completed, { detail: descriptor.type === 'detail' });
             if (descriptor.type === 'step' && state.actionStage === 'before' && !state.arrows?.length) leftLabel = copy.beforeView || copy.actionView;
+            modulePreassembly = steps[descriptor.index].action?.scope === 'parts' && steps[descriptor.index].action.type === 'preassemble';
+            if (modulePreassembly) {
+              leftLabel = copy.preassemblyBefore || copy.beforeView || copy.actionView;
+              rightLabel = copy.preassemblyComplete || copy.completeView;
+            }
             heading = descriptor.heading; instructions = descriptor.instructions;
             if (descriptor.type === 'detail') {
               const interfaces = state.interfaceMarks || [];
@@ -1124,12 +1110,6 @@ export async function exportAssemblyPdf(opts) {
                 rightFocus = assemblyFocusBounds(scene, model, plan, steps[descriptor.index], completed);
               }
             }
-            if (descriptor.fixingMarks?.length) {
-              // Frame the whole referenced part: a close camera at the screw
-              // position can otherwise land inside a long support tube.
-              scene.renderModel(model, null, { assembly: completed });
-              leftFocus = rightFocus = assemblyFocusBounds(scene, model, plan, steps[descriptor.index], completed);
-            }
           } else if (descriptor.type === 'region') {
             const regionIds = new Set(descriptor.region.partIds);
             state = { current: regionIds, done: new Set(), visible: regionIds, transforms: new Map() };
@@ -1138,11 +1118,12 @@ export async function exportAssemblyPdf(opts) {
             leftLabel = copy.regionShape; rightLabel = copy.regionLocation;
             instructions = [`${copy.regionOrder}: ${steps.filter(step => step.regionId === descriptor.region.id).map(step => step.title).filter(Boolean).join(' → ')}`];
           } else {
-            state = descriptor.type === 'final' ? { current: allIds, done: new Set(), visible: allIds, transforms: new Map(), interfaceMarks: plan.interfaces, arrows: [] } : null;
+            const finalInterfaces = (plan.interfaces || []).filter(marker => marker.attachment !== 'upper-frame');
+            state = descriptor.type === 'final' ? { current: allIds, done: new Set(), visible: allIds, transforms: new Map(), interfaceMarks: finalInterfaces, arrows: [] } : null;
             completed = state;
             heading = descriptor.type === 'final' ? copy.finalTitle : copy.regionOverview;
             leftLabel = copy.front; rightLabel = copy.back;
-            instructions = descriptor.type === 'overview' ? (plan.regions || []).map((region, i) => `${region.label || `R${i + 1}`} · ${region.name}`).join('   ') : (plan.interfaces || []).map(marker => `I${marker.id.split('-').at(-1)}`).join(' · ');
+            instructions = descriptor.type === 'overview' ? (plan.regions || []).map((region, i) => `${region.label || `R${i + 1}`} · ${region.name}`).join('   ') : finalInterfaces.map(marker => `I${marker.id.split('-').at(-1)}`).join(' · ');
             instructions = [instructions];
             bounds = fullBounds;
           }
@@ -1153,7 +1134,7 @@ export async function exportAssemblyPdf(opts) {
             const rightBounds = assemblyFocusBounds(scene, model, plan, steps[descriptor.index], completed);
             bounds = boundsFor(leftBounds.min.map((value, axis) => Math.min(value, rightBounds.min[axis])), leftBounds.max.map((value, axis) => Math.max(value, rightBounds.max[axis])));
           }
-          const isReverse = descriptor.type === 'detail' || descriptor.type === 'fixdetail' || descriptor.type === 'overview' || descriptor.type === 'final' || steps[descriptor.index]?.action?.type === 'fix';
+          const isReverse = descriptor.type === 'detail' || descriptor.type === 'overview' || descriptor.type === 'final';
           const left = await shot(state, descriptor.type === 'detail' ? Math.PI : 0, descriptor.allItems || descriptor.items || [], leftFocus || bounds, roofCoverDetail ? [1, -0.65, 1] : null, pageBox);
           const right = await shot(completed, isReverse ? Math.PI : 0, descriptor.allItems || descriptor.items || [], rightFocus || bounds, roofCoverDetail ? [-1, -0.65, -1] : null, pageBox);
           if (descriptor.type === 'overview') {
@@ -1164,7 +1145,7 @@ export async function exportAssemblyPdf(opts) {
               image.marks.push(...positions.map((point, i) => ({ ...point, num: plan.regions[i]?.label || `R${i + 1}` })));
             }
           }
-          const consumed = paintStep(ctx, { front: left.img, back: right.img, copy: { ...copy, front: leftLabel, back: rightLabel, contextHint: roofCoverDetail ? copy.roofCoverHint : ['step', 'detail', 'fixdetail'].includes(descriptor.type) ? copy.contextHint : '' }, heading, items: descriptor.items || [], icons, k: currentPage, n: total, fill: sceneFill(scene), frontMarks: left.marks, backMarks: right.marks, instructions, stamp, partsH: descriptor.partsH });
+          const consumed = paintStep(ctx, { front: left.img, back: right.img, copy: { ...copy, front: leftLabel, back: rightLabel, contextHint: modulePreassembly ? copy.preassemblyHint : roofCoverDetail ? copy.roofCoverHint : ['step', 'detail'].includes(descriptor.type) ? copy.contextHint : '' }, heading, items: descriptor.items || [], icons, k: currentPage, n: total, fill: sceneFill(scene), frontMarks: left.marks, backMarks: right.marks, instructions, stamp, partsH: descriptor.partsH });
           if (consumed !== (descriptor.items?.length || 0)) throw manualError('pagination', '步骤料表分页与实际绘制不一致');
           const box = pageBox;
           if (descriptor.type !== 'detail') drawArrows(ctx, left.img, mm(box.x0), mm(box.imgY), mm(box.imgW), mm(box.imgH), left.arrows);

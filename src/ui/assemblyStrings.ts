@@ -1,7 +1,6 @@
 import type { Lang } from '../i18n'
 
 const zh = {
-  fixingPositions: '固定位置',
   title: '安装说明书预览', subtitle: '先拼好各个区域，再连接成完整造型。画面与 PDF 使用同一份模型快照。',
   close: '关闭', regions: '拼装区域', steps: '拼装步骤', diagnostics: '需要检查', ready: '计划可以导出', blocked: '请先处理下列问题，再导出说明书。',
   auto: '自动划分', save: '保存区域设置', saved: '区域设置已保存，可撤销。', stale: '源模型已更新。当前仍预览打开时的快照；重新打开可读取最新模型。',
@@ -16,27 +15,34 @@ const zh = {
 }
 type Strings = typeof zh
 const en: Strings = {
-  fixingPositions: 'Fastening areas',
   repairPhysical: 'Model connectivity and accessory references were checked. Physical assembly and load capacity of the repair have not been verified on site.',
   title: 'Assembly manual preview', subtitle: 'Build each region, then connect the whole design. The preview and PDF use the same model snapshot.', close: 'Close', regions: 'Assembly regions', steps: 'Assembly steps', diagnostics: 'Check these items', ready: 'Ready to export', blocked: 'Resolve the issues below before exporting.', auto: 'Auto group', save: 'Save regions', saved: 'Region settings saved. You can undo this change.', stale: 'The source model has changed. This preview keeps its original snapshot; reopen to use the latest model.', split: 'Split selected parts', merge: 'Merge with next region', up: 'Move up', down: 'Move down', parts: 'Parts', edit: 'Select parts', name: 'Region name', newRegion: 'New region', previous: 'Previous', next: 'Next', all: 'Whole design', action: 'Assembly action', rotate: 'Drag to rotate; scroll or pinch to zoom.', export: 'Export PDF', exporting: 'Creating PDF', order: 'Grouping direction', locate: 'Locate issue', repair: 'Preview repair', apply: 'Apply to source model', discard: 'Discard repair preview', repairTitle: 'Repair preview', repairHint: 'Review the changes and repaired steps before applying. Changes can be undone.', readonly: 'Read-only model: region changes and repairs apply to this PDF only.', change: 'Change', before: 'Before', after: 'After', dependencies: 'Complete first', attach: 'Connect regions', preassemble: 'Preassemble region', build: 'Install parts', noRepair: 'No automatic repair is available. Check these parts in the model.', failedApply: 'The source model or permissions changed. Reopen the preview.', remove: 'Remove conflicting part', connectors: 'Connectors', tubes: 'Tubes', panels: 'Panels', textiles: 'Textiles', slides: 'Slides', fittings: 'Fittings', screws: 'Screws', reinforcements: 'Reinforcements', duplicatePort: 'Multiple parts occupy the same connector port. Check the marked curved tube and short riser.', invalidConfig: 'The region configuration is outdated. Regroup automatically or update part assignments.',
 }
 const de: Strings = {
-  fixingPositions: 'Befestigungsstellen',
   repairPhysical: 'Modellverbindungen und Zubehörverweise wurden geprüft. Der praktische Aufbau und die Belastbarkeit der Korrektur wurden noch nicht vor Ort geprüft.',
   title: 'Vorschau der Bauanleitung', subtitle: 'Zuerst die Bereiche bauen, dann das gesamte Modell verbinden. Vorschau und PDF verwenden denselben Modellstand.', close: 'Schließen', regions: 'Baubereiche', steps: 'Bauschritte', diagnostics: 'Bitte prüfen', ready: 'Bereit zum Export', blocked: 'Vor dem Export die folgenden Probleme beheben.', auto: 'Automatisch aufteilen', save: 'Bereiche speichern', saved: 'Bereiche gespeichert. Die Änderung lässt sich rückgängig machen.', stale: 'Das Ausgangsmodell wurde geändert. Die Vorschau behält ihren Modellstand; zum Aktualisieren erneut öffnen.', split: 'Gewählte Teile abtrennen', merge: 'Mit nächstem Bereich verbinden', up: 'Nach oben', down: 'Nach unten', parts: 'Teile', edit: 'Teile wählen', name: 'Bereichsname', newRegion: 'Neuer Bereich', previous: 'Zurück', next: 'Weiter', all: 'Gesamtes Modell', action: 'Montagebewegung', rotate: 'Ziehen zum Drehen; mit Rad oder zwei Fingern zoomen.', export: 'PDF exportieren', exporting: 'PDF wird erstellt', order: 'Aufbaurichtung', locate: 'Problem anzeigen', repair: 'Korrektur ansehen', apply: 'Im Ausgangsmodell anwenden', discard: 'Korrektur verwerfen', repairTitle: 'Korrekturvorschau', repairHint: 'Änderungen und Bauschritte vor dem Anwenden prüfen. Änderungen lassen sich rückgängig machen.', readonly: 'Schreibgeschütztes Modell: Änderungen gelten nur für dieses PDF.', change: 'Änderung', before: 'Vorher', after: 'Nachher', dependencies: 'Zuerst fertigstellen', attach: 'Bereiche verbinden', preassemble: 'Bereich vormontieren', build: 'Teile montieren', noRepair: 'Keine automatische Korrektur verfügbar. Diese Teile im Modell prüfen.', failedApply: 'Modell oder Berechtigungen wurden geändert. Vorschau erneut öffnen.', remove: 'Kollidierendes Teil entfernen', connectors: 'Kupplungen', tubes: 'Rohre', panels: 'Platten', textiles: 'Textilien', slides: 'Rutschen', fittings: 'Zubehör', screws: 'Schrauben', reinforcements: 'Verstärkungen', duplicatePort: 'Mehrere Teile belegen denselben Kupplungsanschluss. Markiertes Bogenrohr und kurze Stütze prüfen.', invalidConfig: 'Bereichseinstellungen sind veraltet. Automatisch aufteilen oder Teilezuordnung ändern.',
 }
 export const assemblyStrings: Record<Lang, Strings> = { zh, en, de }
 
 export const assemblyPdfStrings: Record<Lang, Record<string, string>> = {
-  zh: { actionView: '装配动作', completeView: '装好后', regionOverview: '拼装区域总览', regionShape: '区域形状', regionLocation: '在完整造型中的位置', regionOrder: '拼装顺序', finalTitle: '完整造型', detailTitle: '连接细节', instructionsTitle: '安装说明', fixingHint: 'F 标记指示固定部位；按实物孔位锁紧。' },
-  en: { actionView: 'Assembly action', completeView: 'Completed step', regionOverview: 'Assembly regions', regionShape: 'Region shape', regionLocation: 'Location in the whole design', regionOrder: 'Assembly order', finalTitle: 'Complete design', detailTitle: 'Connection details', instructionsTitle: 'Assembly instructions', fixingHint: 'F marks identify fastening areas. Tighten at the actual holes.' },
-  de: { actionView: 'Montagebewegung', completeView: 'Fertiger Schritt', regionOverview: 'Baubereiche im Überblick', regionShape: 'Form des Bereichs', regionLocation: 'Position im gesamten Modell', regionOrder: 'Baureihenfolge', finalTitle: 'Fertiges Modell', detailTitle: 'Verbindungsdetails', instructionsTitle: 'Bauanleitung', fixingHint: 'F markiert Befestigungsstellen. An den tatsächlichen Löchern festziehen.' },
+  zh: { actionView: '装配动作', completeView: '装好后', regionOverview: '拼装区域总览', regionShape: '区域形状', regionLocation: '在完整造型中的位置', regionOrder: '拼装顺序', finalTitle: '完整造型', detailTitle: '连接细节', instructionsTitle: '安装说明' },
+  en: { actionView: 'Assembly action', completeView: 'Completed step', regionOverview: 'Assembly regions', regionShape: 'Region shape', regionLocation: 'Location in the whole design', regionOrder: 'Assembly order', finalTitle: 'Complete design', detailTitle: 'Connection details', instructionsTitle: 'Assembly instructions' },
+  de: { actionView: 'Montagebewegung', completeView: 'Fertiger Schritt', regionOverview: 'Baubereiche im Überblick', regionShape: 'Form des Bereichs', regionLocation: 'Position im gesamten Modell', regionOrder: 'Baureihenfolge', finalTitle: 'Fertiges Modell', detailTitle: 'Verbindungsdetails', instructionsTitle: 'Bauanleitung' },
 }
 
 assemblyPdfStrings.zh.contextHint = '操作图暂时隐藏周围零件；完整形态见区域页和成品页。'
 assemblyPdfStrings.zh.beforeView = '装配前'
 assemblyPdfStrings.en.beforeView = 'Before assembly'
 assemblyPdfStrings.de.beforeView = 'Vor der Montage'
+assemblyPdfStrings.zh.preassemblyBefore = '预拼零件'
+assemblyPdfStrings.zh.preassemblyComplete = '预拼完成'
+assemblyPdfStrings.en.preassemblyBefore = 'Parts for preassembly'
+assemblyPdfStrings.en.preassemblyComplete = 'Preassembled frame'
+assemblyPdfStrings.de.preassemblyBefore = 'Teile zur Vormontage'
+assemblyPdfStrings.de.preassemblyComplete = 'Vormontierter Rahmen'
+assemblyPdfStrings.zh.preassemblyHint = '零件分开展示；先拼成右图框架，再进行下一步安装。'
+assemblyPdfStrings.en.preassemblyHint = 'Parts are shown separately. Build the frame on the right, then install it in the next step.'
+assemblyPdfStrings.de.preassemblyHint = 'Teile sind getrennt dargestellt. Zuerst den rechten Rahmen bauen, dann im nächsten Schritt einsetzen.'
 assemblyPdfStrings.en.contextHint = 'Surrounding parts are temporarily hidden for clarity. Region and final pages show the complete shape.'
 assemblyPdfStrings.de.contextHint = 'Umliegende Teile sind für freie Sicht ausgeblendet. Bereichs- und Abschlussseiten zeigen die vollständige Form.'
 assemblyPdfStrings.zh.roofCoverHint = '底部视角：I 为顶棚参考定位；实际扣位按支撑杆核对。'
