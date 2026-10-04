@@ -107,7 +107,7 @@ describe('说明书材料编号', () => {
     const model = new BuildModel()
     model.loadJSON(parseQDF(readFileSync('public/qdf/C0179.qdf', 'utf8'), { tubes: buildableTubes(), panels: panels(), connectorSize: geometry().connectorSize, mergeEps: 2 }))
     const plan = computeAssemblyPlan(model)
-    const index = plan.steps.findIndex((step: any) => step.y === 20 && step.action.layer)
+    const index = plan.steps.findIndex((step: any) => plan.regions.find((region: any) => region.id === step.regionId)?.kind === 'body' && step.y === 20 && step.action.layer)
     expect(index).toBeGreaterThanOrEqual(0)
     const step = plan.steps[index], before = assemblyState(plan, index, { action: true }), after = assemblyState(plan, index)
     const saved = JSON.stringify(model.toJSON()), originalVisible = [...before.visible]
@@ -124,14 +124,20 @@ describe('说明书材料编号', () => {
     }
     for (const id of before.done) expect(left.transforms.has(id)).toBe(false)
     expect([...before.visible]).toEqual(originalVisible)
-    expect(before.hiddenNewParts.size).toBe(0)
+    expect([...before.hiddenNewParts].sort()).toEqual([...step.action.inPlacePartIds].sort())
+    for (const id of step.action.inPlacePartIds) {
+      expect(left.visible.has(id)).toBe(false)
+      expect(right.visible.has(id)).toBe(true)
+      expect(right.transforms.has(id)).toBe(false)
+    }
     expect(JSON.stringify(model.toJSON())).toBe(saved)
   })
   it('C0179 80cm整层页同时呈现四个独立框架及完整已装主体', () => {
     const model = new BuildModel()
     model.loadJSON(parseQDF(readFileSync('public/qdf/C0179.qdf', 'utf8'), { tubes: buildableTubes(), panels: panels(), connectorSize: geometry().connectorSize, mergeEps: 2 }))
     const plan = computeAssemblyPlan(model)
-    const index = plan.steps.findIndex((step: any) => step.y === 80 && step.action.layer)
+    const index = plan.steps.findIndex((step: any) => plan.regions.find((region: any) => region.id === step.regionId)?.kind === 'body' && step.y === 80 && step.action.layer)
+    expect(index).toBeGreaterThanOrEqual(0)
     const step = plan.steps[index], state = assemblyState(plan, index, { action: true })
     const presented = assemblyPresentationState(model, plan, step, state)
     expect(presented.visible.size).toBe(state.visible.size)
@@ -152,19 +158,37 @@ describe('说明书材料编号', () => {
     for (const id of installedTubes) expect(presented.visible.has(id)).toBe(true)
     expect(presented.arrows.every((arrow: any) => arrow.from[1] > arrow.to[1])).toBe(true)
   })
-  it('C0179 第2步全部7种零件留在步骤页，管35 cm不再单独占页', () => {
+  it('C0179主体20cm层的全部材料留在同一主步骤，管35 cm与后装立柱不单独计料', () => {
     const model = new BuildModel()
     model.loadJSON(parseQDF(readFileSync('public/qdf/C0179.qdf', 'utf8'), { tubes: buildableTubes(), panels: panels(), connectorSize: geometry().connectorSize, mergeEps: 2 }))
-    const step = computeAssemblyPlan(model).steps[1]
+    const plan = computeAssemblyPlan(model)
+    const index = plan.steps.findIndex((step: any) => plan.regions.find((region: any) => region.id === step.regionId)?.kind === 'body' && step.y === 20 && step.action.layer)
+    expect(index).toBeGreaterThanOrEqual(0)
+    const step = plan.steps[index]
     const items = stepItems(model, step)
-    expect(items.length).toBe(7)
+    expect(items.some((item: any) => item.key?.includes('T35'))).toBe(true)
+    const allocated = plan.ledger.instances.filter((instance: any) => instance.stepId === step.id && instance.group !== 'screws')
+    expect(items.map((item: any) => `${item.kind}:${item.ledgerKey}`).sort()).toEqual([...new Set(allocated.map((instance: any) => `${instance.group}:${instance.key}`))].sort())
+    for (const item of items) {
+      const rows = allocated.filter((instance: any) => instance.group === item.kind && instance.key === item.ledgerKey)
+      expect(new Set(item.instanceIds).size).toBe(item.instanceIds.length)
+      expect([...item.instanceIds].sort()).toEqual([...new Set(rows.flatMap((instance: any) => instance.partIds))].sort())
+      expect(item.count).toBe(rows.reduce((sum: number, instance: any) => sum + instance.count, 0))
+    }
     // 隔离排版测试使用固定字宽；实际字体及三语分页另由浏览器导出核验。
     const ctx = { font: '', measureText: (text: string) => ({ width: [...text].length * 20 }) }
     const layout = measureManualLegend(ctx, items, 2450)
     const partsH = manualPartsHeight(ctx, items, 2450)
-    expect(layout.height).toBeGreaterThan((47 - 5.2) * 10)
     expect(layout.height).toBeLessThanOrEqual((partsH - 5.7) * 10)
     expect(210 - 20 - partsH - 3).toBeGreaterThanOrEqual(105)
+    const descriptors = manualStepDetailDescriptors(ctx, model, plan, index, coverItems(plan.bom), { stepHeading: '{k}/{n} · {title}', detailTitle: '局部动作详图' })
+    expect(descriptors.flatMap((page: any) => page.groups.map((group: any) => group.id))).toEqual(step.detailGroups.map((group: any) => group.id))
+    for (const page of descriptors) {
+      expect(page.index).toBe(index)
+      expect(page.heading.startsWith(`${index + 1}/${plan.steps.length}`)).toBe(true)
+      expect(page.countsMaterials).toBe(false)
+      expect(page.groups.every((group: any) => group.items.every((item: any) => item.referenceOnly))).toBe(true)
+    }
   })
 
   it('长德文物料名增加实际行高，大料表仍为组装图保留空间', () => {
