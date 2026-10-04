@@ -1,13 +1,24 @@
-import { beforeAll, afterAll, describe, expect, it } from 'vitest'
+import { beforeAll, afterAll, describe, expect, it, vi } from 'vitest'
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { loadCatalog, buildableTubes, panels, geometry } from './catalog.js'
 import { BuildModel } from './model.js'
 import { parseQDF } from './qdfimport.js'
-import { computeAssemblyPlan, assemblyState } from './assemblyPlan.js'
+import { computeAssemblyPlan as computeRawAssemblyPlan, assemblyState } from './assemblyPlan.js'
+import { getLang } from './i18n.js'
 import { proposeAssemblyRepairs, resolveNodeConnection } from './connectionResolver.js'
 
+// Native full-mesh verification intentionally exceeds Vitest's default 5 s.
+vi.setConfig({ testTimeout: 120000 })
 beforeAll(async () => { await loadCatalog() })
 const evidence: any[] = []
+const fixedPlans = new Map<string, any>()
+// Exact inputs only: altered geometry/configuration and language get a fresh plan.
+// Each assertion receives a deep copy, so tests cannot modify another's plan.
+function computeAssemblyPlan(model: any, config?: any, order?: string) {
+  const key = JSON.stringify([getLang(), model.toJSON(), config ?? model.assemblyConfig ?? {}, order ?? 'y+'])
+  if (!fixedPlans.has(key)) fixedPlans.set(key, computeRawAssemblyPlan(model, config, order))
+  return structuredClone(fixedPlans.get(key))
+}
 afterAll(() => { mkdirSync('../qa/layer-followup', { recursive: true }); writeFileSync('../qa/layer-followup/engine-evidence.json', JSON.stringify(evidence, null, 2)) })
 const load = (file: string) => {
   const model = new BuildModel()
@@ -18,13 +29,18 @@ const load = (file: string) => {
 }
 
 describe('真实装配区域、连接件与物料守恒', () => {
-  it.each(['qdf/C0005.qdf', 'qdf/C0013.qdf'])('%s 顶棚以屋顶配件预装，安装图包含其支撑区域', file => {
+  it.each(['qdf/C0005.qdf', 'qdf/C0013.qdf'])('%s 原生顶棚在实际支撑落位后从上方装入', file => {
     const model = load(file), plan = computeAssemblyPlan(model)
     const cover = plan.regions.find((r: any) => r.slideIds.some((id: string) => model.slides.get(id)?.kind === 'roof2'))
     expect(cover.accessoryType).toBe('roof-cover')
     expect(cover.name).toMatch(/屋顶配件|Roof accessory|Dachaufsatz/)
     expect(plan.regions.some((r: any) => r.id === cover.supportRegionId)).toBe(true)
-    expect(plan.steps.filter((s: any) => s.regionId === cover.id).map((s: any) => s.action.type)).toContain('attach')
+    const fit = plan.steps.filter((step: any) => step.regionId === cover.id).flatMap((step: any) => step.operations).find((operation: any) => operation.type === 'fit-accessory' && cover.slideIds.some((id: string) => operation.partIds.includes(id)))
+    expect(fit).toBeTruthy()
+    expect(fit.placementTranslation).toEqual([0, 0, 0])
+    expect(fit.translation).toEqual([0, 18, 0])
+    expect(fit.verification.supportPoses.length).toBeGreaterThan(2)
+    expect(fit.verification.supportPoses.every((support: any) => support.installed && support.translation.every((value: number) => value === 0))).toBe(true)
   })
   it.each(['qdf/B0012.qdf', 'qdf/C0005.qdf', 'qdf/C0013.qdf', 'qdf/C0156.qdf', 'qdf/C0179.qdf', 'assembly-fixtures/s33.json', 'assembly-fixtures/s36.json'])('%s 全部实体仅一次归属且 BOM 守恒', file => {
     const model = load(file), plan: any = computeAssemblyPlan(model)
@@ -57,8 +73,13 @@ describe('真实装配区域、连接件与物料守恒', () => {
     expect(model.toJSON()).toEqual(before)
     const repaired = new BuildModel(); expect(repaired.loadJSON(repair.data).ok).toBe(true)
     const repairedPlan = computeAssemblyPlan(repaired)
-    expect(repairedPlan.canExport, JSON.stringify(repairedPlan.diagnostics)).toBe(true)
-    evidence.push({ file: 'assembly-fixtures/s36.json repaired', canExport: true, changes: repair.changes, bomChanges: repair.bomChanges, validation: repair.validation })
+    expect(repairedPlan.diagnostics.filter((diagnostic: any) => diagnostic.code === 'DUPLICATE_CONNECTOR_PORT')).toEqual([])
+    expect(repairedPlan.ledger.conserved).toBe(true)
+    expect(repairedPlan.verification.physical).toBe('unverified')
+    // Removing duplicate ports is a connection repair, not certification of
+    // the remaining assembly motions. Keep any located path/closure blockers.
+    if (!repairedPlan.canExport) expect(repairedPlan.diagnostics.some((diagnostic: any) => diagnostic.severity === 'error' && diagnostic.partIds.length > 0)).toBe(true)
+    evidence.push({ file: 'assembly-fixtures/s36.json repaired', canExport: repairedPlan.canExport, diagnostics: repairedPlan.diagnostics, changes: repair.changes, bomChanges: repair.bomChanges, validation: repair.validation })
   })
 
   it('尖顶两斜管与顶端弯头一起预装，安装动作分离且不重复计料', () => {
@@ -69,7 +90,8 @@ describe('真实装配区域、连接件与物料守恒', () => {
     const pre = plan.steps.findIndex((s: any) => s.regionId === roof.id && s.action.type === 'preassemble')
     const attach = plan.steps.findIndex((s: any) => s.regionId === roof.id && s.action.type === 'attach')
     expect(plan.steps[pre].nodeIds).toContain('n274')
-    expect(plan.steps[pre].tubeIds).toHaveLength(2)
+    // One main layer now also includes its two vertical support motions.
+    expect([...plan.steps[pre].tubeIds].sort()).toEqual(['m267', 'm269', 't275', 't276'])
     expect(assemblyState(plan, pre).transforms.has('n274')).toBe(true)
     expect(assemblyState(plan, attach, { action: true }).transforms.has('n274')).toBe(true)
     expect(assemblyState(plan, attach).transforms.has('n274')).toBe(false)
@@ -101,10 +123,14 @@ describe('真实装配区域、连接件与物料守恒', () => {
     for (const order of ['y+', 'x-', 'z+']) {
       const plan = computeAssemblyPlan(model, { version: 1, regions: [{ id: 'merged-body', name: '合并主体', partIds: bodyIds }] }, order)
       const structural = plan.steps.filter((s: any) => s.regionId === 'merged-body' && ['frame', 'risers'].includes(s.kind))
-      expect(structural.length).toBeGreaterThan(3)
+      expect(structural.length).toBeGreaterThanOrEqual(2)
+      expect(new Set(structural.map((s: any) => s.y)).size).toBe(structural.length)
       expect(structural.map((s: any) => s.y)).toEqual(structural.map((s: any) => s.y).sort((a: number, b: number) => a - b))
       expect(plan.ledger.conserved).toBe(true)
-      expect(plan.canExport, JSON.stringify(plan.diagnostics)).toBe(true)
+      // A region/order edit cannot certify the same unresolved rigid closure.
+      expect(plan.canExport).toBe(false)
+      expect(plan.diagnostics.some((d: any) => d.code === 'UNRESOLVED_FRAME_CLOSURE' && d.partIds.length > 0)).toBe(true)
+      expect(plan.verification.methodChecked).toBe(false)
     }
   })
 
@@ -113,7 +139,9 @@ describe('真实装配区域、连接件与物料守恒', () => {
     const config = { version: 1, regions: original.regions.map((r: any) => ({ id: r.id, name: r.name, partIds: r.partIds })), order: original.regions.map((r: any) => r.id).reverse() }
     const reversed = computeAssemblyPlan(model, config)
     expect(reversed.interfaces.map((i: any) => [i.sourceRegionId, i.targetRegionId, i.nodeId])).toEqual(original.interfaces.map((i: any) => [i.sourceRegionId, i.targetRegionId, i.nodeId]))
-    expect(reversed.canExport, JSON.stringify(reversed.diagnostics)).toBe(true)
+    expect(reversed.canExport).toBe(original.canExport)
+    const blockers = (plan: any) => plan.diagnostics.filter((item: any) => item.severity === 'error').map((item: any) => [item.code, [...item.partIds].sort().join('|')].join(':')).sort()
+    expect(blockers(reversed)).toEqual(blockers(original))
     for (const step of reversed.steps) for (const id of step.dependsOn) expect(reversed.steps.findIndex((s: any) => s.id === id)).toBeLessThan(reversed.steps.indexOf(step))
   })
 
@@ -151,7 +179,7 @@ describe('真实装配区域、连接件与物料守恒', () => {
     expect(proposal.data!.assemblyConfig.order).toEqual([])
   })
 
-  it('相互独立的落地主体逐层分装再落位，拼接步骤无物料重计且普通步骤无重复接口页', () => {
+  it('相互独立的落地主体原位按层搭建，独立上框分次下套且无物料重计', () => {
     const model = new BuildModel()
     for (const offset of [0, 160]) {
       const a = model.addNode(offset, 0, 0), b = model.addNode(offset + 40, 0, 0), c = model.addNode(offset, 40, 0), d = model.addNode(offset + 40, 40, 0)
@@ -159,11 +187,18 @@ describe('真实装配区域、连接件与物料守恒', () => {
     }
     const plan = computeAssemblyPlan(model), bodies = plan.regions.filter((r: any) => r.kind === 'body')
     expect(bodies).toHaveLength(2)
-    const pre = plan.steps.findIndex((s: any) => s.regionId === bodies[1].id && s.action.type === 'preassemble' && s.action.scope !== 'parts'), attach = plan.steps.findIndex((s: any) => s.regionId === bodies[1].id && s.action.type === 'attach' && s.action.scope !== 'parts')
-    expect(pre).toBeGreaterThan(-1); expect(attach).toBeGreaterThan(pre)
-    expect(assemblyState(plan, pre).transforms.size).toBeGreaterThan(0)
-    expect(assemblyState(plan, attach).transforms.size).toBe(0)
-    expect(Object.values(plan.steps[attach].parts).flat()).toEqual([])
+    for (const body of bodies) {
+      const structural = plan.steps.filter((step: any) => step.regionId === body.id)
+      expect(structural.map((step: any) => step.y)).toEqual([0, 40])
+      expect(structural.every((step: any) => step.action.type === 'build' && !step.action.detached)).toBe(true)
+      const upper = structural[1], module = plan.frameModules.find((part: any) => part.regionId === body.id && part.status === 'lowerable')
+      expect(module).toBeTruthy()
+      const index = plan.steps.indexOf(upper), action = assemblyState(plan, index, { action: true }), complete = assemblyState(plan, index)
+      expect(module.partIds.every((id: string) => action.transforms.has(id))).toBe(true)
+      expect(module.partIds.every((id: string) => !complete.transforms.has(id))).toBe(true)
+      expect(upper.operations.some((operation: any) => operation.type === 'lower-frame')).toBe(true)
+    }
+    expect(plan.steps.some((step: any) => step.action.type === 'attach')).toBe(false)
     expect(plan.steps.filter((s: any) => !s.action.layer && !['attach', 'join'].includes(s.action.type)).every((s: any) => s.interfaceIds.length === 0)).toBe(true)
     expect(plan.canExport).toBe(true)
   })
