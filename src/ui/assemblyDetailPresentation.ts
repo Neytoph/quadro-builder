@@ -13,8 +13,8 @@ export function operationMarkGeometry(label: string) {
 
 // Keep presentation clearance separate from the engine's physical path. Both
 // painters protect the projected shaft and arrowhead without moving either end.
-export function operationCalloutOptions(arrows: { x1: number; y1: number; x2: number; y2: number }[], materialMarks: { x: number; y: number }[]) {
-  return { arrows, materialMarks, gap: 6, arrowClearance: 8, padding: 3 }
+export function operationCalloutOptions(arrows: { x1: number; y1: number; x2: number; y2: number }[], materialMarks: { x: number; y: number }[], blockedRects: { x: number; y: number; boxWidth: number; boxHeight: number }[] = []) {
+  return { arrows, materialMarks, blockedRects, gap: 6, arrowClearance: 8, padding: 3 }
 }
 
 export function detailOperations(step: { operations?: Operation[] }, group?: DetailGroup | null): Operation[] {

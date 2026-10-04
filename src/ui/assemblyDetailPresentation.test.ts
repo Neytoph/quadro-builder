@@ -137,6 +137,29 @@ describe('同一步局部导航与共用材料编号', () => {
     expect(projectedOperationArrowHead({ x1: 4, y1: 6, x2: 4, y2: 6 }, 8)).toBeNull()
   })
 
+  it('首个完成详图序号避开实际接头图框，保留接头锚点且不把灰色背景全部禁用', () => {
+    // Visible connector body bounds rounded from the 318×356 completion crop.
+    // Those are finite black connector footprints, not arbitrary circles around
+    // every part: the pipe label may remain close to its own anchor.
+    const connectorRects = [{ x: 209, y: 158, boxWidth: 28, boxHeight: 49 }, { x: 94, y: 214, boxWidth: 48, boxHeight: 78 }]
+    const marks = [{ x: 211, y: 160, label: '①' }, { x: 173, y: 173, label: '②' }, { x: 94, y: 213, label: '③' }].map(mark => ({ ...mark, boxWidth: 26, boxHeight: 26 }))
+    const materialMarks = [{ x: 303, y: 124, radius: 12 }, { x: 303, y: 231, radius: 12 }]
+    const options = operationCalloutOptions([], materialMarks, connectorRects)
+    expect(options.blockedRects).toBe(connectorRects)
+    const placed = layoutOperationCallouts(marks, 318, 356, options)
+    expect(placed.map(mark => mark.label)).toEqual(['①', '②', '③'])
+    for (const [index, mark] of placed.entries()) {
+      expect(mark.placementClear).toBe(true)
+      expect([mark.anchorX, mark.anchorY]).toEqual([marks[index].x, marks[index].y])
+      for (const connector of connectorRects) expect(Math.abs(mark.x - connector.x) >= (mark.boxWidth + connector.boxWidth) / 2 + 6 || Math.abs(mark.y - connector.y) >= (mark.boxHeight + connector.boxHeight) / 2 + 6).toBe(true)
+      expect(mark.x - mark.boxWidth / 2).toBeGreaterThanOrEqual(3)
+      expect(mark.x + mark.boxWidth / 2).toBeLessThanOrEqual(315)
+      expect(mark.y - mark.boxHeight / 2).toBeGreaterThanOrEqual(3)
+      expect(mark.y + mark.boxHeight / 2).toBeLessThanOrEqual(353)
+    }
+    expect(operationCalloutOptions([], []).blockedRects).toEqual([])
+  })
+
   it.each(['zh', 'en', 'de'] as const)('%s 方向、固定提示与PDF文字完整共用', lang => {
     const ui = assemblyStrings[lang], pdf = assemblyPdfStrings[lang]
     expect(pdf.safetyNotice).toBe(ui.safetyNotice)

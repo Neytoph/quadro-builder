@@ -3,7 +3,7 @@ import { Vector3 } from 'three'
 import { BuildModel, SceneManager, colorName, partName, getPartById } from '../engine-api'
 import { assemblyState, assemblyDetailState, computeAssemblyPlan } from '../engine/assemblyPlan.js'
 import { takeModelThumb, waitSceneReady } from '../engine/thumbShot.js'
-import { renderedBounds, assemblyFocusBounds, assemblyPresentationState, assemblyDetailItems, assemblyDetailBounds, assemblyDetailDirection, manualPositionedItems, layoutManualCallouts, layoutOperationCallouts, projectedOperationArrowHead } from '../engine/assemblyManual.js'
+import { renderedBounds, assemblyFocusBounds, assemblyPresentationState, assemblyDetailItems, assemblyDetailBounds, assemblyDetailDirection, manualPositionedItems, layoutManualCallouts, layoutOperationCallouts, projectedOperationArrowHead, projectConnectorCalloutRects } from '../engine/assemblyManual.js'
 import { useEngine, type AssemblyConfig } from '../store/EngineContext'
 import { useI18n } from '../i18n'
 import { assemblyStrings, assemblyDiagnosticText, assemblyPdfStrings } from './assemblyStrings'
@@ -28,7 +28,7 @@ export default function AssemblyPreview() {
   const view = useRef<{ scene: E; model: E } | null>(null)
   const redraw = useRef<(() => void) | null>(null)
   const projectOverlay = useRef<() => void>(() => {})
-  const [overlay, setOverlay] = useState<{ width: number; height: number; marks: E[]; arrows: E[] }>({ width: 1, height: 1, marks: [], arrows: [] })
+  const [overlay, setOverlay] = useState<{ width: number; height: number; marks: E[]; arrows: E[]; connectorRects: E[] }>({ width: 1, height: 1, marks: [], arrows: [], connectorRects: [] })
   const [viewError, setViewError] = useState<string | null>(null)
   const [index, setIndex] = useState(0)
   const [whole, setWhole] = useState(false)
@@ -139,9 +139,10 @@ export default function AssemblyPreview() {
         const materialMarks = marks.filter(mark => mark.kind === 'material')
         const placedMaterials = layoutManualCallouts(materialMarks, width, height, 12)
         const operationMarks = marks.filter(mark => mark.kind === 'operation').map(mark => ({ ...mark, boxWidth: operationMarkGeometry(mark.label).width, boxHeight: 26 }))
-        const placedOperations = layoutOperationCallouts(operationMarks, width, height, operationCalloutOptions(arrows, placedMaterials))
+        const connectorRects = detail ? projectConnectorCalloutRects(v.scene, v.model, assembly).map((rect: E) => ({ id: rect.id, x: rect.u * width, y: rect.v * height, boxWidth: rect.width * width, boxHeight: rect.height * height })) : []
+        const placedOperations = layoutOperationCallouts(operationMarks, width, height, operationCalloutOptions(arrows, placedMaterials, connectorRects))
         const interfaceMarks = layoutAssemblyMarks(marks.filter(mark => !mark.kind), width, height, { radius: 12 })
-        setOverlay({ width, height, marks: [...placedMaterials, ...placedOperations, ...interfaceMarks], arrows })
+        setOverlay({ width, height, marks: [...placedMaterials, ...placedOperations, ...interfaceMarks], arrows, connectorRects })
       }
       const tints = marked.length ? new Map(marked.map(id => [id, '#dc603e'])) : null
       v.scene.renderModel(v.model, null, { assembly, tints, dimUntinted: !!marked.length })
@@ -260,7 +261,7 @@ export default function AssemblyPreview() {
         <div className="assembly-view-toolbar"><div className="assembly-view-heading"><span className="assembly-small" data-testid="assembly-step-number">{index + 1} / {plan.steps.length} · {detail ? s.details : s.overview}</span><strong>{detail?.title || current?.title}</strong></div><div className="assembly-preview-tools"><button className="qb-btn qb-btn-ghost qb-btn-sm" data-testid="assembly-action-view" aria-pressed={action} disabled={busy} onClick={() => { setAction(true); setWhole(false); setMarked([]) }}>{s.actionView}</button><button className="qb-btn qb-btn-ghost qb-btn-sm" data-testid="assembly-complete-view" aria-pressed={!action} disabled={busy} onClick={() => { setAction(false); setWhole(false); setMarked([]) }}>{s.completedView}</button><button className="qb-btn qb-btn-ghost qb-btn-sm" data-testid="assembly-enlarge" aria-pressed={expanded} onClick={() => setExpanded(value => !value)}>{expanded ? s.shrink : s.enlarge}</button></div></div>
         <div className="assembly-drawing">
         <div ref={host} className="assembly-preview-host" data-testid="assembly-preview-canvas" />
-        <svg className="assembly-interface-overlay" viewBox={`0 0 ${overlay.width} ${overlay.height}`} aria-hidden="true" data-testid="assembly-interface-overlay">
+        <svg className="assembly-interface-overlay" viewBox={`0 0 ${overlay.width} ${overlay.height}`} aria-hidden="true" data-testid="assembly-interface-overlay" data-connector-callout-rects={JSON.stringify(overlay.connectorRects)}>
           {overlay.marks.map((m, i) => <g key={`leader-${i}`} transform={`translate(${m.x},${m.y})`}>
             <line x1="0" y1="0" x2={m.anchorX - m.x} y2={m.anchorY - m.y} stroke={m.kind === 'operation' ? '#1b7650' : '#ea580c'} strokeWidth="1" />
             <circle cx={m.anchorX - m.x} cy={m.anchorY - m.y} r="2" fill={m.kind === 'operation' ? '#1b7650' : '#ea580c'} />
