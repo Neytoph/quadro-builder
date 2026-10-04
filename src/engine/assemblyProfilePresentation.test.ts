@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assemblyProfilePosition } from './assemblyProfilePresentation.js';
+import { assemblyProfilePosition, assemblyProfileFallbackVisible } from './assemblyProfilePresentation.js';
 import * as THREE from 'three';
 import { SceneManager } from './scene.js';
 
@@ -7,6 +7,10 @@ const run = { tubes: ['lower', 'upper'], from: [10, 20, 30] as [number, number, 
 describe('reinforcement illustration pose', () => {
   it('hides an uninserted profile in the prepare action', () => {
     expect(assemblyProfilePosition({ profileVisible: new Set(), visible: new Set(run.tubes) }, run)).toBeNull();
+    expect(assemblyProfileFallbackVisible({ profileVisible: new Set() }, false)).toBe(false);
+    expect(assemblyProfileFallbackVisible({ profileVisible: new Set(['lower']) }, false)).toBe(false);
+    expect(assemblyProfileFallbackVisible(undefined, false)).toBe(true);
+    expect(assemblyProfileFallbackVisible(undefined, true)).toBe(false);
   });
   it('uses the explicit loose profile pose while its carrier stays still', () => {
     const state = { profileVisible: new Set(['lower']), profileTransforms: new Map([['lower', [0, 80, 0]]]), transforms: new Map([['lower', [0, 12, 0]]]) };

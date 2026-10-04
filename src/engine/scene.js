@@ -11,7 +11,7 @@ import { nodeClampOffset, isHolePart, HOLE_MASKS, holeArmDirs, BLACK_FITTINGS,
   isBoltPart, boltAxis, boltShift, hingeDir, hingeKey, POOL_KINDS, fixedFittingColor,
   ARM_FITTINGS } from "./model.js";
 import { reinforcementProfiles } from "./qdfexport.js";
-import { assemblyProfilePosition } from './assemblyProfilePresentation.js';
+import { assemblyProfilePosition, assemblyProfileFallbackVisible } from './assemblyProfilePresentation.js';
 import { loadConnectorMeshes, loadSlideMeshes, loadTubeMeshes, loadFittingMeshes,
   loadSurfaceMeshes } from "./meshes.js";
 import { CONNECTOR_ARM_BITS } from "./qdfimport.js";
@@ -4368,7 +4368,7 @@ export class SceneManager {
       // durch die Kupplungen hindurch – deshalb volle Rohrlänge. Liegen die
       // abgegriffenen Modelle vor, zeichnet sie stattdessen `_addAluProfiles()`
       // als ganze Laeufe NEBEN dem Rohr, so wie die Herstellersoftware.
-      if (t.reinforced && !reinforce && st !== "future" && !aluGedeckt.has(t.id)) {
+      if (t.reinforced && !reinforce && st !== "future" && assemblyProfileFallbackVisible(asm, aluGedeckt.has(t.id))) {
         // Verstaerkungsprofil: ~30 mm Durchmesser (gemessen), passt in das hohle
         // Rohr (49 mm aussen, 3 mm Wandstaerke -> 43 mm Innen-Durchmesser).
         const rodRadius = 1.5;  // 15 mm Radius = 30 mm Durchmesser in cm

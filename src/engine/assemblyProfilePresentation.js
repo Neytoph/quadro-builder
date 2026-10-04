@@ -10,3 +10,11 @@ export function assemblyProfilePosition(assembly, run) {
   if (!Array.isArray(offset) || offset.length !== 3 || !offset.every(Number.isFinite)) throw new Error(`Invalid profile transform: ${first}`);
   return run.from.map((value, axis) => value + offset[axis]);
 }
+
+/** Generic per-tube rods have no independent insertion pose. Ordered assembly
+ * details therefore use the catalogue profile drawing exclusively; otherwise a
+ * hidden, not-yet-inserted core would reappear inside its visible carrier.
+ */
+export function assemblyProfileFallbackVisible(assembly, nativeCovered) {
+  return !nativeCovered && !assembly?.profileVisible;
+}
