@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest'
-import { drawManualArrows, layoutOperationCallouts, projectedOperationArrowHead, projectOperationMarks } from './assemblyManual.js'
+import { drawManualArrows, layoutOperationCallouts, projectedOperationArrowHead, projectOperationMarks, projectConnectorCalloutRects } from './assemblyManual.js'
 import { BuildModel } from './model.js'
 import { buildableTubes, loadCatalog } from './catalog.js'
 import { assemblyDetailState } from './assemblyPlan.js'
@@ -25,6 +25,51 @@ function expectMotionClear(boxes: Box[], arrows: Arrow[], clearance: number) {
 }
 
 describe('projected assembly annotations without model planning', () => {
+  it('protects only visible current native connector bodies at their rendered world pose and keeps PDF labels outside them', () => {
+    const current = 'n-current', gray = 'n-gray', future = 'n-future', tube = 't-current'
+    const pieces = [{ id: current, native: true }]
+    const rows = new Map([[current, { id: current, pieces }], [gray, { id: gray, pieces: [{ id: gray }] }],
+      [future, { id: future, pieces: [{ id: future }] }], [tube, { id: tube, pieces: [{ id: tube }] }]])
+    const calls: { points: number[][]; aspect: number | null }[] = []
+    const boxed: any[][] = []
+    const scene = { buildGroup: { children: ['rendered-native-mesh'] }, _indexParts: () => rows,
+      _piecesBox: (input: any[]) => { boxed.push(input); return { min: { x: 20, y: 30, z: 40 }, max: { x: 40, y: 50, z: 60 } } },
+      projectWorld: (points: number[][], aspect: number | null) => { calls.push({ points, aspect }); return points.map(p => ({ u: p[0] / 100 + p[2] / 1000, v: p[1] / 100 })) } }
+    const state = { current: new Set([current, future, tube]), visible: new Set([current, gray, tube]), transforms: new Map([[current, [100, 0, 0]]]) }
+    const model = { nodes: new Map([[current, {}], [gray, {}], [future, {}]]) }
+    const rectangles = projectConnectorCalloutRects(scene, model, state, 4 / 3)
+    expect(boxed).toEqual([pieces])
+    expect(calls[0].aspect).toBe(4 / 3)
+    expect(calls[0].points).toHaveLength(8)
+    expect(new Set(calls[0].points.map(p => p.join(','))).size).toBe(8)
+    expect(calls[0].points).toContainEqual([20, 30, 40])
+    expect(calls[0].points).toContainEqual([40, 50, 60])
+    expect(rectangles).toHaveLength(1)
+    expect(rectangles[0]).toMatchObject({ id: current })
+    expect(rectangles[0].u).toBeCloseTo(0.35)
+    expect(rectangles[0].v).toBeCloseTo(0.4)
+    expect(rectangles[0].width).toBeCloseTo(0.22)
+    expect(rectangles[0].height).toBeCloseTo(0.2)
+    // Real PDF cover-cropping: 400×300 image fills a 400×200 frame,
+    // so the body is translated by -50 vertically, not stretched to fit.
+    const fills: number[][] = [], texts: string[] = []
+    const canvas: any = { measureText: (text: string) => ({ width: text.length * 18 }), fillRect: (...p: number[]) => fills.push(p), fillText: (text: string) => texts.push(text) }
+    const ctx = new Proxy(canvas, { get: (target, name) => name in target ? target[name] : () => {} })
+    drawManualArrows(ctx, { width: 400, height: 300 }, 100, 50, 400, 200, [], [], true,
+      [{ u: 0.35, v: 0.4, order: 1 }, { u: 0.35, v: 0.4, order: 3 }], rectangles)
+    expect(texts).toEqual(['①', '③'])
+    expect(fills).toHaveLength(2)
+    // World connector projection is x[196,284], y[90,150] in the page.
+    for (const [x, y, width, height] of fills) {
+      expect(x + width <= 196 || x >= 284 || y + height <= 90 || y >= 150).toBe(true)
+      expect(x).toBeGreaterThanOrEqual(100)
+      expect(x + width).toBeLessThanOrEqual(500)
+      expect(y).toBeGreaterThanOrEqual(50)
+      expect(y + height).toBeLessThanOrEqual(250)
+    }
+    expect(state.transforms.get(current)).toEqual([100, 0, 0])
+  })
+
   it('separates overlapping short horizontal action labels from both real arrows and material circles on a phone', () => {
     const arrows = [{ x1: 202, y1: 158, x2: 185, y2: 166 }, { x1: 148, y1: 190, x2: 171, y2: 179 }]
     const marks = [{ x: 202, y: 158, label: '①', boxWidth: 26, boxHeight: 26 }, { x: 158, y: 183, label: '②', boxWidth: 26, boxHeight: 26 }]

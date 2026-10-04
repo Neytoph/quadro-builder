@@ -883,6 +883,30 @@ export function projectOperationMarks(scene, model, state, aspect) {
   }).filter(Boolean);
 }
 
+/** Current connector bodies in this rendered pose. u/v are the rectangle centre;
+ * width/height are normalized to the same camera/aspect as the image.
+ * @param {number | null} [aspect]
+ */
+export function projectConnectorCalloutRects(scene, model, state, aspect = null) {
+  if (!state?.current?.size || !state?.visible) return [];
+  const rectangles = [];
+  for (const row of scene._indexParts(scene.buildGroup.children).values()) {
+    if (!model.nodes.has(row.id) || !state.current.has(row.id) || !state.visible.has(row.id)) continue;
+    // _piecesBox already includes the actual instance/world pose; applying the
+    // assembly translation again would protect a different position.
+    const box = scene._piecesBox(row.pieces);
+    if (!box || ![box.min.x, box.min.y, box.min.z, box.max.x, box.max.y, box.max.z].every(Number.isFinite)) continue;
+    const corners = [];
+    for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) for (const z of [box.min.z, box.max.z]) corners.push([x, y, z]);
+    const points = scene.projectWorld(corners, aspect).filter(point => point && Number.isFinite(point.u) && Number.isFinite(point.v));
+    if (!points.length) continue;
+    const minU = Math.min(...points.map(point => point.u)), maxU = Math.max(...points.map(point => point.u));
+    const minV = Math.min(...points.map(point => point.v)), maxV = Math.max(...points.map(point => point.v));
+    rectangles.push({ id: row.id, u: (minU + maxU) / 2, v: (minV + maxV) / 2, width: maxU - minU, height: maxV - minV });
+  }
+  return rectangles;
+}
+
 /** @param {any[] | null} [numberedCover] */
 export function assemblyDetailItems(model, plan, step, group, numberedCover = null) {
   const cover = numberedCover || coverItems(plan.bom || computeBOM(model));
@@ -1077,8 +1101,10 @@ export function projectedOperationArrowHead(arrow, maxLength = 12) {
     right: [arrow.x2 - length * Math.cos(angle + 0.45), arrow.y2 - length * Math.sin(angle + 0.45)] };
 }
 
-/** @param {any[] | null} [operationMarks] */
-export function drawManualArrows(ctx, img, x, y, w, h, arrows, marks = [], local = false, operationMarks = null) {
+/** @param {any[] | null} [operationMarks]
+ * @param {any[]} [connectorCalloutRects]
+ */
+export function drawManualArrows(ctx, img, x, y, w, h, arrows, marks = [], local = false, operationMarks = null, connectorCalloutRects = []) {
   if (!arrows?.length && !operationMarks?.length) return;
   const scale = Math.max(w / img.width, h / img.height);
   const dw = img.width * scale, dh = img.height * scale;
@@ -1093,7 +1119,8 @@ export function drawManualArrows(ctx, img, x, y, w, h, arrows, marks = [], local
     const label = mark.order <= 20 ? String.fromCodePoint(0x2460 + mark.order - 1) : `(${mark.order})`;
     return { x: mark.x, y: mark.y, label, boxWidth: Math.max(mm(5), ctx.measureText(label).width + mm(2)), boxHeight: mm(5) };
   }), w, h, { arrows: projected, materialMarks, gap: mm(0.8), arrowClearance: mm(2), padding: mm(1),
-    blockedRects: [{ x: w / 2, y: h - mm(5), boxWidth: w, boxHeight: mm(10) }] });
+    blockedRects: [{ x: w / 2, y: h - mm(5), boxWidth: w, boxHeight: mm(10) },
+      ...connectorCalloutRects.map(rect => ({ x: ox + rect.u * dw, y: oy + rect.v * dh, boxWidth: rect.width * dw, boxHeight: rect.height * dh }))] });
   ctx.save();
   roundRect(ctx, x, y, w, h, mm(1.2)); ctx.clip();
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
@@ -1340,8 +1367,8 @@ function paintDetailRow(ctx, { group, left, right, location, icons, copy, y, hei
   const imgH = height - (imgY - y) - legendH - 6;
   const box = { x0: M, x1: 133.5, imgY, imgW: 124, imgH };
   paintPair(ctx, left.img, right.img, box, { front: copy.actionView, back: copy.completeView }, fill, left.marks, right.marks, true);
-  drawManualArrows(ctx, left.img, mm(box.x0), mm(imgY), mm(box.imgW), mm(imgH), left.arrows, left.marks, true, left.operationMarks);
-  drawManualArrows(ctx, right.img, mm(box.x1), mm(imgY), mm(box.imgW), mm(imgH), [], right.marks, true, right.operationMarks);
+  drawManualArrows(ctx, left.img, mm(box.x0), mm(imgY), mm(box.imgW), mm(imgH), left.arrows, left.marks, true, left.operationMarks, left.connectorCalloutRects);
+  drawManualArrows(ctx, right.img, mm(box.x1), mm(imgY), mm(box.imgW), mm(imgH), [], right.marks, true, right.operationMarks, right.connectorCalloutRects);
   const legendY = imgY + imgH + 2;
   const consumed = paintLegend(ctx, group.items, icons, mm(M), mm(legendY), mm(245), mm(y + height));
   if (consumed !== group.items.length) throw manualError('pagination', '局部材料参考绘制空间不足');
@@ -1363,12 +1390,12 @@ function paintCompactDetail(ctx, { group, left, right, location, icons, copy, x,
   const imgH = (height - (imgY - y) - group.legendH - 4) / 2;
   drawShot(ctx, left.img, mm(x), mm(imgY), mm(width), mm(imgH), fill);
   drawMarks(ctx, left.img, mm(x), mm(imgY), mm(width), mm(imgH), left.marks, true);
-  drawManualArrows(ctx, left.img, mm(x), mm(imgY), mm(width), mm(imgH), left.arrows, left.marks, true, left.operationMarks);
+  drawManualArrows(ctx, left.img, mm(x), mm(imgY), mm(width), mm(imgH), left.arrows, left.marks, true, left.operationMarks, left.connectorCalloutRects);
   paintCaption(ctx, `${copy.actionView} · ${directionLabel(group, copy)}`, mm(x), mm(imgY), mm(imgH));
   const completeY = imgY + imgH + 2;
   drawShot(ctx, right.img, mm(x), mm(completeY), mm(width), mm(imgH), fill);
   drawMarks(ctx, right.img, mm(x), mm(completeY), mm(width), mm(imgH), right.marks, true);
-  drawManualArrows(ctx, right.img, mm(x), mm(completeY), mm(width), mm(imgH), [], right.marks, true, right.operationMarks);
+  drawManualArrows(ctx, right.img, mm(x), mm(completeY), mm(width), mm(imgH), [], right.marks, true, right.operationMarks, right.connectorCalloutRects);
   paintCaption(ctx, `${copy.completeView} · ${directionLabel(group, copy)}`, mm(x), mm(completeY), mm(imgH));
   const legendY = completeY + imgH + 2;
   paintDetailReferences(ctx, group.items, icons, mm(x), mm(legendY), mm(104.5));
@@ -1488,6 +1515,7 @@ export async function exportAssemblyPdf(opts) {
       if (!local) image.marks.push(...projectStateMarks(scene, state, size.width / size.height));
       image.operationNumbers = state?.operationNumbers || [];
       image.operationMarks = projectOperationMarks(scene, model, state, size.width / size.height);
+      image.connectorCalloutRects = local ? projectConnectorCalloutRects(scene, model, state, size.width / size.height) : [];
       image.arrows = (state?.arrows || []).map(arrow => {
         const [from, to] = scene.projectWorld([arrow.from, arrow.to], size.width / size.height);
         const operation = state?.operationNumbers?.find(value => value.id === arrow.id);
