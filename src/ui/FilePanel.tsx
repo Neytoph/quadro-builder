@@ -8,8 +8,9 @@ import { storage } from '../engine-api'
 import { syncConfigured } from '../sync/bootstrap'
 import { legacyBackupWithTabs } from '../collab/legacyBackup'
 import { Modal } from '../collab/ui/Modals'
+import { Box, BookOpen, ChevronDown, FileJson, FolderInput, Image, Link, Plus, Save, Sparkles, Upload } from 'lucide-react'
 
-const btn = 'text-sm rounded-lg border border-gray-700 bg-gray-800 hover:border-teal-400 px-3 py-2.5 text-left cursor-pointer leading-snug'
+const btn = 'qb-file-action'
 
 export default function FilePanel() {
   const api = useEngine()
@@ -29,33 +30,35 @@ export default function FilePanel() {
   const plan = collab.mode === 'plan'
 
   return (
-    <div className="p-3">
-      <div className="flex flex-col gap-1.5">
-        {/* 手机上这块面板盖满画布，新开的标签页被挡在后面，点完得有一句话 */}
-        <button onClick={() => { api.newTab(); api.notify(t('toast.newTab')) }} className={btn}>{t('btn.new')}</button>
-        {!plan && <button onClick={() => void api.saveCurrent()} className={btn}>{t('btn.save')}</button>}
-        <button onClick={() => void api.saveCurrentAs()} className={btn}>{t('btn.saveAs')}</button>
-        <button onClick={() => fileRef.current?.click()} className={btn}>{t('btn.import')}</button>
-        <button onClick={() => setBatch(true)} className={btn} data-ui="batch-open">{t('batch.open')}</button>
-        <button onClick={api.exportQdf} className={btn}>{t('btn.exportQdf')}</button>
-        <button onClick={api.exportJson} className={btn}>{t('btn.exportJson')}</button>
-        {syncConfigured() && <button disabled={backingUp} className={btn} onClick={() => {
+    <div className="qb-file-panel">
+      <section aria-labelledby="qb-file-start">
+        <h2 id="qb-file-start" className="qb-file-section">{t('chrome.start')}</h2>
+        {!plan && <button onClick={() => void api.saveCurrent()} className={`${btn} qb-file-primary`}><Save aria-hidden="true" /><span>{t('chrome.save')}</span><kbd>{t('chrome.saveShortcut')}</kbd></button>}
+        <div className="qb-file-two">
+          <button onClick={() => { api.newTab(); api.notify(t('toast.newTab')) }} className={btn}><Plus aria-hidden="true" /><span>{t('btn.new')}</span></button>
+          <button onClick={() => fileRef.current?.click()} className={btn}><Upload aria-hidden="true" /><span>{t('btn.import')}</span></button>
+        </div>
+        <button onClick={() => void api.saveCurrentAs()} className="qb-file-row"><Save aria-hidden="true" /><span>{t('chrome.saveAs')}</span><kbd>{t('chrome.saveAsShortcut')}</kbd></button>
+        <button onClick={() => setBatch(true)} className="qb-file-row" data-ui="batch-open"><FolderInput aria-hidden="true" /><span>{t('batch.open')}<small>QDF</small></span></button>
+        {syncConfigured() && <button disabled={backingUp} className="qb-file-row" onClick={() => {
           if (!window.confirm(t('saves.legacyBackupConfirm'))) return
           setBackingUp(true)
           void legacyBackupWithTabs().then(setLegacy)
             .catch(error => api.notify(String(error), 'err')).finally(() => setBackingUp(false))
-        }}>{t('saves.legacyBackup')}</button>}
-        <button onClick={api.exportPng} className={btn}>{t('btn.exportPng')}</button>
-        <button
-          onClick={() => void api.exportAssemblyPdf()}
-          disabled={!!api.exportingManual}
-          className={`${btn} disabled:opacity-40 disabled:cursor-not-allowed`}
-        >{t('btn.exportManual')}</button>
-        <button onClick={() => void api.shareCurrent()} className={btn}>{t('btn.share')}</button>
-        <button onClick={() => window.dispatchEvent(new Event(ONBOARDING_EVENT))} className={btn}>{t('onboard.replay')}</button>
+        }}><FileJson aria-hidden="true" /><span>{t('saves.legacyBackup')}</span></button>}
         <input ref={fileRef} type="file" accept=".qdf,.json,application/json" hidden
           onChange={e => { const f = e.target.files?.[0]; if (f) void api.importFile(f); e.target.value = '' }} />
-      </div>
+      </section>
+      <section aria-labelledby="qb-file-exports" className="qb-file-separated">
+        <h2 id="qb-file-exports" className="qb-file-section">{t('chrome.export')}</h2>
+        <div className="qb-file-export-grid">
+          <button onClick={api.exportPng} className="qb-file-export" title={t('btn.exportPng')}><Image aria-hidden="true" /><strong>{t('chrome.image')}</strong><small>{t('chrome.imageHint')}</small></button>
+          <button onClick={api.exportJson} className="qb-file-export" title={t('btn.exportJson')}><FileJson aria-hidden="true" /><strong>{t('chrome.backup')}</strong><small>{t('chrome.backupHint')}</small></button>
+          <button onClick={api.exportQdf} className="qb-file-export" title={t('btn.exportQdf')}><Box aria-hidden="true" /><strong>{t('chrome.original')}</strong><small>{t('chrome.originalHint')}</small></button>
+          <button onClick={() => void api.exportAssemblyPdf()} disabled={!!api.exportingManual} aria-busy={!!api.exportingManual} className="qb-file-export" title={t('btn.exportManual')}><BookOpen aria-hidden="true" /><strong>{t('chrome.manual')}</strong><small>{t('chrome.manualHint')}</small></button>
+        </div>
+        <button onClick={() => void api.shareCurrent()} className="qb-file-row"><Link aria-hidden="true" /><span>{t('btn.share')}</span></button>
+      </section>
       {batch && <BatchImport onClose={() => setBatch(false)} />}
       {legacy && <Modal onClose={() => setLegacy(null)} label={t('saves.legacyBackup')}>
         <p className="text-sm mb-3">{t('saves.legacyBackupHint')}</p>
@@ -69,33 +72,35 @@ export default function FilePanel() {
         </div>
       </Modal>}
 
-      <div className="mt-4 pt-3 border-t border-gray-800">
-        <div className="text-[10px] uppercase tracking-wider text-gray-400 mb-1.5">{t('section.room')}</div>
-        <label className="flex items-center gap-2 text-sm text-gray-50 cursor-pointer mb-1.5 min-h-9">
+      <details className="qb-file-room">
+        <summary><span>{t('section.room')}</span><ChevronDown size={16} aria-hidden="true" /></summary>
+        <label className="qb-file-check">
           <input type="checkbox" checked={api.room.visible} onChange={e => api.setRoom({ visible: e.target.checked })} className="accent-sky-500" />
           {t('room.show')}
         </label>
-        <label className="flex items-center gap-2 text-sm text-gray-50 cursor-pointer mb-2 min-h-9">
+        <label className="qb-file-check">
           <input type="checkbox" checked={api.room.showExtents} onChange={e => api.setRoom({ showExtents: e.target.checked })} className="accent-sky-500" />
           {t('room.extents')}
         </label>
-        <div className="grid grid-cols-3 gap-1.5">
+        <div className="qb-file-dimensions">
           <CmField label={t('room.w')} value={api.room.w} onCommit={n => api.setRoom({ w: n })} />
           <CmField label={t('room.d')} value={api.room.d} onCommit={n => api.setRoom({ d: n })} />
           <CmField label={t('room.h')} value={api.room.h} onCommit={n => api.setRoom({ h: n })} />
         </div>
-      </div>
+      </details>
 
-      <div className="mt-4 pt-3 border-t border-gray-800">
-        <div className="flex gap-1">
+      <button onClick={() => window.dispatchEvent(new Event(ONBOARDING_EVENT))} className="qb-file-row"><Sparkles aria-hidden="true" /><span>{t('onboard.replay')}</span></button>
+      <section className="qb-file-separated" aria-labelledby="qb-file-language">
+        <h2 id="qb-file-language" className="qb-file-section">{t('chrome.language')}</h2>
+        <div className="qb-file-languages">
           {LANGS.map(item => (
             <button key={item.id} onClick={() => setLang(item.id)}
-              className={`flex-1 text-sm rounded-lg py-2.5 border cursor-pointer ${lang === item.id ? 'bg-teal-500 text-white border-teal-400' : 'border-gray-700 bg-gray-800'}`}>
+              aria-pressed={lang === item.id} className={lang === item.id ? 'qb-file-primary' : ''}>
               {item.label}
             </button>
           ))}
         </div>
-      </div>
+      </section>
     </div>
   )
 }

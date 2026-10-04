@@ -1,11 +1,14 @@
-import { useLayoutEffect, useRef, useState } from 'react'
-import { MOTION } from './motion'
+import { useEffect, useRef, useState } from 'react'
 import { useEngine } from '../store/EngineContext'
 import { useI18n } from '../i18n'
-import { NARROW_MAX, TAB_BAR_H, usePanelLayout } from './panelLayout'
+import { TAB_BAR_H } from './panelLayout'
 import { DOCK_PILLS, PLAN_PILLS, useDock } from './dock'
 import { useCollab } from '../collab/CollabContext'
 import ShareCluster from '../collab/ui/ShareCluster'
+import { Box, Plus, X } from 'lucide-react'
+import { DockChevron, DockIcon } from './DockIcon'
+import { useOverflowCompact } from './useOverflowCompact'
+import './builderChrome.css'
 
 const GROUPS: (typeof DOCK_PILLS)[] = [
   DOCK_PILLS.filter(p => p.id === 'file' || p.id === 'saves'),
@@ -29,31 +32,21 @@ export default function ProjectTabs() {
   const planMode = collab.mode === 'plan'
   const { t } = useI18n()
   const { pane, toggle } = useDock()
-  const { vw } = usePanelLayout()
-  const narrow = vw <= NARROW_MAX
   const [editing, setEditing] = useState<string | null>(null)
+  const tabsRef = useRef<HTMLDivElement>(null)
+  const topbarRef = useRef<HTMLDivElement>(null)
   const pillsRef = useRef<HTMLDivElement>(null)
-  const indRef = useRef<HTMLSpanElement>(null)
-
-  // 右边这排面板入口底下一块会滑的色块，跟着打开的那个走；全关了就淡掉、原地不动
-  useLayoutEffect(() => {
-    if (!MOTION) return
-    const box = pillsRef.current, ind = indRef.current
-    if (!box || !ind) return
-    const place = () => {
-      const on = box.querySelector<HTMLElement>('[data-pill-on="true"]')
-      if (!on) { ind.style.opacity = '0'; return }
-      ind.style.opacity = '1'
-      ind.style.transform = `translate(${on.offsetLeft}px, ${on.offsetTop}px)`
-      ind.style.width = `${on.offsetWidth}px`
-      ind.style.height = `${on.offsetHeight}px`
-      if (!ind.dataset.ready) requestAnimationFrame(() => { ind.dataset.ready = '1' })
+  const compact = useOverflowCompact(pillsRef, topbarRef)
+  const previousPane = useRef(pane)
+  useEffect(() => {
+    tabsRef.current?.querySelector<HTMLElement>('[data-active="true"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }, [api.activeTabId])
+  useEffect(() => {
+    if (!pane && previousPane.current && document.activeElement?.closest('[data-ui="right-dock"]')) {
+      pillsRef.current?.querySelector<HTMLButtonElement>(`[data-pane="${previousPane.current}"]`)?.focus()
     }
-    place()
-    const ro = new ResizeObserver(place)
-    ro.observe(box)
-    return () => ro.disconnect()
-  })
+    previousPane.current = pane
+  }, [pane])
 
   const close = (tabId: string, dirty: boolean) => {
     if (dirty && !window.confirm(t('confirm.closeTab'))) return
@@ -62,20 +55,20 @@ export default function ProjectTabs() {
 
   return (
     <div
-      className="fixed top-0 left-0 right-0 z-40 flex items-center gap-2 px-2 bg-gray-950/95 border-b border-gray-800"
+      ref={topbarRef} data-compact={compact}
+      className="qb-project-bar fixed top-0 left-0 right-0 z-40"
       style={{ height: TAB_BAR_H }}
     >
       <a href="/" title={t('nav.home')} className="shrink-0 flex items-center justify-center w-8 h-8 rounded-[9px] overflow-hidden">
         <img src={`${import.meta.env.BASE_URL}favicon.svg`} alt="" width={32} height={32} draggable={false} />
       </a>
-      {!narrow && (
-      <div className="flex items-center gap-1 min-w-0 flex-1 overflow-x-auto scrollbar-none">
+      <div ref={tabsRef} className="qb-project-tabs scrollbar-none">
       {api.tabs.map(tab => {
         // 共享方案：创建人、编辑者改的是方案的名字，评论者和访客不能改
         const renamable = !tab.planId || collab.renamable(tab.planId)
         return (
         <div key={tab.tabId} data-plan-tab={tab.planId || undefined}
-          className={`m-tab flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs shrink-0 ${tab.tabId === api.activeTabId ? 'bg-gray-800 border-teal-500 text-teal-700' : 'bg-transparent border-transparent text-gray-400 hover:text-gray-200 hover:bg-gray-900'}`}>
+          className="m-tab qb-project-tab" data-active={tab.tabId === api.activeTabId}>
           {editing === tab.tabId ? (
             <input autoFocus defaultValue={tab.name} maxLength={tab.planId ? 40 : undefined} className="bg-transparent w-24 outline-none"
               onBlur={e => {
@@ -86,24 +79,37 @@ export default function ProjectTabs() {
               onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} />
           ) : (
             <button onClick={() => api.activateTab(tab.tabId)} onDoubleClick={() => { if (renamable) setEditing(tab.tabId) }}
-              title={renamable ? t('hint.renameTab') : undefined} className="cursor-pointer max-w-[10rem] truncate">
-              {tab.name}{tab.dirty ? ' •' : ''}
+              title={renamable ? `${tab.name} · ${t('hint.renameTab')}` : tab.name} className="qb-project-name" aria-current={tab.tabId === api.activeTabId ? 'page' : undefined}>
+              <Box size={16} strokeWidth={1.65} aria-hidden="true" /><span>{tab.name}</span>{tab.dirty ? <span aria-hidden="true">•</span> : null}
             </button>
           )}
-          <button onClick={() => close(tab.tabId, tab.dirty)} className="text-gray-500 hover:text-teal-600 cursor-pointer"
-            title={t('saves.delete')}>×</button>
+          <button onClick={() => close(tab.tabId, tab.dirty)} className="qb-tab-close"
+            title={t('chrome.closeTab')} aria-label={`${t('chrome.closeTab')} · ${tab.name}`}><X size={14} aria-hidden="true" /></button>
         </div>
         )
       })}
-      <button onClick={api.newTab} className="w-6 h-6 shrink-0 rounded-md border border-gray-800 bg-gray-900/80 text-gray-300 hover:border-teal-400 cursor-pointer">+</button>
       </div>
-      )}
+      <button onClick={api.newTab} className="qb-project-new" title={t('btn.new')} aria-label={t('btn.new')}><Plus size={18} aria-hidden="true" /></button>
 
-      <div ref={pillsRef} className={`relative flex items-center gap-1.5 ${narrow ? 'flex-1 overflow-x-auto scrollbar-none' : 'shrink-0'}`}>
-        {MOTION && <span ref={indRef} aria-hidden className="m-pill-ind" />}
+      <div ref={pillsRef} role="navigation" aria-label={t('chrome.navigation')} className="qb-navigation scrollbar-none" onKeyDown={event => {
+        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+        const buttons = Array.from(pillsRef.current?.querySelectorAll<HTMLButtonElement>('[data-pane]') || [])
+        const index = buttons.indexOf(event.target as HTMLButtonElement)
+        if (index < 0) return
+        event.preventDefault()
+        let next: number
+        if (event.key === 'Home') next = 0
+        else if (event.key === 'End') next = buttons.length - 1
+        else {
+          const direction = event.key === 'ArrowLeft' ? -1 : 1
+          next = (index + direction + buttons.length) % buttons.length
+        }
+        buttons[next]?.focus()
+        buttons[next]?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+      }}>
         {(planMode ? (collab.plan && !collab.plan.me ? VISITOR_GROUPS : PLAN_GROUPS) : GROUPS).map((group, i) => (
-          <div key={i} className="flex items-center gap-0.5 shrink-0">
-            {i > 0 && <span className="w-px h-4 bg-gray-700 mx-0.5" />}
+          <div key={i} className="qb-nav-group">
+            {i > 0 && <span className="qb-nav-divider" aria-hidden="true" />}
             {group.map(item => {
               const on = pane === item.id
               // 安全入口带上错误和提醒的数量；没有就打个勾
@@ -111,16 +117,12 @@ export default function ProjectTabs() {
                 ? api.safety.findings.filter(f => f.level !== 'info').length
                 : null
               const unread = item.id === 'comments' ? collab.unread.pins + collab.unread.chat : 0
-              const mark = issues == null ? '' : issues ? ` · ${issues}` : ' ✓'
-              const tone = issues == null || on ? '' : issues ? ' text-amber-300' : ' text-teal-400'
               return (
-                <button key={item.id} data-tour={`dock-${item.id}`} data-pill-on={on} onClick={() => toggle(item.id)}
-                  className={`m-pill relative z-[1] text-xs px-2.5 min-h-8 rounded-lg cursor-pointer whitespace-nowrap ${
-                    on
-                      ? (MOTION ? 'text-white font-semibold' : 'bg-teal-500 text-white font-semibold')
-                      : `text-gray-300 hover:text-teal-600 hover:bg-gray-900${tone}`
-                  }`}>
-                  {t(item.labelKey)}{mark}
+                <button key={item.id} type="button" data-tour={`dock-${item.id}`} data-pane={item.id} data-pill-on={on} onClick={() => toggle(item.id)}
+                  aria-controls="qb-right-dock" aria-expanded={on} title={t(item.labelKey)} aria-label={t(item.labelKey)} className="m-pill qb-nav-button">
+                  <DockIcon pane={item.id} /><span className="qb-nav-label">{t(item.labelKey)}</span>
+                  {issues != null && <span className="qb-safety-mark" data-issues={issues > 0}>{issues || '✓'}</span>}
+                  <DockChevron />
                   {unread > 0 && <b className="cb-n" data-unread>{unread}</b>}
                 </button>
               )
@@ -128,8 +130,8 @@ export default function ProjectTabs() {
           </div>
         ))}
       </div>
-      <span data-site-slot="help" hidden />
       <ShareCluster />
+      <div data-site-slot="help" hidden className="qb-host-help" />
     </div>
   )
 }

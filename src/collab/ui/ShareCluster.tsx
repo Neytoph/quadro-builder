@@ -40,7 +40,7 @@ export default function ShareCluster() {
   if (collab.mode !== 'plan') {
     return (
       <div className="cb-cluster">
-        <button type="button" className="cb-share ghost" onClick={() => show('enable')} data-ui="share-enable"><Users /><span>{t('collab.create.action')}</span></button>
+        <button type="button" className="cb-share ghost" title={t('collab.create.action')} aria-label={t('collab.create.action')} onClick={() => show('enable')} data-ui="share-enable"><Users /><span>{t('collab.create.action')}</span></button>
         {collab.createdPlan && <button type="button" className="cb-text-action" onClick={collab.recoverCreatedPlan}>{t('collab.create.recover')}</button>}
         {open === 'enable' && <EnableShareModal onClose={closeCreate} />}
       </div>
@@ -63,7 +63,7 @@ export default function ShareCluster() {
         {members.length > 5 && <span className="cb-face more">+{members.length - 5}</span>}
       </div>
       {plan && (
-        <button type="button" className="cb-share" onClick={() => show('share')} data-ui="plan-share">
+        <button type="button" className="cb-share" title={t(collab.role === 'owner' ? 'collab.create.invite' : 'collab.create.members')} aria-label={t(collab.role === 'owner' ? 'collab.create.invite' : 'collab.create.members')} onClick={() => show('share')} data-ui="plan-share">
           {collab.role === 'owner' ? <UserPlus /> : <Users />}<span>{t(collab.role === 'owner' ? 'collab.create.invite' : 'collab.create.members')}</span>
         </button>
       )}

@@ -384,9 +384,17 @@ function AppInner() {
       }
       // 输入控件和确认框占用键盘时，不触发画布操作。
       if (api.nameAsk || api.exportManualConfirm || api.accountAsk || api.exportingManual) return
-      if (input || el?.closest('[role="dialog"][aria-modal="true"]') || document.querySelector('[role="dialog"][aria-modal="true"]')) return
+      if (input) return
+      const modalOpen = Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"]')).some(dialog => {
+        if (dialog instanceof HTMLDialogElement && !dialog.open) return false
+        const visibility = getComputedStyle(dialog).visibility
+        return dialog.getClientRects().length > 0 && visibility !== 'hidden' && visibility !== 'collapse'
+      })
+      if (modalOpen) return
       if (e.altKey) return
       if (el?.closest?.('[data-panel-chrome]')) return
+      // 顶部菜单用左右方向键移动焦点，不执行画布接管或移动。
+      if (el?.closest('[role="navigation"]') && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) return
       const meta = e.metaKey || e.ctrlKey
       if (meta && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); e.shiftKey ? api.redo() : api.undo(); return }
       if (meta && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); api.redo(); return }

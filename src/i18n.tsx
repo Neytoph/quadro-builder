@@ -4,6 +4,7 @@ import { detectOsFamily, type OsFamily } from './platform'
 import { bootEntry } from './entry'
 import { sharedStrings } from './collab/sharedStrings'
 import { accessoryStrings } from './ui/accessoryStrings'
+import { builderChromeStrings } from './ui/builderChromeStrings'
 
 export type Lang = 'zh' | 'en' | 'de'
 
@@ -2063,7 +2064,7 @@ const de: Dict = {
   'room.closeFirst': 'Erst den Umriss schließen, dann Türen und Fenster setzen',
 }
 
-export const dicts: Record<Lang, Dict> = { zh: { ...zh, ...sharedStrings.zh, ...accessoryStrings.zh }, en: { ...en, ...sharedStrings.en, ...accessoryStrings.en }, de: { ...de, ...sharedStrings.de, ...accessoryStrings.de } }
+export const dicts: Record<Lang, Dict> = { zh: { ...zh, ...sharedStrings.zh, ...accessoryStrings.zh, ...builderChromeStrings.zh }, en: { ...en, ...sharedStrings.en, ...accessoryStrings.en, ...builderChromeStrings.en }, de: { ...de, ...sharedStrings.de, ...accessoryStrings.de, ...builderChromeStrings.de } }
 
 /** 打开时用哪种语言：网址里带了的优先，其次是用户选过的，都没有按浏览器语言。 */
 export function detect(): Lang {

@@ -12,10 +12,10 @@ export const TOOLBAR_H = 56
 export const TOOLBAR_CHROME_H = 58
 
 export const LEFT_DEFAULT = 192
-export const RIGHT_DEFAULT = 264
+export const RIGHT_DEFAULT = 368
 const LEFT_MIN = 160
 const LEFT_MAX = 360
-const RIGHT_MIN = 196
+const RIGHT_MIN = 280
 const RIGHT_MAX = 448
 export const HEIGHT_MIN = 180
 
@@ -383,15 +383,17 @@ function setResizeCursor(dir: Dir | null) {
   else delete document.body.dataset.resizeDir
 }
 
-export function PanelHandles({ side, moveLabel, sizeLabel, hug, showMove = true }: {
+export function PanelHandles({ side, moveLabel, sizeLabel, hug, showMove = true, showResize = true, boxOverride }: {
   side: Side
   moveLabel: string
   sizeLabel: string
   hug?: boolean
   showMove?: boolean
+  showResize?: boolean
+  boxOverride?: PanelBox
 }) {
   const { left, right, vh, patchLeft, patchRight } = usePanelLayout()
-  const box = side === 'left' ? left : right
+  const box = boxOverride ?? (side === 'left' ? left : right)
   const patch = side === 'left' ? patchLeft : patchRight
   const minW = side === 'left' ? LEFT_MIN : RIGHT_MIN
   const maxW = side === 'left' ? LEFT_MAX : RIGHT_MAX
@@ -525,9 +527,9 @@ export function PanelHandles({ side, moveLabel, sizeLabel, hug, showMove = true 
       >
         <span className="w-10 h-1 rounded-full bg-gray-600 group-hover:bg-teal-400 group-focus-visible:bg-teal-400" />
       </div>}
-      {!hug && edge('n', 'top-0 left-2 right-2 h-1 cursor-ns-resize')}
-      {!hug && edge('s', 'bottom-0 left-2 right-2 h-1.5 cursor-ns-resize')}
-      {edge('ew', side === 'left' ? 'top-0 bottom-0 right-0 w-2 cursor-ew-resize' : 'top-0 bottom-0 left-0 w-2 cursor-ew-resize')}
+      {showResize && !hug && edge('n', 'top-0 left-2 right-2 h-1 cursor-ns-resize')}
+      {showResize && !hug && edge('s', 'bottom-0 left-2 right-2 h-1.5 cursor-ns-resize')}
+      {showResize && edge('ew', side === 'left' ? 'top-0 bottom-0 right-0 w-2 cursor-ew-resize' : 'top-0 bottom-0 left-0 w-2 cursor-ew-resize')}
     </>
   )
 }

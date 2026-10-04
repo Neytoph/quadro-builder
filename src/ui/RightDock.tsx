@@ -1,4 +1,6 @@
+import { useEffect, useState } from 'react'
 import { useI18n } from '../i18n'
+import { useEngine } from '../store/EngineContext'
 import { HEIGHT_MIN, NARROW_MAX, PanelHandles, PANEL_GAP, TAB_BAR_H, TOOLBAR_CHROME_H, toolbarTop, usePanelLayout } from './panelLayout'
 import { useDock, type DockPane } from './dock'
 import FilePanel from './FilePanel'
@@ -12,6 +14,8 @@ import { usePresence } from './motion'
 import { useCollab } from '../collab/CollabContext'
 import CommentsPane from '../collab/ui/CommentsPane'
 import VersionsPane from '../collab/ui/VersionsPane'
+import { Maximize2, Minimize2, X } from 'lucide-react'
+import { DockIcon } from './DockIcon'
 
 const TITLE: Record<DockPane, string> = {
   file: 'btn.file',
@@ -27,6 +31,9 @@ const TITLE: Record<DockPane, string> = {
 
 export default function RightDock() {
   const { pane: open, setPane } = useDock()
+  const api = useEngine()
+  const [expanded, setExpanded] = useState(false)
+  useEffect(() => { setExpanded(false) }, [open])
   const collab = useCollab()
   // 评论和版本只属于共享方案：切到自己的标签页就不显示
   const live = (open === 'comments' || open === 'versions') && collab.mode !== 'plan' ? null : open
@@ -40,27 +47,39 @@ export default function RightDock() {
   const clash = vw - PANEL_GAP - right.width < toolbarRight + PANEL_GAP
   const top = clash ? Math.max(right.top, toolbarTop(left, vw) + TOOLBAR_CHROME_H + PANEL_GAP) : right.top
   const maxH = Math.max(HEIGHT_MIN, vh - top - PANEL_GAP)
+  const visibleBox = { ...right, top, height: Math.min(right.height, maxH) }
+  const name = api.tabs.find(tab => tab.tabId === api.activeTabId)?.name || t('tab.untitled')
+  const close = () => {
+    setPane(null)
+    document.querySelector<HTMLButtonElement>(`[data-pane="${pane}"]`)?.focus()
+  }
 
   return (
     <aside
       data-tour="dock-panel"
       data-ui="right-dock"
-      className={`m-dock fixed ${narrow ? 'z-[60]' : 'z-[45]'} flex flex-col overflow-y-auto scrollbar-thin qb-card text-gray-200 ${leaving ? 'm-leave pointer-events-none' : ''}`}
+      id="qb-right-dock" aria-labelledby="qb-dock-title"
+      data-pane={pane} data-expanded={expanded}
+      className={`m-dock qb-right-dock fixed ${narrow ? 'z-[60]' : 'z-[45]'} flex flex-col qb-card text-gray-200 ${leaving ? 'm-leave pointer-events-none' : ''}`}
       style={narrow
-        ? { left: PANEL_GAP, right: PANEL_GAP, top: TAB_BAR_H + PANEL_GAP, bottom: PANEL_GAP, width: 'auto', height: 'auto' }
-        : { width: right.width, top, right: PANEL_GAP, maxHeight: maxH }}
+        ? { left: 8, right: 8, bottom: 'max(8px, env(safe-area-inset-bottom))', width: 'auto', height: expanded ? `calc(100dvh - ${TAB_BAR_H + TOOLBAR_CHROME_H + PANEL_GAP * 2}px)` : `calc((100dvh - ${TAB_BAR_H}px) * .48)`, maxHeight: `calc(100dvh - ${TAB_BAR_H + PANEL_GAP * 2}px)` }
+        : { width: right.width, top, right: PANEL_GAP, height: Math.min(right.height, maxH), maxHeight: maxH }}
     >
-      <div className="sticky top-0 z-20 bg-teal-50">
-        {!narrow && <PanelHandles side="right" hug moveLabel={t('hint.movePanel')} sizeLabel={t('hint.resize')} />}
-        <div className="px-3 py-2 border-b border-gray-800 text-sm font-semibold shrink-0 flex items-center gap-2">
-          <span key={pane} className="m-swap flex-1 min-w-0 truncate">{t(TITLE[pane])}</span>
-          <button onClick={() => setPane(null)}
-            className="w-8 h-8 rounded-lg text-gray-400 hover:text-gray-100 hover:bg-gray-800 cursor-pointer text-lg leading-none"
-            aria-label="Close">×</button>
+      {!narrow && <PanelHandles side="right" boxOverride={visibleBox} showMove={false} moveLabel={t('hint.movePanel')} sizeLabel={t('hint.resize')} />}
+      <div className="qb-dock-header">
+        {!narrow && <PanelHandles side="right" boxOverride={visibleBox} hug showResize={false} moveLabel={t('hint.movePanel')} sizeLabel={t('hint.resize')} />}
+        <div className="qb-dock-heading">
+          <span className="qb-dock-icon"><DockIcon pane={pane} size={21} /></span>
+          <div key={pane} className="m-swap qb-dock-title-copy"><h1 id="qb-dock-title">{t(TITLE[pane])}</h1><p title={name}>{name}</p></div>
+          {narrow && <button onClick={() => setExpanded(value => !value)} className="qb-dock-control" aria-label={t(expanded ? 'chrome.compact' : 'chrome.expand')} title={t(expanded ? 'chrome.compact' : 'chrome.expand')} aria-expanded={expanded}>
+            {expanded ? <Minimize2 size={16} aria-hidden="true" /> : <Maximize2 size={16} aria-hidden="true" />}
+          </button>}
+          <button onClick={close} className="qb-dock-control" aria-label={t('chrome.close')} title={t('chrome.close')}><X size={19} aria-hidden="true" /></button>
         </div>
       </div>
       {/* 换面板时内容整块换掉，key 让它重新演一遍入场。
           不能收缩：面板里有 sticky 的表头，父级被压矮之后它就粘不住了。 */}
+      <div className="qb-dock-scroll scrollbar-thin">
       <div key={pane} className="m-swap flex flex-col shrink-0">
         {pane === 'file' && <FilePanel />}
         {pane === 'library' && <LibraryPanel />}
@@ -71,6 +90,7 @@ export default function RightDock() {
         {pane === 'safety' && <SafetyPane />}
         {pane === 'comments' && <CommentsPane />}
         {pane === 'versions' && <VersionsPane />}
+      </div>
       </div>
     </aside>
   )
