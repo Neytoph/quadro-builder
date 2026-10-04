@@ -11,7 +11,7 @@ for(const file of ['slides','fittings','surfaces','connectors','tubes']){
   // models with no fine counterpart (e.g. roof and panels) retain their source.
   for(const [kind,mesh] of Object.entries({...JSON.parse(text),...JSON.parse(fineText)})){
     if(file==='connectors'){connectorMasks[kind]=mesh.mask;connectorTriangles[kind]=Array.from({length:mesh.idx.length/3},(_,i)=>mesh.idx.slice(i*3,i*3+3).map(index=>mesh.pos.slice(index*3,index*3+3).map(value=>value/100)));}
-    if((file==='slides' && ['roof2','slide2','slide-end2'].includes(kind)) || (file==='fittings' && ['connector45_2','floating-wheel2','multi-wheel2','clamp2','clip2','pool2','pool-small2'].includes(kind)) || (file==='tubes' && kind==='round-tube2'))accessoryTriangles[kind]=Array.from({length:mesh.idx.length/3},(_,i)=>mesh.idx.slice(i*3,i*3+3).map(index=>mesh.pos.slice(index*3,index*3+3).map(value=>value/100)));
+    if((file==='slides' && ['roof2','slide2','slide-end2'].includes(kind)) || (file==='fittings' && ['connector45_2','floating-wheel2','multi-wheel2','bearing2','adapter2','hub-cap2','bearing-connector4','steering-lock2','clamp2','clip2','pool2','pool-small2'].includes(kind)) || (file==='tubes' && kind==='round-tube2'))accessoryTriangles[kind]=Array.from({length:mesh.idx.length/3},(_,i)=>mesh.idx.slice(i*3,i*3+3).map(index=>mesh.pos.slice(index*3,index*3+3).map(value=>value/100)));
     if(file==='surfaces')surfaceTriangles[kind]=Array.from({length:mesh.idx.length/3},(_,i)=>mesh.idx.slice(i*3,i*3+3).map(index=>mesh.pos.slice(index*3,index*3+3).map(value=>value/100)));
     const bins=new Map();
     for(let i=0;i<mesh.idx.length;i+=3){

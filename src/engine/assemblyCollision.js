@@ -264,8 +264,34 @@ function linerSleeveContact(model,id,obstacleId,a,b,delta,end,pad,obstacleOffset
   for(const plane of planes){const outside=clipPolygonPlane(connector.points,plane.origin,plane.normal,true);for(let i=1;i<outside.length-1;i++){const remaining={kind:'triangle',points:[outside[0],outside[i],outside[i+1]]};if(assemblyShapesOverlap(move(movingLiner?sleeve:remaining,delta),move(movingLiner?remaining:sleeve,obstacleOffset),pad))return false;}}
   return true;
 }
+export function assemblyFittingBoreContact(model,id,obstacleId,a,b,delta,end,pad,obstacleOffset,contracts){
+  const contract=contracts.get(`${id}:${obstacleId}`),fitting=model.fittings?.get(id),support=model.fittings?.get(obstacleId)||model.nodes.get(obstacleId);
+  if(!contract||contract.fittingId!==id||contract.supportId!==obstacleId||!fitting||!support||a.kind!=='triangle'||b.kind!=='triangle')return false;
+  const axis=axes(fitting.quat)[0],origin=xyz(support),radius=contract.kind==='wheel-bearing'?2.5:2.1;
+  if(dot(axis,unit(contract.axis||[]))<.995)return false;
+  if(contract.kind==='wheel-bearing'){
+    const offset=sub(xyz(fitting),origin),along=dot(offset,axis);
+    if(fitting.kind!=='multi-wheel2'||support.kind!=='bearing2'||dot(axes(support.quat)[0],axis)<.999999||Math.abs(along-5)>.01||Math.hypot(...offset.map((v,i)=>v-axis[i]*along))>1e-4)return false;
+  }else if(contract.kind==='node-stub'){
+    if(!['bearing2','adapter2'].includes(fitting.kind)||!model.nodes.has(obstacleId)||Math.hypot(...sub(xyz(fitting),origin))>1e-4||!resolveNodeConnection(model,support).renderDirs.some(d=>dot(unit(d),axis)>.999999))return false;
+  }else return false;
+  const relative=sub(delta,obstacleOffset);if(Math.hypot(...sub(end,obstacleOffset))>1e-6||Math.hypot(...relative)+Math.hypot(...pad)>7.5+1e-6||dot(relative,axis)<-1e-6||Math.hypot(...relative.map((v,i)=>v-axis[i]*dot(relative,axis)))>1e-4||Math.hypot(...pad)>1e-6&&Math.abs(dot(unit(pad),axis))<.999999)return false;
+  const normal=unit(cross(sub(b.points[1],b.points[0]),sub(b.points[2],b.points[0]))),movingNormal=unit(cross(sub(a.points[1],a.points[0]),sub(a.points[2],a.points[0]))),fixed=move(b,obstacleOffset),moving=move(a,delta);
+  // Factory wheel/bearing cylindrical facets can use different diagonals on
+  // the same source-native circular wall. End caps and cones remain obstacles.
+  const rim=contract.kind==='wheel-bearing'&&b.points.every(p=>Math.abs(dot(sub(p,origin),axis)-7.5)<1e-6)&&b.points.every((p,i)=>Math.hypot(...sub(p,b.points[(i+1)%3]))<=.6);
+  if((!rim&&Math.abs(dot(normal,axis))>.02)||Math.abs(dot(movingNormal,axis))>.02)return false;
+  if(contract.kind==='node-stub'&&(Math.abs(dot(normal,movingNormal))<.999||moving.points.some(p=>Math.abs(dot(sub(p,fixed.points[0]),normal))>.001)))return false;
+  const radiusAt=p=>{const v=sub(p,origin),along=dot(v,axis);return Math.hypot(...v.map((x,i)=>x-axis[i]*along));};
+  if(![...a.points,...b.points].every(p=>Math.abs(radiusAt(p)-radius)<.01))return false;
+  // A small native ear at the shaft's outer circular rim is another boundary
+  // facet of this joint. Annular/full-cap triangles and other ends do not qualify.
+  if(rim)return true;
+  for(const [along,positive]of [[2.5,false],[7.5,true]]){const outside=clipPolygonPlane(b.points,origin.map((v,i)=>v+axis[i]*along),axis,positive);for(let i=1;i<outside.length-1;i++){const points=[outside[0],outside[i],outside[i+1]];if(Math.hypot(...cross(sub(points[1],points[0]),sub(points[2],points[0])))<1e-9)continue;if(assemblyShapesOverlap(moving,move({kind:'triangle',points},obstacleOffset),pad))return false;}}
+  return true;
+}
 /** Full conservative swept geometry; contacts are exempted only inside the mating port. */
-export function checkAssemblyPath(model,movingIds,installedIds,start,end=[0,0,0],{allowMating=true,obstacleTranslations=new Map(),matingContacts=new Map(),entryPanelContacts=new Map(),linerCarrierContacts=new Map(),movingAssemblyIds=movingIds}={}) {
+export function checkAssemblyPath(model,movingIds,installedIds,start,end=[0,0,0],{allowMating=true,obstacleTranslations=new Map(),matingContacts=new Map(),entryPanelContacts=new Map(),linerCarrierContacts=new Map(),fittingMatingContacts=new Map(),movingAssemblyIds=movingIds}={}) {
   const started=performance.now();const timing=()=>{const elapsed=performance.now()-started;if(globalThis.process?.env?.ASSEMBLY_PROFILE && elapsed>200)globalThis.process.stderr.write(JSON.stringify({elapsed:Math.round(elapsed),moving:movingIds.length,installed:installedIds.length,first:movingIds.slice(0,3),start,end})+'\n');};
   const moving=new Set(movingIds),travel=Math.hypot(...sub(start,end)),spacing=geometry().tubeRadius||2.45,count=Math.max(1,Math.ceil(travel/spacing));
   const assemblyMoving=new Set(movingAssemblyIds);
@@ -295,6 +321,7 @@ export function checkAssemblyPath(model,movingIds,installedIds,start,end=[0,0,0]
         if(allowMating&&sharedPanelLipContact(model,id,obstacle.id,a,b,delta,end,pad,obstacle.offset))continue;
         if(allowMating&&entryPanelContact(model,id,obstacle.id,a,b,delta,end,pad,obstacle.offset,entryPanelContacts))continue;
         if(allowMating&&linerSleeveContact(model,id,obstacle.id,a,b,delta,end,pad,obstacle.offset,linerCarrierContacts))continue;
+        if(allowMating&&assemblyFittingBoreContact(model,id,obstacle.id,a,b,delta,end,pad,obstacle.offset,fittingMatingContacts))continue;
         // Connector/tube contact at the destination is valid only near the actual node.
         // No whole shared tube is excluded: clip both tubes away from the joint and test again.
         const relative=sub(delta,obstacle.offset),portTube=t||o;
