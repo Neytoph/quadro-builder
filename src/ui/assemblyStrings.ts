@@ -34,6 +34,9 @@ export const assemblyPdfStrings: Record<Lang, Record<string, string>> = {
 }
 
 assemblyPdfStrings.zh.contextHint = '操作图暂时隐藏周围零件；完整形态见区域页和成品页。'
+assemblyPdfStrings.zh.beforeView = '装配前'
+assemblyPdfStrings.en.beforeView = 'Before assembly'
+assemblyPdfStrings.de.beforeView = 'Vor der Montage'
 assemblyPdfStrings.en.contextHint = 'Surrounding parts are temporarily hidden for clarity. Region and final pages show the complete shape.'
 assemblyPdfStrings.de.contextHint = 'Umliegende Teile sind für freie Sicht ausgeblendet. Bereichs- und Abschlussseiten zeigen die vollständige Form.'
 assemblyPdfStrings.zh.roofCoverHint = '底部视角：I 为顶棚参考定位；实际扣位按支撑杆核对。'

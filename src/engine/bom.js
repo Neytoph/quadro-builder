@@ -27,6 +27,11 @@ function cardinalOf(dx, dy, dz) {
   return d;
 }
 
+export function hasStandaloneFileC45(model, node) {
+  return !!(node.c45file && !node.c45body && ![...model.tubes.values()].some(t => t.arm &&
+    (t.a === node.id ? model.nodes.get(t.b)?.c45body : t.b === node.id && model.nodes.get(t.a)?.c45body)));
+}
+
 function neighborDirs(model, node) {
   const dirs = [];
   for (const t of model.tubes.values()) {
@@ -52,6 +57,11 @@ function neighborDirs(model, node) {
       const norm = Math.hypot(...d) || 1;
       dirs.push(d.map(v => v / norm));
     }
+  }
+  // 文件中的套筒占用承载接头的一根真实臂，即使另一端直接进入管口。
+  if (hasStandaloneFileC45(model, node) && node.c45quat) {
+    const sleeve = xAxisOf(node.c45quat);
+    if (!dirs.some(d => d.reduce((sum, value, axis) => sum + value * sleeve[axis], 0) > 0.99)) dirs.push(sleeve);
   }
   for (const f of (model.fittings ? model.fittings.values() : [])) {
     if (!ARM_FITTINGS.has(f.kind) || !f.quat) continue;
@@ -429,6 +439,9 @@ export function resolveNodeConnection(model, nodeOrId) {
     type = preferredPattern ? node.preferType : geometric;
     types = type === 'end' ? [] : [type];
   }
+  // connector45_2 本身是文件确认的实体；已有 c45body 归属时避免重复计料。
+  const importedAdapter = hasStandaloneFileC45(model, node);
+  if (importedAdapter && !types.includes('diagonal')) types = [...types, 'diagonal'];
   for (const value of types) if (!getConnector(value)) diag('UNKNOWN_CONNECTOR', `连接件 ${value} 不在零件目录中。`, '选择实际可用的连接件。');
   const frame = frameOf(model, node), renderDirs = [...worldDirs];
   const addRender = d => { const length = Math.hypot(...d) || 1, normalized = d.map(v => v / length); if (!renderDirs.some(e => e.reduce((s, v, i) => s + v * normalized[i], 0) > 0.99)) renderDirs.push(normalized); };

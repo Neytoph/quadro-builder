@@ -1097,6 +1097,23 @@ export function parseQDF(text, opts = {}) {
     }
   }
 
+  // 文件中的 C45 也可装在旋转连接件上，另一端直接接入水平轨道的管口。
+  // 按真实零件的局部接口核对，不把整个斜架吸附或移动到底框。
+  for (const corner of connectorNodes.filter(n => n.c45file && n.c45quat)) {
+    const q = [corner.c45quat[3], ...corner.c45quat.slice(0, 3)];
+    const diagonal = C45_ARM_LEN * Math.SQRT1_2;
+    const offset = rotateByQuat(q, [C45_SLEEVE_LEN - diagonal, diagonal, 0]);
+    const mouth = [corner.x + offset[0], corner.y + offset[1], corner.z + offset[2]];
+    const direction = rotateByQuat(q, [-Math.SQRT1_2, Math.SQRT1_2, 0]);
+    const endpoint = connectorNodes.find(n => n !== corner &&
+      Math.hypot(n.x - mouth[0], n.y - mouth[1], n.z - mouth[2]) < 0.15 &&
+      tubes.some(t => !t.arm && !t.link && [t.a, t.b].includes(n.id) && t.geom?.dir &&
+        t.geom.dir.reduce((sum, value, axis) => sum + value * direction[axis] * (t.a === n.id ? 1 : -1), 0) > 0.99));
+    if (endpoint && !tubeExists(tubes, corner.id, endpoint.id)) {
+      tubes.push({ id: "l" + seq++, a: corner.id, b: endpoint.id, link: true, color: FALLBACK_COLOR });
+    }
+  }
+
   // --- Bereinigung -----------------------------------------------------------
   // Durch das Andocken an gemeinsame Kupplungen koennen entartete (a===b) oder
   // doppelte Rohre entstehen. Diese entfernen.

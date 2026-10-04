@@ -202,8 +202,8 @@ export default function AssemblyPreview() {
       <div className="assembly-preview-canvas">
         <div ref={host} className="assembly-preview-host" data-testid="assembly-preview-canvas" />
         <svg className="assembly-interface-overlay" viewBox={`0 0 ${overlay.width} ${overlay.height}`} aria-hidden="true" data-testid="assembly-interface-overlay">
-          <defs><marker id="assembly-arrowhead" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 Z" fill="#ea580c" /></marker></defs>
-          {overlay.arrows.map((a, i) => <line key={`a-${i}`} {...a} stroke="#ea580c" strokeWidth="3" markerEnd="url(#assembly-arrowhead)" />)}
+          <defs><marker id="assembly-arrowhead" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" refX="7.2" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#ea580c" /></marker></defs>
+          {overlay.arrows.map((a, i) => <line key={`a-${i}`} {...a} stroke="#ea580c" strokeWidth="1.8" markerEnd="url(#assembly-arrowhead)" />)}
           {overlay.marks.map((m, i) => <g key={`m-${i}`} transform={`translate(${m.x},${m.y})`}>
             <line x1="0" y1="0" x2={m.anchorX - m.x} y2={m.anchorY - m.y} stroke="#ea580c" strokeWidth="1" />
             <circle cx={m.anchorX - m.x} cy={m.anchorY - m.y} r="2" fill="#ea580c" />

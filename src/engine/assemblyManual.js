@@ -61,20 +61,18 @@ function loadImage(url) {
   });
 }
 
-function stepBox() {
+function stepBox(partsH = 47) {
   const gap = 2.5;
   const headerH = 20;
-  const partsH = 47;
   const imgY = headerH;
   const imgH = PAGE_H - imgY - partsH - 3;
   const imgW = (PAGE_W - M * 2 - gap) / 2;
   return { gap, headerH, partsH, imgY, imgH, imgW, x0: M, x1: M + imgW + gap };
 }
 
-function coverBox() {
+function coverBox(bomH = 54) {
   const gap = 2.5;
   const headerH = 16;
-  const bomH = 54;
   const imgY = headerH;
   const imgH = PAGE_H - imgY - bomH - 3;
   const imgW = (PAGE_W - M * 2 - gap) / 2;
@@ -544,17 +542,15 @@ function newPageCanvas() {
   return { c, ctx };
 }
 
-function paintLegend(ctx, items, icons, x, y, maxW, maxY) {
+export function measureManualLegend(ctx, items, maxW) {
   const n = items.length;
-  if (!n) return;
+  if (!n) return { cols: 0, height: 0, rows: [], wrapped: [] };
   const cols = Math.min(3, n);
   const colGap = mm(4);
   const colW = (maxW - colGap * (cols - 1)) / cols;
   const minRowH = mm(15);
-  const badgeR = mm(1.65);
   const numW = mm(6.4);
   const dotW = mm(3.6);
-  const iconS = mm(12);
   const iconW = mm(14);
   const nameGap = mm(1.6);
   ctx.font = font(700, mm(2.35));
@@ -574,12 +570,23 @@ function paintLegend(ctx, items, icons, x, y, maxW, maxY) {
     if (line) lines.push(line);
     return lines;
   });
-  const visible = [];
-  let cellY = y;
+  const rows = [];
   for (let offset = 0; offset < n; offset += cols) {
     const rowH = Math.max(minRowH, ...wrapped.slice(offset, offset + cols).map(lines => lines.length * mm(3.2) + mm(4)));
+    rows.push({ offset, rowH });
+  }
+  return { cols, colW, colGap, numW, dotW, iconW, qtyColW, wrapped, rows, height: rows.reduce((sum, row) => sum + row.rowH, 0) };
+}
+
+function paintLegend(ctx, items, icons, x, y, maxW, maxY) {
+  if (!items.length) return 0;
+  const { cols, colW, colGap, numW, dotW, iconW, qtyColW, wrapped, rows } = measureManualLegend(ctx, items, maxW);
+  const badgeR = mm(1.65), iconS = mm(12);
+  const visible = [];
+  let cellY = y;
+  for (const { offset, rowH } of rows) {
     if (cellY + rowH > maxY) break;
-    for (let col = 0; col < cols && offset + col < n; col++) visible.push({ i: offset + col, col, cellY, rowH, it: items[offset + col] });
+    for (let col = 0; col < cols && offset + col < items.length; col++) visible.push({ i: offset + col, col, cellY, rowH, it: items[offset + col] });
     cellY += rowH;
   }
 
@@ -671,8 +678,8 @@ function paintStamp(ctx, stamp, qr, withHint) {
   return w + mm(STAMP_GAP);
 }
 
-function paintCover(ctx, { front, back, copy, items, icons, fill, frontMarks, backMarks, stamp }) {
-  const box = coverBox();
+function paintCover(ctx, { front, back, copy, items, icons, fill, frontMarks, backMarks, stamp, partsH }) {
+  const box = coverBox(partsH);
   ctx.fillStyle = INK;
   ctx.font = font(600, mm(5.4));
   ctx.textBaseline = "top";
@@ -695,8 +702,8 @@ function paintCover(ctx, { front, back, copy, items, icons, fill, frontMarks, ba
   return paintLegend(ctx, items, icons, mm(M), mm(bomY + 4.2), mm(PAGE_W - M * 2) - stampW, mm(PAGE_H - 3)) || 0;
 }
 
-function paintStep(ctx, { front, back, copy, heading, items, icons, k, n, fill, frontMarks, backMarks, stamp, instructions = [] }) {
-  const box = stepBox();
+function paintStep(ctx, { front, back, copy, heading, items, icons, k, n, fill, frontMarks, backMarks, stamp, instructions = [], partsH }) {
+  const box = stepBox(partsH);
   ctx.fillStyle = INK;
   ctx.font = font(600, mm(4.4));
   ctx.textBaseline = "top";
@@ -779,7 +786,7 @@ function positionedItems(model, items, state = null) {
   const fallback = collectPositions(model);
   return items.map(item => ({
     ...item,
-    positions: item.instanceIds?.length ? item.instanceIds.map(id => {
+    positions: item.instanceIds?.length ? item.instanceIds.filter(id => !state?.visible || state.visible.has(id)).map(id => {
       const position = partCenter(model, id);
       const delta = state?.transforms?.get(id) || [0, 0, 0];
       return position && position.map((value, axis) => value + delta[axis]);
@@ -925,20 +932,32 @@ function drawArrows(ctx, img, x, y, w, h, arrows) {
   ctx.restore();
 }
 
+export function manualPartsHeight(ctx, items, maxW, cover = false) {
+  const height = measureManualLegend(ctx, items, maxW).height / PX;
+  // 六行短表完整留在图示页，图示至少保留 85 mm 高度。
+  // 更长的表保留较大图示，并让续页包含多行物料。
+  const maxHeight = height <= 100 ? (cover ? 106 : 102) : (cover ? 91 : 82);
+  return Math.min(maxHeight, Math.max(cover ? 54 : 47, Math.ceil(height + 6)));
+}
+
 function legendChunks(items, cover, icons, stamp) {
   const chunks = [];
   let consumed = 0;
+  const measurement = newPageCanvas();
+  const stampW = stamp ? stampWidth(measurement.ctx, stamp, cover ? STAMP_QR_COVER : STAMP_QR_STEP, cover) + mm(STAMP_GAP) : 0;
+  const maxW = mm(PAGE_W - M * 2) - stampW;
+  const partsH = manualPartsHeight(measurement.ctx, items, maxW, cover);
+  measurement.c.width = measurement.c.height = 0;
   while (consumed < items.length) {
     const { c, ctx } = newPageCanvas();
-    const stampW = stamp ? stampWidth(ctx, stamp, cover ? STAMP_QR_COVER : STAMP_QR_STEP, cover) + mm(STAMP_GAP) : 0;
-    const box = cover ? coverBox() : stepBox();
+    const box = cover ? coverBox(partsH) : stepBox(partsH);
     const y = chunks.length ? mm(17) : mm(box.imgY + box.imgH + (cover ? 5.7 : 5.2));
-    const count = paintLegend(ctx, items.slice(consumed), icons, mm(M), y, mm(PAGE_W - M * 2) - stampW, mm(PAGE_H - (chunks.length ? M : 3)));
+    const count = paintLegend(ctx, items.slice(consumed), icons, mm(M), y, maxW, mm(PAGE_H - (chunks.length ? M : 3)));
     c.width = c.height = 0;
     if (!count) throw new Error('材料图例没有可用分页空间');
     chunks.push(items.slice(consumed, consumed + count)); consumed += count;
   }
-  return chunks.length ? chunks : [[]];
+  return { chunks: chunks.length ? chunks : [[]], partsH };
 }
 
 function instructionChunks(instructions) {
@@ -1012,18 +1031,18 @@ export async function exportAssemblyPdf(opts) {
   const itemsCover = coverItems(plan.bom || opts.bom || computeBOM(model));
   for (const item of itemsCover) item.instanceIds = [...new Set((plan.ledger?.instances || []).filter(row => row.group === item.kind && row.key === item.ledgerKey).flatMap(row => row.partIds))];
   const icons = await loadIcons(itemsCover);
-  const coverChunks = legendChunks(itemsCover, true, icons, stamp);
-  const descriptors = [{ type: 'cover', items: coverChunks[0] }, ...coverChunks.slice(1).map(items => ({ type: 'legend', title: copy.bomTitle, items }))];
+  const coverLayout = legendChunks(itemsCover, true, icons, stamp);
+  const descriptors = [{ type: 'cover', items: coverLayout.chunks[0], partsH: coverLayout.partsH }, ...coverLayout.chunks.slice(1).map(items => ({ type: 'legend', title: copy.bomTitle, items }))];
   descriptors.push({ type: 'overview' });
   for (const region of plan.regions || []) descriptors.push({ type: 'region', region });
   for (let index = 0; index < steps.length; index++) {
     const step = steps[index];
     const heading = (copy.stepHeading || '{k}/{n} · {title}').replace('{k}', String(index + 1)).replace('{n}', String(steps.length)).replace('{kind}', kindLabel(step.kind, copy)).replace('{title}', step.title || '');
     const items = numberStepItems(stepItems(model, step), itemsCover);
-    const chunks = legendChunks(items, false, icons, stamp);
+    const { chunks, partsH } = legendChunks(items, false, icons, stamp);
     const fixingMarks = fixingGroups.filter(mark => mark.stepId === step.id);
     const instructions = [...(step.action?.type === 'fix' ? [copy.fixingHint || 'F 标记指示固定部位；按实物孔位锁紧。'] : []), ...(step.instructions || [])];
-    descriptors.push({ type: 'step', index, heading, items: chunks[0], allItems: items, instructions, fixingMarks: fixingMarks.slice(0, 12) });
+    descriptors.push({ type: 'step', index, heading, items: chunks[0], allItems: items, partsH, instructions, fixingMarks: fixingMarks.slice(0, 12) });
     for (let offset = 12; offset < fixingMarks.length; offset += 12) descriptors.push({ type: 'fixdetail', index, heading: `${heading} · ${fixingMarks[offset].label}–${fixingMarks[Math.min(offset + 11, fixingMarks.length - 1)].label}`, fixingMarks: fixingMarks.slice(offset, offset + 12), instructions });
     descriptors.push(...chunks.slice(1).map(items => ({ type: 'legend', title: `${heading} · ${copy.thisStep}`, items })));
     if (step.interfaceIds?.length && (step.action?.type === 'attach' || step.kind === 'join')) descriptors.push({ type: 'detail', index, heading: `${heading} · ${copy.detailTitle}`, items: [], instructions });
@@ -1053,9 +1072,9 @@ export async function exportAssemblyPdf(opts) {
     scene.renderModel(model, null);
     const fullBounds = renderedBounds(scene, model);
     const allIds = new Set(['nodes', 'tubes', 'panels', 'clamps', 'textiles', 'slides', 'fittings'].flatMap(key => [...(model[key]?.keys() || [])]));
-    const shot = async (state, yaw, items = [], bounds = null, direction = null) => {
+    const shot = async (state, yaw, items = [], bounds = null, direction = null, box = stepBox()) => {
       activeState = state; scene.renderModel(model, null, { assembly: state });
-      const box = stepBox(), size = snapSize(box.imgW, box.imgH);
+      const size = snapSize(box.imgW, box.imgH);
       const image = await captureView(scene, model, yaw, { ...size, bounds: bounds || renderedBounds(scene, model), items: positionedItems(model, items, state), oneEach: false, direction });
       image.marks.push(...projectStateMarks(scene, state, size.width / size.height));
       image.arrows = (state?.arrows || []).map(arrow => {
@@ -1069,14 +1088,16 @@ export async function exportAssemblyPdf(opts) {
       onProgress?.({ page: currentPage, total, phase: 'render' });
       await yieldUi();
       const { c, ctx } = newPageCanvas();
+      const pageBox = descriptor.type === 'cover' ? coverBox(descriptor.partsH) : stepBox(descriptor.partsH);
       try {
         if (descriptor.type === 'legend') {
           paintTextPage(ctx, descriptor.title, [], stamp);
           paintLegend(ctx, descriptor.items, icons, mm(M), mm(17), mm(PAGE_W - M * 2) - (stamp ? stampWidth(ctx, stamp, STAMP_QR_STEP, false) + mm(STAMP_GAP) : 0), mm(PAGE_H - M));
         } else if (descriptor.type === 'instructions') paintTextPage(ctx, descriptor.title, descriptor.lines, stamp);
         else if (descriptor.type === 'cover') {
-          const front = await shot(null, 0, [], fullBounds), back = await shot(null, Math.PI, [], fullBounds);
-          paintCover(ctx, { front: front.img, back: back.img, copy: coverCopy, items: descriptor.items, icons, fill: sceneFill(scene), stamp });
+          const front = await shot(null, 0, [], fullBounds, null, pageBox), back = await shot(null, Math.PI, [], fullBounds, null, pageBox);
+          const consumed = paintCover(ctx, { front: front.img, back: back.img, copy: coverCopy, items: descriptor.items, icons, fill: sceneFill(scene), stamp, partsH: descriptor.partsH });
+          if (consumed !== descriptor.items.length) throw manualError('pagination', '总料表分页与实际绘制不一致');
         } else {
           let state, completed, heading, instructions = [], leftLabel = copy.actionView, rightLabel = copy.completeView, bounds, leftFocus, rightFocus, roofCoverDetail = false;
           if (descriptor.type === 'step' || descriptor.type === 'detail' || descriptor.type === 'fixdetail') {
@@ -1085,13 +1106,14 @@ export async function exportAssemblyPdf(opts) {
             if (descriptor.fixingMarks?.length) state.interfaceMarks = completed.interfaceMarks = [];
             state = assemblyPresentationState(model, plan, steps[descriptor.index], state, { detail: descriptor.type === 'detail' });
             completed = assemblyPresentationState(model, plan, steps[descriptor.index], completed, { detail: descriptor.type === 'detail' });
+            if (descriptor.type === 'step' && state.actionStage === 'before' && !state.arrows?.length) leftLabel = copy.beforeView || copy.actionView;
             heading = descriptor.heading; instructions = descriptor.instructions;
             if (descriptor.type === 'detail') {
               const interfaces = state.interfaceMarks || [];
               const points = interfaces.map(marker => marker.position).filter(Boolean);
               const sources = interfaces.map(marker => state.arrows.find(arrow => arrow.id === marker.id)?.from || marker.position).filter(Boolean);
               const focus = positions => boundsFor([0, 1, 2].map(axis => Math.min(...positions.map(p => p[axis])) - 22), [0, 1, 2].map(axis => Math.max(...positions.map(p => p[axis])) + 22));
-              if (points.length) { leftFocus = focus(sources); rightFocus = focus(points); }
+              if (points.length) { leftFocus = focus([...sources, ...points]); rightFocus = focus(points); }
               roofCoverDetail = steps[descriptor.index].slideIds?.some(id => model.slides.get(id)?.kind === 'roof2') || plan.regions.find(r => r.id === steps[descriptor.index].regionId)?.accessoryType === 'roof-cover';
               if (roofCoverDetail) {
                 // A canopy covers its supporting roof from above. Show the
@@ -1132,8 +1154,8 @@ export async function exportAssemblyPdf(opts) {
             bounds = boundsFor(leftBounds.min.map((value, axis) => Math.min(value, rightBounds.min[axis])), leftBounds.max.map((value, axis) => Math.max(value, rightBounds.max[axis])));
           }
           const isReverse = descriptor.type === 'detail' || descriptor.type === 'fixdetail' || descriptor.type === 'overview' || descriptor.type === 'final' || steps[descriptor.index]?.action?.type === 'fix';
-          const left = await shot(state, descriptor.type === 'detail' ? Math.PI : 0, descriptor.allItems || descriptor.items || [], leftFocus || bounds, roofCoverDetail ? [1, -0.65, 1] : null);
-          const right = await shot(completed, isReverse ? Math.PI : 0, descriptor.allItems || descriptor.items || [], rightFocus || bounds, roofCoverDetail ? [-1, -0.65, -1] : null);
+          const left = await shot(state, descriptor.type === 'detail' ? Math.PI : 0, descriptor.allItems || descriptor.items || [], leftFocus || bounds, roofCoverDetail ? [1, -0.65, 1] : null, pageBox);
+          const right = await shot(completed, isReverse ? Math.PI : 0, descriptor.allItems || descriptor.items || [], rightFocus || bounds, roofCoverDetail ? [-1, -0.65, -1] : null, pageBox);
           if (descriptor.type === 'overview') {
             for (const [image, yaw] of [[left, 0], [right, Math.PI]]) {
               scene.frameFromYaw(model, yaw, { silent: true, bounds: fullBounds, aspect: image.img.width / image.img.height, margin: FIT });
@@ -1142,8 +1164,9 @@ export async function exportAssemblyPdf(opts) {
               image.marks.push(...positions.map((point, i) => ({ ...point, num: plan.regions[i]?.label || `R${i + 1}` })));
             }
           }
-          paintStep(ctx, { front: left.img, back: right.img, copy: { ...copy, front: leftLabel, back: rightLabel, contextHint: roofCoverDetail ? copy.roofCoverHint : ['step', 'detail', 'fixdetail'].includes(descriptor.type) ? copy.contextHint : '' }, heading, items: descriptor.items || [], icons, k: currentPage, n: total, fill: sceneFill(scene), frontMarks: left.marks, backMarks: right.marks, instructions, stamp });
-          const box = stepBox();
+          const consumed = paintStep(ctx, { front: left.img, back: right.img, copy: { ...copy, front: leftLabel, back: rightLabel, contextHint: roofCoverDetail ? copy.roofCoverHint : ['step', 'detail', 'fixdetail'].includes(descriptor.type) ? copy.contextHint : '' }, heading, items: descriptor.items || [], icons, k: currentPage, n: total, fill: sceneFill(scene), frontMarks: left.marks, backMarks: right.marks, instructions, stamp, partsH: descriptor.partsH });
+          if (consumed !== (descriptor.items?.length || 0)) throw manualError('pagination', '步骤料表分页与实际绘制不一致');
+          const box = pageBox;
           if (descriptor.type !== 'detail') drawArrows(ctx, left.img, mm(box.x0), mm(box.imgY), mm(box.imgW), mm(box.imgH), left.arrows);
         }
         ctx.fillStyle = MUTED; ctx.font = font(400, mm(2)); ctx.textAlign = 'center';

@@ -4,7 +4,7 @@ import { BuildModel } from './model.js'
 import { loadCatalog, buildableTubes, panels, geometry } from './catalog.js'
 import { computeBOM } from './bom.js'
 import { computeAssemblyPlan, assemblyState } from './assemblyPlan.js'
-import { coverItems, numberStepItems, stepItems, assemblyFixingGroups, assemblyPresentationState } from './assemblyManual.js'
+import { coverItems, numberStepItems, stepItems, assemblyFixingGroups, assemblyPresentationState, measureManualLegend, manualPartsHeight } from './assemblyManual.js'
 import { parseQDF } from './qdfimport.js'
 import { partImageSrc } from '../ui/partImages'
 
@@ -13,6 +13,54 @@ type ManualItem = { id: string; key: string; kind: string; num: number }
 beforeAll(async () => { await loadCatalog() })
 
 describe('说明书材料编号', () => {
+  it('C0179 第2步全部7种零件留在步骤页，管35 cm不再单独占页', () => {
+    const model = new BuildModel()
+    model.loadJSON(parseQDF(readFileSync('public/qdf/C0179.qdf', 'utf8'), { tubes: buildableTubes(), panels: panels(), connectorSize: geometry().connectorSize, mergeEps: 2 }))
+    const step = computeAssemblyPlan(model).steps[1]
+    const items = stepItems(model, step)
+    expect(items.length).toBe(7)
+    // 隔离排版测试使用固定字宽；实际字体及三语分页另由浏览器导出核验。
+    const ctx = { font: '', measureText: (text: string) => ({ width: [...text].length * 20 }) }
+    const layout = measureManualLegend(ctx, items, 2450)
+    const partsH = manualPartsHeight(ctx, items, 2450)
+    expect(layout.height).toBeGreaterThan((47 - 5.2) * 10)
+    expect(layout.height).toBeLessThanOrEqual((partsH - 5.7) * 10)
+    expect(210 - 20 - partsH - 3).toBeGreaterThanOrEqual(105)
+  })
+
+  it('长德文物料名增加实际行高，大料表仍为组装图保留空间', () => {
+    const ctx = { font: '', measureText: (text: string) => ({ width: [...text].length * 18 }) }
+    const items = Array.from({ length: 20 }, (_, index) => ({ num: index + 1, count: 123, name: 'Sehr lange Materialbezeichnung für ein Verbindungselement mit mehreren Anschlussrichtungen' }))
+    const layout = measureManualLegend(ctx, items, 2200)
+    expect(layout.wrapped.some((lines: string[]) => lines.length > 1)).toBe(true)
+    expect(manualPartsHeight(ctx, items, 2200)).toBe(82)
+    expect(manualPartsHeight(ctx, [], 2200)).toBe(47)
+  })
+
+  it('C0013 第4步的最后一条加固管留在六行步骤料表中', () => {
+    const model = new BuildModel()
+    model.loadJSON(parseQDF(readFileSync('public/qdf/C0013.qdf', 'utf8'), { tubes: buildableTubes(), panels: panels(), connectorSize: geometry().connectorSize, mergeEps: 2 }))
+    const items = stepItems(model, computeAssemblyPlan(model).steps[3])
+    const ctx = { font: '', measureText: (text: string) => ({ width: [...text].length * 20 }) }
+    const layout = measureManualLegend(ctx, items, 2450)
+    const partsH = manualPartsHeight(ctx, items, 2450)
+    expect(items.length).toBe(16)
+    expect(layout.height).toBeGreaterThan((82 - 5.7) * 10)
+    expect(layout.height).toBeLessThanOrEqual((partsH - 5.7) * 10)
+    expect(210 - 20 - partsH - 3).toBeGreaterThanOrEqual(85)
+  })
+
+  it('s33 两条面板物料不再溢出封面成为稀疏续页', () => {
+    const model = new BuildModel()
+    model.loadJSON(JSON.parse(readFileSync('public/assembly-fixtures/s33.json', 'utf8')))
+    const items = coverItems(computeBOM(model))
+    const ctx = { font: '', measureText: (text: string) => ({ width: [...text].length * 20 }) }
+    const layout = measureManualLegend(ctx, items, 2450)
+    const partsH = manualPartsHeight(ctx, items, 2450, true)
+    expect(layout.height).toBeGreaterThan((91 - 5.7) * 10)
+    expect(layout.height).toBeLessThanOrEqual((partsH - 5.7) * 10)
+    expect(210 - 16 - partsH - 3).toBeGreaterThanOrEqual(85)
+  })
   it('C0005 顶棚安装保留完整支撑框架，供底部视角核对固定杆', () => {
     const model = new BuildModel()
     model.loadJSON(parseQDF(readFileSync('public/qdf/C0005.qdf', 'utf8'), { tubes: buildableTubes(), panels: panels(), connectorSize: geometry().connectorSize, mergeEps: 2 }))

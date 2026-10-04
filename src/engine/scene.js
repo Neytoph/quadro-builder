@@ -15,7 +15,7 @@ import { loadConnectorMeshes, loadSlideMeshes, loadTubeMeshes, loadFittingMeshes
   loadSurfaceMeshes } from "./meshes.js";
 import { CONNECTOR_ARM_BITS } from "./qdfimport.js";
 import { preferPanelCell } from "./pickcell.js";
-import { resolveNodeConnection } from "./bom.js";
+import { resolveNodeConnection, hasStandaloneFileC45 } from "./bom.js";
 import { shadeHex, hexRgba, DEFAULT_TUNE, DEFAULT_GRADE, gradeHex, displayHex } from "./colorTune.js";
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -3985,7 +3985,7 @@ export class SceneManager {
       // Zeile blieb es in einem Modell ohne Anbauteile beim gezeichneten
       // Innenstab, das abgegriffene Profil kam nie.
       || [...model.tubes.values()].some((t) => t.reinforced)
-      || [...model.nodes.values()].some((n) => n.c45 || isHolePart(n.part) || isBoltPart(n.part));
+      || [...model.nodes.values()].some((n) => n.c45 || n.c45file || isHolePart(n.part) || isBoltPart(n.part));
     const braucht = [];
     if (model.nodes.size) braucht.push("connectors");
     if ([...model.tubes.values()].some((t) => t.bow)) braucht.push("tubes");
@@ -4124,7 +4124,8 @@ export class SceneManager {
       // 45-Grad-Winkelkupplung (C45). Echtes Teil: eine Huelse wird auf einen
       // KARDINALEN Arm der Basiskupplung gesteckt, davon zweigt ein 45°-Arm ab,
       // der in die Tube greift.
-      if (n.c45 && st !== "future") {
+      const fileC45 = hasStandaloneFileC45(model, n);
+      if ((n.c45 || fileC45) && st !== "future") {
         // Im Aufbau bleicht der Adapter genau wie die uebrigen fertigen Teile
         // aus -- sonst steht die 45-Grad-Kupplung als einziges Stueck kraeftig
         // schwarz im schon Gebauten.
@@ -4139,6 +4140,23 @@ export class SceneManager {
         if (c45lage) {
           this._batchAdd(this._meshGeometry("fit:connector45_2", echtC45), c45mat,
             c45lage, "node", n.id, this.pickNodes);
+        } else if (fileC45) {
+          const placement = this._c45Placement(model, n);
+          if (placement) {
+            // 低画质保留文件确认的 C45 接口与朝向，近似网格沿真实局部轴线绘制。
+            const radius = this._c45SocketR();
+            for (const [from, to] of [
+              [[1.5, 0, 0], [9.5, 0, 0]],
+              [[10.83, 0, 0], [6.51, 4.32, 0]],
+            ]) {
+              const a = new THREE.Vector3(...from).applyMatrix4(placement), b = new THREE.Vector3(...to).applyMatrix4(placement);
+              const piece = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, a.distanceTo(b), 14), c45mat);
+              piece.position.copy(a).add(b).multiplyScalar(0.5);
+              piece.quaternion.setFromUnitVectors(UP, b.sub(a).normalize());
+              piece.userData = { kind: 'node', id: n.id };
+              this.buildGroup.add(piece); this.pickNodes.push(piece);
+            }
+          }
         } else if (n.c45body) {
           // Import: n ist der Adapter-Koerper am Diagonal-Fuss; die Basis sitzt
           // am anderen Ende der Arm-Kante. Huelse laeuft kardinal von der Basis.

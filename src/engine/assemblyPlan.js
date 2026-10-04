@@ -580,6 +580,30 @@ export function computeAssemblyPlan(model, config = model.assemblyConfig || {}, 
     if (step.action.type === 'fix') step.action.references = [...new Set(fixingPoints.filter(p => p.stepId === step.id).map(p => p.partId))];
   }
   for (const step of steps) for (const group of GROUPS) step[group] = step.parts[group];
+  // 只展示真实的单口插接。已固定两端的管件不能画成从一侧强行插入。
+  const installedParts = new Set();
+  for (const step of steps) {
+    const operations = [];
+    if (['build', 'preassemble'].includes(step.action.type)) {
+      const addedNodes = new Set(step.nodeIds), region = regions.find(r => r.id === step.regionId);
+      for (const id of step.tubeIds) {
+        const tube = model.tubes.get(id);
+        if (!tube || tube.arm || tube.link || tube.bow) continue;
+        const available = [tube.a, tube.b].filter(id => installedParts.has(id) &&
+          (!step.action.detached || region.ownedNodeIds.includes(id)));
+        if (available.length !== 1) continue;
+        const anchorId = available[0], freeId = tube.a === anchorId ? tube.b : tube.a;
+        if (addedNodes.has(freeId) && step.tubeIds.some(id => id !== tube.id &&
+          [model.tubes.get(id).a, model.tubes.get(id).b].includes(freeId))) continue;
+        const anchor = model.nodes.get(anchorId), free = model.nodes.get(freeId);
+        const outward = norm(model._tubeDirAt(tube, anchor, free));
+        const translation = outward.map(v => v * Math.max(10, Math.min(18, (tube.length || 35) * 0.4)));
+        operations.push({ id: `insert-${step.id}-${id}`, partIds: [id, ...(addedNodes.has(freeId) ? [freeId] : [])], position: point(anchor), translation, direction: outward.map(v => -v) });
+      }
+    }
+    step.action = { ...step.action, operations };
+    for (const id of step.partIds) installedParts.add(id);
+  }
   for (const [name] of Object.entries(MAPS)) for (const p of values(model, MAPS[name])) if (!owner.has(p.id)) diagnostics.push({ code: 'PART_UNASSIGNED', severity: 'error', message: `部件 ${p.id} 没有区域或装配步骤。`, nodeIds: MAPS[name] === 'nodes' ? [p.id] : [], partIds: [p.id] });
   return { version: 1, order, regions, interfaces, fixingPoints, steps, diagnostics, bom, ledger, canExport: ledger.conserved && !diagnostics.some(d => d.severity === 'error'), levels };
 }
@@ -587,6 +611,7 @@ export function computeAssemblyPlan(model, config = model.assemblyConfig || {}, 
 /** 渲染器只消费此快照。已预装模块保持分离，直到安装步骤才归位。 */
 export function assemblyState(plan, index, { action = false } = {}) {
   const done = new Set(), current = new Set(), visible = new Set(), transforms = new Map(), arrows = [];
+  const hiddenNewParts = new Set();
   const end = Math.min(Math.max(-1, index), plan.steps.length - 1);
   const detached = new Map();
   for (let i = 0; i <= end; i++) {
@@ -609,5 +634,22 @@ export function assemblyState(plan, index, { action = false } = {}) {
     // 动作帧保持模块分离，完成帧移回最终位置。
     for (const mark of interfaceMarks) arrows.push({ id: mark.id, from: mark.position.map((v, i) => v + translation[i]), to: mark.position, direction: norm(translation.map(v => -v)), regionId: step.regionId });
   }
-  return { done, current, visible, transforms, arrows, interfaceMarks, fixingPoints: (plan.fixingPoints || []).filter(p => p.stepId === step?.id) };
+  if (action) for (const operation of step?.action?.operations || []) {
+    const regionTranslation = detached.get(step.regionId) || [0, 0, 0];
+    for (const id of operation.partIds) if (visible.has(id)) transforms.set(id,
+      operation.translation.map((v, axis) => v + (transforms.get(id)?.[axis] || 0)));
+    const to = operation.position.map((v, axis) => v + regionTranslation[axis]);
+    arrows.push({ id: operation.id, from: to.map((v, axis) => v + operation.translation[axis]), to, direction: operation.direction, regionId: step.regionId });
+  }
+  if (action && ['build', 'preassemble'].includes(step?.action?.type)) {
+    const moving = new Set((step.action.operations || []).flatMap(operation => operation.partIds));
+    const beforeKeys = ['tubeIds', 'panelIds', 'textileIds', 'slideIds', 'fittingIds', 'clampIds'];
+    // 只新增接头的步骤也展示装配前；纯拓扑 link 不代表新增实体管。
+    if (!step.parts?.tubes?.length) beforeKeys.push('nodeIds');
+    for (const id of beforeKeys.flatMap(key => step[key] || [])) {
+      if (moving.has(id)) continue;
+      visible.delete(id); current.delete(id); done.delete(id); transforms.delete(id); hiddenNewParts.add(id);
+    }
+  }
+  return { done, current, visible, transforms, arrows, interfaceMarks, hiddenNewParts, actionStage: action && hiddenNewParts.size ? 'before' : 'installation', fixingPoints: (plan.fixingPoints || []).filter(p => p.stepId === step?.id) };
 }
