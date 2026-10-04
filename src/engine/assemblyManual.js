@@ -1508,7 +1508,7 @@ export async function exportAssemblyPdf(opts) {
           const box = pageBox;
           if (descriptor.type !== 'detail') drawArrows(ctx, left.img, mm(box.x0), mm(box.imgY), mm(box.imgW), mm(box.imgH), left.arrows);
         }
-        ctx.fillStyle = MUTED; ctx.font = font(400, mm(2)); ctx.textAlign = 'center';
+        ctx.fillStyle = MUTED; ctx.font = font(400, mm(2)); ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
         ctx.fillText(`${currentPage} / ${total}`, mm(PAGE_W / 2), mm(PAGE_H - 2.5));
         await pageToPdf(doc, c, currentPage === 1);
         if (descriptor.type === 'safety') doc.link(M, 28, 150, 10, { url: 'https://quadroworld.com/files/manuals/Sicherheitsanweisung.pdf' });
