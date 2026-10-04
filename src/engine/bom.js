@@ -4,6 +4,7 @@ import { getTube, getConnector, getPanel, colorName, partName, reinforcementPart
 import { round2, xAxisOf, yAxisOf, zAxisOf } from "./util.js";
 import { POOL_KINDS, isHolePart, isBoltPart, BOLT_PART, HINGE_PART, ARM_FITTINGS } from "./model.js";
 import { isOriginalComponent, componentKitFields, componentPartId, componentColorName, componentOutputColor, componentFittingKey, componentSizeLabel } from './accessoryInfo.js';
+import { CONN_TYPE_MASK, DIRECTIONS } from './config.js';
 
 // Einheitsvektoren der Nachbarn eines Knotens. Doppelrohr-Verbindungen (link)
 // sind KEIN Arm der Kupplung und zaehlen nicht in die Kupplungstyp-Heuristik
@@ -47,7 +48,9 @@ function neighborDirs(model, node) {
         : (node.c45body && node.c45axis ? node.c45axis.map((v) => -v) : null);
       dirs.push(achse ? achse.slice() : cardinalOf(dx, dy, dz));
     } else {
-      dirs.push([dx / len, dy / len, dz / len]);
+      const d = model._tubeDirAt ? model._tubeDirAt(t, node, nb) : [dx, dy, dz];
+      const norm = Math.hypot(...d) || 1;
+      dirs.push(d.map(v => v / norm));
     }
   }
   for (const f of (model.fittings ? model.fittings.values() : [])) {
@@ -119,7 +122,9 @@ function frameOf(model, node) {
     if (!o) continue;
     const v = [o.x - node.x, o.y - node.y, o.z - node.z];
     const L = Math.hypot(v[0], v[1], v[2]) || 1;
-    rohre.push([v[0] / L, v[1] / L, v[2] / L]);
+    const d = model._tubeDirAt ? model._tubeDirAt(t, node, o) : v;
+    const norm = Math.hypot(...d) || 1;
+    rohre.push(d.map(value => value / norm));
   }
   let k = -1;
   for (const u of rohre) {
@@ -278,6 +283,10 @@ export function infeasibleConnectors(model) {
 // Knoten ist die Basiskupplung selbst; das Schraegrohr dockt ~9 cm versetzt an,
 // daher reicht das Flag und kein geometrischer 45-Grad-Arm am Knoten ist noetig.
 export function inferConnectorType(model, node) {
+  return resolveNodeConnection(model, node).type;
+}
+
+function legacyConnectorType(model, node) {
   if (node.part) return node.part;
   const dirs = neighborDirs(model, node);
   if (dirs.length === 0) return null;
@@ -295,6 +304,10 @@ export function inferConnectorType(model, node) {
 // alle Arme zusammen als eine normale Kupplung. Ein reines, freies Rohrende
 // ("end") liefert eine leere Liste.
 export function connectorsForNode(model, node) {
+  return resolveNodeConnection(model, node).types;
+}
+
+function legacyConnectorsForNode(model, node) {
   // Eine Radkappe am Rohrende ERSETZT die Kupplung -- dort steckt keine mehr.
   if (model.hasWheelCap && model.hasWheelCap(node)) return [];
   // Klemm-Kupplungen sind ein festes Katalogteil. Die Lochzapfenkupplung nimmt
@@ -367,13 +380,70 @@ export function connectorsForNode(model, node) {
   return out;
 }
 
+/** 所有显示、BOM 与装配诊断共用真实端口方向。弯管使用端点切线。 */
+export function resolveNodeConnection(model, nodeOrId) {
+  const node = typeof nodeOrId === 'string' ? model.nodes.get(nodeOrId) : nodeOrId;
+  if (!node) return { type: null, typeId: null, types: [], worldDirs: [], localDirs: [], diagnostics: [], canExport: false };
+  const worldDirs = neighborDirs(model, node);
+  const local = localDirs(model, node, worldDirs);
+  const diagnostics = [];
+  const diag = (code, message, suggestion, repairable = false) => diagnostics.push({ code, severity: 'error', message, suggestion, repairable, nodeIds: [node.id], partIds: [node.id] });
+  const ordinary = !node.unused && !node.c45body && !node.part && !(model.hasWheelCap && model.hasWheelCap(node));
+  const validatesPorts = ordinary || isHolePart(node.part) || node.part === 'bearing';
+  const unique = [];
+  for (const d of local) {
+    if (unique.some(e => e.reduce((s, v, i) => s + v * d[i], 0) > 0.99)) {
+      if (validatesPorts) diag('DUPLICATE_CONNECTOR_PORT', '两个部件占用了连接件的同一个端口。', '移动或替换弯管、立柱，使每个端口只连接一个部件。', ordinary);
+    } else unique.push(d);
+  }
+  const nonAxis = unique.filter(d => !isAxisDir(d));
+  const savedArms = node.arms?.filter(d => Array.isArray(d) && d.length === 3);
+  if (validatesPorts && savedArms?.length && !worldDirs.every(d => savedArms.some(a => {
+    const length = Math.hypot(...a) || 1;
+    return a.reduce((s, v, i) => s + v / length * d[i], 0) > 0.97;
+  }))) diag('INCOMPATIBLE_SAVED_CONNECTOR_ARMS', '保存的连接件臂方向不包含实际连接方向。', '核对连接件朝向和实际连接臂，调整不匹配的管件。');
+  const pref = getConnector(node.preferType);
+  let preferredPattern = null;
+  if (ordinary && pref && nonAxis.length === 0) {
+    const cardinal = DIRECTIONS.map(d => d.vec);
+    const patterns = [];
+    for (let mask = 1; mask < 64; mask++) {
+      const arms = cardinal.filter((_, i) => mask & (1 << i));
+      if (connectorTypeForDirs(arms) === node.preferType && unique.every(d => arms.some(a => a.reduce((s, v, i) => s + v * d[i], 0) > 0.99))) patterns.push({ mask, arms });
+    }
+    preferredPattern = node.quat ? patterns.find(p => p.mask === CONN_TYPE_MASK[node.preferType]) : patterns[0];
+    if (!preferredPattern) diag('INCOMPATIBLE_CONNECTOR_TYPE', '保存的连接件型号或朝向不能容纳实际管件端口。', '调整连接件型号或朝向，使每个实际端口都能插接。');
+  }
+  if (ordinary && nonAxis.length && worldDirs.length > 1) {
+    if (nonAxis.every(isC45Dir)) {
+      diag('MISSING_C45_ADAPTER', '斜管直接接在立方连接件上，缺少真实的 45°适配器及安装空间。', '增加 C45 适配器并移动斜管端点；检查另一端及关联板材。', true);
+    } else {
+      diag('UNSUPPORTED_CONNECTOR_ANGLE', '连接方向无法由现有连接件端口组成。', '核对旋转连接件方向、管端位置及夹具安装。');
+    }
+  }
+  let types = node.unused ? [] : legacyConnectorsForNode(model, node);
+  let type = node.unused ? null : legacyConnectorType(model, node);
+  // 重复端口不能凭 degree 增加一个不存在的连接件臂。
+  if (ordinary && nonAxis.length === 0 && unique.length) {
+    const geometric = connectorTypeForDirs(unique);
+    type = preferredPattern ? node.preferType : geometric;
+    types = type === 'end' ? [] : [type];
+  }
+  for (const value of types) if (!getConnector(value)) diag('UNKNOWN_CONNECTOR', `连接件 ${value} 不在零件目录中。`, '选择实际可用的连接件。');
+  const frame = frameOf(model, node), renderDirs = [...worldDirs];
+  const addRender = d => { const length = Math.hypot(...d) || 1, normalized = d.map(v => v / length); if (!renderDirs.some(e => e.reduce((s, v, i) => s + v * normalized[i], 0) > 0.99)) renderDirs.push(normalized); };
+  for (const d of node.arms || []) if (Array.isArray(d) && d.length === 3) addRender(d);
+  if (preferredPattern) for (const d of preferredPattern.arms) addRender(frame ? [0, 1, 2].map(i => d.reduce((s, v, j) => s + v * frame[j][i], 0)) : d);
+  return { nodeId: node.id, type, typeId: type, types, worldDirs, renderDirs, dirs: worldDirs, localDirs: local, frame, quat: node.quat || null, diagnostics, canExport: diagnostics.length === 0 };
+}
+
 // Fasst verstaerkte Rohre zu "Laeufen" zusammen: Rohre, die kollinear (gleiche
 // Achse) ueber einen gemeinsamen Knoten aneinanderstossen, bilden EIN
 // durchgehendes, laengeres Verstaerkungsprofil. Ueber Ecken (Richtungswechsel)
 // hinweg wird NICHT verbunden, da ein Profil gerade ist. Die 45-Grad-Kupplungen
 // brauchen etwas Platz, daher wird ueber Knoten-IDs (Topologie) statt exakter
 // Koordinaten verbunden und die Laenge aus der echten Knotendistanz summiert.
-function reinforcementRuns(model) {
+export function reinforcementRuns(model) {
   const reinforced = [...model.tubes.values()].filter((t) => t.reinforced);
   if (!reinforced.length) return [];
 
@@ -420,9 +490,10 @@ function reinforcementRuns(model) {
   const runs = new Map(); // Wurzel -> { segments, length }
   for (const t of reinforced) {
     const r = find(t.id);
-    if (!runs.has(r)) runs.set(r, { segments: 0, length: 0 });
+    if (!runs.has(r)) runs.set(r, { segments: 0, length: 0, tubeIds: [] });
     const run = runs.get(r);
     run.segments++;
+    run.tubeIds.push(t.id);
     run.length += lenOf(t);
   }
   return [...runs.values()];
@@ -449,6 +520,11 @@ const SCREW_SLIDE_EPS = 45;
  * Liste rechnet anteilig.
  */
 export function computeScrews(model) {
+  const allocations = [];
+  const allocate = (id, partId, count, color = null, positions = [], precision = 'region-reference') => {
+    const record = { id, partId, count, color, positions, precision };
+    allocations.push(record); return record;
+  };
   // 1. Plaetze aufspannen: je Rohrende einer. Arme und Doppelrohr-Verbindungen
   //    sind keine Rohre und tragen keine Schrauben.
   const slots = new Map();            // "tubeId@nodeId" -> { tube, node, frei }
@@ -537,10 +613,11 @@ export function computeScrews(model) {
     if (p.poolPart) continue;                  // Baellebad ist eine Folie
     // 原创套装使用随附固定夹或绑带，不占标准板螺丝的位置。
     if (isOriginalComponent(p)) continue;
-    count.panel += 4;
-    const pdef = getPanel(p.panelId);
-    if (pdef && pdef.acrylic) count.acrylic += 4;
     const corners = model.panelCorners(p);
+    count.panel += 4;
+    allocate('screw_panel', p.id, 4, null, corners || [], 'panel-corner-anchor');
+    const pdef = getPanel(p.panelId);
+    if (pdef && pdef.acrylic) { count.acrylic += 4; allocate('screw_acrylic', p.id, 4, null, corners || [], 'acrylic-frame-reference'); }
     if (!corners) continue;
     // corners: [Anfang a, Ende a, Ende b, Anfang b]
     if (!p.turned) {
@@ -583,6 +660,9 @@ export function computeScrews(model) {
     count.conical += 2;
     count.counter += 2;
     count.slide += 2;
+    allocate('screw_slide_conical', s.id, 2, null, [exit.pos], 'slide-joint-anchor');
+    allocate('screw_slide_conical_counter', s.id, 2, null, [exit.pos], 'slide-joint-anchor');
+    allocate('screw_slide', s.id, 2, null, [exit.pos], 'slide-joint-anchor');
     const node = nodeNear(exit.pos, SCREW_SLIDE_EPS);
     if (node) { takeAtNode(node.id); takeAtNode(node.id); }
   }
@@ -591,12 +671,18 @@ export function computeScrews(model) {
     if (!model.slideExit(s) || belegt.has(s.id)) continue;
     count.conical += 2;
     count.panel += 2;
+    const entry = s.hook && s.hook.length === 3 ? s.hook : [s.x, s.y, s.z];
+    const conicalFixing = allocate('screw_slide_conical', s.id, 2, null, [entry], 'slide-entry-reference');
+    const panelFixing = allocate('screw_panel', s.id, 2, null, [entry], 'slide-entry-reference');
     // Wo genau: die beiden Plattenschrauben sitzen im WAAGERECHTEN Rohr, auf
     // dem die Rutsche aufliegt (je Ende eine), die beiden konischen in den
     // Rohren, die von dessen Kupplungen nach OBEN gehen.
     const einstieg = s.hook && s.hook.length === 3 ? s.hook : [s.x, s.y, s.z];
     const traeger = horizontalTubeNear(einstieg);
     if (!traeger) continue;
+    const anchors = [traeger.a, traeger.b].map(id => model.nodes.get(id)).filter(Boolean).map(n => [n.x, n.y, n.z]);
+    panelFixing.positions = anchors; panelFixing.precision = 'support-connector-anchor';
+    conicalFixing.positions = anchors; conicalFixing.precision = 'upright-connector-anchor';
     takeSlot(traeger.id + "@" + traeger.a);
     takeSlot(traeger.id + "@" + traeger.b);
     for (const nodeId of [traeger.a, traeger.b]) {
@@ -611,6 +697,8 @@ export function computeScrews(model) {
     if (!slot.free) continue;
     const color = slot.tube.color || null;
     tubeScrews.set(color, (tubeScrews.get(color) || 0) + 1);
+    const node = model.nodes.get(slot.node);
+    allocate('screw_tube', slot.tube.id, 1, color, node ? [[node.x, node.y, node.z]] : [], 'connector-anchor');
   }
 
   const rows = [];
@@ -624,6 +712,7 @@ export function computeScrews(model) {
       color, colorName: color ? colorName(color) : null,
       count: anzahl, pack: def.pack || 1,
       price: stueck, subtotal: round2(stueck * anzahl),
+      allocations: allocations.filter(a => a.id === id && a.color === color),
     });
   };
   for (const [color, anzahl] of [...tubeScrews.entries()]

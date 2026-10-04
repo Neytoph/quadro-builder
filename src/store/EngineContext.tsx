@@ -28,6 +28,10 @@ import { createTabDoc, dropTabDoc, memoryDoc, openTabDoc, SEED_ORIGIN, type Loca
 import { partCountOf, writeJSON, type ModelJSON } from '../collab/ymodel'
 import { appendTab } from './tabs'
 import { renderModelCover } from './modelCover'
+import { computeAssemblyPlan } from '../engine/assemblyPlan.js'
+import { proposeAssemblyRepairs } from '../engine/connectionResolver.js'
+import { validAssemblyConfig } from '../engine/assemblyConfig.js'
+import { assemblyPdfStrings, assemblyStrings } from '../ui/assemblyStrings'
 
 // 引擎来自 Vanilla JS，这里不跟它的推断类型较劲。
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -36,6 +40,8 @@ type AnyRec = Record<string, E>
 type ToastKind = 'ok' | 'warn' | 'err'
 type NameAsk = { title: string; ok: string; value: string; resolve: (name: string | null) => void }
 export type SidePanel = 'bom' | 'inventory'
+export type AssemblyConfig = { version: 1; regions: Array<{ id: string; name: string; partIds: string[] }>; order: string[] }
+export type ManualPreview = { data: ModelJSON; plan: E; config: AssemblyConfig; order: string; source: string; tabId: string | null; name: string; repair: E | null }
 
 export interface RoomSettings {
   w: number
@@ -257,9 +263,16 @@ interface EngineApi {
   /** 料表存成一张图，发群里直接能看 */
   exportBomPng: () => Promise<void>
   exportAssemblyPdf: () => Promise<void>
-  confirmExportManual: () => Promise<void>
+  confirmExportManual: (cover?: string | null) => Promise<void>
   cancelExportManual: () => void
   exportManualConfirm: boolean
+  manualPreview: ManualPreview | null
+  updateManualConfig: (config: AssemblyConfig) => void
+  updateManualOrder: (order: string) => void
+  saveManualConfig: () => boolean
+  reviewManualRepairs: (nodeIds: string[]) => void
+  applyManualRepairs: () => boolean
+  discardManualRepairs: () => void
   exportingManual: { page: number; total: number } | null
   shareCurrent: () => Promise<void>
   /**
@@ -634,6 +647,12 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const [side, setSide] = useState<SidePanel>('bom')
   const [exportingManual, setExportingManual] = useState<{ page: number; total: number } | null>(null)
   const [exportManualConfirm, setExportManualConfirm] = useState(false)
+  const [manualPreview, setManualPreview] = useState<ManualPreview | null>(null)
+  const manualPreviewRef = useRef<ManualPreview | null>(null)
+  function putManualPreview(preview: ManualPreview | null) {
+    manualPreviewRef.current = preview
+    setManualPreview(preview)
+  }
   const exportingManualRef = useRef(false)
   const [nameAsk, setNameAsk] = useState<NameAsk | null>(null)
   const [accountAsk, setAccountAsk] = useState<EngineApi['accountAsk']>(null)
@@ -1698,21 +1717,23 @@ export function EngineProvider({ children }: { children: ReactNode }) {
    * 导出前把这一座存成方案页，拿到印在文件上的网址和二维码。部署没接方案页就是 null。
    * 存不上就抛错：印一个打不开的二维码没有意义，这次导出跟着停下。
    */
-  async function makeStamp(kind: ExportKind, cover: string): Promise<Stamp | null> {
+  async function makeStamp(kind: ExportKind, cover: string, preview?: ManualPreview): Promise<Stamp | null> {
     if (!sharePagesEnabled()) return null
     const e2 = eng.current
     const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
     if (!e2 || !tab) throw new Error('no design')
-    const b = e2.model.bounds(geometry().connectorSize / 2) as { size: number[] }
+    const stampModel = preview ? new BuildModel() : e2.model
+    if (preview && !stampModel.loadJSON(preview.data).ok) throw new Error('invalid frozen design')
+    const b = stampModel.bounds(geometry().connectorSize / 2) as { size: number[] }
     const url = await publishSharePage({
-      key: tab.docId || tab.tabId,
-      title: tab.name,
-      model: e2.model.toJSON(),
-      parts: partsOfModel(e2.model) as Record<string, Record<string, number>>,
+      key: preview ? `${preview.tabId || 'manual'}-manual` : tab.docId || tab.tabId,
+      title: preview?.name || tab.name,
+      model: stampModel.toJSON(),
+      parts: partsOfModel(stampModel) as Record<string, Record<string, number>>,
       size: [Math.round(b.size[0]), Math.round(b.size[2]), Math.round(b.size[1])],
-      steps: (computeBuildPlan(e2.model, e2.builder.assemblyOrder || 'y+') as { steps: unknown[] }).steps.length,
+      steps: preview?.plan.steps.length ?? (computeBuildPlan(e2.model, e2.builder.assemblyOrder || 'y+') as { steps: unknown[] }).steps.length,
       cover,
-      stats: statsOfModel(e2.model),
+      stats: statsOfModel(stampModel),
     })
     return stampFor(url, kind)
   }
@@ -1811,7 +1832,67 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notify, t])
 
-  const cancelExportManual = useCallback(() => setExportManualConfirm(false), [])
+  const cancelExportManual = useCallback(() => { if (exportingManualRef.current) return; setExportManualConfirm(false); putManualPreview(null) }, [])
+
+  function makeManualPreview(data: ModelJSON, previous?: ManualPreview): ManualPreview {
+    const frozen = new BuildModel()
+    if (!frozen.loadJSON(data).ok) throw new Error('invalid assembly snapshot')
+    const order = previous?.order || eng.current?.builder.assemblyOrder || 'y+'
+    const plan = computeAssemblyPlan(frozen, frozen.assemblyConfig || {}, order)
+    const config: AssemblyConfig = frozen.assemblyConfig || {
+      version: 1,
+      regions: plan.regions.map((r: E) => ({ id: r.id, name: r.name, partIds: [...r.partIds] })),
+      order: plan.regions.map((r: E) => r.id),
+    }
+    return { data: { ...frozen.toJSON(), assemblyConfig: structuredClone(config) } as ModelJSON, plan, config, order, source: previous?.source || JSON.stringify(data), tabId: previous?.tabId ?? activeRef.current, name: previous?.name || activeName(), repair: previous?.repair || null }
+  }
+
+  function updateManualConfig(config: AssemblyConfig) {
+    const prev = manualPreviewRef.current
+    if (!prev || !validAssemblyConfig(config)) return
+    putManualPreview(makeManualPreview({ ...prev.data, assemblyConfig: structuredClone(config) }, prev))
+  }
+  function updateManualOrder(order: string) {
+    const prev = manualPreviewRef.current
+    if (!prev || !BUILD_ORDERS.includes(order)) return
+    putManualPreview(makeManualPreview(prev.data, { ...prev, order }))
+  }
+  function saveManualConfig() {
+    const prev = manualPreviewRef.current
+    const e2 = eng.current
+    if (!prev || !e2 || e2.builder.readOnly || prev.tabId !== activeRef.current || JSON.stringify(e2.model.toJSON()) !== prev.source || prev.repair) return false
+    e2.builder.recordHistory(() => { e2.model.assemblyConfig = structuredClone(prev.config) })
+    e2.builder.refresh()
+    putManualPreview({ ...prev, source: JSON.stringify(e2.model.toJSON()) })
+    bump()
+    return true
+  }
+  function reviewManualRepairs(nodeIds: string[]) {
+    const prev = manualPreviewRef.current
+    if (!prev) return
+    const frozen = new BuildModel()
+    if (!frozen.loadJSON(prev.data).ok) throw new Error('invalid assembly snapshot')
+    const result = proposeAssemblyRepairs(frozen, nodeIds)
+    if (!result.changes.length) { notify(assemblyStrings[lang].noRepair, 'warn'); return }
+    const withRepair = { ...prev, repair: { ...result, before: prev.data } }
+    putManualPreview(result.data ? makeManualPreview(result.data as ModelJSON, withRepair) : withRepair)
+  }
+  function discardManualRepairs() {
+    const prev = manualPreviewRef.current
+    if (prev?.repair) putManualPreview(makeManualPreview(prev.repair.before, { ...prev, repair: null }))
+  }
+  function applyManualRepairs() {
+    const prev = manualPreviewRef.current
+    const e2 = eng.current
+    if (!prev?.repair?.canApply || !e2 || e2.builder.readOnly || prev.tabId !== activeRef.current || JSON.stringify(e2.model.toJSON()) !== prev.source) return false
+    e2.builder.recordHistory(() => {
+      if (!e2.model.loadJSON(prev.data).ok) throw new Error('invalid assembly repair')
+    })
+    e2.builder.refresh()
+    putManualPreview({ ...prev, source: JSON.stringify(e2.model.toJSON()), repair: null })
+    bump()
+    return true
+  }
 
   const exportAssemblyPdf = useCallback(async () => {
     const e2 = eng.current
@@ -1821,56 +1902,57 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       return
     }
     if (needAccount('manual')) return
+    putManualPreview(makeManualPreview(structuredClone(e2.model.toJSON()) as ModelJSON))
     track('builder.export.manual.ask', { parts: modelPartCount(e2.model.toJSON()) })
     setExportManualConfirm(true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notify, t])
 
-  const confirmExportManual = useCallback(async () => {
+  const confirmExportManual = useCallback(async (previewCover?: string | null) => {
     const e2 = eng.current
-    if (!e2 || exportingManualRef.current) return
-    if (modelPartCount(e2.model.toJSON()) === 0) {
-      setExportManualConfirm(false)
-      notify(t('toast.manualEmpty'), 'warn')
-      return
-    }
-    setExportManualConfirm(false)
+    const preview = manualPreviewRef.current
+    if (!e2 || !preview || !preview.plan.canExport || exportingManualRef.current) return
+    if (needAccount('manual')) return
+    const frozen = new BuildModel()
+    if (!frozen.loadJSON(preview.data).ok) throw new Error('invalid assembly snapshot')
     track('builder.export.manual.go')
     exportingManualRef.current = true
     setExportingManual({ page: 0, total: 1 })
     let stamp: Stamp | null = null
     if (sharePagesEnabled()) {
-      const cover = await coverShot()
+      const cover = previewCover
       try {
         if (!cover) throw new Error('cover')
-        stamp = await makeStamp('manual', cover)
-      } catch {
+        stamp = await makeStamp('manual', cover, preview)
+      } catch (err) {
+        console.error('Assembly manual share page failed', err)
         exportingManualRef.current = false
         setExportingManual(null)
         notify(t('toast.stampFailed'), 'err')
         return
       }
     }
-    switching.current = true
     const locale = lang === 'zh' ? 'zh-CN' : lang === 'de' ? 'de-DE' : 'en-US'
-    const b = e2.model.bounds?.(2.5) as { size: number[] } | null
+    const b = frozen.bounds?.(2.5) as { size: number[] } | null
     const sizeLine = b
       ? t('manual.size', { w: Math.round(b.size[0]), d: Math.round(b.size[2]), h: Math.round(b.size[1]) })
       : ''
-    let bomNow: BomView | null = null
-    try { bomNow = asBom(computeBOM(e2.model) as AnyRec) } catch { bomNow = null }
-    const fileBase = (activeName() || 'design').replace(/[\\/:*?"<>|]+/g, '_').trim() || 'design'
+    const fileBase = (preview.name || 'design').replace(/[\\/:*?"<>|]+/g, '_').trim() || 'design'
     try {
+      const bomNow = asBom(computeBOM(frozen) as AnyRec)
       await runAssemblyPdf({
-        scene: e2.scene,
-        builder: e2.builder,
-        model: e2.model,
-        name: activeName(),
+        model: frozen,
+        modelJSON: preview.data,
+        plan: preview.plan,
+        assemblyConfig: preview.config,
+        order: preview.order,
+        name: preview.name,
         bom: bomNow,
         filename: `${fileBase}-${t('manual.fileSuffix')}.pdf`,
         onProgress: (p: { page: number; total: number }) => setExportingManual(p),
         stamp: stamp && { ...stamp, hint: t('stamp.hint') },
         copy: {
+          ...assemblyPdfStrings[lang],
           product: t('app.title'),
           coverTitle: t('manual.coverTitle'),
           date: new Date().toLocaleDateString(locale, { year: 'numeric', month: 'long', day: 'numeric' }),
@@ -1900,12 +1982,11 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       track('builder.export.manual.done')
       notify(t('toast.manualSaved'))
     } catch (err) {
+      console.error('Assembly manual export failed', err)
       if ((err as { code?: string })?.code === 'empty') notify(t('toast.manualEmpty'), 'warn')
       else notify(t('toast.manualFailed'), 'err')
     } finally {
       exportingManualRef.current = false
-      switching.current = false
-      snapshotActive()
       setExportingManual(null)
       bump()
     }
@@ -2194,6 +2275,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     tabs, activeTabId, bom, inventory,
     invRows: cmp.rows, feasible: cmp.feasible, sizeCm, room, setRoom, roomOverflow,
     loadPreset, placeModule, exportPng, exportBomCsv, exportBomPng, exportAssemblyPdf, confirmExportManual, cancelExportManual, exportManualConfirm, exportingManual, shareCurrent,
+    manualPreview, updateManualConfig, updateManualOrder, saveManualConfig, reviewManualRepairs, applyManualRepairs, discardManualRepairs,
     accountAsk, answerAccount,
     assembly: {
       step: builder?.assemblyStep ?? 0,

@@ -186,10 +186,10 @@ describe('短布面：拼装说明', () => {
     const m = new BuildModel()
     const a = frame(m, 0, 20, 40)
     const b = frame(m, 100, 40, 80)
-    m.addTextile(a.bottom.id, a.top.id, 0, 20, 'green')
+    const shortTextile = m.addTextile(a.bottom.id, a.top.id, 0, 20, 'green')!
     m.addTextile(b.bottom.id, b.top.id, 0, 40, 'green')
     const plan = computeBuildPlan(m)
-    const step = plan.steps.find((s: { textileIds?: string[] }) => (s.textileIds || []).length)
+    const step = plan.steps.find((s: { textileIds?: string[] }) => (s.textileIds || []).includes(shortTextile.id))
     const rows = stepItems(m, step)
     const short = rows.find((r: { id: string }) => r.id === 'textile_20x40')
     expect(short).toMatchObject({ kind: 'textiles', count: 1, name: '短布面 20×40' })

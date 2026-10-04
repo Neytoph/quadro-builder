@@ -10,6 +10,7 @@ import { inferConnectorType, connectorsForNode } from "./bom.js";
 import { getTube, getConnector, getPanel, colorName, partName, reinforcementPart } from "./catalog.js";
 import { getLang, t } from "./i18n.js";
 import { isOriginalComponent, componentInstallCopy, componentPartId, componentOutputColor, componentColorName } from './accessoryInfo.js';
+import { computeAssemblyPlan } from './assemblyPlan.js';
 
 const Y_EPS = 0.6; // cm: Knoten innerhalb dieser Hoehe gelten als gleiche Ebene
 
@@ -232,6 +233,11 @@ function slideChainHeads(model) {
 // Jeder Schritt: { kind, title, level, y, connectors, openEnds, tubes, panels,
 //                  nodeIds, tubeIds, panelIds }
 export function computeBuildPlan(model, order = "y+") {
+  return computeAssemblyPlan(model, model.assemblyConfig || {}, order);
+}
+
+// 保留原分层算法供历史调用和对照；默认入口使用带区域和守恒账本的装配计划。
+export function computeLayerBuildPlan(model, order = "y+") {
   const coord = orderCoord(order);
   const levels = levelsOf(model, order);
   const steps = [];

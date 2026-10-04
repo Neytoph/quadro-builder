@@ -3,7 +3,8 @@
 import { DIRECTIONS, DIAGONAL_DIRECTIONS, DIR_ALIGN_TOL, ARM_ALIGN_TOL, CLAMP_LINK_DIST, C45_SLEEVE_LEN, C45_ARM_LEN, CONN_TYPE_MASK } from "./config.js";
 import { buildableTubes, geometry, getTube, spacingFor, getPanel, defaultPanel, diagonalTubeId, slideKindLabel, slideKindName, isCurvedTube, gridSpacing, partName, partForFitting, getPartById, getConnector, poolLinerFor, reinforcementPart, textilePart } from "./catalog.js";
 import { CLASSIC_COLOR_IDS, officialColorId } from "./colors.js";
-import { computeBuildPlan, connectorLabelInfo } from "./buildplan.js";
+import { connectorLabelInfo } from "./buildplan.js";
+import { computeAssemblyPlan, assemblyState } from "./assemblyPlan.js";
 import { infeasibleConnectors, inferConnectorType } from "./bom.js";
 import { t } from "./i18n.js";
 import { round2, panelNormal, modelMiddle, xAxisOf, yAxisOf, zAxisOf, quatFromBasis } from "./util.js";
@@ -1479,7 +1480,7 @@ export class Builder {
   // --- Aufbaumodus -------------------------------------------------------
   // Aufbauplan (neu) berechnen und beim aktuellen Schritt bleiben (geklemmt).
   enterAssembly() {
-    this.buildPlan = computeBuildPlan(this.model, this.assemblyOrder);
+    this.buildPlan = computeAssemblyPlan(this.model, this.model.assemblyConfig || {}, this.assemblyOrder);
     const max = Math.max(0, this.buildPlan.steps.length - 1);
     this.assemblyStep = Math.min(this.assemblyStep, max);
   }
@@ -1503,20 +1504,7 @@ export class Builder {
 
   // Sichtbarkeit fuer den Aufbaumodus: bereits gebaute vs. aktueller Schritt.
   _assemblyVisibility() {
-    const done = new Set();
-    const current = new Set();
-    const steps = this.buildPlan.steps;
-    for (let k = 0; k <= this.assemblyStep && k < steps.length; k++) {
-      const s = steps[k];
-      const target = k === this.assemblyStep ? current : done;
-      for (const id of s.nodeIds) target.add(id);
-      for (const id of s.tubeIds) target.add(id);
-      for (const id of s.panelIds) target.add(id);
-      for (const id of s.textileIds || []) target.add(id);
-      for (const id of s.slideIds || []) target.add(id);
-      for (const id of s.fittingIds || []) target.add(id);
-    }
-    return { done, current };
+    return assemblyState(this.buildPlan, this.assemblyStep, { action: true });
   }
 
   // Ein Bau-Schritt per Tastatur: vom ausgewaehlten Knoten in Richtung dirVec.

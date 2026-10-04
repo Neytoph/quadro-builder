@@ -1,14 +1,20 @@
-// 按拼装步骤出 A4 横版 PDF：封面（正/反 + 总料表）+ 一步一页（正/反两图）。
+// 冻结模型，使用独立场景导出成品、总料表、区域与动作/完成图。
 // 整页先画在 2D Canvas 再压成 JPEG，避免给 jsPDF 嵌 CJK 字体。
 // 料表用「圆圈编号 + 图标 + 名称」；图上只标对应数字，不再往 3D 模型上写字。
 
 import { jsPDF } from "jspdf";
+import { Vector3 } from 'three';
+import { layoutAssemblyMarks } from '../ui/assemblyOverlay';
 import {
   partForFitting, partName, slideKindName, geometry, colorHex, colorName,
-  reinforcementPart, poolLinerFor, getPartById,
+  reinforcementPart, poolLinerFor, getPartById, loadCatalog,
 } from "./catalog.js";
-import { connectorsForNode, textileRow } from "./bom.js";
-import { POOL_KINDS } from "./model.js";
+import { connectorsForNode, textileRow, computeBOM } from "./bom.js";
+import { POOL_KINDS, BuildModel } from "./model.js";
+import { SceneManager } from "./scene.js";
+import { computeAssemblyPlan, assemblyState } from "./assemblyPlan.js";
+import { waitSceneReady } from "./thumbShot.js";
+import { applyFrameHex, loadTune } from "./colorTune.js";
 import { componentStepLabel, componentPartId, componentOutputColor, componentFittingKey, componentSizeLabel } from './accessoryInfo.js';
 import { partImageSrc } from "../ui/partImages";
 import { drawQr } from "../sharePage";
@@ -24,7 +30,7 @@ const MUTED = "#5c6570";
 const WELL = "#edd8c4";
 const ACCENT = "#ea580c";
 const M = 7;
-const SNAP_LONG = 2000;
+const SNAP_LONG = 1400;
 const FIT = 1.05;
 const MARK_PULL = 8;
 
@@ -50,14 +56,14 @@ function loadImage(url) {
     if (!url) { reject(new Error("empty snapshot")); return; }
     const img = new Image();
     img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error("image load"));
+    img.onerror = () => reject(manualError('resources', `图片载入失败: ${url.startsWith('data:') ? '场景截图' : url}`));
     img.src = url;
   });
 }
 
 function stepBox() {
   const gap = 2.5;
-  const headerH = 11;
+  const headerH = 20;
   const partsH = 47;
   const imgY = headerH;
   const imgH = PAGE_H - imgY - partsH - 3;
@@ -121,36 +127,12 @@ function drawBadge(ctx, x, y, num, r) {
   ctx.stroke();
   const s = String(num);
   ctx.fillStyle = MUTED;
-  ctx.font = font(500, s.length > 1 ? r * 1.02 : r * 1.18);
+  ctx.font = font(600, s.length > 2 ? r * 0.65 : s.length > 1 ? r * 1.02 : r * 1.18);
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText(s, x, y + r * 0.04);
   ctx.textAlign = "left";
   ctx.textBaseline = "top";
-}
-
-function separateMarks(marks, minD) {
-  for (let pass = 0; pass < 4; pass++) {
-    for (let i = 0; i < marks.length; i++) {
-      for (let j = 0; j < i; j++) {
-        let dx = marks[i].x - marks[j].x;
-        let dy = marks[i].y - marks[j].y;
-        let d = Math.hypot(dx, dy);
-        if (d >= minD) continue;
-        if (d < 0.2) {
-          dx = 0.7;
-          dy = -0.7;
-          d = 1;
-        }
-        const push = (minD - d) / 2;
-        const ux = dx / d, uy = dy / d;
-        marks[i].x += ux * push;
-        marks[i].y += uy * push;
-        marks[j].x -= ux * push;
-        marks[j].y -= uy * push;
-      }
-    }
-  }
 }
 
 function drawMarks(ctx, img, x, y, w, h, marks) {
@@ -167,11 +149,17 @@ function drawMarks(ctx, img, x, y, w, h, marks) {
     z: m.z,
   })).filter((m) => m.x > x - r && m.x < x + w + r && m.y > y - r && m.y < y + h + r);
   placed.sort((a, b) => a.z - b.z);
-  separateMarks(placed, r * 2.15);
+  const labels = layoutAssemblyMarks(placed.map(m => ({ x: m.x - x, y: m.y - y, label: String(m.num) })), w, h, { radius: r, gap: r * 0.15 });
   ctx.save();
   roundRect(ctx, x, y, w, h, mm(1.2));
   ctx.clip();
-  for (const m of placed) drawBadge(ctx, m.x, m.y, m.num, r);
+  for (const m of labels) {
+    if (Math.hypot(m.x - m.anchorX, m.y - m.anchorY) > 1) {
+      ctx.beginPath(); ctx.moveTo(x + m.anchorX, y + m.anchorY); ctx.lineTo(x + m.x, y + m.y);
+      ctx.strokeStyle = 'rgba(92,101,112,0.75)'; ctx.lineWidth = 1.5; ctx.stroke();
+    }
+    drawBadge(ctx, x + m.x, y + m.y, m.label, r);
+  }
   ctx.restore();
 }
 
@@ -197,16 +185,6 @@ function ellipsize(ctx, text, maxW) {
   let cur = s;
   while (cur.length && ctx.measureText(`${cur}…`).width > maxW) cur = cur.slice(0, -1);
   return `${cur}…`;
-}
-
-function visibleBounds(model, builder) {
-  const pad = geometry().connectorSize / 2;
-  const vis = builder._assemblyVisibility?.();
-  if (!vis) return model.bounds(pad);
-  const ids = new Set();
-  for (const id of vis.done) ids.add(id);
-  for (const id of vis.current) ids.add(id);
-  return model.boundsOf(ids, pad);
 }
 
 function facingXZ(world, cam, target, slack = 2) {
@@ -356,28 +334,29 @@ function numberItems(rows) {
 export function coverItems(bom) {
   if (!bom) return [];
   const rows = [];
-  const take = (list) => {
+  const take = (group, list) => {
     for (const r of list || []) {
+      const id = r.id || r.type || r.tubeId || r.panelId || r.kind;
+      const rawKey = r.key ?? (group === 'connectors' ? r.type : `${id}|${r.color || ''}`);
+      const key = group === 'connectors' ? `connectors:${id}`
+        : group === 'slides' ? `slides:${id}`
+        : ['fittings', 'reinforcements', 'screws'].includes(group) ? (String(rawKey).startsWith(`${group}:`) ? rawKey : `${group}:${rawKey}`)
+        : rawKey;
       rows.push({
-        key: r.key,
-        id: r.id,
-        kind: r.kind,
+        key,
+        ledgerKey: rawKey,
+        id,
+        kind: group,
         name: niceName(r),
         color: r.color || null,
         colorName: r.colorName || null,
         count: r.count,
+        instanceIds: r.instanceIds || [],
       });
     }
   };
-  take(bom.tubes);
-  take(bom.connectors);
-  take(bom.panels);
-  take(bom.textiles);
-  take(bom.slides);
-  take(bom.wheels);
-  take(bom.fittings);
-  take(bom.reinforcements);
-  take(bom.screws);
+  // The manual excludes screw statistics; the platform BOM remains compatible.
+  for (const group of ['tubes', 'connectors', 'panels', 'textiles', 'slides', 'wheels', 'fittings', 'reinforcements']) take(group, bom[group]);
   return numberItems(rows);
 }
 
@@ -439,6 +418,7 @@ function extraStepItems(model, step) {
 }
 
 export function stepItems(model, step) {
+  if (step.parts) return coverItems(step.parts);
   const rows = [];
   for (const r of step.connectors || []) {
     rows.push({
@@ -468,15 +448,11 @@ export function stepItems(model, step) {
   return numberItems(rows);
 }
 
-function attachPositions(items, posMap) {
-  for (const it of items) it.positions = posMap.get(it.key) || [];
-}
-
 const iconCache = new Map();
 
 async function iconImage(id, kind) {
   const key = partImageSrc(id);
-  if (!key) { console.warn('缺少零件图片', id, kind); return null; }
+  if (!key) throw manualError('resources', `零件图片缺失: ${id}`, [{ code: 'MISSING_PART_IMAGE', severity: 'error', partId: id, kind }]);
   if (iconCache.has(key)) return iconCache.get(key);
   const img = await loadImage(key);
   iconCache.set(key, img);
@@ -524,11 +500,12 @@ function projectCallouts(scene, items, aspect, oneEach) {
   return marks;
 }
 
-async function captureView(scene, model, yaw, { bounds, width, height, items, oneEach }) {
+async function captureView(scene, model, yaw, { bounds, width, height, items, oneEach, direction }) {
   const aspect = width / height;
   scene._viewSize = { w: width, h: height };
   try {
-    scene.frameFromYaw(model, yaw, { silent: true, bounds, aspect, margin: FIT });
+    if (direction) scene._frameAlong(model, new Vector3(...direction).normalize(), { silent: true, bounds, aspect, margin: FIT });
+    else scene.frameFromYaw(model, yaw, { silent: true, bounds, aspect, margin: FIT });
     scene._updateTreeCamera?.();
     const marks = items && items.length ? projectCallouts(scene, items, aspect, !!oneEach) : [];
     const img = await loadImage(scene.snapshot({
@@ -538,7 +515,7 @@ async function captureView(scene, model, yaw, { bounds, width, height, items, on
       mime: "image/png",
       width,
       height,
-      pixelRatio: 2.5,
+      pixelRatio: 1.5,
     }));
     return { img, marks };
   } finally {
@@ -729,6 +706,13 @@ function paintStep(ctx, { front, back, copy, heading, items, icons, k, n, fill, 
   ctx.textAlign = "right";
   ctx.fillText(`${k}/${n}`, mm(PAGE_W - M), mm(4.4));
   ctx.textAlign = "left";
+  ctx.fillStyle = MUTED;
+  ctx.font = font(400, mm(2.7));
+  instructions.slice(0, 2).forEach((line, i) => ctx.fillText(ellipsize(ctx, line, mm(PAGE_W - M * 2)), mm(M), mm(10 + i * 4)));
+  if (copy.contextHint) {
+    ctx.font = font(400, mm(2.2));
+    ctx.fillText(copy.contextHint, mm(M), mm(18));
+  }
   paintPair(ctx, front, back, box, copy, fill, frontMarks, backMarks);
 
   const partsY = box.imgY + box.imgH + 1.2;
@@ -747,54 +731,6 @@ function paintStep(ctx, { front, back, copy, heading, items, icons, k, n, fill, 
   return 0;
 }
 
-async function appendLegendPages(doc, items, icons, consumed, title, stamp) {
-  while (consumed < items.length) {
-    const { c, ctx } = newPageCanvas();
-    ctx.fillStyle = INK;
-    ctx.font = font(600, mm(4.4));
-    ctx.textBaseline = 'top';
-    ctx.fillText(ellipsize(ctx, title, mm(PAGE_W - M * 2)), mm(M), mm(5));
-    const stampW = stamp ? paintStamp(ctx, stamp, STAMP_QR_STEP, false) : 0;
-    const count = paintLegend(ctx, items.slice(consumed), icons, mm(M), mm(17), mm(PAGE_W - M * 2) - stampW, mm(PAGE_H - M));
-    if (!count) throw new Error('材料图例没有可用分页空间');
-    consumed += count;
-    await pageToPdf(doc, c, false);
-  }
-}
-
-async function appendInstructionPages(doc, instructions, title, stamp) {
-  if (!instructions.length) return;
-  let page = newPageCanvas(), y = mm(18);
-  const heading = () => {
-    page.ctx.fillStyle = INK;
-    page.ctx.font = font(600, mm(4.4));
-    page.ctx.textBaseline = 'top';
-    page.ctx.fillText(ellipsize(page.ctx, title, mm(PAGE_W - M * 2)), mm(M), mm(5));
-    if (stamp) paintStamp(page.ctx, stamp, STAMP_QR_STEP, false);
-    page.ctx.font = font(400, mm(3));
-    page.ctx.fillStyle = INK;
-  };
-  heading();
-  const lineHeight = mm(5), width = mm(PAGE_W - M * 2 - (stamp ? 35 : 0));
-  const line = async (text) => {
-    if (y + lineHeight > mm(PAGE_H - M)) {
-      await pageToPdf(doc, page.c, false);
-      page = newPageCanvas(); y = mm(18); heading();
-    }
-    page.ctx.fillText(text, mm(M), y); y += lineHeight;
-  };
-  for (const text of instructions) {
-    let current = '';
-    for (const char of String(text)) {
-      if (page.ctx.measureText(current + char).width > width) { await line(current); current = ''; }
-      current += char;
-    }
-    if (current) await line(current);
-    y += mm(3);
-  }
-  await pageToPdf(doc, page.c, false);
-}
-
 async function pageToPdf(doc, canvas, first) {
   const jpeg = canvas.toDataURL("image/jpeg", 0.96);
   if (!first) doc.addPage();
@@ -807,19 +743,6 @@ function yieldUi() {
   });
 }
 
-function restoreBuilder(builder, saved) {
-  builder.manualLabels = false;
-  builder.highlight = saved.highlight;
-  builder.assemblyStep = saved.step;
-  builder.setMode(saved.mode);
-  builder.selection.clear();
-  if (saved.selection) {
-    for (const [id, kind] of saved.selection) builder.selection.set(id, kind);
-  }
-  builder.selectedNodeId = saved.selectedNodeId;
-  builder.refresh();
-}
-
 export function stepFilter(step) {
   return {
     nodes: new Set(step.nodeIds || []),
@@ -828,140 +751,417 @@ export function stepFilter(step) {
     textiles: new Set(step.textileIds || []),
     slides: new Set(step.slideIds || []),
     fittings: new Set(step.fittingIds || []),
+    clamps: new Set(step.clampIds || []),
   };
+}
+
+export function numberStepItems(items, numberedCover) {
+  const numbers = new Map(numberedCover.map(item => [item.key, item.num]));
+  return items.map(item => {
+    const num = numbers.get(item.key);
+    if (!num) throw new Error(`材料未列入总料表: ${item.key}`);
+    return { ...item, num };
+  });
+}
+
+function partCenter(model, id) {
+  for (const key of ['nodes', 'clamps', 'slides', 'fittings']) {
+    const part = model[key]?.get(id);
+    if (part) return [part.x, part.y, part.z];
+  }
+  const tube = model.tubes.get(id);
+  if (tube) return tubeMid(model, tube);
+  const panel = model.panels.get(id) || model.textiles?.get(id);
+  return panel ? centroid(model.panelCorners(panel)) : null;
+}
+
+function positionedItems(model, items, state = null) {
+  const fallback = collectPositions(model);
+  return items.map(item => ({
+    ...item,
+    positions: item.instanceIds?.length ? item.instanceIds.map(id => {
+      const position = partCenter(model, id);
+      const delta = state?.transforms?.get(id) || [0, 0, 0];
+      return position && position.map((value, axis) => value + delta[axis]);
+    }).filter(Boolean) : fallback.get(item.key) || [],
+  }));
+}
+
+export function renderedBounds(scene, model) {
+  const pieces = [...scene._indexParts(scene.buildGroup.children).values()].flatMap(row => row.pieces);
+  if (!pieces.length) return model.bounds(geometry().connectorSize / 2);
+  const box = scene._piecesBox(pieces);
+  return boundsFor(box.min.toArray(), box.max.toArray());
+}
+
+export function assemblyFocusBounds(scene, model, plan, step, state) {
+  const region = plan.regions.find(region => region.id === step?.regionId);
+  if (!region) return renderedBounds(scene, model);
+  const ids = state?.visible || new Set(region.partIds);
+  const pieces = [...scene._indexParts(scene.buildGroup.children).values()]
+    .filter(row => ids.has(row.id)).flatMap(row => row.pieces);
+  if (!pieces.length) return renderedBounds(scene, model);
+  const box = scene._piecesBox(pieces);
+  const bounds = boundsFor(box.min.toArray(), box.max.toArray());
+  const positions = [
+    ...(state?.interfaceMarks || []).map(mark => mark.position),
+    ...(state?.arrows || []).flatMap(arrow => [arrow.from, arrow.to]),
+    ...(state?.fixingMarks || []).map(mark => mark.position),
+  ];
+  for (const position of positions) for (let axis = 0; axis < 3; axis++) {
+    bounds.min[axis] = Math.min(bounds.min[axis], position[axis] - 8);
+    bounds.max[axis] = Math.max(bounds.max[axis], position[axis] + 8);
+  }
+  bounds.size = bounds.max.map((value, axis) => value - bounds.min[axis]);
+  return bounds;
+}
+
+// Operation drawings use only the operated module and its actual support interfaces.
+// This is a presentation filter: the frozen model, inventory and installed state stay intact.
+export function assemblyPresentationState(model, plan, step, state, { detail = false } = {}) {
+  if (!state || !step) return state;
+  const region = plan.regions.find(region => region.id === step.regionId);
+  const allowed = new Set(state.fixingMarks?.length
+    ? state.fixingMarks.flatMap(mark => mark.partIds)
+    : region?.partIds || step.partIds || []);
+  const includeTube = id => {
+    const tube = model.tubes.get(id);
+    if (tube) { allowed.add(id); allowed.add(tube.a); allowed.add(tube.b); }
+  };
+  for (const id of [...allowed]) {
+    includeTube(id);
+    const panel = model.panels.get(id) || model.textiles?.get(id);
+    if (panel) { includeTube(panel.a); includeTube(panel.b); }
+    const clamp = model.clamps?.get(id);
+    if (clamp) includeTube(model._clampBaseTube?.(clamp)?.id);
+  }
+  if (region?.accessoryType === 'roof-cover') {
+    const support = plan.regions.find(r => r.id === region.supportRegionId);
+    for (const id of support?.tubeIds || []) includeTube(id);
+  }
+  for (const marker of state.interfaceMarks || []) {
+    if (marker.nodeId) {
+      allowed.add(marker.nodeId);
+      for (const tube of model.tubes.values()) if (tube.a === marker.nodeId || tube.b === marker.nodeId) includeTube(tube.id);
+    }
+    if (marker.supportTubeId) includeTube(marker.supportTubeId);
+    // Slides attach between saved support rails rather than connector nodes.
+    if (!marker.nodeId && !marker.supportTubeId && marker.position) {
+      const distanceToSegment = tube => {
+        const a = model.nodes.get(tube.a), b = model.nodes.get(tube.b);
+        if (!a || !b) return Infinity;
+        const start = [a.x, a.y, a.z], end = [b.x, b.y, b.z];
+        const d = end.map((value, axis) => value - start[axis]);
+        const t = Math.max(0, Math.min(1, d.reduce((sum, value, axis) => sum + value * (marker.position[axis] - start[axis]), 0) / (d.reduce((sum, value) => sum + value * value, 0) || 1)));
+        return Math.hypot(...d.map((value, axis) => start[axis] + value * t - marker.position[axis]));
+      };
+      [...model.tubes.values()].filter(tube => state.visible.has(tube.id)).map(tube => ({ tube, distance: distanceToSegment(tube) })).sort((a, b) => a.distance - b.distance).slice(0, 4).filter(row => row.distance < 35).forEach(row => includeTube(row.tube.id));
+    }
+  }
+  if (detail && !state.fixingMarks?.length) {
+    for (const id of [...allowed]) if (model.panels.has(id) || model.textiles?.has(id)) allowed.delete(id);
+  }
+  const filter = ids => new Set([...ids].filter(id => allowed.has(id)));
+  return { ...state, current: filter(state.current), done: filter(state.done), visible: filter(state.visible), contextFiltered: [...state.visible].some(id => !allowed.has(id)) };
+}
+
+export function assemblyFixingGroups(plan) {
+  const grouped = new Map();
+  for (const point of plan.fixingPoints || []) {
+    if (!point.position?.every(Number.isFinite)) throw manualError('fixings', '固定位置坐标无效');
+    const key = `${point.regionId}:${point.position.map(value => value.toFixed(2)).join(',')}`;
+    let group = grouped.get(key);
+    if (!group) {
+      group = { label: `F${grouped.size + 1}`, position: point.position, regionId: point.regionId, stepId: point.stepId, count: 0, pointIds: [], partIds: [], screwIds: [] };
+      grouped.set(key, group);
+    }
+    group.count += point.count;
+    group.pointIds.push(point.id); group.partIds.push(point.partId); group.screwIds.push(point.screwId);
+  }
+  return [...grouped.values()];
+}
+
+function boundsFor(min, max) {
+  return { min, max, size: max.map((value, axis) => value - min[axis]) };
+}
+
+function projectStateMarks(scene, state, aspect) {
+  const marks = [];
+  for (const marker of state?.interfaceMarks || []) {
+    const arrow = state.arrows?.find(arrow => arrow.id === marker.id);
+    const delta = state.transforms?.get(marker.nodeId);
+    const detached = delta && marker.position.map((value, axis) => value + delta[axis]);
+    const positions = marker.positions || (arrow ? [arrow.from, arrow.to] : detached ? [marker.position, detached] : [marker.position]);
+    for (const position of positions.filter(Boolean)) {
+      const point = scene.projectWorld([position], aspect)[0];
+      if (point) marks.push({ ...point, num: `I${String(marker.id).split('-').at(-1)}` });
+    }
+  }
+  for (const marker of state?.fixingMarks || []) {
+    const point = scene.projectWorld([marker.position], aspect)[0];
+    if (point) marks.push({ ...point, num: marker.label });
+  }
+  return marks;
+}
+
+function drawArrows(ctx, img, x, y, w, h, arrows) {
+  if (!arrows?.length) return;
+  const scale = Math.max(w / img.width, h / img.height);
+  const dw = img.width * scale, dh = img.height * scale;
+  const ox = x + (w - dw) / 2, oy = y + (h - dh) / 2;
+  ctx.save();
+  roundRect(ctx, x, y, w, h, mm(1.2)); ctx.clip();
+  ctx.strokeStyle = ACCENT; ctx.fillStyle = ACCENT; ctx.lineWidth = mm(0.7);
+  for (const arrow of arrows) {
+    const from = [ox + arrow.from.u * dw, oy + arrow.from.v * dh];
+    const to = [ox + arrow.to.u * dw, oy + arrow.to.v * dh];
+    const angle = Math.atan2(to[1] - from[1], to[0] - from[0]);
+    ctx.beginPath(); ctx.moveTo(...from); ctx.lineTo(...to); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(...to);
+    ctx.lineTo(to[0] - mm(3) * Math.cos(angle - 0.45), to[1] - mm(3) * Math.sin(angle - 0.45));
+    ctx.lineTo(to[0] - mm(3) * Math.cos(angle + 0.45), to[1] - mm(3) * Math.sin(angle + 0.45));
+    ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+}
+
+function legendChunks(items, cover, icons, stamp) {
+  const chunks = [];
+  let consumed = 0;
+  while (consumed < items.length) {
+    const { c, ctx } = newPageCanvas();
+    const stampW = stamp ? stampWidth(ctx, stamp, cover ? STAMP_QR_COVER : STAMP_QR_STEP, cover) + mm(STAMP_GAP) : 0;
+    const box = cover ? coverBox() : stepBox();
+    const y = chunks.length ? mm(17) : mm(box.imgY + box.imgH + (cover ? 5.7 : 5.2));
+    const count = paintLegend(ctx, items.slice(consumed), icons, mm(M), y, mm(PAGE_W - M * 2) - stampW, mm(PAGE_H - (chunks.length ? M : 3)));
+    c.width = c.height = 0;
+    if (!count) throw new Error('材料图例没有可用分页空间');
+    chunks.push(items.slice(consumed, consumed + count)); consumed += count;
+  }
+  return chunks.length ? chunks : [[]];
+}
+
+function instructionChunks(instructions) {
+  const { c, ctx } = newPageCanvas();
+  ctx.font = font(400, mm(3));
+  const lines = [];
+  for (const instruction of instructions) {
+    let line = '';
+    for (const char of String(instruction)) {
+      if (line && ctx.measureText(line + char).width > mm(PAGE_W - M * 2 - 35)) { lines.push(line); line = ''; }
+      line += char;
+    }
+    if (line) lines.push(line);
+    lines.push('');
+  }
+  c.width = c.height = 0;
+  const chunks = [];
+  for (let offset = 0; offset < lines.length; offset += 35) chunks.push(lines.slice(offset, offset + 35));
+  return chunks;
+}
+
+function paintTextPage(ctx, title, lines, stamp) {
+  ctx.fillStyle = INK; ctx.font = font(600, mm(4.4)); ctx.textBaseline = 'top';
+  ctx.fillText(ellipsize(ctx, title, mm(PAGE_W - M * 2)), mm(M), mm(5));
+  if (stamp) paintStamp(ctx, stamp, STAMP_QR_STEP, false);
+  ctx.font = font(400, mm(3));
+  lines.forEach((line, i) => ctx.fillText(line, mm(M), mm(18 + i * 5)));
+}
+
+function manualError(code, message, diagnostics = []) {
+  const error = new Error(message); error.code = code; error.diagnostics = diagnostics; return error;
 }
 
 /**
  * @param {{
- *   scene: object,
- *   builder: object,
- *   model: object,
+ *   model?: object,
+ *   modelJSON?: object,
+ *   plan?: object,
+ *   assemblyConfig?: object,
+ *   order?: string,
+ *   builder?: object,
  *   name: string,
- *   bom: object | null,
+ *   bom?: object | null,
  *   copy: Record<string, string>,
- *   filename: string,
- *   onProgress?: (p: { page: number, total: number }) => void,
+ *   filename?: string,
+ *   save?: boolean,
+ *   onDocument?: (result: {doc: object, blob: Blob, pages: number, plan: object}) => void | Promise<void>,
+ *   onProgress?: (p: { page: number, total: number, phase?: string }) => void,
  *   stamp?: { url: string, host: string, hint: string } | null,
  * }} opts
  *
  * stamp 是方案页的网址和二维码（src/sharePage.ts），给了就印在每一页右下角。
  */
-export async function exportAssemblyPdf({ scene, builder, model, name, bom, copy, filename, onProgress, stamp }) {
-  builder.enterAssembly();
-  const steps = builder.buildPlan?.steps || [];
-  if (!steps.length) {
-    const err = new Error("empty");
-    err.code = "empty";
-    throw err;
+export async function exportAssemblyPdf(opts) {
+  const { name, filename, onProgress, stamp, save = true, onDocument } = opts;
+  // 在第一个异步等待之前冻结输入，编辑器切换模型或继续修改均不会进入本次导出。
+  const snapshot = structuredClone(opts.modelJSON ?? opts.model.toJSON());
+  const suppliedPlan = opts.plan ? structuredClone(opts.plan) : null;
+  const copy = { actionView: '安装动作', completeView: '本步完成', regionOverview: '区域总览', regionShape: '独立外形', regionLocation: '成品定位', regionOrder: '拼接顺序', finalTitle: '完成造型与接口位置', detailTitle: '背面接口特写', instructionsTitle: '安装说明', ...opts.copy };
+  onProgress?.({ page: 0, total: 0, phase: 'resources' });
+  await loadCatalog();
+  const model = new BuildModel();
+  const loaded = model.loadJSON(snapshot);
+  if (!loaded.ok) throw manualError('model', `说明书模型无法载入: ${loaded.reason}`);
+  const plan = suppliedPlan || computeAssemblyPlan(model, opts.assemblyConfig, opts.order || opts.builder?.assemblyOrder || 'y+');
+  if (!plan.canExport) throw manualError('diagnostics', '模型连接诊断尚未通过，无法导出说明书', plan.diagnostics);
+  const steps = plan.steps || [];
+  const fixingGroups = assemblyFixingGroups(plan);
+  if (!steps.length) throw manualError('empty', '模型没有可导出的装配步骤');
+  await document.fonts?.ready;
+  const itemsCover = coverItems(plan.bom || opts.bom || computeBOM(model));
+  for (const item of itemsCover) item.instanceIds = [...new Set((plan.ledger?.instances || []).filter(row => row.group === item.kind && row.key === item.ledgerKey).flatMap(row => row.partIds))];
+  const icons = await loadIcons(itemsCover);
+  const coverChunks = legendChunks(itemsCover, true, icons, stamp);
+  const descriptors = [{ type: 'cover', items: coverChunks[0] }, ...coverChunks.slice(1).map(items => ({ type: 'legend', title: copy.bomTitle, items }))];
+  descriptors.push({ type: 'overview' });
+  for (const region of plan.regions || []) descriptors.push({ type: 'region', region });
+  for (let index = 0; index < steps.length; index++) {
+    const step = steps[index];
+    const heading = (copy.stepHeading || '{k}/{n} · {title}').replace('{k}', String(index + 1)).replace('{n}', String(steps.length)).replace('{kind}', kindLabel(step.kind, copy)).replace('{title}', step.title || '');
+    const items = numberStepItems(stepItems(model, step), itemsCover);
+    const chunks = legendChunks(items, false, icons, stamp);
+    const fixingMarks = fixingGroups.filter(mark => mark.stepId === step.id);
+    const instructions = [...(step.action?.type === 'fix' ? [copy.fixingHint || 'F 标记指示固定部位；按实物孔位锁紧。'] : []), ...(step.instructions || [])];
+    descriptors.push({ type: 'step', index, heading, items: chunks[0], allItems: items, instructions, fixingMarks: fixingMarks.slice(0, 12) });
+    for (let offset = 12; offset < fixingMarks.length; offset += 12) descriptors.push({ type: 'fixdetail', index, heading: `${heading} · ${fixingMarks[offset].label}–${fixingMarks[Math.min(offset + 11, fixingMarks.length - 1)].label}`, fixingMarks: fixingMarks.slice(offset, offset + 12), instructions });
+    descriptors.push(...chunks.slice(1).map(items => ({ type: 'legend', title: `${heading} · ${copy.thisStep}`, items })));
+    if (step.interfaceIds?.length && (step.action?.type === 'attach' || step.kind === 'join')) descriptors.push({ type: 'detail', index, heading: `${heading} · ${copy.detailTitle}`, items: [], instructions });
+    if (instructions.length > 2 || instructions.some(line => String(line).length > 85)) descriptors.push(...instructionChunks(instructions).map(lines => ({ type: 'instructions', title: `${heading} · ${copy.instructionsTitle}`, lines })));
   }
-
-  const total = 1 + steps.length;
-  const report = (page) => onProgress?.({ page, total });
-
-  const saved = {
-    mode: builder.mode,
-    step: builder.assemblyStep,
-    pose: scene.getCameraPose(),
-    sceneOn: !!scene._sceneOn,
-    selection: [...builder.selection],
-    selectedNodeId: builder.selectedNodeId,
-    highlight: builder.highlight,
-    controls: scene.controls ? scene.controls.enabled : true,
-  };
-
-  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4", compress: true });
-  const itemsCover = coverItems(bom);
-  attachPositions(itemsCover, collectPositions(model, null));
-  const coverCopy = {
-    ...copy,
-    modelName: name || copy.product || "design",
-    stepsLine: String(copy.stepsLine || "").replaceAll("{n}", String(steps.length)),
-  };
-  const cover = coverBox();
-  const step = stepBox();
-  const coverSnap = snapSize(cover.imgW, cover.imgH);
-  const stepSnap = snapSize(step.imgW, step.imgH);
-  const fill = sceneFill(scene);
-
+  descriptors.push({ type: 'final' });
+  const total = descriptors.length;
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4', compress: true });
+  const host = document.createElement('div');
+  host.style.cssText = 'position:fixed;left:-10000px;top:0;width:960px;height:720px;pointer-events:none';
+  host.setAttribute('aria-hidden', 'true');
+  document.body.append(host);
+  let scene;
+  let activeState = null;
+  let currentPage = 0;
+  const coverCopy = { ...copy, modelName: name || copy.product || 'design', stepsLine: String(copy.stepsLine || '').replaceAll('{n}', String(steps.length)) };
   try {
-    if (scene.controls) scene.controls.enabled = false;
-    if (scene.projection && scene.projection !== "perspective") scene.setProjection("perspective");
-    builder.highlight = null;
-    builder.selection.clear();
-    builder.selectedNodeId = null;
-    builder.manualLabels = false;
-    if (builder.mode !== "select") builder.setMode("select");
-    else builder.refresh();
-
-    report(1);
-    await yieldUi();
-    const coverIcons = await loadIcons(itemsCover);
-    const fullBounds = model.bounds(geometry().connectorSize / 2);
-    // 封面只展示成品外形；编号圆圈留给总料表和各步截图。
-    const coverFront = await captureView(scene, model, 0, {
-      ...coverSnap, bounds: fullBounds,
-    });
-    const coverBack = await captureView(scene, model, Math.PI, {
-      ...coverSnap, bounds: fullBounds,
-    });
-    {
-      const { c, ctx } = newPageCanvas();
-      const consumed = paintCover(ctx, {
-        front: coverFront.img, back: coverBack.img, copy: coverCopy,
-        items: itemsCover, icons: coverIcons, fill,
-        frontMarks: coverFront.marks, backMarks: coverBack.marks, stamp,
-      });
-      await pageToPdf(doc, c, true);
-      await appendLegendPages(doc, itemsCover, coverIcons, consumed, `${coverCopy.modelName} · ${copy.bomTitle}`, stamp);
-    }
-
-    builder.assemblyStep = 0;
-    builder.setMode("assembly");
-
-    for (let i = 0; i < steps.length; i++) {
-      report(i + 2);
+    scene = new SceneManager(host);
+    scene.setMotion(false); scene.setTheme(false); scene.setScene(false);
+    const tune = loadTune(); applyFrameHex(tune.frame); scene.applyColorTune(tune);
+    scene.controls.enabled = false;
+    scene.onMeshesReady = () => scene.renderModel(model, null, { assembly: activeState });
+    scene.renderModel(model, null);
+    if (!await waitSceneReady(scene)) throw manualError('resources', '零件网格载入超时');
+    const failedMeshes = ['_connMeshes', '_tubeMeshes', '_fitMeshes', '_surfMeshes', '_slideMeshes'].filter(key => scene[key] === false);
+    if (failedMeshes.length) throw manualError('resources', `真实零件网格载入失败: ${failedMeshes.join(', ')}`);
+    scene.renderModel(model, null);
+    const fullBounds = renderedBounds(scene, model);
+    const allIds = new Set(['nodes', 'tubes', 'panels', 'clamps', 'textiles', 'slides', 'fittings'].flatMap(key => [...(model[key]?.keys() || [])]));
+    const shot = async (state, yaw, items = [], bounds = null, direction = null) => {
+      activeState = state; scene.renderModel(model, null, { assembly: state });
+      const box = stepBox(), size = snapSize(box.imgW, box.imgH);
+      const image = await captureView(scene, model, yaw, { ...size, bounds: bounds || renderedBounds(scene, model), items: positionedItems(model, items, state), oneEach: false, direction });
+      image.marks.push(...projectStateMarks(scene, state, size.width / size.height));
+      image.arrows = (state?.arrows || []).map(arrow => {
+        const [from, to] = scene.projectWorld([arrow.from, arrow.to], size.width / size.height);
+        return from && to ? { from, to } : null;
+      }).filter(Boolean);
+      return image;
+    };
+    for (const descriptor of descriptors) {
+      currentPage++;
+      onProgress?.({ page: currentPage, total, phase: 'render' });
       await yieldUi();
-      builder.setAssemblyStep(i);
-      const s = steps[i];
-      const items = stepItems(model, s);
-      attachPositions(items, collectPositions(model, stepFilter(s)));
-      const icons = await loadIcons(items);
-      const bounds = visibleBounds(model, builder);
-      const front = await captureView(scene, model, 0, {
-        ...stepSnap, bounds, items, oneEach: false,
-      });
-      const back = await captureView(scene, model, Math.PI, {
-        ...stepSnap, bounds, items, oneEach: false,
-      });
-      const heading = copy.stepHeading
-        .replace("{k}", String(i + 1))
-        .replace("{n}", String(steps.length))
-        .replace("{kind}", kindLabel(s.kind, copy))
-        .replace("{title}", s.title || "");
       const { c, ctx } = newPageCanvas();
-      const consumed = paintStep(ctx, {
-        front: front.img, back: back.img, copy, heading, items, icons,
-        k: i + 1, n: steps.length, fill,
-        instructions: s.instructions || [],
-        frontMarks: front.marks, backMarks: back.marks, stamp,
-      });
-      await pageToPdf(doc, c, false);
-      await appendLegendPages(doc, items, icons, consumed, `${heading} · ${copy.thisStep}`, stamp);
-      await appendInstructionPages(doc, s.instructions || [], heading, stamp);
+      try {
+        if (descriptor.type === 'legend') {
+          paintTextPage(ctx, descriptor.title, [], stamp);
+          paintLegend(ctx, descriptor.items, icons, mm(M), mm(17), mm(PAGE_W - M * 2) - (stamp ? stampWidth(ctx, stamp, STAMP_QR_STEP, false) + mm(STAMP_GAP) : 0), mm(PAGE_H - M));
+        } else if (descriptor.type === 'instructions') paintTextPage(ctx, descriptor.title, descriptor.lines, stamp);
+        else if (descriptor.type === 'cover') {
+          const front = await shot(null, 0, [], fullBounds), back = await shot(null, Math.PI, [], fullBounds);
+          paintCover(ctx, { front: front.img, back: back.img, copy: coverCopy, items: descriptor.items, icons, fill: sceneFill(scene), stamp });
+        } else {
+          let state, completed, heading, instructions = [], leftLabel = copy.actionView, rightLabel = copy.completeView, bounds, leftFocus, rightFocus, roofCoverDetail = false;
+          if (descriptor.type === 'step' || descriptor.type === 'detail' || descriptor.type === 'fixdetail') {
+            state = assemblyState(plan, descriptor.index, { action: true }); completed = assemblyState(plan, descriptor.index, { action: false });
+            state.fixingMarks = completed.fixingMarks = descriptor.fixingMarks || [];
+            if (descriptor.fixingMarks?.length) state.interfaceMarks = completed.interfaceMarks = [];
+            state = assemblyPresentationState(model, plan, steps[descriptor.index], state, { detail: descriptor.type === 'detail' });
+            completed = assemblyPresentationState(model, plan, steps[descriptor.index], completed, { detail: descriptor.type === 'detail' });
+            heading = descriptor.heading; instructions = descriptor.instructions;
+            if (descriptor.type === 'detail') {
+              const interfaces = state.interfaceMarks || [];
+              const points = interfaces.map(marker => marker.position).filter(Boolean);
+              const sources = interfaces.map(marker => state.arrows.find(arrow => arrow.id === marker.id)?.from || marker.position).filter(Boolean);
+              const focus = positions => boundsFor([0, 1, 2].map(axis => Math.min(...positions.map(p => p[axis])) - 22), [0, 1, 2].map(axis => Math.max(...positions.map(p => p[axis])) + 22));
+              if (points.length) { leftFocus = focus(sources); rightFocus = focus(points); }
+              roofCoverDetail = steps[descriptor.index].slideIds?.some(id => model.slides.get(id)?.kind === 'roof2') || plan.regions.find(r => r.id === steps[descriptor.index].regionId)?.accessoryType === 'roof-cover';
+              if (roofCoverDetail) {
+                // A canopy covers its supporting roof from above. Show the
+                // underside and the complete referenced support instead.
+                scene.renderModel(model, null, { assembly: state });
+                leftFocus = assemblyFocusBounds(scene, model, plan, steps[descriptor.index], state);
+                scene.renderModel(model, null, { assembly: completed });
+                rightFocus = assemblyFocusBounds(scene, model, plan, steps[descriptor.index], completed);
+              }
+            }
+            if (descriptor.fixingMarks?.length) {
+              // Frame the whole referenced part: a close camera at the screw
+              // position can otherwise land inside a long support tube.
+              scene.renderModel(model, null, { assembly: completed });
+              leftFocus = rightFocus = assemblyFocusBounds(scene, model, plan, steps[descriptor.index], completed);
+            }
+          } else if (descriptor.type === 'region') {
+            const regionIds = new Set(descriptor.region.partIds);
+            state = { current: regionIds, done: new Set(), visible: regionIds, transforms: new Map() };
+            completed = { current: regionIds, done: allIds, visible: allIds, transforms: new Map() };
+            heading = `${descriptor.region.label || `R${plan.regions.indexOf(descriptor.region) + 1}`} · ${descriptor.region.name}`;
+            leftLabel = copy.regionShape; rightLabel = copy.regionLocation;
+            instructions = [`${copy.regionOrder}: ${steps.filter(step => step.regionId === descriptor.region.id).map(step => step.title).filter(Boolean).join(' → ')}`];
+          } else {
+            state = descriptor.type === 'final' ? { current: allIds, done: new Set(), visible: allIds, transforms: new Map(), interfaceMarks: plan.interfaces, arrows: [] } : null;
+            completed = state;
+            heading = descriptor.type === 'final' ? copy.finalTitle : copy.regionOverview;
+            leftLabel = copy.front; rightLabel = copy.back;
+            instructions = descriptor.type === 'overview' ? (plan.regions || []).map((region, i) => `${region.label || `R${i + 1}`} · ${region.name}`).join('   ') : (plan.interfaces || []).map(marker => `I${marker.id.split('-').at(-1)}`).join(' · ');
+            instructions = [instructions];
+            bounds = fullBounds;
+          }
+          if (descriptor.type === 'step') {
+            scene.renderModel(model, null, { assembly: state });
+            const leftBounds = assemblyFocusBounds(scene, model, plan, steps[descriptor.index], state);
+            scene.renderModel(model, null, { assembly: completed });
+            const rightBounds = assemblyFocusBounds(scene, model, plan, steps[descriptor.index], completed);
+            bounds = boundsFor(leftBounds.min.map((value, axis) => Math.min(value, rightBounds.min[axis])), leftBounds.max.map((value, axis) => Math.max(value, rightBounds.max[axis])));
+          }
+          const isReverse = descriptor.type === 'detail' || descriptor.type === 'fixdetail' || descriptor.type === 'overview' || descriptor.type === 'final' || steps[descriptor.index]?.action?.type === 'fix';
+          const left = await shot(state, descriptor.type === 'detail' ? Math.PI : 0, descriptor.allItems || descriptor.items || [], leftFocus || bounds, roofCoverDetail ? [1, -0.65, 1] : null);
+          const right = await shot(completed, isReverse ? Math.PI : 0, descriptor.allItems || descriptor.items || [], rightFocus || bounds, roofCoverDetail ? [-1, -0.65, -1] : null);
+          if (descriptor.type === 'overview') {
+            for (const [image, yaw] of [[left, 0], [right, Math.PI]]) {
+              scene.frameFromYaw(model, yaw, { silent: true, bounds: fullBounds, aspect: image.img.width / image.img.height, margin: FIT });
+              const centers = (plan.regions || []).map(region => centroid(region.partIds.map(id => partCenter(model, id)).filter(Boolean)));
+              const positions = scene.projectWorld(centers.filter(Boolean), image.img.width / image.img.height);
+              image.marks.push(...positions.map((point, i) => ({ ...point, num: plan.regions[i]?.label || `R${i + 1}` })));
+            }
+          }
+          paintStep(ctx, { front: left.img, back: right.img, copy: { ...copy, front: leftLabel, back: rightLabel, contextHint: roofCoverDetail ? copy.roofCoverHint : ['step', 'detail', 'fixdetail'].includes(descriptor.type) ? copy.contextHint : '' }, heading, items: descriptor.items || [], icons, k: currentPage, n: total, fill: sceneFill(scene), frontMarks: left.marks, backMarks: right.marks, instructions, stamp });
+          const box = stepBox();
+          if (descriptor.type !== 'detail') drawArrows(ctx, left.img, mm(box.x0), mm(box.imgY), mm(box.imgW), mm(box.imgH), left.arrows);
+        }
+        ctx.fillStyle = MUTED; ctx.font = font(400, mm(2)); ctx.textAlign = 'center';
+        ctx.fillText(`${currentPage} / ${total}`, mm(PAGE_W / 2), mm(PAGE_H - 2.5));
+        await pageToPdf(doc, c, currentPage === 1);
+      } finally { c.width = c.height = 0; }
     }
-
-    doc.save(filename || `${name || "design"}.pdf`);
-    return { pages: doc.getNumberOfPages(), coverRows: itemsCover.length, steps: steps.length, missingPictures: itemsCover.filter(item => !partImageSrc(item.id)).map(item => item.id) };
+    if (doc.getNumberOfPages() !== total) throw manualError('pagination', '说明书页数与导出进度不一致');
+    const blob = doc.output('blob');
+    await onDocument?.({ doc, blob, pages: total, plan });
+    if (save) doc.save(filename || `${name || 'design'}.pdf`);
+    onProgress?.({ page: total, total, phase: 'complete' });
+    return { pages: total, coverRows: itemsCover.length, steps: steps.length, diagnostics: plan.diagnostics, missingPictures: itemsCover.filter(item => !partImageSrc(item.id)).map(item => item.id), blob };
+  } catch (error) {
+    error.page = currentPage; error.total = total;
+    throw error;
   } finally {
-    scene._viewSize = null;
-    scene._labelDpr = 0;
-    restoreBuilder(builder, saved);
-    scene.setScene(saved.sceneOn);
-    scene.setCameraPose(saved.pose);
-    if (scene.controls) scene.controls.enabled = saved.controls;
-    scene._lastW = 0;
-    scene._lastH = 0;
-    scene.onResize?.();
-    scene.requestRender();
+    if (scene) { scene.onMeshesReady = () => {}; scene.dispose(); scene.renderer.forceContextLoss(); }
+    host.remove();
   }
 }

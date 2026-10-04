@@ -34,7 +34,7 @@ export default function AssemblyBar() {
     return (
       <div data-tour="assembly" className="m-asm qb-card fixed bottom-3 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 p-1.5 max-w-[calc(100vw-1rem)]">
         <button onClick={() => api.setAssembly(true)} className="qb-btn qb-btn-ghost qb-btn-sm">{t('asm.steps', { n })}</button>
-        <button onClick={() => void api.exportAssemblyPdf()} disabled={!!api.exportingManual} className="qb-btn qb-btn-sm">{t('btn.exportManual')}</button>
+        <button data-testid="assembly-open-preview" onClick={() => void api.exportAssemblyPdf()} disabled={!!api.exportingManual} className="qb-btn qb-btn-sm">{t('btn.exportManual')}</button>
       </div>
     )
   }
