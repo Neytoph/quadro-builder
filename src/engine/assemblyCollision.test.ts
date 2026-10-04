@@ -9,6 +9,31 @@ import {parseQDF} from './qdfimport.js';
 import {SceneManager} from './scene.js';
 beforeAll(async()=>{await loadCatalog();});
 describe('measured assembly geometry',()=>{
+  it('A0016 file C45 enters only its linked native mouth and finite receiver port, preserving wrong references and pipe-body obstruction',()=>{
+    const model=new BuildModel();expect(model.loadJSON(parseQDF(readFileSync('public/qdf/A0016.qdf','utf8'),{tubes:buildableTubes(),panels:panels(),connectorSize:geometry().connectorSize,mergeEps:2})).ok).toBe(true);
+    const contracts=new Map([['n1:t22',{cornerId:'n1',receiverNodeId:'n7',tubeId:'t22'}],['n2:t28',{cornerId:'n2',receiverNodeId:'n12',tubeId:'t28'}],['n3:t30',{cornerId:'n3',receiverNodeId:'n14',tubeId:'t30'}],['n4:t23',{cornerId:'n4',receiverNodeId:'n8',tubeId:'t23'}]]),options={c45MatingContacts:contracts};beginAssemblyCollisionPass(model);
+    for(const [corner,tube,direction] of [['n1','t22',-1],['n2','t28',-1],['n3','t30',1],['n4','t23',1]] as const){
+      expect(checkAssemblyPath(model,[corner],[tube],[0,0,direction*45],[0,0,0],options)).toBeNull();
+      expect(checkAssemblyPath(model,[corner],[tube],[0,0,0],[0,0,0],options)).toBeNull();
+      expect(checkAssemblyPath(model,[corner],[tube],[0,0,direction*45])).not.toBeNull();
+      expect(checkAssemblyPath(model,[corner],[tube],[0,0,direction*45],[0,0,0],{...options,allowMating:false})).not.toBeNull();
+      expect(checkAssemblyPath(model,[corner],[tube],[0,18,0],[0,0,0],options)).not.toBeNull();
+      expect(checkAssemblyPath(model,[corner],[tube],[0,3,direction*45],[0,0,0],options)).not.toBeNull();
+    }
+    expect(checkAssemblyPath(model,['n1'],['t22'],[0,0,-45],[0,0,0],{c45MatingContacts:new Map([['n1:t22',{cornerId:'n1',receiverNodeId:'n5',tubeId:'t22'}]])})).not.toBeNull();
+    const link=[...model.tubes.values()].find((t:any)=>t.link&&[t.a,t.b].includes('n1')&&[t.a,t.b].includes('n7'))!;model.tubes.delete(link.id);beginAssemblyCollisionPass(model);
+    expect(checkAssemblyPath(model,['n1'],['t22'],[0,0,-45],[0,0,0],options)).not.toBeNull();model.tubes.set(link.id,link);
+    const receiver:any=model.nodes.get('n7')!;receiver.x+=.02;beginAssemblyCollisionPass(model);
+    expect(checkAssemblyPath(model,['n1'],['t22'],[0,0,-45],[0,0,0],options)).not.toBeNull();receiver.x-=.02;receiver.z-=.03;beginAssemblyCollisionPass(model);
+    expect(checkAssemblyPath(model,['n1'],['t22'],[0,0,-45],[0,0,0],options)).not.toBeNull();receiver.z+=.03;beginAssemblyCollisionPass(model);
+    // Geometry-only source-depth guard: extend the native peg by .02 cm.
+    const adapter=partEnvelope(model,'n1').slice(-accessoryTriangles.connector45_2.length),tip=adapter.reduce((a:any,b:any)=>Math.max(...a.points.map((p:number[])=>p[2]))>Math.max(...b.points.map((p:number[])=>p[2]))?a:b);
+    tip.points=tip.points.map((p:number[])=>p.map((v:number,i:number)=>v+(i===2?.02:0)));
+    expect(checkAssemblyPath(model,['n1'],['t22'],[0,0,-45],[0,0,0],options)).not.toBeNull();beginAssemblyCollisionPass(model);
+    // Geometry-only adversarial pipe section beyond the finite port boundary.
+    const pipeShapes=partEnvelope(model,'t22');pipeShapes.push({kind:'cylinder',a:[10,7.66,-55.94],b:[30,7.66,-55.94],r:2.45});
+    expect(checkAssemblyPath(model,['n1'],['t22'],[0,0,0],[0,0,0],options)).not.toBeNull();
+  });
   it('A0016 standalone file C45 keeps its complete Scene-native adapter as well as its ordinary base connector',()=>{
     const model=new BuildModel();expect(model.loadJSON(parseQDF(readFileSync('public/qdf/A0016.qdf','utf8'),{tubes:buildableTubes(),panels:panels(),connectorSize:geometry().connectorSize,mergeEps:2})).ok).toBe(true);
     const scene={_c45BaseNode:SceneManager.prototype._c45BaseNode};let adapters=0,exposedFace:null|{nodeId:string;point:number[]}=null;

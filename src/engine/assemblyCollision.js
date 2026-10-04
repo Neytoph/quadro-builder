@@ -3,6 +3,7 @@ import { geometry } from './catalog.js';
 import { nativeEnvelopes, surfaceTriangles, connectorTriangles, connectorMasks, accessoryTriangles } from './assemblyNativeEnvelopes.js';
 import { componentVolumes } from './accessoryPack.js';
 import { curvePoint } from './confirmedComponentModel.js';
+import { C45_SLEEVE_LEN, C45_ARM_LEN } from './config.js';
 import { xAxisOf, yAxisOf, zAxisOf, panelNormal, modelMiddle } from './util.js';
 
 const xyz = p => [p.x, p.y, p.z];
@@ -320,7 +321,24 @@ export function assemblyFittingBoreContact(model,id,obstacleId,a,b,delta,end,pad
   return true;
 }
 /** Full conservative swept geometry; contacts are exempted only inside the mating port. */
-export function checkAssemblyPath(model,movingIds,installedIds,start,end=[0,0,0],{allowMating=true,obstacleTranslations=new Map(),matingContacts=new Map(),entryPanelContacts=new Map(),panelLinerContacts=new Map(),linerCarrierContacts=new Map(),fittingMatingContacts=new Map(),movingAssemblyIds=movingIds}={}) {
+function fileC45ContactNodes(model,id,obstacleId,start,end,obstacleOffset,contracts){
+  const cornerId=model.nodes.has(id)?id:obstacleId,tubeId=cornerId===id?obstacleId:id,contract=contracts.get(`${cornerId}:${tubeId}`),corner=model.nodes.get(cornerId),tube=model.tubes.get(tubeId);
+  if(!contract||contract.cornerId!==cornerId||contract.tubeId!==tubeId||!corner||!hasStandaloneFileC45(model,corner)||corner.c45quat?.length!==4||!tube?.geom?.dir||tube.arm||tube.link||tube.bow||![tube.a,tube.b].includes(contract.receiverNodeId)||Math.hypot(...sub(end,obstacleOffset))>1e-6)return [];
+  const receiver=model.nodes.get(contract.receiverNodeId);if(!receiver||![...model.tubes.values()].some(t=>t.link&&(t.a===cornerId&&t.b===receiver.id||t.b===cornerId&&t.a===receiver.id)))return [];
+  const [ex,ey]=axes(corner.c45quat),diagonal=C45_ARM_LEN*Math.SQRT1_2,mouth=xyz(corner).map((v,i)=>v+ex[i]*(C45_SLEEVE_LEN-diagonal)+ey[i]*diagonal),axis=unit(ex.map((v,i)=>(ey[i]-v)*Math.SQRT1_2)),direction=unit(model._tubeDirAt(tube,receiver,model.nodes.get(tube.a===receiver.id?tube.b:tube.a)));
+  // Native mouth and the file's finite receiving tube must identify one exact
+  // port. Source coordinates are quantised to .01 cm; no nearby joint qualifies.
+  const offset=sub(mouth,xyz(receiver)),along=dot(offset,direction);
+  const travel=sub(end,start);
+  if(Math.abs(along)>.02||Math.hypot(...offset.map((v,i)=>v-direction[i]*along))>.01||dot(axis,direction)<.999999||Math.hypot(...travel)>1e-6&&Math.abs(dot(unit(travel),direction))<=.999999)return [];
+  const matching=[...model.tubes.values()].filter(t=>!t.arm&&!t.link&&!t.bow&&[t.a,t.b].includes(receiver.id)&&dot(axis,unit(model._tubeDirAt(t,receiver,model.nodes.get(t.a===receiver.id?t.b:t.a))))>.999999);
+  if(matching.length!==1||matching[0].id!==tubeId)return [];
+  const native=partEnvelope(model,cornerId).slice(-accessoryTriangles.connector45_2.length),depth=Math.max(...native.flatMap(shape=>shape.points.map(p=>dot(sub(p,xyz(receiver)),direction))));
+  // Saved poses/native vertices are rounded: use their actual mouth plane,
+  // never an enlarged generic port. The nominal insertion window stays 7.5 cm.
+  return Math.abs(depth-7.5)<=.01?[{nodeId:receiver.id,depth}]:[];
+}
+export function checkAssemblyPath(model,movingIds,installedIds,start,end=[0,0,0],{allowMating=true,obstacleTranslations=new Map(),matingContacts=new Map(),c45MatingContacts=new Map(),entryPanelContacts=new Map(),panelLinerContacts=new Map(),linerCarrierContacts=new Map(),fittingMatingContacts=new Map(),movingAssemblyIds=movingIds}={}) {
   const started=performance.now();const timing=()=>{const elapsed=performance.now()-started;if(globalThis.process?.env?.ASSEMBLY_PROFILE && elapsed>200)globalThis.process.stderr.write(JSON.stringify({elapsed:Math.round(elapsed),moving:movingIds.length,installed:installedIds.length,first:movingIds.slice(0,3),start,end})+'\n');};
   const moving=new Set(movingIds),travel=Math.hypot(...sub(start,end)),spacing=geometry().tubeRadius||2.45,count=Math.max(1,Math.ceil(travel/spacing));
   const assemblyMoving=new Set(movingAssemblyIds);
@@ -338,11 +356,12 @@ export function checkAssemblyPath(model,movingIds,installedIds,start,end=[0,0,0]
     }).map(b=>[a,b]);});
     if(!pairs.length)continue;
     const t=model.tubes.get(id),o=model.tubes.get(obstacle.id),shared=t&&o?[t.a,t.b].filter(n=>n===o.a||n===o.b):[];
+    const fileContacts=allowMating?fileC45ContactNodes(model,id,obstacle.id,start,end,obstacle.offset,c45MatingContacts):[];
     for(let sample=0;sample<count;sample++){
       const delta=start.map((v,i)=>v+(end[i]-v)*(sample+.5)/count),pad=sub(end,start).map(v=>v/count/2);
       const adapterIds=id=>adapterMap.get(id)||[];
       const adapterContacts=model.nodes.has(id)&&o ? [o.a,o.b].filter(n=>adapterIds(id).includes(n)) : t&&model.nodes.has(obstacle.id) ? [t.a,t.b].filter(n=>adapterIds(obstacle.id).includes(n)) : [];
-      const declaredContacts=(matingContacts.get(`${id}:${obstacle.id}`)||[]).filter(nodeId=>model.nodes.has(nodeId));
+      const declaredContacts=[...(matingContacts.get(`${id}:${obstacle.id}`)||[]),...fileContacts.map(contact=>contact.nodeId)].filter(nodeId=>model.nodes.has(nodeId));
       const contacts=allowMating ? [...new Set([...shared,...adapterContacts,...declaredContacts,...(t&&[t.a,t.b].includes(obstacle.id)?[obstacle.id]:[]),...(o&&[o.a,o.b].includes(id)?[id]:[])])]:[];
       for(const [a,b] of pairs){
         if(!assemblyShapesOverlap(move(a,delta),move(b,obstacle.offset),pad))continue;
@@ -359,7 +378,7 @@ export function checkAssemblyPath(model,movingIds,installedIds,start,end=[0,0,0]
         const portAxes=contactAxes.length?contactAxes:portTube?[unit(sub(xyz(model.nodes.get(portTube.b)),xyz(model.nodes.get(portTube.a))))]:[];
         const coaxial=portAxes.length&&portAxes.every(portAxis=>Math.hypot(...relative.map((v,i)=>v-portAxis[i]*dot(relative,portAxis)))<.6 && (travel<1e-6 || Math.abs(dot(unit(sub(end,start)),portAxis))>.995));
         if(contacts.length && coaxial && Math.hypot(...relative)+Math.hypot(...pad)<7.5+1e-6){
-          const trim=(shape,tube)=>{if(!['capsule','cylinder'].includes(shape.kind)||!tube)return shape;let p=[...shape.a],q=[...shape.b];const d=unit(sub(q,p));for(const n of contacts){const pos=xyz(model.nodes.get(n));if(Math.hypot(...sub(p,pos))<8){const depth=matingPortDepth(model,n,d);p=p.map((v,i)=>v+d[i]*(depth-dot(sub(p,pos),d)));}if(Math.hypot(...sub(q,pos))<8){const depth=matingPortDepth(model,n,d.map(v=>-v));q=q.map((v,i)=>v-d[i]*(depth+dot(sub(q,pos),d)));}}if(dot(sub(q,p),d)<=0)return null;return {...shape,a:p,b:q};};
+          const trim=(shape,tube)=>{if(!['capsule','cylinder'].includes(shape.kind)||!tube)return shape;let p=[...shape.a],q=[...shape.b];const d=unit(sub(q,p));for(const n of contacts){const pos=xyz(model.nodes.get(n)),fileDepth=fileContacts.find(contact=>contact.nodeId===n)?.depth;if(Math.hypot(...sub(p,pos))<8){const depth=fileDepth??matingPortDepth(model,n,d);p=p.map((v,i)=>v+d[i]*(depth-dot(sub(p,pos),d)));}if(Math.hypot(...sub(q,pos))<8){const depth=fileDepth??matingPortDepth(model,n,d.map(v=>-v));q=q.map((v,i)=>v-d[i]*(depth+dot(sub(q,pos),d)));}}if(dot(sub(q,p),d)<=0)return null;return {...shape,a:p,b:q};};
           const ta=trim(a,t),tb=trim(b,o);if(!ta||!tb||!assemblyShapesOverlap(move(ta,delta),move(tb,obstacle.offset),pad))continue;
         }
         timing();return {movingPartId:id,obstaclePartId:obstacle.id,movingTubeId:id,obstacleTubeId:obstacle.id,sample,pathSamples:count+1,sampleSpacing:travel/count,translation:delta,envelope:'complete-conservative',movingShape:a,obstacleShape:b};
