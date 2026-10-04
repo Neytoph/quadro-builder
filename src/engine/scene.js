@@ -15,6 +15,7 @@ import { loadConnectorMeshes, loadSlideMeshes, loadTubeMeshes, loadFittingMeshes
   loadSurfaceMeshes } from "./meshes.js";
 import { CONNECTOR_ARM_BITS } from "./qdfimport.js";
 import { preferPanelCell } from "./pickcell.js";
+import { resolveNodeConnection, hasStandaloneFileC45 } from "./bom.js";
 import { shadeHex, hexRgba, DEFAULT_TUNE, DEFAULT_GRADE, gradeHex, displayHex } from "./colorTune.js";
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -386,19 +387,20 @@ function turnMask(mask, cols) {
  * je einer festen Lage vor; jede Maske mit mindestens zwei Armen ist genau eine
  * ihrer 24 Würfeldrehungen. Einmal gebaut, sobald die Modelle da sind.
  */
-let _maskTable = null;
+let _maskTables = new WeakMap();
 function maskTable(store) {
-  if (_maskTable) return _maskTable;
-  _maskTable = {};
+  if (_maskTables.has(store)) return _maskTables.get(store);
+  const table = {};
   for (const rot of cubeRotations()) {
     for (const id of Object.keys(store)) {
       const mask = store[id].mask;
       if (!mask) continue;
       const turned = turnMask(mask, rot.cols);
-      if (_maskTable[turned] === undefined) _maskTable[turned] = { id, quat: rot.quat };
+      if (table[turned] === undefined) table[turned] = { id, quat: rot.quat };
     }
   }
-  return _maskTable;
+  _maskTables.set(store, table);
+  return table;
 }
 
 // Hintergrundfarben fuer die Beschriftung nach Kategorie (Aufbaumodus-Hervorhebung).
@@ -579,6 +581,22 @@ export class SceneManager {
     this._disposed = true;
     window.removeEventListener("resize", this._onWindowResize);
     if (this._resizeObserver) this._resizeObserver.disconnect();
+    this.onMeshesReady = () => {};
+    const geometries = new Set(), materials = new Set(), textures = new Set();
+    for (const root of [this.scene, this._cubeScene]) root?.traverse(object => {
+      if (object.geometry) geometries.add(object.geometry);
+      for (const material of Array.isArray(object.material) ? object.material : object.material ? [object.material] : []) {
+        materials.add(material);
+        for (const value of Object.values(material)) if (value?.isTexture) textures.add(value);
+      }
+    });
+    this._disposeLabels();
+    for (const group of [this.buildGroup, this.handleGroup, this._ghostGroup]) this._disposeGroup(group);
+    for (const texture of textures) texture.dispose();
+    for (const material of materials) material.dispose();
+    for (const geometry of geometries) geometry.dispose();
+    this._dirLight?.shadow?.map?.dispose();
+    this._spinner?.remove();
     this._confirmedEnvironmentTarget?.dispose();
     this._confirmedEnvironmentTarget = null;
     this._confirmedEnvironmentRenderer = null;
@@ -1245,6 +1263,7 @@ export class SceneManager {
       // Damit wartet das Bild nicht weiter, sondern zeichnet seine eigenen
       // Formen -- `null` bedeutet dagegen "laeuft noch".
       this[feld] = rec || false;
+      if (this._disposed) return;
       this.onMeshesReady();
     });
     return null;
@@ -1275,7 +1294,7 @@ export class SceneManager {
    * bei den Rutschen der groesste Posten der ganzen Szene.
    */
   _dropMeshes() {
-    _maskTable = null;
+    _maskTables = new WeakMap();
     for (const feld of Object.values(MESH_FIELDS)) this[feld] = undefined;
     if (!this._fitGeos) return;
     for (const [key, geo] of [...this._fitGeos]) {
@@ -1314,7 +1333,10 @@ export class SceneManager {
       if (!bit || mask & bit) { maskOk = false; break; }
       mask |= bit;
     }
-    let entry = maskOk ? maskTable(store)[mask] : null;
+    const types = this._connTypeStores || (this._connTypeStores = {});
+    if (typeId && store[typeId] && types[typeId]?.[typeId] !== store[typeId]) types[typeId] = { [typeId]: store[typeId] };
+    const matchedStore = typeId && store[typeId] ? types[typeId] : store;
+    let entry = maskOk ? maskTable(matchedStore)[mask] : null;
     if (!entry && typeId && store[typeId] && store[typeId].mask) {
       entry = maskTable(store)[store[typeId].mask];
       if (entry) entry = { id: typeId, quat: entry.quat };
@@ -3748,7 +3770,7 @@ export class SceneManager {
   // Baut die Szene aus dem Modell neu auf.
   // opts.labelFor(node) -> string|null  : Beschriftung an der Kupplung.
   // opts.slideNameFor(slide) -> string|null : Beschriftung an der Rutsche/Dach.
-  // opts.assembly { done:Set, current:Set } : Aufbaumodus (fertig/aktuell/kuenftig).
+  // assembly.transforms 只移动场景碎片，保存的模型位置保持不变。
   renderModel(model, selectedNodeId, opts = {}) {
     this._renderModel = model;   // 有的配件要回头看模型（软包滚筒套在哪根管上）
     // 开着动效的时候旧零件先摘下来不释放：画完新的才知道哪些被删了，要给它们留影子。
@@ -3811,6 +3833,7 @@ export class SceneManager {
       }
       // 版本对照：没变的零件退后，上了色的才看得出来
       if (opts.dimUntinted) return this._dimmedMaterial(base);
+      if (opts.assembly?.done.has(id) && !opts.assembly.current.has(id)) return this._assemblyDoneMaterial(base);
       return base;
     };
 
@@ -3962,7 +3985,7 @@ export class SceneManager {
       // Zeile blieb es in einem Modell ohne Anbauteile beim gezeichneten
       // Innenstab, das abgegriffene Profil kam nie.
       || [...model.tubes.values()].some((t) => t.reinforced)
-      || [...model.nodes.values()].some((n) => n.c45 || isHolePart(n.part) || isBoltPart(n.part));
+      || [...model.nodes.values()].some((n) => n.c45 || n.c45file || isHolePart(n.part) || isBoltPart(n.part));
     const braucht = [];
     if (model.nodes.size) braucht.push("connectors");
     if ([...model.tubes.values()].some((t) => t.bow)) braucht.push("tubes");
@@ -4001,6 +4024,7 @@ export class SceneManager {
       if (!asm) return "done";
       if (asm.current.has(id)) return "current";
       if (asm.done.has(id)) return "done";
+      if (asm.visible?.has(id)) return "done";
       return "future";
     };
 
@@ -4026,7 +4050,7 @@ export class SceneManager {
         // Liste markiert ist, leuchtet das ganze Profil mit -- sonst sieht man
         // nicht, dass der Klick darauf gesessen hat.
         const grund = zustand.some((z) => z === "current") ? this._rodMaterial()
-          : (asm && zustand.every((z) => z === "done")) ? this._fadedMaterial()
+          : (asm && zustand.every((z) => z === "done")) ? this._assemblyDoneMaterial(this._rodMaterial())
           : this._rodMaterial();
         const mat = matFor(lauf.tubes.find((id) => marked && marked.has(id)) ?? null, grund);
         this._batchAdd(this._meshGeometry("fit:" + (Math.abs(lauf.len - 80) < 1 ? "alu2_800" : "alu2_600"), rec),
@@ -4050,7 +4074,7 @@ export class SceneManager {
       let mat;
       if (st === "future") mat = this._ghostMaterial();
       else if (st === "current") mat = this._connMaterial(false);
-      else if (asm && st === "done") mat = this._fadedMaterial();
+      else if (asm && st === "done") mat = this._connMaterial(false);
       else mat = this._connMaterial(n.id === selectedNodeId);
       // Adapter-Koerper (importierte C45, n.c45body) sind keine eigenstaendige
       // Kupplung -> kein dunkler Wuerfel; sie werden unten in Adapter-Farbe
@@ -4068,12 +4092,15 @@ export class SceneManager {
       if (!n.c45body && !isHolePart(n.part) && !isBoltPart(n.part)
           && !(model.hasWheelCap && model.hasWheelCap(n))) {
         const pos = new THREE.Vector3(n.x, n.y, n.z);
-        const quat = this._nodeCubeQuat(model, n);
+        const connection = resolveNodeConnection(model, n);
+        const quat = connection.quat ? new THREE.Quaternion(...connection.quat).normalize()
+          : connection.frame ? new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(...connection.frame.map(axis => new THREE.Vector3(...axis))))
+          : new THREE.Quaternion();
         // Abgegriffenes Originalteil: EIN Mesh mit Bohrungen und Armen.
         // Offene Huelsen kommen aus variant2 (`n.arms`) bzw. dem gewaehlten
         // `preferType` -- nicht nur aus bereits steckenden Rohren.
-        const dirs = this._connectorArmDirs(n, tubeDirsAt.get(n.id) || [], quat);
-        const echt = wantMeshes ? this._connMeshFor(dirs, quat, n.preferType) : null;
+        const dirs = (connection.renderDirs || connection.worldDirs).map(d => ({ d, bow: (tubeDirsAt.get(n.id) || []).some(entry => entry.bow && entry.d.every((value, axis) => Math.abs(value - d[axis]) < 0.01)) }));
+        const echt = wantMeshes ? this._connMeshFor(dirs, quat, connection.typeId) : null;
         if (echt) {
           this._batchAdd(echt.geo, matFor(n.id, mat),
             new THREE.Matrix4().compose(pos, echt.quat, ONE), "node", n.id, this.pickNodes);
@@ -4097,12 +4124,12 @@ export class SceneManager {
       // 45-Grad-Winkelkupplung (C45). Echtes Teil: eine Huelse wird auf einen
       // KARDINALEN Arm der Basiskupplung gesteckt, davon zweigt ein 45°-Arm ab,
       // der in die Tube greift.
-      if (n.c45 && st !== "future") {
+      const fileC45 = hasStandaloneFileC45(model, n);
+      if ((n.c45 || fileC45) && st !== "future") {
         // Im Aufbau bleicht der Adapter genau wie die uebrigen fertigen Teile
         // aus -- sonst steht die 45-Grad-Kupplung als einziges Stueck kraeftig
         // schwarz im schon Gebauten.
-        const c45base = (asm && st === "done")
-          ? this._fadedMaterial() : this._c45Material();
+        const c45base = this._c45Material();
         const c45mat = matFor(n.id, c45base);
         // Abgegriffenes Originalteil: EIN Mesh auf der Basiskupplung, mit deren
         // Lage -- genau dort und so fuehrt die Datei die connector45_2. Huelse,
@@ -4113,6 +4140,23 @@ export class SceneManager {
         if (c45lage) {
           this._batchAdd(this._meshGeometry("fit:connector45_2", echtC45), c45mat,
             c45lage, "node", n.id, this.pickNodes);
+        } else if (fileC45) {
+          const placement = this._c45Placement(model, n);
+          if (placement) {
+            // 低画质保留文件确认的 C45 接口与朝向，近似网格沿真实局部轴线绘制。
+            const radius = this._c45SocketR();
+            for (const [from, to] of [
+              [[1.5, 0, 0], [9.5, 0, 0]],
+              [[10.83, 0, 0], [6.51, 4.32, 0]],
+            ]) {
+              const a = new THREE.Vector3(...from).applyMatrix4(placement), b = new THREE.Vector3(...to).applyMatrix4(placement);
+              const piece = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, a.distanceTo(b), 14), c45mat);
+              piece.position.copy(a).add(b).multiplyScalar(0.5);
+              piece.quaternion.setFromUnitVectors(UP, b.sub(a).normalize());
+              piece.userData = { kind: 'node', id: n.id };
+              this.buildGroup.add(piece); this.pickNodes.push(piece);
+            }
+          }
         } else if (n.c45body) {
           // Import: n ist der Adapter-Koerper am Diagonal-Fuss; die Basis sitzt
           // am anderen Ende der Arm-Kante. Huelse laeuft kardinal von der Basis.
@@ -4243,7 +4287,7 @@ export class SceneManager {
           : st === "current" ? this._tubeMaterial(t.color)
           : (suggest && suggest.has(t.id)) ? this._tubeSuggest()
           : reinforce ? this._tubeGray()
-          : (asm && st === "done") ? this._fadedMaterial()
+          : (asm && st === "done") ? this._tubeMaterial(t.color)
           : this._tubeMaterial(t.color);
         const bowFinalMat = matFor(t.id, bowMat);
         // Abgegriffenes Originalteil, wenn es passt: EIN Mesh, an beiden Enden
@@ -4305,7 +4349,7 @@ export class SceneManager {
         : isReinforceActive ? this._tubeReinforceActive()
         : (suggest && suggest.has(t.id)) ? this._tubeSuggest()
         : reinforce ? this._tubeGray()
-        : (asm && st === "done") ? this._fadedMaterial()
+        : (asm && st === "done") ? this._tubeMaterial(t.color)
         : this._tubeMaterial(t.color);
       if (t.tubeId?.startsWith('TA') && st !== 'future' && !(asm && st === 'done')) {
         if (!this._materials.aluminiumTube) this._materials.aluminiumTube = new THREE.MeshStandardMaterial({ color: '#b9c0c5', metalness: 0.85, roughness: 0.27 });
@@ -4327,8 +4371,8 @@ export class SceneManager {
         const rodRadius = 1.5;  // 15 mm Radius = 30 mm Durchmesser in cm
         const rodGeo = this._tubeGeometry(rodRadius, len, 8);
         // Nicht anklickbar (kind null) -- das Profil steckt im Rohr.
-        this._batchAdd(rodGeo, matFor(null, this._rodMaterial()),
-          new THREE.Matrix4().compose(mid, quat, ONE), null, null, null);
+        this._batchAdd(rodGeo, matFor(t.id, this._rodMaterial()),
+          new THREE.Matrix4().compose(mid, quat, ONE), 'tube', t.id, null);
       }
 
       // Laengen-Beschriftung: gleiche Sichtbarkeitsregel wie die Kupplungs-Namen.
@@ -4373,7 +4417,7 @@ export class SceneManager {
         [center.x, center.y, center.z], middle,
       );
       const mat = st === "future" ? this._ghostMaterial()
-        : (asm && st === "done") ? this._fadedMaterial(true)
+        : (asm && st === "done") ? this._panelMaterial(p.color, false, false)
         : this._panelMaterial(p.color, false, false);
       // Abgegriffenes Originalteil, wenn es die Groesse gibt. Es bringt seinen
       // Versatz auf den Rohrscheitel selbst mit, also OHNE `lift` und mit der
@@ -4527,7 +4571,7 @@ export class SceneManager {
       const yAxis = new THREE.Vector3().crossVectors(zAxis, xAxis).normalize();
       const mat = matFor(tx.id,
         st === "future" ? this._ghostMaterial()
-          : (asm && st === "done") ? this._fadedMaterial(true)
+          : (asm && st === "done") ? this._panelMaterial(tx.color, false, false)
           : this._panelMaterial(tx.color, false, false));
       // Abgegriffenes Originaltuch, wenn es die Groesse gibt. Die Normale
       // bestimmt hier dieselbe Regel wie bei der Platte, damit das Tuch nicht
@@ -4601,7 +4645,7 @@ export class SceneManager {
         // Wasser bleibt blau -- es ist kein Bauteil, Orange wuerde wie ein Kasten wirken.
         mesh.material = role === "water" ? base
           : matFor(f.id, (suggest && suggest.has(f.id)) ? this._suggestMaterial(base)
-          : (asm && st === "done") ? this._fadedMaterial(base.side === THREE.DoubleSide) : base);
+          : base);
         this.buildGroup.add(mesh);
         this.pickFittings.push(mesh);
       }
@@ -4619,9 +4663,7 @@ export class SceneManager {
       if (st === "future") continue;
       // Liegt zu dieser Art ein abgegriffenes Originalmodell vor?
       const echtesTeil = !!(wantMeshes && this._slideMeshes && this._slideMeshes[sl.kind]);
-      const base = (asm && st === "done")
-        ? this._fadedMaterial(true)
-        : this._slideMatFor(sl.kind, false, sl.color);
+      const base = this._slideMatFor(sl.kind, false, sl.color);
       const mat = matFor(sl.id, (suggest && suggest.has(sl.id)) ? this._suggestMaterial(base) : base);
 
       // Beschriftung: Name des Rutschenenteils/Dachs wenn Labels aktiv.
@@ -4664,6 +4706,8 @@ export class SceneManager {
 
     // Gesammelte Kupplungen, Arm-Stutzen und Rohre als InstancedMesh anlegen.
     this._batchFlush();
+    if (asm?.transforms?.size) this._applyAssemblyTransforms(asm.transforms);
+    if (asm?.current?.size) this._outlineAssemblyParts(asm.current);
 
     // Schnittebene: Materialien entstehen erst bei ihrer ersten Verwendung und
     // muessen die Ebene nachtragen -- deshalb hier statt nur in setClip().
@@ -6020,6 +6064,65 @@ export class SceneManager {
   }
 
   /** 把画出来的东西按零件归拢：key 是 kind:id，值是它的全部碎片（管身、端盖、实例格子）。 */
+  _assemblyDoneMaterial(base) {
+    const key = `assembly-done:${base.uuid}`;
+    let material = this._materials[key];
+    if (!material) {
+      material = base.clone();
+      this._materials[key] = material;
+    }
+    const hsl = {};
+    base.color.getHSL(hsl);
+    material.color.setHSL(hsl.h, hsl.s * 0.18, hsl.l * 0.72 + 0.22);
+    material.emissive?.setHex(0);
+    return material;
+  }
+
+  _applyAssemblyTransforms(transforms) {
+    const translation = new THREE.Matrix4();
+    const matrix = new THREE.Matrix4();
+    for (const rec of this._indexParts(this.buildGroup.children).values()) {
+      const delta = transforms.get(rec.id);
+      if (!delta) continue;
+      if (!Array.isArray(delta) || delta.length !== 3 || !delta.every(Number.isFinite)) throw new Error(`Invalid assembly transform: ${rec.id}`);
+      translation.makeTranslation(...delta);
+      for (const piece of this._bindPieces(rec.pieces)) {
+        matrix.multiplyMatrices(translation, piece.P).premultiply(piece.Pinv).multiply(piece.base);
+        if (piece.index >= 0) {
+          piece.obj.setMatrixAt(piece.index, matrix);
+          piece.obj.instanceMatrix.needsUpdate = true;
+          piece.obj.boundingSphere = null;
+          piece.obj.boundingBox = null;
+        } else matrix.decompose(piece.obj.position, piece.obj.quaternion, piece.obj.scale);
+      }
+    }
+    this.buildGroup.updateWorldMatrix(true, true);
+  }
+
+  _outlineAssemblyParts(current) {
+    const parent = this.buildGroup;
+    parent.updateWorldMatrix(true, true);
+    const inverse = parent.matrixWorld.clone().invert();
+    const matrix = new THREE.Matrix4();
+    const material = this._materials['assembly-outline'] ||= new THREE.LineBasicMaterial({
+      color: '#91400d', transparent: true, opacity: 0.72, depthWrite: false,
+    });
+    for (const rec of this._indexParts(parent.children).values()) {
+      if (!current.has(rec.id)) continue;
+      for (const piece of rec.pieces) {
+        const geometry = piece.obj.geometry;
+        const edges = this._cachedGeo(`assembly-outline:${geometry.uuid}`, () => new THREE.EdgesGeometry(geometry, 40));
+        const outline = new THREE.LineSegments(edges, material);
+        matrix.multiplyMatrices(inverse, this._pieceWorld(piece, new THREE.Matrix4()));
+        matrix.decompose(outline.position, outline.quaternion, outline.scale);
+        outline.userData.assemblyOutlineFor = rec.id;
+        outline.raycast = () => {};
+        outline.renderOrder = 2;
+        parent.add(outline);
+      }
+    }
+  }
+
   _indexParts(children) {
     const idx = new Map();
     const put = (key, piece) => {

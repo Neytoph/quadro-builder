@@ -147,6 +147,10 @@ export function applyDelta(doc: Y.Doc, before: ModelJSON, after: ModelJSON, orig
     const meta = metaMap(doc)
     const format = after.format ?? FORMAT_VERSION
     if (meta.get('format') !== format) meta.set('format', format)
+    if (!sameJson(before.assemblyConfig, after.assemblyConfig)) {
+      if (after.assemblyConfig == null) meta.delete('assemblyConfig')
+      else meta.set('assemblyConfig', structuredClone(after.assemblyConfig))
+    }
   }, origin)
   return summarize(a, b)
 }
@@ -198,6 +202,8 @@ export function writeJSON(doc: Y.Doc, json: ModelJSON, origin: unknown) {
     const meta = metaMap(doc)
     const format = json.format ?? FORMAT_VERSION
     if (meta.get('format') !== format) meta.set('format', format)
+    if (json.assemblyConfig == null) meta.delete('assemblyConfig')
+    else if (!sameJson(meta.get('assemblyConfig'), json.assemblyConfig)) meta.set('assemblyConfig', structuredClone(json.assemblyConfig))
   }, origin)
 }
 
@@ -214,6 +220,8 @@ export function docFromJSON(json: ModelJSON, opts?: { gc?: boolean }): Y.Doc {
  */
 export function docToJSON(doc: Y.Doc): ModelJSON {
   const out: ModelJSON = { format: (metaMap(doc).get('format') as number | undefined) ?? FORMAT_VERSION, nodes: [] }
+  const config = metaMap(doc).get('assemblyConfig')
+  if (config != null) out.assemblyConfig = structuredClone(config)
   for (const [coll] of COLLECTIONS) out[coll] = []
   const parts = partsMap(doc)
   for (const [id, ymap] of parts.entries()) {

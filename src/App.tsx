@@ -7,6 +7,7 @@ import LeftStack from './ui/LeftStack'
 import RightDock from './ui/RightDock'
 import ProjectTabs from './ui/ProjectTabs'
 import AssemblyBar from './ui/AssemblyBar'
+import AssemblyPreview from './ui/AssemblyPreview'
 import Onboarding from './ui/Onboarding'
 import ThumbCapture from './ui/ThumbCapture'
 import ErrorBoundary from './ui/ErrorBoundary'
@@ -47,42 +48,6 @@ function Toast() {
     // 在「文件」里点保存，提示要浮在面板上才看得见。确认框（z-75）仍在它上面。
     <div key={toast.message} className={`m-toast qb-card fixed top-[9.5rem] left-1/2 -translate-x-1/2 w-max max-w-[calc(100vw-2rem)] text-center ${tone} text-sm font-medium px-4 py-2 z-[70] pointer-events-none ${leaving ? 'm-leave' : ''}`}>
       {toast.message}
-    </div>
-  )
-}
-
-function ManualConfirm() {
-  const { exportManualConfirm, cancelExportManual, confirmExportManual } = useEngine()
-  const { t } = useI18n()
-  const [shown, leaving] = usePresence(exportManualConfirm ? true : null)
-
-  useEffect(() => {
-    if (!exportManualConfirm) return
-    const onEsc = () => cancelExportManual()
-    window.addEventListener(UI_ESCAPE_EVENT, onEsc)
-    return () => window.removeEventListener(UI_ESCAPE_EVENT, onEsc)
-  }, [exportManualConfirm, cancelExportManual])
-
-  if (!shown) return null
-  return (
-    <div
-      className={`m-backdrop fixed inset-0 z-[75] flex items-center justify-center bg-black/45 p-4 ${leaving ? 'm-leave pointer-events-none' : ''}`}
-      onClick={cancelExportManual}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="manual-confirm-title"
-        className="m-modal qb-card w-full max-w-sm text-gray-100 p-5"
-        onClick={e => e.stopPropagation()}
-      >
-        <div id="manual-confirm-title" className="text-base font-semibold">{t('confirm.exportManualTitle')}</div>
-        <p className="text-sm text-gray-300 leading-relaxed mt-2 mb-5">{t('confirm.exportManual')}</p>
-        <div className="flex justify-end gap-2">
-          <button type="button" onClick={cancelExportManual} className="qb-btn qb-btn-ghost qb-btn-sm">{t('confirm.cancel')}</button>
-          <button type="button" autoFocus onClick={() => void confirmExportManual()} className="qb-btn qb-btn-sm">{t('confirm.okExport')}</button>
-        </div>
-      </div>
     </div>
   )
 }
@@ -506,7 +471,7 @@ function AppInner() {
       {collab.mode === 'plan' && collab.compare && <CompareView key={collab.session?.id} />}
       <JoinModal />
       <Toast />
-      <ManualConfirm />
+      <AssemblyPreview />
       <AccountDialog />
       <NameDialog />
       <ManualProgress />
