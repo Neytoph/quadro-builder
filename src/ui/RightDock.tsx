@@ -1,7 +1,6 @@
-import { useEffect, useState } from 'react'
 import { useI18n } from '../i18n'
 import { useEngine } from '../store/EngineContext'
-import { HEIGHT_MIN, NARROW_MAX, PanelHandles, PANEL_GAP, TAB_BAR_H, TOOLBAR_CHROME_H, toolbarTop, usePanelLayout } from './panelLayout'
+import { NARROW_MAX, PanelHandles, PANEL_GAP, TOOLBAR_CHROME_H, toolbarTop, usePanelLayout } from './panelLayout'
 import { useDock, type DockPane } from './dock'
 import FilePanel from './FilePanel'
 import LibraryPanel from './LibraryPanel'
@@ -14,7 +13,7 @@ import { usePresence } from './motion'
 import { useCollab } from '../collab/CollabContext'
 import CommentsPane from '../collab/ui/CommentsPane'
 import VersionsPane from '../collab/ui/VersionsPane'
-import { Maximize2, Minimize2, X } from 'lucide-react'
+import { X } from 'lucide-react'
 import { DockIcon } from './DockIcon'
 
 const TITLE: Record<DockPane, string> = {
@@ -32,8 +31,6 @@ const TITLE: Record<DockPane, string> = {
 export default function RightDock() {
   const { pane: open, setPane } = useDock()
   const api = useEngine()
-  const [expanded, setExpanded] = useState(false)
-  useEffect(() => { setExpanded(false) }, [open])
   const collab = useCollab()
   // 评论和版本只属于共享方案：切到自己的标签页就不显示
   const live = (open === 'comments' || open === 'versions') && collab.mode !== 'plan' ? null : open
@@ -45,8 +42,12 @@ export default function RightDock() {
   // 面板宽到够着居中的工具条时，往下让到工具条底下，标题不被挡住
   const toolbarRight = (vw + toolbarW) / 2
   const clash = vw - PANEL_GAP - right.width < toolbarRight + PANEL_GAP
-  const top = clash ? Math.max(right.top, toolbarTop(left, vw) + TOOLBAR_CHROME_H + PANEL_GAP) : right.top
-  const maxH = Math.max(HEIGHT_MIN, vh - top - PANEL_GAP)
+  const toolbarBottom = toolbarTop(left, vw) + TOOLBAR_CHROME_H + PANEL_GAP
+  let top = right.top
+  if (narrow) top = toolbarBottom
+  else if (clash) top = Math.max(right.top, toolbarBottom)
+  const maxH = Math.max(0, vh - top - PANEL_GAP)
+  const width = narrow ? Math.min(right.width, Math.max(0, vw - PANEL_GAP * 2)) : right.width
   const visibleBox = { ...right, top, height: Math.min(right.height, maxH) }
   const name = api.tabs.find(tab => tab.tabId === api.activeTabId)?.name || t('tab.untitled')
   const close = () => {
@@ -59,11 +60,9 @@ export default function RightDock() {
       data-tour="dock-panel"
       data-ui="right-dock"
       id="qb-right-dock" aria-labelledby="qb-dock-title"
-      data-pane={pane} data-expanded={expanded}
+      data-pane={pane}
       className={`m-dock qb-right-dock fixed ${narrow ? 'z-[60]' : 'z-[45]'} flex flex-col qb-card text-gray-200 ${leaving ? 'm-leave pointer-events-none' : ''}`}
-      style={narrow
-        ? { left: 8, right: 8, bottom: 'max(8px, env(safe-area-inset-bottom))', width: 'auto', height: expanded ? `calc(100dvh - ${TAB_BAR_H + TOOLBAR_CHROME_H + PANEL_GAP * 2}px)` : `calc((100dvh - ${TAB_BAR_H}px) * .48)`, maxHeight: `calc(100dvh - ${TAB_BAR_H + PANEL_GAP * 2}px)` }
-        : { width: right.width, top, right: PANEL_GAP, height: Math.min(right.height, maxH), maxHeight: maxH }}
+      style={{ width, top, right: PANEL_GAP, height: Math.min(right.height, maxH), maxHeight: maxH }}
     >
       {!narrow && <PanelHandles side="right" boxOverride={visibleBox} showMove={false} moveLabel={t('hint.movePanel')} sizeLabel={t('hint.resize')} />}
       <div className="qb-dock-header">
@@ -71,9 +70,6 @@ export default function RightDock() {
         <div className="qb-dock-heading">
           <span className="qb-dock-icon"><DockIcon pane={pane} size={21} /></span>
           <div key={pane} className="m-swap qb-dock-title-copy"><h1 id="qb-dock-title">{t(TITLE[pane])}</h1><p title={name}>{name}</p></div>
-          {narrow && <button onClick={() => setExpanded(value => !value)} className="qb-dock-control" aria-label={t(expanded ? 'chrome.compact' : 'chrome.expand')} title={t(expanded ? 'chrome.compact' : 'chrome.expand')} aria-expanded={expanded}>
-            {expanded ? <Minimize2 size={16} aria-hidden="true" /> : <Maximize2 size={16} aria-hidden="true" />}
-          </button>}
           <button onClick={close} className="qb-dock-control" aria-label={t('chrome.close')} title={t('chrome.close')}><X size={19} aria-hidden="true" /></button>
         </div>
       </div>

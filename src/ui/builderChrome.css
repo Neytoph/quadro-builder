@@ -118,8 +118,6 @@
   .qb-dock-control { width: 44px; }
   .qb-file-panel { padding: 12px; }
   .qb-top-toolbar .qb-tool { min-width: 48px; padding: 0 6px; font-size: 11px; }
-  html[data-motion] .qb-right-dock { transform-origin: bottom center; animation-name: m-in-up; }
-  html[data-motion] .qb-right-dock.m-leave { animation-name: m-out-up; }
 }
 @media (pointer: coarse) {
   .qb-tab-close, .qb-project-new { min-width: 44px; }
