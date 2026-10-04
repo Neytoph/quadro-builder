@@ -1,10 +1,10 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { BuildModel } from './model.js'
 import { loadCatalog, buildableTubes, panels, geometry } from './catalog.js'
 import { computeBOM } from './bom.js'
 import { computeAssemblyPlan, assemblyState, assemblyDetailState } from './assemblyPlan.js'
-import { coverItems, numberStepItems, stepItems, assemblyPresentationState, measureManualLegend, manualPartsHeight, assemblyDetailItems, assemblyDetailDirection, wrapManualText, manualStepTextLayout, manualStepDetailDescriptors, layoutManualCallouts, manualTextPageLayout, manualDetailPageLayout, manualActionLabelBox, manualSafetyDescriptor, MANUAL_TEXT_MM, MANUAL_AUX_MM } from './assemblyManual.js'
+import { coverItems, numberStepItems, stepItems, assemblyPresentationState, measureManualLegend, manualPartsHeight, manualLegendChunks, assemblyDetailItems, assemblyDetailDirection, wrapManualText, manualStepTextLayout, manualStepDetailDescriptors, layoutManualCallouts, manualTextPageLayout, manualDetailPageLayout, manualActionLabelBox, manualSafetyDescriptor, MANUAL_TEXT_MM, MANUAL_AUX_MM } from './assemblyManual.js'
 import { parseQDF } from './qdfimport.js'
 import { partImageSrc } from '../ui/partImages'
 import { getLang, setLang } from './i18n.js'
@@ -154,10 +154,13 @@ describe('说明书材料编号', () => {
     expect([...right.visible].sort()).toEqual([...after.visible].sort())
     expect(left.contextFiltered).toBe(false)
     expect(left.arrows).toHaveLength(4)
+    expect(left.arrows.map((arrow: any) => arrow.id).sort()).toEqual(step.action.modules.flatMap((module: any) => module.interfaceIds).sort())
     expect(left.interfaceMarks).toEqual([])
     expect(before.interfaceMarks).toHaveLength(4)
     for (const module of step.action.modules) for (const id of module.partIds) {
-      expect(left.transforms.get(id)).toEqual(module.translation)
+      // Quaternion-derived translations can contain -0; compare physical coordinates.
+      const translation = left.transforms.get(id)!
+      for (let axis = 0; axis < 3; axis++) expect(translation[axis]).toBeCloseTo(module.translation[axis], 8)
       expect(right.transforms.has(id)).toBe(false)
     }
     for (const id of before.done) expect(left.transforms.has(id)).toBe(false)
@@ -234,17 +237,31 @@ describe('说明书材料编号', () => {
     expect(manualPartsHeight(ctx, [], 2200)).toBe(47)
   })
 
-  it('C0013 新步骤的加固件完整分配，料表按实际行高留在图示页', () => {
+  it('C0013 加固件完整分配，长料表真实分页且保留主图空间', () => {
     const { model, plan } = manualFixture('qdf/C0013.qdf')
     const groups = plan.steps.map((step: any) => stepItems(model, step)).filter((items: any[]) => items.some(item => item.kind === 'reinforcements'))
-    const ctx = { font: '', measureText: (text: string) => ({ width: [...text].length * 20 }) }
+    // Real pagination/painting with deterministic metrics; visual font QA uses browser PDFs.
+    const ctx: any = new Proxy({ font: '', measureText: (text: string) => ({ width: [...String(text)].length * 20 }) }, { get(target, key) { return key in target ? target[key as keyof typeof target] : () => {} } })
+    const canvases: any[] = []
     expect(groups.flat().filter((item: any) => item.kind === 'reinforcements').reduce((sum: number, item: any) => sum + item.count, 0)).toBe(8)
-    for (const items of groups) {
-      const layout = measureManualLegend(ctx, items, 2450)
-      const partsH = manualPartsHeight(ctx, items, 2450)
-      expect(layout.height).toBeLessThanOrEqual((partsH - 5.7) * 10)
-      expect(210 - 20 - partsH - 3).toBeGreaterThanOrEqual(85)
-    }
+    vi.stubGlobal('document', { createElement: () => { const canvas = { width: 0, height: 0, getContext: () => ctx }; canvases.push(canvas); return canvas } })
+    try {
+      let continuationPages = 0
+      for (const items of groups) {
+        const title = 'C0013 材料续页', { chunks, partsH } = manualLegendChunks(items, false, new Map(), null, title)
+        expect(chunks.flat()).toEqual(items)
+        expect(chunks.flat().reduce((sum: number, item: any) => sum + item.count, 0)).toBe(items.reduce((sum: number, item: any) => sum + item.count, 0))
+        expect(210 - 20 - partsH - 3).toBeGreaterThanOrEqual(85)
+        chunks.forEach((chunk: any[], index: number) => {
+          expect(chunk.length).toBeGreaterThan(0)
+          const available = index ? 210 - 7 - manualTextPageLayout(ctx, title, []).bodyY : partsH - 5.2
+          expect(measureManualLegend(ctx, chunk, 2830).height).toBeLessThanOrEqual(available * 10)
+        })
+        continuationPages += chunks.length - 1
+      }
+      expect(continuationPages).toBeGreaterThan(0)
+      expect(canvases.every(canvas => canvas.width === 0 && canvas.height === 0)).toBe(true)
+    } finally { vi.unstubAllGlobals() }
   })
 
   it('s33 两条面板物料不再溢出封面成为稀疏续页', () => {
@@ -297,10 +314,18 @@ describe('说明书材料编号', () => {
   })
   it('C0005 滑梯本体按原位分件步骤绘图，详情过滤遮挡板且不修改冻结模型或零件状态', () => {
     const { model, plan } = manualFixture('qdf/C0005.qdf')
-    const index = plan.steps.findIndex((step: any) => plan.regions.find((region: any) => region.id === step.regionId)?.kind === 'slide' && step.operations.some((operation: any) => operation.type === 'fit-accessory' && operation.partIds.some((id: string) => model.slides.get(id)?.kind === 'slide2')))
+    // The body is fitted in its completed support layer, which can own the slide material.
+    const index = plan.steps.findIndex((step: any) => step.operations.some((operation: any) => operation.type === 'fit-accessory' && operation.partIds.some((id: string) => model.slides.get(id)?.kind === 'slide2')))
     expect(index).toBeGreaterThanOrEqual(0)
     expect(plan.steps[index].action.detached).toBe(false)
     expect(plan.steps[index].action.type).toBe('build')
+    const step = plan.steps[index], operation = step.operations.find((operation: any) => operation.type === 'fit-accessory' && operation.partIds.some((id: string) => model.slides.get(id)?.kind === 'slide2'))
+    expect(operation.placementTranslation).toEqual([0, 0, 0])
+    expect(operation.translation).toEqual([0, 18, 0])
+    expect(operation.verification.supportPoses.length).toBeGreaterThan(0)
+    expect(operation.verification.supportPoses.every((support: any) => support.installed && support.translation.every((value: number) => value === 0))).toBe(true)
+    const group = step.detailGroups.find((group: any) => group.operationIds.includes(operation.id))
+    expect(group).toBeTruthy()
     const before = JSON.stringify(model.toJSON())
     const state = assemblyState(plan, index, { action: false })
     const original = [...state.visible]
@@ -311,6 +336,19 @@ describe('说明书材料编号', () => {
     expect([...state.visible]).toEqual(original)
     expect(JSON.stringify(model.toJSON())).toBe(before)
     expect(plan.ledger.conserved).toBe(true)
+    const action = assemblyDetailState(plan, index, group.id, { action: true }), complete = assemblyDetailState(plan, index, group.id)
+    for (const id of operation.partIds) {
+      expect(action.visible.has(id)).toBe(true)
+      expect(action.transforms.get(id)).toEqual([0, 18, 0])
+      expect(complete.visible.has(id)).toBe(true)
+      expect(complete.transforms.get(id) || [0, 0, 0]).toEqual([0, 0, 0])
+    }
+    const next = step.operations.findIndex((op: any) => group.operationIds.includes(op.id)), last = step.operations.findLastIndex((op: any) => group.operationIds.includes(op.id))
+    const consumed = new Set(step.operations.slice(0, last + 1).flatMap((op: any) => op.consumesPartIds))
+    for (const op of step.operations.slice(last + 1)) for (const id of op.consumesPartIds) if (!consumed.has(id)) expect(complete.visible.has(id)).toBe(false)
+    expect(next).toBeGreaterThanOrEqual(0)
+    expect([...state.visible]).toEqual(original)
+    expect(JSON.stringify(model.toJSON())).toBe(before)
   })
   it('s33 说明书不生成固定检查步骤或螺丝位置', () => {
     const { plan } = manualFixture('assembly-fixtures/s33.json')

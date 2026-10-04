@@ -1044,7 +1044,7 @@ export function manualPartsHeight(ctx, items, maxW, cover = false) {
   return Math.min(maxHeight, Math.max(cover ? 54 : 47, Math.ceil(height + 6)));
 }
 
-function legendChunks(items, cover, icons, stamp, title = '') {
+export function manualLegendChunks(items, cover, icons, stamp, title = '') {
   const chunks = [];
   let consumed = 0;
   const measurement = newPageCanvas();
@@ -1330,7 +1330,7 @@ export async function exportAssemblyPdf(opts) {
   const itemsCover = coverItems(plan.bom || opts.bom || computeBOM(model));
   for (const item of itemsCover) item.instanceIds = [...new Set((plan.ledger?.instances || []).filter(row => row.group === item.kind && row.key === item.ledgerKey).flatMap(row => row.partIds))];
   const icons = await loadIcons(itemsCover);
-  const coverLayout = legendChunks(itemsCover, true, icons, stamp, copy.bomTitle);
+  const coverLayout = manualLegendChunks(itemsCover, true, icons, stamp, copy.bomTitle);
   const descriptors = [{ type: 'cover', items: coverLayout.chunks[0], partsH: coverLayout.partsH }, ...coverLayout.chunks.slice(1).map(items => ({ type: 'legend', title: copy.bomTitle, items }))];
   descriptors.push(manualSafetyDescriptor(copy, manualLang));
   descriptors.push({ type: 'overview' });
@@ -1339,7 +1339,7 @@ export async function exportAssemblyPdf(opts) {
     const step = steps[index];
     const heading = (copy.stepHeading || '{k}/{n} · {title}').replace('{k}', String(index + 1)).replace('{n}', String(steps.length)).replace('{kind}', kindLabel(step.kind, copy)).replace('{title}', step.title || '');
     const items = numberStepItems(stepItems(model, step), itemsCover);
-    const { chunks, partsH } = legendChunks(items, false, icons, stamp, `${heading} · ${copy.thisStep}`);
+    const { chunks, partsH } = manualLegendChunks(items, false, icons, stamp, `${heading} · ${copy.thisStep}`);
     const instructions = step.instructions || [];
     const measurement = newPageCanvas();
     const contextHint = step.action?.layer ? copy.layerHint : ['frame', 'risers', 'panels'].includes(step.kind) ? copy.bodyHint : step.action?.type === 'preassemble' ? copy.preassemblyHint : copy.contextHint;
