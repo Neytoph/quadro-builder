@@ -33,6 +33,27 @@ describe('说明书材料编号', () => {
     expect(before.hiddenNewParts.size).toBe(step.action.partIds.length)
     expect(JSON.stringify(model.toJSON())).toBe(saved)
   })
+  it('C0179局部下套页保留真实立柱到基础，排除无关平台并保持支撑原位', () => {
+    const model = new BuildModel()
+    model.loadJSON(parseQDF(readFileSync('public/qdf/C0179.qdf', 'utf8'), { tubes: buildableTubes(), panels: panels(), connectorSize: geometry().connectorSize, mergeEps: 2 }))
+    const plan = computeAssemblyPlan(model)
+    const index = plan.steps.findIndex((step: any) => step.y === 20 && step.action.scope === 'parts' && step.action.type === 'attach')
+    const step = plan.steps[index], state = assemblyState(plan, index, { action: true })
+    const presented = assemblyPresentationState(model, plan, step, state)
+    expect(presented.visible.size).toBeLessThan(state.visible.size)
+    for (const id of step.action.partIds) expect(presented.visible.has(id)).toBe(true)
+    for (const mark of presented.interfaceMarks) {
+      expect(presented.visible.has(mark.supportTubeId)).toBe(true)
+      expect(presented.transforms.has(mark.supportTubeId)).toBe(false)
+      const support = model.tubes.get(mark.supportTubeId)
+      expect(presented.visible.has(support.a)).toBe(true)
+      expect(presented.visible.has(support.b)).toBe(true)
+    }
+    expect([...presented.visible].some(id => model.nodes.get(id)?.y === 0)).toBe(true)
+    // 原模型这一低平台有四根横管与四根立柱，基础横管接向其他平台。
+    expect([...presented.visible].filter(id => model.tubes.has(id))).toHaveLength(8)
+    expect(presented.arrows.every((arrow: any) => arrow.from[1] > arrow.to[1])).toBe(true)
+  })
   it('C0179 第2步全部7种零件留在步骤页，管35 cm不再单独占页', () => {
     const model = new BuildModel()
     model.loadJSON(parseQDF(readFileSync('public/qdf/C0179.qdf', 'utf8'), { tubes: buildableTubes(), panels: panels(), connectorSize: geometry().connectorSize, mergeEps: 2 }))

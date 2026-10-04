@@ -828,6 +828,7 @@ export function assemblyPresentationState(model, plan, step, state, { detail = f
   if (!state || !step) return state;
   const region = plan.regions.find(region => region.id === step.regionId);
   const modulePreassembly = step.action?.scope === 'parts' && step.action.type === 'preassemble';
+  const moduleInstallation = step.action?.scope === 'parts' && step.action.type === 'attach';
   if (modulePreassembly && state.actionStage === 'before') {
     const prepared = assemblyState(plan, plan.steps.indexOf(step));
     const visible = new Set(step.action.partIds);
@@ -836,7 +837,7 @@ export function assemblyPresentationState(model, plan, step, state, { detail = f
     for (const id of step.tubeIds) transforms.set(id, (transforms.get(id) || [0, 0, 0]).map((v, axis) => v + (axis === 1 ? 8 : 0)));
     state = { ...state, visible, current: new Set(visible), done: new Set(), transforms, hiddenNewParts: new Set(), arrows: [], actionStage: 'parts' };
   }
-  const allowed = new Set(modulePreassembly ? step.action.partIds : region?.partIds || step.partIds || []);
+  const allowed = new Set(modulePreassembly || moduleInstallation ? step.action.partIds : region?.partIds || step.partIds || []);
   const includeTube = id => {
     const tube = model.tubes.get(id);
     if (tube) { allowed.add(id); allowed.add(tube.a); allowed.add(tube.b); }
@@ -869,6 +870,23 @@ export function assemblyPresentationState(model, plan, step, state, { detail = f
         return Math.hypot(...d.map((value, axis) => start[axis] + value * t - marker.position[axis]));
       };
       [...model.tubes.values()].filter(tube => state.visible.has(tube.id)).map(tube => ({ tube, distance: distanceToSegment(tube) })).sort((a, b) => a.distance - b.distance).slice(0, 4).filter(row => row.distance < 35).forEach(row => includeTube(row.tube.id));
+    }
+  }
+  if (moduleInstallation) {
+    // 局部框架保留承托立柱直到基础的连接关系，不把整个大区域缩进操作图。
+    let expanded = true;
+    while (expanded) {
+      expanded = false;
+      for (const tube of model.tubes.values()) {
+        if (!state.visible.has(tube.id) || allowed.has(tube.id) || tube.arm || tube.link || tube.bow) continue;
+        const a = model.nodes.get(tube.a), b = model.nodes.get(tube.b);
+        if (!a || !b || Math.max(a.y, b.y) > step.y + 0.6) continue;
+        if (Math.abs(a.x - b.x) > 0.6 || Math.abs(a.z - b.z) > 0.6) continue;
+        if (allowed.has(tube.a) || allowed.has(tube.b)) { includeTube(tube.id); expanded = true; }
+      }
+    }
+    for (const tube of model.tubes.values()) {
+      if (state.visible.has(tube.id) && allowed.has(tube.a) && allowed.has(tube.b)) includeTube(tube.id);
     }
   }
   if (detail) {
