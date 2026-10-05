@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Vector3 } from 'three'
 import { BuildModel, SceneManager, colorName, partName, getPartById } from '../engine-api'
-import { assemblyState, computeAssemblyPlan } from '../engine/assemblyPlan.js'
+import { computeAssemblyPlan } from '../engine/assemblyPlan.js'
 import { takeModelThumb, waitSceneReady } from '../engine/thumbShot.js'
-import { coverItems, renderedBounds, manualPositionedItems, layoutManualCallouts, projectedOperationArrowHead } from '../engine/assemblyManual.js'
+import { coverItems, renderedBounds, manualPositionedItems, layoutManualCallouts, projectedOperationArrowHead, projectReadingLocatorBounds } from '../engine/assemblyManual.js'
 import { createAssemblyReadingPlan, assemblyReadingState, readingModuleDirection } from '../engine/assemblyReadingPlan.js'
 import { useEngine, type AssemblyConfig } from '../store/EngineContext'
 import { useI18n } from '../i18n'
@@ -109,17 +109,11 @@ export default function AssemblyPreview() {
       const detail: E = !whole && !marked.length ? entry?.areas.find((area: E) => area.id === detailId) : null
       let assembly: E = null
       if (entry && !whole && !marked.length) {
-        assembly = entry.kind === 'module' && action && !detail ? assemblyState(preview.plan, entry.sourceIndex, { action: true }) : assemblyReadingState(v.model, preview.plan, entry, { area: detail, structure: !!detail && action, whole: !detail && !action })
-        if (entry.kind === 'module' && action && !detail) {
-          assembly = { ...assembly, operationNumbers: [], fixingPoints: [] }
-        } else if (entry.kind === 'module' && !detail) {
-          const placed = assemblyState(preview.plan, entry.sourceIndex, { action: false })
-          assembly = { ...assembly, interfaceMarks: placed.interfaceMarks.filter((marker: E) => entry.interfaceIds.includes(marker.id)) }
-        }
+        assembly = assemblyReadingState(v.model, preview.plan, entry, { area: detail, structure: entry.kind !== 'module' && action, whole: !detail && !action })
       }
       const rows = detail?.materials || entry?.materials || []
       const priority = [...rows].sort((a: E, b: E) => (a.kind === 'connectors' ? 0 : 1) - (b.kind === 'connectors' ? 0 : 1) || a.num - b.num)
-      const materials = entry && assembly ? priority.slice(detail && !action ? 6 : 0, detail && !action ? 12 : 6) : []
+      const materials = entry && assembly ? priority.slice(action ? 0 : 6, action ? 6 : 12) : []
       const viewKey = `${index}:${detail?.id || 'overview'}:${action}:${whole}:${marked.join(',')}`
       const preferred = entry?.kind === 'module' ? readingModuleDirection(v.model, preview.plan, entry) : detail && !action ? [-1, .75, -1] : [1, .75, 1]
       const direction = cameraViewKey.current !== viewKey ? new Vector3(...preferred).normalize() : v.scene.camera.position.clone().sub(v.scene.controls.target).normalize() as Vector3
@@ -128,13 +122,22 @@ export default function AssemblyPreview() {
         const key = `${index}:${detail?.id || 'module'}:${action}`
         if (locationCache.current?.plan !== preview.plan || locationCache.current?.key !== key) {
           const overview = assemblyReadingState(v.model, preview.plan, entry, { whole: true })
-          if (detail) { overview.current = new Set(detail.partIds); overview.done = new Set([...overview.visible].filter((id: string) => !overview.current.has(id))) }
+          overview.visible = new Set(GROUPS.flatMap(group => [...(v.model[group]?.keys() || [])]).concat([...v.model.nodes.keys()], [...v.model.clamps.keys()]))
+          overview.current = new Set(detail?.partIds || entry.partIds)
+          overview.done = new Set([...overview.visible].filter((id: string) => !overview.current.has(id)))
+          overview.transforms = new Map()
           v.scene.renderModel(v.model, null, { assembly: overview })
           const bounds = renderedBounds(v.scene, v.model)
           v.scene._viewSize = { w: 300, h: 220 }
           let image: string
           try {
-            v.scene._frameAlong(v.model, new Vector3(...preferred).normalize(), { silent: true, bounds, aspect: 300 / 220, margin: 1.2 })
+            let complete = false
+            for (const margin of [1.2, 1.45, 1.8]) {
+              v.scene._frameAlong(v.model, new Vector3(...preferred).normalize(), { silent: true, bounds, aspect: 300 / 220, margin })
+              complete = projectReadingLocatorBounds(v.scene, bounds, 300 / 220).complete
+              if (complete) break
+            }
+            if (!complete) throw new Error('Assembly locator could not fit the complete structure')
             image = v.scene.snapshot({ width: 300, height: 220, pixelRatio: 1, hideRoom: true, hideLabels: true })
           } finally { v.scene._viewSize = null }
           locationCache.current = { plan: preview.plan, key, image }
@@ -144,18 +147,8 @@ export default function AssemblyPreview() {
       projectOverlay.current = () => {
         const width = host.current?.clientWidth || 1, height = host.current?.clientHeight || 1
         const marks = [], arrows = []
-        for (const marker of entry?.kind === 'module' ? assembly?.interfaceMarks || [] : []) {
-          const interfaceIndex = entry.interfaceIds.indexOf(marker.id)
-          if (interfaceIndex < 0) continue
-          const arrow = assembly?.arrows.find((a: E) => a.id === marker.id)
-          const delta = assembly?.transforms.get(marker.nodeId)
-          const detached = delta && marker.position.map((n: number, i: number) => n + delta[i])
-          const positions = marker.positions || (arrow ? [arrow.from, arrow.to] : detached ? [marker.position, detached] : [marker.position])
-          for (const position of positions.filter(Boolean)) {
-            const point = v.scene.projectWorld([position])[0]
-            if (point) marks.push({ x: point.u * width, y: point.v * height, label: String.fromCharCode(65 + interfaceIndex) })
-          }
-        }
+        const interfaces = entry?.kind === 'module' && assembly ? (preview.plan.interfaces || []).filter((marker: E) => entry.interfaceIds.includes(marker.id) && marker.position) : []
+        interfaces.forEach((marker: E, i: number) => { const point = v.scene.projectWorld([marker.position])[0]; if (point) marks.push({ x: point.u * width, y: point.v * height, label: String.fromCharCode(65 + i) }) })
         for (const item of manualPositionedItems(v.model, materials, assembly)) {
           const projected = v.scene.projectWorld(item.positions).filter((p: E) => p && p.u >= 0 && p.u <= 1 && p.v >= 0 && p.v <= 1)
           const point = projected[0]
