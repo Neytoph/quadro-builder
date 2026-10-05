@@ -81,4 +81,9 @@
   .assembly-preview-expanded .assembly-drawing { flex: 1 1 0; min-height: 0; }
   .assembly-preview-expanded .assembly-view-toolbar,
   .assembly-preview-expanded .assembly-view-caption { flex-shrink: 0; }
+  .assembly-preview-expanded .assembly-detail-navigation > .qb-btn:first-child,
+  .assembly-preview-expanded .assembly-detail-paging,
+  .assembly-preview-expanded .assembly-view-caption p,
+  .assembly-preview-expanded .assembly-preview-footer p { display: none; }
+  .assembly-preview-expanded .assembly-detail-navigation .qb-btn { flex: 1; text-align: center; max-width: none; }
 }
