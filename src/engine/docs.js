@@ -100,6 +100,7 @@ function applyRemote(store, record, result) {
     result.doc = remoteDoc(record);
     if (current?.conflictCopies) result.doc.conflictCopies = current.conflictCopies;
     if (current?.legacyRecoveryId) result.doc.legacyRecoveryId = current.legacyRecoveryId;
+    if (current?.legacyDeletionAt) result.doc.legacyDeletionAt = current.legacyDeletionAt;
     store.put(result.doc);
     result.applied = true;
   };
@@ -196,6 +197,11 @@ export function markDocSynced(docId, rev, expectUpdatedAt, sentCover, expectSave
 }
 
 /** PUT 等待期间的最新保存和发送快照都在同一事务内保全。 */
+function hasRecoverableData(record) {
+  const data = record.data ?? record.recoveryData;
+  return data !== null && data !== undefined;
+}
+
 export function resolveDocConflict(sent, remote, authoritativeLegacy = false) {
   const result = { copies: {} };
   return dbTx(DB_STORES.docs, "readwrite", store => {
@@ -206,6 +212,8 @@ export function resolveDocConflict(sent, remote, authoritativeLegacy = false) {
       let candidates = [sent];
       if (current?.dirty) candidates = current.saveId === sent.saveId ? [current] : [sent, current];
       for (const candidate of candidates) {
+        // 旧 removeDoc 丢弃了 data，不能把该删除意图伪装成可上传空模型。
+        if (candidate.deletedAt && !hasRecoverableData(candidate)) continue;
         const key = candidate.saveId || `legacy:${candidate.updatedAt}`;
         if (copies[key]) { result.copies[key] = copies[key]; continue; }
         const copyId = id("d");
@@ -223,15 +231,17 @@ export function resolveDocConflict(sent, remote, authoritativeLegacy = false) {
       if (current?.dirty && current.saveId === sent.saveId) {
         const sentKey = sent.saveId || `legacy:${sent.updatedAt}`;
         const latestKey = current.saveId || `legacy:${current.updatedAt}`;
-        copies[sentKey] = result.copies[sentKey] = copies[latestKey];
+        if (copies[latestKey]) copies[sentKey] = result.copies[sentKey] = copies[latestKey];
       }
       result.copyId = copies[sent.saveId || `legacy:${sent.updatedAt}`];
       // 新的本地保存已保全为副本；接受的远端不冒充本次保存回执。
       const latestRemote = current?.pendingRemote?.rev > remote.rev ? current.pendingRemote : remote;
       const legacyRecoveryId = authoritativeLegacy && current?.dirty && !current.saveId
         ? copies[`legacy:${current.updatedAt}`] : current?.legacyRecoveryId;
+      const legacyDeletionAt = authoritativeLegacy && sent.deletedAt && !hasRecoverableData(sent)
+        ? sent.deletedAt : current?.legacyDeletionAt;
       if (!current || current.dirty && authoritativeLegacy || (current.rev || 0) <= latestRemote.rev) store.put({ ...remoteDoc(latestRemote), conflictCopies: copies,
-        ...(legacyRecoveryId ? { legacyRecoveryId } : {}) });
+        ...(legacyRecoveryId ? { legacyRecoveryId } : {}), ...(legacyDeletionAt ? { legacyDeletionAt } : {}) });
       else store.put({ ...current, conflictCopies: copies });
     };
     return result;
@@ -246,6 +256,10 @@ export function protectLegacyDoc(sent) {
     request.onsuccess = () => {
       const current = request.result;
       if (!current?.dirty || current.saveId || !(current.rev > 0)) return;
+      if (current.deletedAt && !hasRecoverableData(current)) {
+        result.local = current;
+        return;
+      }
       const key = `legacy:${current.updatedAt}`;
       const copies = { ...(current.conflictCopies || {}) };
       if (!copies[key]) {

@@ -20,6 +20,9 @@ export interface DocRecord {
   saveId?: string
   parentSaveId?: string
   legacyRecoveryId?: string
+  /** 旧版删除未保留模型，真实核对后仍保留该删除意图。 */
+  legacyDeletionAt?: number
+  recoveryData?: unknown
   syncedSaveId?: string
   pendingRemote?: RemoteDoc
   conflictCopies?: Record<string, string>
@@ -76,6 +79,7 @@ export type SyncEvent =
   | { type: 'pushed'; id: string; rev: number; saveId?: string }
   | { type: 'pulled'; count: number; rev: number }
   | { type: 'conflict'; id: string; copyId: string; saveId?: string }
+  | { type: 'legacy-deletion'; id: string }
   | { type: 'inventory-pushed'; rev: number }
   | { type: 'inventory-pulled'; rev: number }
   /** 库存两端都改过。服务端那份已生效，本地那份存进了 stashKey。 */

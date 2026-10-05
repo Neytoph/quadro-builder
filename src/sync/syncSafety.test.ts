@@ -460,6 +460,70 @@ describe('存档及同步竞争保护（内存 IndexedDB、隔离请求夹具，
     }
   })
 
+  it('旧41fd无恢复数据的删除核对live后保留意图，不造空副本且其他模型正常上传', async () => {
+    const legacy = { ...remote('deleted', 2), data: null, deletedAt: 10, dirty: true }
+    await storage.dbTx(storage.DB_STORES.docs, 'readwrite', (store: IDBObjectStore) => store.put(legacy))
+    const other = await docs.saveDoc({ docId: 'other', name: 'other', data: model('other') })
+    const cloud = remote('deleted', 3, 'latest')
+    const calls: string[] = []
+    const events: SyncEvent[] = []
+    const sync = createSync({ baseUrl: '/quadro', accountId, onEvent: event => events.push(event), fetchImpl: sink((url, init) => {
+      calls.push(`${init?.method || 'GET'} ${url}`)
+      if (url.endsWith('/models/deleted')) return response(cloud)
+      if (init?.method === 'PUT') {
+        const payload = JSON.parse(init.body as string)
+        expect(payload.data).toEqual(other.data)
+        return response({ rev: 4, saveId: payload.saveId })
+      }
+      return response({ items: [cloud], rev: 4 })
+    }) })
+    await sync.syncNow(); sync.stop()
+    expect(calls).toContain('GET /quadro/models/deleted')
+    expect(calls.filter(call => call.startsWith('PUT '))).toEqual(['PUT /quadro/models/other'])
+    expect(calls.some(call => call.startsWith('DELETE '))).toBe(false)
+    expect(await docs.listDocs()).toHaveLength(2)
+    const restored = await docs.getDoc('deleted')
+    expect(restored!.data).toEqual(cloud.data)
+    expect(restored!.legacyDeletionAt).toBe(10)
+    expect(restored!.legacyRecoveryId).toBeUndefined()
+    expect(events).toContainEqual({ type: 'legacy-deletion', id: 'deleted' })
+    expect(events.some(event => event.type === 'error')).toBe(false)
+    expect((await docs.getDoc('other'))!.syncedSaveId).toBe(other.saveId)
+    await docs.putRemoteDoc(remote('deleted', 5, 'next'))
+    expect((await docs.getDoc('deleted'))!.legacyDeletionAt).toBe(10)
+  })
+
+  it('旧无数据删除GET失败仍保留墓碑，随后墓碑或404核对均不生成模型副本', async () => {
+    for (const missing of [false, true]) {
+      const docId = missing ? 'old-missing' : 'old-deleted'
+      const legacy = { ...remote(docId, 2), data: null, deletedAt: 10, dirty: true }
+      await storage.dbTx(storage.DB_STORES.docs, 'readwrite', (store: IDBObjectStore) => store.put(legacy))
+      let failed = true
+      const calls: string[] = []
+      const sync = createSync({ baseUrl: '/quadro', accountId, fetchImpl: sink((url, init) => {
+        calls.push(`${init?.method || 'GET'} ${url}`)
+        if (url.endsWith(`/models/${docId}`)) {
+          if (failed) return response({}, 500)
+          return missing ? response({}, 404) : response({ ...remote(docId, 3), data: null, deletedAt: 3 })
+        }
+        return response({ items: [], rev: 3 })
+      }) })
+      await sync.syncNow()
+      const pending = (await docs.allRecords()).find((doc: DocRecord) => doc.id === docId)
+      expect(pending).toMatchObject({ deletedAt: 10, data: null, dirty: true })
+      expect(pending.legacyRecoveryId).toBeUndefined()
+      expect(await docs.listDocs()).toHaveLength(0)
+      failed = false
+      await sync.syncNow(); sync.stop()
+      const accepted = (await docs.allRecords()).find((doc: DocRecord) => doc.id === docId)
+      expect(accepted.dirty).toBe(false)
+      expect(accepted.deletedAt).toBeGreaterThan(0)
+      expect(accepted.legacyDeletionAt).toBe(10)
+      expect(calls.some(call => call.startsWith('PUT ') || call.startsWith('DELETE '))).toBe(false)
+      expect(await docs.listDocs()).toHaveLength(0)
+    }
+  })
+
   it('无saveId的正常clean云端记录不迁移，新rename/cover分配已知内容标识', async () => {
     const cloud = remote('clean', 2)
     await docs.putRemoteDoc(cloud)

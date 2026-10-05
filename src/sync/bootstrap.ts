@@ -9,15 +9,19 @@ let live: ReturnType<typeof createSync> | null = null
 const waiting = new Set<() => void>()
 const subscribers = new Set<(e: SyncEvent) => void>()
 let recentEvent: SyncEvent | undefined
+const pendingWarnings: SyncEvent[] = []
 function publish(e: SyncEvent): void {
   recentEvent = e
+  if (!subscribers.size && (e.type === 'error' || e.type === 'quota' || e.type === 'legacy-deletion')) pendingWarnings.push(e)
   for (const cb of subscribers) {
     try { cb(e) } catch (error) { console.warn('[sync] event subscriber', error) }
   }
 }
 export function onSyncEvent(cb: (e: SyncEvent) => void): () => void {
   subscribers.add(cb)
-  if (recentEvent) cb(recentEvent)
+  const warnings = pendingWarnings.splice(0)
+  for (const warning of warnings) cb(warning)
+  if (recentEvent && !warnings.includes(recentEvent)) cb(recentEvent)
   return () => { subscribers.delete(cb) }
 }
 let probeDone: (ok: boolean | null) => void = () => {}

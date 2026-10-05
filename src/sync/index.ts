@@ -130,6 +130,9 @@ export function createSync(opts: SyncOptions = {}) {
         if (remote && (remote.id !== doc.id || !Number.isSafeInteger(remote.rev))) throw new Error('invalid legacy remote model')
         const copies = await forkConflict(legacy, remote || { id: doc.id, name: legacy.name, data: null,
           createdAt: legacy.createdAt, updatedAt: Date.now(), deletedAt: Date.now(), rev: 0 }, true)
+        if (legacy.deletedAt && [legacy.data, legacy.recoveryData].every(data => data === null || data === undefined) && remote && !remote.deletedAt) {
+          emit({ type: 'legacy-deletion', id: doc.id })
+        }
         for (const copyId of new Set(Object.values(copies))) {
           if (queued.has(copyId)) continue
           const copy = await docs.getDoc(copyId) as DocRecord | null
