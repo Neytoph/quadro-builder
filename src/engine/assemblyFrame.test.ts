@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { loadCatalog, buildableTubes, panels, geometry } from './catalog.js'
 import { BuildModel } from './model.js'
 import { parseQDF } from './qdfimport.js'
