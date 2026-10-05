@@ -17,8 +17,8 @@
 .assembly-view-caption { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; background: #fffaf3; font-size: 12px; }
 .assembly-view-caption > div { min-width: 0; }
 .assembly-view-caption p { font-size: 12px; }
-.assembly-location { margin: 0; flex: 0 0 110px; text-align: center; }
-.assembly-location img { width: 110px; height: 80px; object-fit: contain; border-radius: 6px; background: #f4f3ed; border: 1px solid #e1d4c4; }
+.assembly-location { margin: 0; flex: 0 0 114px; max-width: 40%; text-align: center; padding: 3px; background: #fff; border: 1px solid #e1d4c4; border-radius: 8px; }
+.assembly-location img { display: block; width: 100%; height: auto; aspect-ratio: 300 / 220; object-fit: contain; border-radius: 6px; background: #f4f3ed; }
 .assembly-location figcaption { font-size: 11px; margin-top: 3px; line-height: 1.4; }
 .assembly-detail-navigation { display: flex; gap: 6px; padding: 10px 12px; overflow-x: auto; background: #fffaf3; border-top: 1px solid #e9e3d6; }
 .assembly-detail-navigation { flex-wrap: nowrap; flex-shrink: 0; }
@@ -38,7 +38,8 @@
 .assembly-detail-materials li { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-bottom: 1px solid #eee4d6; font-size: 14px; }
 .assembly-material-number { display: grid; place-items: center; flex: 0 0 26px; height: 26px; border: 1.5px solid #ea580c; border-radius: 50%; color: #9a4113; font-weight: 700; font-size: 12px; }
 .assembly-detail-materials img { width: 32px; height: 32px; object-fit: contain; }
-.assembly-detail-materials li > span:not(.assembly-material-number) { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.assembly-photo-loading { width: 32px; height: 32px; flex-shrink: 0; background: #f3eee4; border-radius: 4px; }
+.assembly-detail-materials li > span:not(.assembly-material-number):not(.assembly-photo-loading) { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .assembly-detail-materials small { display: block; color: #5a6270; }
 .assembly-detail-materials b { white-space: nowrap; flex-shrink: 0; }
 .assembly-step-list { margin-top: 16px; }
