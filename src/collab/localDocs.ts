@@ -33,8 +33,9 @@ export function writePersonalState(local: LocalDoc, state: PersonalState & Parti
   local.doc.transact(() => {
     const map = local.doc.getMap('personal-state')
     for (const [key, value] of Object.entries(state)) {
-      if (value !== undefined) map.set(key, value)
-      else map.delete(key)
+      if (value !== undefined) {
+        if (map.get(key) !== value) map.set(key, value)
+      } else if (map.has(key)) map.delete(key)
     }
   }, local.history.origin)
 }

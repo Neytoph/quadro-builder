@@ -2,8 +2,9 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { storeState } from 'y-indexeddb'
+import * as Y from 'yjs'
 import { BuildModel, buildableTubes, docs, geometry, loadCatalog, panels, parseQDF, storage } from '../engine-api'
-import { createTabDoc, dropTabDoc, openTabDoc, readPersonalState, writePersonalState } from '../collab/localDocs'
+import { createTabDoc, dropTabDoc, memoryDoc, openTabDoc, readPersonalState, writePersonalState } from '../collab/localDocs'
 import type { ModelJSON } from '../collab/ymodel'
 import { displaySaveState, modelContent, personalDecision, readPersonalBinding, restorePersonalBinding, savedGenerationUnchanged, savedRecordState } from './personalTabs'
 
@@ -144,5 +145,29 @@ describe('personal tab working baseline', () => {
       savedContent: undefined, editGeneration: undefined, saveState: undefined, conflictDocId: undefined })
     expect(restorePersonalBinding(session, {})).toBe(session)
     expect(restorePersonalBinding(session, { baseRev: 0, saveId: 'unknown-binding' })).toBe(session)
+  })
+
+  it('repeating identical full state creates no Yjs items or changed keys, while an explicit null binding remains a real update', () => {
+    const local = memoryDoc(original)
+    const state = { bindingVersion: 1 as const, docId: 'original', name: 'Original', dirty: false,
+      baseRev: 7, savedContent: modelContent(original), editGeneration: 3, saveId: 'save-3', saveState: 'synced' as const }
+    writePersonalState(local, state)
+    const before = Y.encodeStateVector(local.doc)
+    const changed: number[] = []
+    let updates = 0
+    local.doc.on('afterTransaction', transaction => changed.push(transaction.changed.size))
+    local.doc.on('update', () => updates++)
+    writePersonalState(local, state)
+    writePersonalState(local, state)
+    expect(changed).toEqual([0, 0])
+    expect(updates).toBe(0)
+    // 公开state vector没有推进，证明savedContent等字段未生成新Yjs Item。
+    expect(Y.encodeStateVector(local.doc)).toEqual(before)
+    writePersonalState(local, { ...state, docId: null })
+    expect(readPersonalState(local).docId).toBeNull()
+    expect(updates).toBe(1)
+    expect(Y.encodeStateVector(local.doc)).not.toEqual(before)
+    local.history.destroy()
+    local.doc.destroy()
   })
 })
