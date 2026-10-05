@@ -1,6 +1,12 @@
+import {normalizedAssemblyQuaternion} from './assemblyAccessoryMethods.js';
 import { computeBOM, connectorsForNode, resolveNodeConnection, reinforcementRuns, textileRow } from './bom.js';
 import { reinforcementPart } from './catalog.js';
 import { geometry } from './catalog.js';
+import { checkAssemblyPath, beginAssemblyCollisionPass } from './assemblyCollision.js';
+import { scheduleAssemblyAccessories, addAssemblyOperations } from './assemblyOperations.js';
+import { consolidateLayerSteps } from './assemblyLayerSteps.js';
+import { xAxisOf, yAxisOf } from './util.js';
+import { C45_ARM_LEN, C45_SLEEVE_LEN } from './config.js';
 import { getLang } from './i18n.js';
 import { isOriginalComponent, componentInstallCopy, componentPartId } from './accessoryInfo.js';
 
@@ -17,44 +23,11 @@ const coordOf = order => n => (n?.[order[0]] || 0) * (order[1] === '-' ? -1 : 1)
 const idsOf = r => Object.keys(MAPS).flatMap(k => r[k] || []);
 const rowKey = (group, row) => row.key ?? (group === 'connectors' ? row.type : `${row.id || row.panelId || row.tubeId || row.kind}|${row.color || ''}`);
 
-function segmentDistance(a, b, c, d) {
-  const sub = (a, b) => a.map((v, i) => v - b[i]), dot = (a, b) => a.reduce((s, v, i) => s + v * b[i], 0);
-  const u = sub(b, a), v = sub(d, c), w = sub(a, c);
-  const aa = dot(u, u), bb = dot(u, v), cc = dot(v, v), dd = dot(u, w), ee = dot(v, w), det = aa * cc - bb * bb;
-  let s = det > 1e-8 ? Math.max(0, Math.min(1, (bb * ee - cc * dd) / det)) : 0;
-  let t = cc > 1e-8 ? (bb * s + ee) / cc : 0;
-  if (t < 0) { t = 0; s = aa > 1e-8 ? Math.max(0, Math.min(1, -dd / aa)) : 0; }
-  else if (t > 1) { t = 1; s = aa > 1e-8 ? Math.max(0, Math.min(1, (bb - dd) / aa)) : 0; }
-  return Math.hypot(...w.map((x, i) => x + s * u[i] - t * v[i]));
-}
-
-function tubePosition(model, tube) {
-  if (tube.geom?.p0 && tube.geom?.dir) return [tube.geom.p0, tube.geom.p0.map((v, i) => v + tube.geom.dir[i] * (tube.geom.len + (tube.geom.pad || 0)))];
-  return [point(model.nodes.get(tube.a)), point(model.nodes.get(tube.b))];
-}
-
 function insertionObstruction(model, region, installed, translation, destination = [0, 0, 0], allowSharedSeams = true) {
-  const tubeRadius = geometry().tubeRadius || 2.45, radius = tubeRadius * 2;
-  const travel = distance(translation, destination), sampleCount = Math.max(1, Math.ceil(travel / tubeRadius));
-  const halfStep = travel / sampleCount / 2;
-  const obstacles = installed.flatMap(r => r.tubeIds).map(id => model.tubes.get(id)).filter(t => t && !t.arm && !t.link && !t.bow);
-  for (const id of region.tubeIds) {
-    const moving = model.tubes.get(id);
-    if (moving.arm || moving.link || moving.bow) continue;
-    const [a, b] = tubePosition(model, moving);
-    for (const obstacle of obstacles) {
-      // 插接口的同轴支撑是终点接合对象，允许管端靠近这一对象。
-      if (allowSharedSeams && [moving.a, moving.b].some(id => id === obstacle.a || id === obstacle.b)) continue;
-      const [c, d] = tubePosition(model, obstacle);
-      for (let sample = 0; sample <= sampleCount; sample++) {
-        const delta = translation.map((v, i) => v * (1 - sample / sampleCount) + destination[i] * sample / sampleCount);
-        const movedA = a.map((v, i) => v + delta[i]), movedB = b.map((v, i) => v + delta[i]);
-        const clearance = radius + (sample > 0 && sample < sampleCount ? halfStep : 0);
-        if (segmentDistance(movedA, movedB, c, d) < clearance) return { movingTubeId: id, obstacleTubeId: obstacle.id, sample, pathSamples: sampleCount + 1, sampleSpacing: travel / sampleCount, translation: delta };
-      }
-    }
-  }
-  return null;
+  const keys = Object.keys(MAPS);
+  const movingIds = [...new Set(keys.flatMap(k => region[k] || []))];
+  const installedIds = [...new Set(installed.flatMap(r => keys.flatMap(k => r[k] || [])))];
+  return checkAssemblyPath(model, movingIds, installedIds, translation, destination, { allowMating: allowSharedSeams });
 }
 
 function components(items, neighbors) {
@@ -287,6 +260,16 @@ function automaticRegions(model) {
     region.supportRegionId = support?.id;
     region.anchor = point(anchor);
   }
+  // A connector with no physical body tube is part of the sole adjoining
+  // ramp frame. Consuming it as an isolated body would close both tube ends
+  // before that frame can be preassembled.
+  for(const placeholder of regions.filter(region=>region.kind==='body'))for(const nodeId of [...(placeholder.ownedNodeIds||[])]){
+    if(placeholder.tubeIds.some(id=>{const t=model.tubes.get(id);return !t.arm&&!t.link&&(t.a===nodeId||t.b===nodeId);} ))continue;
+    const adjoining=regions.filter(region=>region!==placeholder&&region.tubeIds.some(id=>{const tube=model.tubes.get(id);return !tube.arm&&!tube.link&&(tube.a===nodeId||tube.b===nodeId);}));
+    if(adjoining.length===1&&adjoining[0].kind==='ramp'){
+      const frame=adjoining[0];placeholder.ownedNodeIds=placeholder.ownedNodeIds.filter(id=>id!==nodeId);if(!placeholder.tubeIds.some(id=>{const t=model.tubes.get(id);return t.a===nodeId||t.b===nodeId;}))placeholder.nodeIds=placeholder.nodeIds.filter(id=>id!==nodeId);frame.ownedNodeIds=[...new Set([...frame.ownedNodeIds,nodeId])];frame.nodeIds=[...new Set([...frame.nodeIds,nodeId])];
+    }
+  }
   const counters = {};
   for (const r of regions) {
     r.supportRank = regions.indexOf(r);
@@ -327,6 +310,11 @@ function applyConfig(model, automatic, config, diagnostics) {
     r.supportRank = Math.min(...r.partIds.map(id => source.get(id)?.supportRank ?? Infinity));
     for (const id of r.tubeIds) { const t = model.tubes.get(id); r.nodeIds.push(t.a, t.b); }
     r.nodeIds = [...new Set(r.nodeIds)];
+    // Persisted manual regions may already own an accessory moved to an
+    // earlier support layer. That does not change the physical frame kind.
+    // Inherit anchors only when its stable ID and actual tube boundary match.
+    const template=automatic.find(auto=>auto.id===r.id&&auto.tubeIds.length===r.tubeIds.length&&auto.tubeIds.every(id=>r.tubeIds.includes(id))&&(auto.tubeIds.length>0||(auto.slideIds.length>0&&auto.slideIds.length===r.slideIds.length&&auto.slideIds.every(id=>r.slideIds.includes(id)))));
+    if(template)Object.assign(r,{...template,...r,kind:template.kind});
     if (r.partIds.length) out.push(r);
   }
   // 未编辑的部件继续使用自动区域，保存配置无需复制所有未变化部件。
@@ -395,7 +383,9 @@ function allocateBOM(model, bom, steps, owner, diagnostics) {
   return ledger;
 }
 
-export function computeAssemblyPlan(model, config = model.assemblyConfig || {}, order = 'y+') {
+export function computeAssemblyPlan(model, config = model.assemblyConfig || {}, order = 'y+', internal = {}) {
+  beginAssemblyCollisionPass(model);
+  const deferredAccessories=internal.deferredAccessories||[],deferredIds=new Set(deferredAccessories.map(item=>item.partId));
   const diagnostics = [], coord = n => n.y;
   for (const n of model.nodes.values()) diagnostics.push(...resolveNodeConnection(model, n).diagnostics);
   for (const tube of model.tubes.values()) if (!model.nodes.has(tube.a) || !model.nodes.has(tube.b)) diagnostics.push({ code: 'MISSING_TUBE_ENDPOINT', severity: 'error', message: '管件端点不存在。', nodeIds: [tube.a, tube.b], partIds: [tube.id] });
@@ -419,13 +409,21 @@ export function computeAssemblyPlan(model, config = model.assemblyConfig || {}, 
       const tube = (ownsNode ? source : target).tubeIds.map(id => model.tubes.get(id)).filter(t => t.a === id || t.b === id).sort((a, b) => model.nodes.get(a.a === id ? a.b : a.a).y - model.nodes.get(b.a === id ? b.b : b.a).y)[0];
       if (!tube) continue;
       const other = tube && model.nodes.get(tube.a === id ? tube.b : tube.a);
-      interfaces.push({ id: `interface-${interfaces.length + 1}`, sourceRegionId: source.id, targetRegionId: target.id, nodeId: id, position: point(node), direction: other ? norm(model._tubeDirAt(tube, node, other)).map(v => ownsNode ? v : -v) : [0, 1, 0] });
+      let actualPort;
+      if(tube.link&&node.c45file&&node.c45quat){
+        const ex=xAxisOf(normalizedAssemblyQuaternion(node.c45quat)),ey=yAxisOf(normalizedAssemblyQuaternion(node.c45quat)),diagonal=C45_ARM_LEN*Math.SQRT1_2,mouth=point(node).map((v,i)=>v+ex[i]*(C45_SLEEVE_LEN-diagonal)+ey[i]*diagonal),direction=ex.map((v,i)=>-v*Math.SQRT1_2+ey[i]*Math.SQRT1_2);
+        const receiving=[...model.tubes.values()].filter(t=>!t.arm&&!t.link&&(t.a===other.id||t.b===other.id)&&t.geom?.dir&&t.geom.dir.reduce((sum,v,i)=>sum+v*direction[i]*(t.a===other.id?1:-1),0)>.99);
+        if(distance(mouth,point(other))<.15&&receiving.length===1)actualPort={direction,supportTubeId:receiving[0].id,mateNodeId:other.id,position:mouth,basis:'qdf-file-C45-mouth-and-matching-receiver-axis'};
+      }
+      interfaces.push({ id: `interface-${interfaces.length + 1}`, sourceRegionId: source.id, targetRegionId: target.id, nodeId: id, position: actualPort?.position||point(node), direction: actualPort?actualPort.direction.map(v=>ownsNode?v:-v):other ? norm(model._tubeDirAt(tube, node, other)).map(v => ownsNode ? v : -v) : [0, 1, 0],...(actualPort?{supportTubeId:actualPort.supportTubeId,mateNodeId:actualPort.mateNodeId,directionBasis:actualPort.basis}:{}) });
     }
   }
-  for (const r of regions) for (const clampId of r.clampIds) {
-    const clamp = model.clamps.get(clampId), base = model._clampBaseTube?.(clamp);
-    const source = base && regions.find(other => other.id !== r.id && other.tubeIds.includes(base.id));
-    if (source) interfaces.push({ id: '', sourceRegionId: source.id, targetRegionId: r.id, nodeId: null, clampId, position: point(clamp), direction: [0, -1, 0], attachment: 'clamp-close', supportTubeId: base.id });
+  for (const clamp of model.clamps.values()) {
+    const base=model._clampBaseTube?.(clamp),cohort=model.clampCohort?.(clamp.id),source=base&&regions.find(region=>region.tubeIds.includes(base.id));
+    // A threaded ring's material owner can move to its first carrier layer.
+    // Its physical interface still connects the base rail to the other frame.
+    const targets=regions.filter(region=>region!==source&&[...(cohort?.tubes||[])].some(id=>id!==base?.id&&region.tubeIds.includes(id)));
+    if(source)for(const target of targets)interfaces.push({id:'',sourceRegionId:source.id,targetRegionId:target.id,nodeId:null,clampId:clamp.id,position:point(clamp),direction:[0,-1,0],attachment:clamp.connectorId==='tube_clamp'?'clamp-close':'prethread-ring',supportTubeId:base.id});
   }
   for (const n of model.nodes.values()) if (n.clampOn) {
     const source = regions.find(r => r.tubeIds.includes(n.clampOn.tubeId)), target = regions.find(r => r.ownedNodeIds.includes(n.id));
@@ -487,7 +485,11 @@ export function computeAssemblyPlan(model, config = model.assemblyConfig || {}, 
       if (!owned || !supportsVertical || boundary) {
         module.reason = !owned ? 'connector-already-installed-or-owned-by-another-region' : !supportsVertical ? 'support-axes-not-vertical' : 'fixed-boundary-tube'; frameModules.push(module); continue;
       }
-      const installed = [{ tubeIds: installedTubeIds }];
+      // This first pass establishes a possible structural frame grouping.
+      // Accessories have not been physically scheduled yet: ledger ownership
+      // does not establish their installed pose. Operations below check all
+      // installed/prepared accessories at their actual poses on every leg.
+      const installed = [{tubeIds:installedTubeIds,nodeIds:[...owner.keys()].filter(id=>model.nodes.has(id))}];
       const highest = Math.max(y, ...installedTubeIds.flatMap(id => { const t = model.tubes.get(id); return [model.nodes.get(t.a).y, model.nodes.get(t.b).y]; }));
       const clearance = Math.max(18, highest - y + (geometry().tubeRadius || 2.45) * 2 + 10);
       const minX = Math.min(...moduleNodes.map(id => model.nodes.get(id).x));
@@ -514,9 +516,9 @@ export function computeAssemblyPlan(model, config = model.assemblyConfig || {}, 
     r.installation = { direction, commonAxis, clearance: Math.max(45, width * 0.4), pathVerified: false };
     r.detachedTranslation = direction.map(v => -v * r.installation.clearance);
     const detachable = preassemble && (commonAxis || r.kind === 'slide');
-    const bodyModule = r.kind === 'body' && marks.length > 0 && commonAxis;
+    const bodyModule = r.kind === 'body' && marks.some(mark=>mark.attachment!=='place-on-ground') && commonAxis;
     if (preassemble && !commonAxis && r.kind === 'roof') diagnostics.push({ code: 'INCOMPATIBLE_INTERFACE_AXES', severity: 'error', message: '预装模块的接口无法沿同一方向插接，请将边界框架纳入模块或调整区域。', nodeIds: marks.map(m => m.nodeId).filter(Boolean), partIds: r.partIds });
-    if (preassemble && !commonAxis && r.kind === 'ramp') { r.installation.mode = 'in-place'; r.installation.pathVerified = true; }
+    if (preassemble && !commonAxis && r.kind === 'ramp') { r.installation.mode = 'in-place'; r.installation.pathVerified = false; }
     if (preassemble && commonAxis) {
       const minY = r.nodeIds.length ? Math.min(...r.nodeIds.map(id => model.nodes.get(id).y)) : r.anchor?.[1] || 0;
       const installed = regions.slice(0, regions.indexOf(r));
@@ -529,7 +531,11 @@ export function computeAssemblyPlan(model, config = model.assemblyConfig || {}, 
     }
     const keys = { ...Object.fromEntries(Object.keys(MAPS).map(k => [k, r[k]])), nodeIds: r.ownedNodeIds };
     for (const key of ['panelIds', 'fittingIds']) keys[key] = keys[key].filter(id => !isOriginalComponent(model[MAPS[key]].get(id)));
-    if (detachable || r.kind === 'roof') {
+    if(r.kind==='slide'&&['slide','roof-cover'].includes(r.accessoryType)){
+      r.detachedTranslation=[0,0,0];r.installation.mode='slide-specific-accessory-sequence';r.installation.pathVerified=false;
+      const ordered=[...keys.slideIds].sort((a,b)=>(model.slides.get(a)?.kind==='slide-end2'?0:1)-(model.slides.get(b)?.kind==='slide-end2'?0:1));
+      for(const id of ordered)createStep(r,{slideIds:[id]},{type:'build',translation:[0,0,0],detached:false},model.slides.get(id)?.kind==='roof2'?copy('屋顶：从上方安装覆件','Roof: fit the covering from above','Dach: Abdeckung von oben aufsetzen'):model.slides.get(id)?.kind==='slide-end2'?copy('滑梯：安装缓冲尾段','Slide: install the runout','Rutsche: Auslauf montieren'):copy('滑梯：安装本体','Slide: install the body','Rutsche: Hauptteil montieren'));
+    }else if (detachable || r.kind === 'roof') {
       if (r.kind === 'roof') {
         const usedNodes = new Set(), usedTubes = new Set();
         const preassemble = (ids, title) => createStep(r, ids, { type: 'preassemble', translation: r.detachedTranslation, detached: true }, title);
@@ -582,7 +588,7 @@ export function computeAssemblyPlan(model, config = model.assemblyConfig || {}, 
         const frame = at.filter(t => Math.abs(model.nodes.get(t.a).y - model.nodes.get(t.b).y) <= EPS), risers = at.filter(t => !frame.includes(t));
         const modules = planUpperFrames(r, frame, nodeIds, y);
         if (nodeIds.length || frame.length || clampIds.length) {
-          const action = modules.length ? { type: 'build', scope: 'parts', layer: true, modules: modules.map(m => ({ id: m.id, partIds: m.partIds, translation: m.installationTranslation, interfaceIds: m.interfaceIds })) } : buildAction;
+          const action = modules.length ? { ...buildAction, scope: 'parts', layer: true, modules: modules.map(m => ({ id: m.id, partIds: m.partIds, translation: m.installationTranslation, interfaceIds: m.interfaceIds })) } : buildAction;
           const title = modules.length ? copy(`${r.name}：${Math.round(y)} cm 本层框架向下套入`, `${r.name}: lower frames at ${Math.round(y)} cm`, `${r.name}: Rahmen auf ${Math.round(y)} cm absenken`) : copy(`${r.name}：${Math.round(y)} cm 框架`, `${r.name}: frame at ${Math.round(y)} cm`, `${r.name}: Rahmen auf ${Math.round(y)} cm`);
           const s = createStep(r, { nodeIds, tubeIds: frame.map(t => t.id), clampIds }, action, title); s.y = y; s.kind = 'frame';
           if (modules.length) {
@@ -621,6 +627,9 @@ export function computeAssemblyPlan(model, config = model.assemblyConfig || {}, 
     const supportSteps = steps.filter(s => s.regionId === support?.id && s.kind !== 'accessories');
     if (supportSteps.length && steps.indexOf(supportSteps.at(-1)) >= steps.indexOf(step) && step.action.type !== 'preassemble') diagnostics.push({ code: 'INVALID_ASSEMBLY_ORDER', severity: 'error', message: '接口支撑区域尚未完成，请调整区域顺序。', nodeIds: mark.nodeId ? [mark.nodeId] : [], partIds: [] });
   }
+  scheduleAssemblyAccessories(model, steps, diagnostics, regions,deferredAccessories);
+  owner.clear();
+  steps.forEach((step, i) => { if (step.action.type !== 'attach') for (const id of step.partIds) owner.set(id, i); });
   const bom = computeBOM(model), ledger = allocateBOM(model, bom, steps, owner, diagnostics);
   const fixingPoints = [];
   for (const step of steps) for (const group of GROUPS) step[group] = step.parts[group];
@@ -649,7 +658,21 @@ export function computeAssemblyPlan(model, config = model.assemblyConfig || {}, 
     for (const id of step.partIds) installedParts.add(id);
   }
   for (const [name] of Object.entries(MAPS)) for (const p of values(model, MAPS[name])) if (!owner.has(p.id)) diagnostics.push({ code: 'PART_UNASSIGNED', severity: 'error', message: `部件 ${p.id} 没有区域或装配步骤。`, nodeIds: MAPS[name] === 'nodes' ? [p.id] : [], partIds: [p.id] });
-  return { version: 1, order, regions, interfaces, frameModules, fixingPoints, steps, diagnostics, bom, ledger, canExport: ledger.conserved && !diagnostics.some(d => d.severity === 'error'), levels };
+  const plan = { version: 2, adjustments:[], order, regions, interfaces, frameModules, fixingPoints, steps, diagnostics, bom, ledger, levels, verification: { directionChecked: false, pathChecked: false, methodChecked: false, physical: 'unverified', load: 'unverified' }, canExport: false };
+  addAssemblyOperations(model, plan);
+  // A blocked lowering path may be opened by installing its covering later.
+  // Rebuild the actual action plan and recheck every subsequent motion; never
+  // retain a geometric exemption merely because the first candidate failed.
+  if((internal.attempt||0)<2){
+    const candidates=frameModules.filter(module=>module.reason==='installation-path-blocked'&&model.panels.has(module.obstruction?.obstaclePartId));
+    for(const diagnostic of diagnostics.filter(d=>d.code==='INSTALLATION_PATH_BLOCKED'&&d.details?.type==='lower-frame'&&model.panels.has(d.details.obstaclePartId))){const step=steps.find(step=>step.operations.some(op=>op.id===diagnostic.details.operationId));if(step)candidates.push({tubeIds:step.tubeIds,obstruction:diagnostic.details});}
+    const candidate=candidates.find(module=>!deferredIds.has(module.obstruction.obstaclePartId));
+    if(candidate){const request={partId:candidate.obstruction.obstaclePartId,afterTubeIds:candidate.tubeIds,reason:'blocked-lowering-path'},history=[...(internal.history||[]),{...request,blockedBy:candidate.obstruction.obstaclePartId}];return computeAssemblyPlan(model,config,order,{attempt:(internal.attempt||0)+1,deferredAccessories:[...deferredAccessories,request],history});}
+  }
+  plan.adjustments=internal.history||[];
+  consolidateLayerSteps(plan, rowKey);
+  plan.canExport = ledger.conserved && plan.verification.directionChecked && plan.verification.pathChecked && plan.verification.methodChecked && !diagnostics.some(d => d.severity === 'error');
+  return plan;
 }
 
 /** 渲染器只消费此快照。已预装模块保持分离，直到安装步骤才归位。 */
@@ -701,6 +724,9 @@ export function assemblyState(plan, index, { action = false } = {}) {
     for (const id of step.action.inPlacePartIds || []) { visible.delete(id); current.delete(id); done.delete(id); transforms.delete(id); hiddenNewParts.add(id); }
   }
   if (action) for (const operation of step?.action?.operations || []) {
+    // A merged layer overview lowers its frames first. Later in-place parts
+    // are hidden above, so their arrows belong only to their ordered details.
+    if (step.action.layer && !operation.partIds.some(id => visible.has(id))) continue;
     const regionTranslation = detached.get(step.regionId) || [0, 0, 0];
     for (const id of operation.partIds) if (visible.has(id)) transforms.set(id,
       operation.translation.map((v, axis) => v + (transforms.get(id)?.[axis] || 0)));
@@ -722,4 +748,57 @@ export function assemblyState(plan, index, { action = false } = {}) {
     }
   }
   return { done, current, visible, transforms, arrows, interfaceMarks, hiddenNewParts, actionStage: action && hiddenNewParts.size && !step?.action?.layer ? 'before' : 'installation', fixingPoints: (plan.fixingPoints || []).filter(p => p.stepId === step?.id) };
+}
+
+
+/** One local action group. Future actions remain hidden in both action and completion frames. */
+export function assemblyDetailState(plan, index, groupId, { action = false } = {}) {
+  const step = plan.steps[index], group = step?.detailGroups?.find(g => g.id === groupId);
+  if (!group) return { ...assemblyState(plan, index, { action }), focusPartIds: [], operationNumbers: [],profileTransforms:new Map(),profileVisible:new Set() };
+  const base = assemblyState(plan, index - 1), operations = step.operations || [];
+  const profileTransforms=new Map(),profileVisible=new Set(),profileCarriers=new Map(plan.steps.flatMap(step=>step.operations||[]).filter(op=>op.type==='preinsert-reinforcement').map(op=>[op.profileKey||op.partIds[0],op.partIds[0]]));
+  for(const prior of plan.steps.slice(0,index))for(const op of prior.operations||[])if(op.type==='preinsert-reinforcement')profileVisible.add(op.profileKey||op.partIds[0]);
+  for(const id of base.current)base.done.add(id);base.current.clear();
+  const selected = new Set(group.operationIds), last = operations.findLastIndex(op => selected.has(op.id));
+  const first = operations.findIndex(op => selected.has(op.id));
+  for (let i = 0; i <= last; i++) {
+    const op = operations[i], offset = op.placementTranslation || [0,0,0];
+    for (const id of op.consumesPartIds || []) {
+      base.visible.add(id); base.done.add(id);
+      if (offset.some(v => v)) base.transforms.set(id, [...offset]); else base.transforms.delete(id);
+    }
+    if(op.type==='preinsert-reinforcement'){profileVisible.add(op.profileKey||op.partIds[0]);profileTransforms.set(op.profileKey||op.partIds[0],[...offset]);}
+    else if (op.translation||op.type==='unfold-flexible-liner') for (const id of op.partIds) {
+      if(offset.some(v=>v))base.transforms.set(id,[...offset]);else base.transforms.delete(id);
+    }
+    if(op.type!=='preinsert-reinforcement'&&op.translation)for(const [key,carrier]of profileCarriers)if(profileVisible.has(key)&&op.partIds.includes(carrier))profileTransforms.set(key,[...offset]);
+    if(selected.has(op.id)) {
+      for(const id of op.partIds) {base.visible.add(id);base.current.add(id);base.done.delete(id);}
+      if(['prepare-core-channel','preinsert-reinforcement','prethread-accessory'].includes(op.type))for(const id of op.referencePartIds || []) {
+        base.visible.add(id);base.current.add(id);base.done.delete(id);
+        const loose=op.displayTransforms?.[id] || offset;
+        if(loose.some(v=>v))base.transforms.set(id,loose);else base.transforms.delete(id);
+      }
+    }
+  }
+  base.arrows = [];
+  const neededReferences=new Set(operations.filter(op=>selected.has(op.id)&&op.translation).flatMap(op=>op.referencePartIds||[]));
+  if (action) for (let i = first; i <= last; i++) {
+    const op = operations[i]; if (!selected.has(op.id)) continue;
+    const offset=op.placementTranslation || [0,0,0];
+    if (op.translation && op.direction) {
+      if(op.type==='preinsert-reinforcement')profileTransforms.set(op.profileKey||op.partIds[0],op.translation.map((v,j)=>v+offset[j]));
+      else {for (const id of op.partIds) base.transforms.set(id, op.translation.map((v,j)=>v+offset[j]));for(const [key,carrier]of profileCarriers)if(profileVisible.has(key)&&op.partIds.includes(carrier))profileTransforms.set(key,op.translation.map((v,j)=>v+offset[j]));}
+      const to = (op.position || [0, step.y, 0]).map((v,j)=>v+offset[j]);
+      base.arrows.push({ id:op.id, from:to.map((v,j)=>v+op.translation[j]), to, direction:op.direction, regionId:step.regionId });
+    } else if (['orient-connector','fit-accessory','topology-reference'].includes(op.type)) {
+      for (const id of op.consumesPartIds || []) { if(neededReferences.has(id))continue;base.visible.delete(id); base.current.delete(id); base.done.delete(id); base.transforms.delete(id); base.hiddenNewParts.add(id); }
+    }
+  }
+  base.interfaceMarks = (step.interfaceIds || []).map(id=>plan.interfaces.find(m=>m.id===id)).filter(Boolean);
+  const localIds=operations.filter(op=>selected.has(op.id)).flatMap(op=>op.closesPorts?.length ? op.closesPorts : [...op.partIds,...(op.referencePartIds||[]).filter(id=>group.partIds.includes(id)&&!plan.regions.some(r=>r.tubeIds.includes(id)))]);
+  const focusPartIds = [...new Set(localIds.filter(id=>base.visible.has(id)&&group.partIds.includes(id)))];
+  const operationNumbers = group.operationNumbers || operations.filter(op=>selected.has(op.id)).map(op=>({id:op.id,order:op.order,partIds:op.partIds}));
+  base.actionStage = action && base.hiddenNewParts.size ? 'before' : 'installation';
+  return { ...base, focusPartIds, operationNumbers, profileTransforms,profileVisible };
 }

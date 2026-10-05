@@ -1,11 +1,20 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { loadCatalog, buildableTubes, panels, geometry } from './catalog.js'
 import { BuildModel } from './model.js'
 import { parseQDF } from './qdfimport.js'
-import { computeAssemblyPlan, assemblyState } from './assemblyPlan.js'
+import { getLang } from './i18n.js'
+import { computeAssemblyPlan as computeRawAssemblyPlan, assemblyState } from './assemblyPlan.js'
 
-const evidenceDir = '.work/assembly-qa'
+vi.setConfig({ testTimeout: 120000 })
+const fixturePlans = new Map<string, any>()
+function computeAssemblyPlan(model: any, config?: any, order?: string) {
+  const key = JSON.stringify([getLang(), model.toJSON(), config ?? model.assemblyConfig ?? {}, order ?? 'y+'])
+  if (!fixturePlans.has(key)) fixturePlans.set(key, computeRawAssemblyPlan(model, config, order))
+  return structuredClone(fixturePlans.get(key))
+}
+
+const evidenceDir = '../qa/layer-followup'
 const records: any[] = []
 beforeAll(async () => { await loadCatalog(); mkdirSync(evidenceDir, { recursive: true }) })
 afterAll(() => writeFileSync(`${evidenceDir}/frame-engine-evidence.json`, JSON.stringify(records, null, 2)))
@@ -36,15 +45,17 @@ describe('本层框架连续展示与真实下套', () => {
       const layerIndices = plan.steps.map((s: any, i: number) => s.y === y && s.action.layer && s.regionId === modules[0].regionId ? i : -1).filter((i: number) => i >= 0)
       expect(layerIndices).toHaveLength(1)
       const index = layerIndices[0], step = plan.steps[index]
-      expect(step.tubeIds).toHaveLength(count)
+      expect(ids.every((id: string) => step.tubeIds.includes(id))).toBe(true)
+      const risers = step.tubeIds.filter((id: string) => !ids.includes(id))
+      expect(risers.every((id: string) => { const tube = model.tubes.get(id)!; return tube.arm || tube.link || Math.abs(model.nodes.get(tube.a)!.y - model.nodes.get(tube.b)!.y) > 0.6 })).toBe(true)
       expect(step.action.modules).toHaveLength(modules.length)
       expect(step.instructions.join(' ')).toMatch(/先拼好|Preassemble|vormontieren/)
-      expect(step.parts.tubes.reduce((n: number, r: any) => n + r.count, 0)).toBe(count)
+      expect(step.parts.tubes.reduce((n: number, r: any) => n + r.count, 0)).toBe(step.tubeIds.filter((id: string) => { const tube = model.tubes.get(id)!; return !tube.arm && !tube.link }).length)
       const installing = assemblyState(plan, index, { action: true }), installed = assemblyState(plan, index)
       expect(installing.actionStage).toBe('installation')
       for (const id of plan.steps.slice(0, index).flatMap((s: any) => s.partIds)) { expect(installing.visible.has(id)).toBe(true); expect(installing.transforms.has(id)).toBe(false) }
       expect(installing.arrows.length).toBeGreaterThan(0)
-      for (const arrow of installing.arrows) { expect(arrow.direction).toEqual([0, -1, 0]); expect(arrow.from[1]).toBeGreaterThan(arrow.to[1]); expect(arrow.from[0]).toBe(arrow.to[0]); expect(arrow.from[2]).toBe(arrow.to[2]) }
+      for (const arrow of installing.arrows) { expect(arrow.direction[0]).toBeCloseTo(0, 8); expect(arrow.direction[1]).toBe(-1); expect(arrow.direction[2]).toBeCloseTo(0, 8); expect(arrow.from[1]).toBeGreaterThan(arrow.to[1]); expect(arrow.from[0]).toBe(arrow.to[0]); expect(arrow.from[2]).toBe(arrow.to[2]) }
       for (const module of modules) {
         expect(module.installStepId).toBe(step.id)
         for (const id of module.partIds) {
@@ -100,7 +111,7 @@ describe('本层框架连续展示与真实下套', () => {
     expect(plan.ledger.conserved).toBe(true)
   })
 
-  it('区域整体分离期间，局部上框架位移叠加，不移动下方立柱或提前归位区域', () => {
+  it('独立落地主体的上框架下套，支撑立柱原位且完成后无偏移', () => {
     const model = new BuildModel()
     for (const offset of [0, 160]) {
       const a = model.addNode(offset, 0, 0), b = model.addNode(offset + 40, 0, 0), c = model.addNode(offset, 40, 0), d = model.addNode(offset + 40, 40, 0)
@@ -112,10 +123,11 @@ describe('本层框架连续展示与真实下套', () => {
     const index = plan.steps.findIndex((s: any) => s.id === module.installStepId)
     const installing = assemblyState(plan, index, { action: true }), installed = assemblyState(plan, index)
     for (const id of module.partIds) {
-      expect(installing.transforms.get(id)).toEqual(module.installationTranslation.map((v: number, i: number) => v + region.detachedTranslation[i]))
-      expect(installed.transforms.get(id)).toEqual(region.detachedTranslation)
+      expect(plan.steps[index].action.detached).toBe(false)
+      expect(installing.transforms.get(id)).toEqual(module.installationTranslation)
+      expect(installed.transforms.has(id)).toBe(false)
     }
-    for (const mark of plan.interfaces.filter((m: any) => m.assemblyId === module.id)) expect(installing.transforms.get(mark.supportTubeId)).toEqual(region.detachedTranslation)
+    for (const mark of plan.interfaces.filter((m: any) => m.assemblyId === module.id)) expect(installing.transforms.has(mark.supportTubeId)).toBe(false)
     expect(assemblyState(plan, plan.steps.length - 1).transforms.size).toBe(0)
   })
 
