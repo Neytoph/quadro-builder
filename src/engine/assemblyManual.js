@@ -19,6 +19,8 @@ import { componentStepLabel, componentPartId, componentOutputColor, componentFit
 import { partImageSrc } from "../ui/partImages";
 import { drawQr } from "../sharePage";
 import { getLang } from './i18n.js';
+import { createAssemblyReadingPlan, assemblyReadingState, readingModuleDirection } from './assemblyReadingPlan.js';
+import { loadAssemblyPartImage } from '../ui/assemblyPartImages';
 
 const PAGE_W = 297;
 const PAGE_H = 210;
@@ -72,9 +74,17 @@ function stepBox(partsH = 47, headerH = 20) {
   return { gap, headerH, partsH, imgY, imgH, imgW, x0: M, x1: M + imgW + gap };
 }
 
+/** Local locator has its own column; neither model image is painted underneath it. */
+export function manualReadingPageBox(partsH = 47, headerH = 20, localized = false) {
+  const box = stepBox(partsH, headerH);
+  if (!localized) return box;
+  const imgW = box.imgW - 19;
+  return { ...box, imgW, x1: M + imgW + box.gap, locator: { x: PAGE_W - M - 35, y: Math.max(20, headerH + 2), width: 35, height: 29 } };
+}
+
 function coverBox(bomH = 54) {
   const gap = 2.5;
-  const headerH = 16;
+  const headerH = 22;
   const imgY = headerH;
   const imgH = PAGE_H - imgY - bomH - 3;
   const imgW = (PAGE_W - M * 2 - gap) / 2;
@@ -87,14 +97,14 @@ function snapSize(imgW, imgH) {
   return { width: Math.max(1, Math.round(SNAP_LONG * a)), height: SNAP_LONG };
 }
 
-function drawShot(ctx, img, x, y, w, h, fill) {
+function drawShot(ctx, img, x, y, w, h, fill, contain = false) {
   ctx.save();
   roundRect(ctx, x, y, w, h, mm(1.2));
   ctx.clip();
   ctx.fillStyle = fill || WELL;
   ctx.fillRect(x, y, w, h);
   if (img && img.width) {
-    const s = Math.max(w / img.width, h / img.height);
+    const s = contain ? Math.min(w / img.width, h / img.height) : Math.max(w / img.width, h / img.height);
     const dw = img.width * s, dh = img.height * s;
     ctx.drawImage(img, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
   }
@@ -522,9 +532,8 @@ export function stepItems(model, step) {
 
 const iconCache = new Map();
 
-async function iconImage(id, kind) {
-  const key = partImageSrc(id);
-  if (!key) throw manualError('resources', `零件图片缺失: ${id}`, [{ code: 'MISSING_PART_IMAGE', severity: 'error', partId: id, kind }]);
+async function iconImage(item) {
+  const key = await loadAssemblyPartImage(item);
   if (iconCache.has(key)) return iconCache.get(key);
   const img = await loadImage(key);
   iconCache.set(key, img);
@@ -534,7 +543,7 @@ async function iconImage(id, kind) {
 async function loadIcons(items) {
   const map = new Map();
   await Promise.all(items.map(async (it) => {
-    map.set(it.num, await iconImage(it.id, it.kind));
+    map.set(it.num, await iconImage(it));
   }));
   return map;
 }
@@ -572,12 +581,12 @@ function projectCallouts(scene, items, aspect, oneEach) {
   return marks;
 }
 
-async function captureView(scene, model, yaw, { bounds, width, height, items, oneEach, direction }) {
+async function captureView(scene, model, yaw, { bounds, width, height, items, oneEach, direction, fitMargin = null }) {
   const aspect = width / height;
   scene._viewSize = { w: width, h: height };
   try {
-    if (direction) scene._frameAlong(model, new Vector3(...direction).normalize(), { silent: true, bounds, aspect, margin: 1.18 });
-    else scene.frameFromYaw(model, yaw, { silent: true, bounds, aspect, margin: FIT });
+    if (direction) scene._frameAlong(model, new Vector3(...direction).normalize(), { silent: true, bounds, aspect, margin: fitMargin || 1.18 });
+    else scene.frameFromYaw(model, yaw, { silent: true, bounds, aspect, margin: fitMargin || FIT });
     scene._updateTreeCamera?.();
     const marks = items && items.length ? projectCallouts(scene, items, aspect, !!oneEach) : [];
     const img = await loadImage(scene.snapshot({
@@ -593,6 +602,14 @@ async function captureView(scene, model, yaw, { bounds, width, height, items, on
   } finally {
     scene._viewSize = null;
   }
+}
+
+export function projectReadingLocatorBounds(scene, bounds, aspect, padding = .025) {
+  const corners = [];
+  for (const x of [bounds.min[0], bounds.max[0]]) for (const y of [bounds.min[1], bounds.max[1]]) for (const z of [bounds.min[2], bounds.max[2]]) corners.push([x, y, z]);
+  const points = scene.projectWorld(corners, aspect);
+  const complete = points.length === 8 && points.every(point => point && Number.isFinite(point.u) && Number.isFinite(point.v) && point.u >= padding && point.u <= 1 - padding && point.v >= padding && point.v <= 1 - padding);
+  return { points, complete, padding, aspect };
 }
 
 function kindLabel(kind, copy) {
@@ -622,10 +639,10 @@ export function measureManualLegend(ctx, items, maxW) {
   const cols = Math.min(3, n);
   const colGap = mm(4);
   const colW = (maxW - colGap * (cols - 1)) / cols;
-  const minRowH = mm(15);
+  const minRowH = mm(12);
   const numW = mm(8);
-  const dotW = mm(3.6);
-  const iconW = mm(14);
+  const dotW = 0;
+  const iconW = mm(12);
   const nameGap = mm(1.6);
   ctx.font = font(700, mm(MANUAL_TEXT_MM));
   let qtyTextW = mm(3.2);
@@ -646,7 +663,7 @@ export function measureManualLegend(ctx, items, maxW) {
   });
   const rows = [];
   for (let offset = 0; offset < n; offset += cols) {
-    const rowH = Math.max(minRowH, ...wrapped.slice(offset, offset + cols).map(lines => lines.length * mm(4.4) + mm(4)));
+    const rowH = Math.max(minRowH, ...wrapped.slice(offset, offset + cols).map(lines => lines.length * mm(4.4) + mm(3)));
     rows.push({ offset, rowH });
   }
   return { cols, colW, colGap, numW, dotW, iconW, qtyColW, wrapped, rows, height: rows.reduce((sum, row) => sum + row.rowH, 0) };
@@ -655,7 +672,7 @@ export function measureManualLegend(ctx, items, maxW) {
 function paintLegend(ctx, items, icons, x, y, maxW, maxY) {
   if (!items.length) return 0;
   const { cols, colW, colGap, numW, dotW, iconW, qtyColW, wrapped, rows } = measureManualLegend(ctx, items, maxW);
-  const badgeR = mm(2.8), iconS = mm(12);
+  const badgeR = mm(2.8), iconS = mm(10);
   const visible = [];
   let cellY = y;
   for (const { offset, rowH } of rows) {
@@ -674,16 +691,6 @@ function paintLegend(ctx, items, icons, x, y, maxW, maxY) {
     ctx.textBaseline = "middle";
 
     const dotX = cellX + numW;
-    if (it.color) {
-      ctx.fillStyle = colorHex(it.color);
-      ctx.beginPath();
-      ctx.arc(dotX + mm(1.15), mid, mm(1.15), 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = "rgba(31,36,48,0.16)";
-      ctx.lineWidth = 0.8;
-      ctx.stroke();
-    }
-
     const iconX = dotX + dotW;
     const icon = icons.get(it.num);
     if (icon) ctx.drawImage(icon, iconX, mid - iconS / 2, iconS, iconS);
@@ -766,6 +773,8 @@ function paintCover(ctx, { front, back, copy, items, icons, fill, frontMarks, ba
   ctx.textAlign = "left";
   const meta = [copy.date, copy.stepsLine, copy.sizeLine].filter(Boolean).join("   ·   ");
   ctx.fillText(ellipsize(ctx, meta, mm(PAGE_W - M * 2)), mm(M), mm(10.5));
+  ctx.font = font(400, mm(MANUAL_AUX_MM));
+  if (copy.readingPhysicalStatus) ctx.fillText(copy.readingPhysicalStatus, mm(M), mm(15));
   paintPair(ctx, front, back, box, copy, fill, frontMarks, backMarks);
 
   const bomY = box.imgY + box.imgH + 1.5;
@@ -776,8 +785,8 @@ function paintCover(ctx, { front, back, copy, items, icons, fill, frontMarks, ba
   return paintLegend(ctx, items, icons, mm(M), mm(bomY + 4.2), mm(PAGE_W - M * 2) - stampW, mm(PAGE_H - 3)) || 0;
 }
 
-function paintStep(ctx, { front, back, copy, heading, items, icons, k, n, fill, frontMarks, backMarks, stamp, instructions = [], partsH, headerH = 20, instructionLines = null }) {
-  const box = stepBox(partsH, headerH);
+function paintStep(ctx, { front, back, copy, heading, items, icons, k, n, fill, frontMarks, backMarks, stamp, instructions = [], partsH, headerH = 20, instructionLines = null, imageBox = null }) {
+  const box = imageBox || stepBox(partsH, headerH);
   ctx.fillStyle = INK;
   ctx.font = font(600, mm(4.4));
   ctx.textBaseline = "top";
@@ -1464,27 +1473,28 @@ export async function exportAssemblyPdf(opts) {
   const itemsCover = coverItems(plan.bom || opts.bom || computeBOM(model));
   for (const item of itemsCover) item.instanceIds = [...new Set((plan.ledger?.instances || []).filter(row => row.group === item.kind && row.key === item.ledgerKey).flatMap(row => row.partIds))];
   const icons = await loadIcons(itemsCover);
+  const reading = createAssemblyReadingPlan(model, plan, { items: itemsCover, copy });
   const coverLayout = manualLegendChunks(itemsCover, true, icons, stamp, copy.bomTitle);
   const descriptors = [{ type: 'cover', items: coverLayout.chunks[0], partsH: coverLayout.partsH }, ...coverLayout.chunks.slice(1).map(items => ({ type: 'legend', title: copy.bomTitle, items }))];
-  descriptors.push(manualSafetyDescriptor(copy, manualLang));
-  descriptors.push({ type: 'overview' });
-  descriptors.push(...regionDescriptors);
-  for (let index = 0; index < steps.length; index++) {
-    const step = steps[index];
-    const heading = (copy.stepHeading || '{k}/{n} · {title}').replace('{k}', String(index + 1)).replace('{n}', String(steps.length)).replace('{kind}', kindLabel(step.kind, copy)).replace('{title}', step.title || '');
-    const items = numberStepItems(stepItems(model, step), itemsCover);
+  for (const entry of reading.steps) {
+    const index = entry.sourceIndex;
+    const heading = (copy.readingStepHeading || '{k}/{n} · {title}').replace('{k}', String(entry.index + 1)).replace('{n}', String(reading.steps.length)).replace('{title}', entry.title);
+    const items = entry.materials;
     const { chunks, partsH } = manualLegendChunks(items, false, icons, stamp, `${heading} · ${copy.thisStep}`);
-    const instructions = step.instructions || [];
+    const instructions = [];
     const measurement = newPageCanvas();
-    const contextHint = step.action?.layer ? copy.layerHint : ['frame', 'risers', 'panels'].includes(step.kind) ? copy.bodyHint : step.action?.type === 'preassemble' ? copy.preassemblyHint : copy.contextHint;
-    const textLayout = manualStepTextLayout(measurement.ctx, heading, instructions, contextHint || '');
-    descriptors.push({ type: 'step', index, heading, items: chunks[0], allItems: items, partsH, instructions, ...textLayout });
+    const textLayout = manualStepTextLayout(measurement.ctx, heading, instructions);
+    descriptors.push({ type: 'reading', index, entry, heading, items: chunks[0], allItems: items, partsH, instructions, ...textLayout });
     descriptors.push(...chunks.slice(1).map(items => ({ type: 'legend', title: `${heading} · ${copy.thisStep}`, items })));
-    descriptors.push(...manualStepDetailDescriptors(measurement.ctx, model, plan, index, itemsCover, copy));
-    descriptors.push(...manualTextDescriptors(measurement.ctx, `${heading} · ${copy.instructionsTitle}`, textLayout.remainingLines, stamp));
+    for (const area of entry.areas) {
+      const title = `${heading} · ${(copy.readingArea || '{area}').replace('{area}', area.label)}`;
+      const local = manualLegendChunks(area.materials, false, icons, stamp, `${title} · ${copy.thisStep}`);
+      descriptors.push({ type: 'reading-local', index, entry, area, heading: title, items: local.chunks[0], allItems: area.materials, partsH: local.partsH, ...manualStepTextLayout(measurement.ctx, title, []) });
+      descriptors.push(...local.chunks.slice(1).map(items => ({ type: 'legend', title: `${title} · ${copy.thisStep}`, items })));
+    }
     measurement.c.width = measurement.c.height = 0;
   }
-  descriptors.push({ type: 'final' });
+  descriptors.push({ type: 'final', partsH: 0 });
   const textMeasurement = newPageCanvas();
   for (let position = 0; position < descriptors.length; position++) {
     const descriptor = descriptors[position];
@@ -1493,7 +1503,7 @@ export async function exportAssemblyPdf(opts) {
     const heading = region ? `${descriptor.label} · ${region.name}` : descriptor.type === 'final' ? copy.finalTitle : copy.regionOverview;
     const instructions = region ? [`${copy.regionOrder}: ${steps.filter(step => step.regionId === region.id).map(step => step.title).filter(Boolean).join(' → ')}`]
       : descriptor.type === 'overview' ? [regionDescriptors.map(row => `${row.label} · ${row.region.name}`).join('   ')]
-      : [(plan.interfaces || []).filter(marker => marker.attachment !== 'upper-frame').map(marker => `I${marker.id.split('-').at(-1)}`).join(' · ')];
+      : [];
     const layout = manualStepTextLayout(textMeasurement.ctx, heading, instructions);
     Object.assign(descriptor, layout);
     const continuations = manualTextDescriptors(textMeasurement.ctx, `${heading} · ${copy.instructionsTitle}`, layout.remainingLines, stamp);
@@ -1509,7 +1519,7 @@ export async function exportAssemblyPdf(opts) {
   let scene;
   let activeState = null;
   let currentPage = 0;
-  const coverCopy = { ...copy, modelName: name || copy.product || 'design', stepsLine: String(copy.stepsLine || '').replaceAll('{n}', String(steps.length)) };
+  const coverCopy = { ...copy, modelName: name || copy.product || 'design', stepsLine: String(copy.stepsLine || '').replaceAll('{n}', String(reading.steps.length)) };
   try {
     scene = new SceneManager(host);
     scene.setMotion(false); scene.setTheme(false); scene.setScene(false);
@@ -1527,7 +1537,7 @@ export async function exportAssemblyPdf(opts) {
       activeState = state; scene.renderModel(model, null, { assembly: state });
       const size = snapSize(box.imgW, box.imgH);
       const visibleItems = local ? items : items.slice(0, 6);
-      const image = await captureView(scene, model, yaw, { ...size, bounds: bounds || renderedBounds(scene, model), items: positionedItems(model, visibleItems, state), oneEach: true, direction });
+      const image = await captureView(scene, model, yaw, { ...size, bounds: bounds || renderedBounds(scene, model), items: positionedItems(model, visibleItems, state), oneEach: true, direction, fitMargin: box.fitMargin });
       if (!local) image.marks.push(...projectStateMarks(scene, state, size.width / size.height));
       image.operationNumbers = state?.operationNumbers || [];
       image.operationMarks = projectOperationMarks(scene, model, state, size.width / size.height);
@@ -1544,7 +1554,7 @@ export async function exportAssemblyPdf(opts) {
       onProgress?.({ page: currentPage, total, phase: 'render' });
       await yieldUi();
       const { c, ctx } = newPageCanvas();
-      const pageBox = descriptor.type === 'cover' ? coverBox(descriptor.partsH) : stepBox(descriptor.partsH, descriptor.headerH);
+      const pageBox = descriptor.type === 'cover' ? coverBox(descriptor.partsH) : manualReadingPageBox(descriptor.partsH, descriptor.headerH, descriptor.type === 'reading-local');
       try {
         if (descriptor.type === 'legend') {
           paintTextPage(ctx, descriptor.title, [], stamp);
@@ -1583,6 +1593,51 @@ export async function exportAssemblyPdf(opts) {
           const front = await shot(null, 0, [], fullBounds, null, pageBox), back = await shot(null, Math.PI, [], fullBounds, null, pageBox);
           const consumed = paintCover(ctx, { front: front.img, back: back.img, copy: coverCopy, items: descriptor.items, icons, fill: sceneFill(scene), stamp, partsH: descriptor.partsH });
           if (consumed !== descriptor.items.length) throw manualError('pagination', '总料表分页与实际绘制不一致');
+        } else if (descriptor.type === 'reading' || descriptor.type === 'reading-local') {
+          const { entry, area } = descriptor;
+          const localized = descriptor.type === 'reading-local';
+          const module = entry.kind === 'module';
+          const leftState = assemblyReadingState(model, plan, entry, { area: area || null, structure: !module });
+          const rightState = assemblyReadingState(model, plan, entry, { area: area || null, whole: !localized });
+          scene.renderModel(model, null, { assembly: rightState });
+          const bounds = localized || module ? renderedBounds(scene, model) : fullBounds;
+          const leftDirection = module ? readingModuleDirection(model, plan, entry) : [1, .75, 1];
+          const rightDirection = localized ? [-1, .75, -1] : leftDirection;
+          const priority = [...descriptor.allItems].sort((a, b) => (a.kind === 'connectors' ? 0 : 1) - (b.kind === 'connectors' ? 0 : 1) || a.num - b.num);
+          scene.renderModel(model, null, { assembly: leftState });
+          const leftBounds = localized ? bounds : renderedBounds(scene, model);
+          const left = await shot(leftState, 0, priority.slice(0, 6), leftBounds, leftDirection, pageBox, true);
+          const right = await shot(rightState, 0, priority.slice(6, 12), localized ? bounds : fullBounds, rightDirection, pageBox, true);
+          const attachMarks = module ? (plan.interfaces || []).filter(marker => entry.interfaceIds.includes(marker.id) && marker.position).map((marker, i) => ({ position: marker.position, num: String.fromCharCode(65 + i) })) : [];
+          const addMarks = (image, state, bounds, direction, markers) => {
+            scene.renderModel(model, null, { assembly: state });
+            scene._frameAlong(model, new Vector3(...direction).normalize(), { silent: true, bounds, aspect: image.img.width / image.img.height, margin: 1.18 });
+            const points = scene.projectWorld(markers.map(marker => marker.position), image.img.width / image.img.height);
+            image.marks.push(...points.flatMap((point, i) => point ? [{ ...point, num: markers[i].num }] : []));
+          };
+          if (module) {
+            addMarks(left, leftState, leftBounds, leftDirection, attachMarks);
+            addMarks(right, rightState, fullBounds, rightDirection, attachMarks);
+          } else if (!localized && entry.areas.length) {
+            const markers = entry.areas.map(value => ({ position: value.center, num: value.label }));
+            addMarks(left, leftState, leftBounds, leftDirection, markers);
+            addMarks(right, rightState, fullBounds, rightDirection, markers);
+          }
+          const consumed = paintStep(ctx, { front: left.img, back: right.img, copy: { ...copy, front: localized ? copy.readingStructureFront : module ? copy.readingModule : copy.readingLayerStructure, back: localized ? copy.readingCompleteBack : copy.readingWholeLocation, thisStep: localized ? (copy.readingAreaParts || '{area}').replace('{area}', area.label) : copy.thisStep, contextHint: '' }, heading: descriptor.heading, items: descriptor.items, icons, k: currentPage, n: total, fill: sceneFill(scene), frontMarks: left.marks, backMarks: right.marks, instructions: [], stamp, partsH: descriptor.partsH, headerH: descriptor.headerH, imageBox: pageBox });
+          if (consumed !== descriptor.items.length) throw manualError('pagination', '阅读页材料分页与实际绘制不一致');
+          if (localized) {
+            // 定位图另占安全框，标题下方留白；截图和绘制使用相同纵横比。
+            const locatorState = { ...rightState, visible: new Set(allIds), current: new Set(area.partIds), done: new Set([...allIds].filter(id => !area.partIds.includes(id))), transforms: new Map(), arrows: [], interfaceMarks: [] };
+            const locationBox = { imgW: 35, imgH: 29, fitMargin: 1.3 };
+            const location = await shot(locatorState, 0, [], fullBounds, [1, .75, 1], locationBox, true);
+            const projection = projectReadingLocatorBounds(scene, fullBounds, location.img.width / location.img.height);
+            if (!projection.complete) throw manualError('locator', copy.readingLocatorError);
+            const { x: lx, y: ly } = pageBox.locator;
+            ctx.fillStyle = PAPER; ctx.fillRect(mm(lx - 1), mm(ly - 1), mm(37), mm(37));
+            drawShot(ctx, location.img, mm(lx), mm(ly), mm(35), mm(29), sceneFill(scene), true);
+            ctx.font = font(500, mm(MANUAL_AUX_MM)); ctx.fillStyle = INK;
+            wrapManualText(ctx, `${copy.readingLocation} · ${area.label}`, mm(35)).forEach((line, i) => ctx.fillText(line, mm(lx), mm(ly + 30 + i * 4)));
+          }
         } else {
           let state, completed, heading, instructions = [], leftLabel = copy.actionView, rightLabel = copy.completeView, bounds, leftFocus, rightFocus, roofCoverDetail = false, modulePreassembly = false, layer = false, bodyContext = false;
           if (descriptor.type === 'step' || descriptor.type === 'detail') {
@@ -1623,7 +1678,7 @@ export async function exportAssemblyPdf(opts) {
             leftLabel = copy.regionShape; rightLabel = copy.regionLocation;
             instructions = [`${copy.regionOrder}: ${steps.filter(step => step.regionId === descriptor.region.id).map(step => step.title).filter(Boolean).join(' → ')}`];
           } else {
-            const finalInterfaces = (plan.interfaces || []).filter(marker => marker.attachment !== 'upper-frame');
+          const finalInterfaces = [];
             state = descriptor.type === 'final' ? { current: allIds, done: new Set(), visible: allIds, transforms: new Map(), interfaceMarks: finalInterfaces, arrows: [] } : null;
             completed = state;
             heading = descriptor.type === 'final' ? copy.finalTitle : copy.regionOverview;
@@ -1651,7 +1706,7 @@ export async function exportAssemblyPdf(opts) {
               image.marks.push(...positions.flatMap((point, i) => point ? [{ ...point, num: locatedRegions[i].row.label }] : []));
             }
           }
-          const consumed = paintStep(ctx, { front: left.img, back: right.img, copy: { ...copy, front: leftLabel, back: rightLabel, contextHint: layer ? copy.layerHint : bodyContext ? copy.bodyHint : modulePreassembly ? copy.preassemblyHint : roofCoverDetail ? copy.roofCoverHint : ['step', 'detail'].includes(descriptor.type) ? copy.contextHint : '' }, heading, items: descriptor.items || [], icons, k: currentPage, n: total, fill: sceneFill(scene), frontMarks: left.marks, backMarks: right.marks, instructions, stamp, partsH: descriptor.partsH, headerH: descriptor.headerH, instructionLines: descriptor.instructionLines });
+          const consumed = paintStep(ctx, { front: left.img, back: right.img, copy: { ...copy, ...(descriptor.type === 'final' ? { thisStep: '', none: '' } : {}), front: leftLabel, back: rightLabel, contextHint: layer ? copy.layerHint : bodyContext ? copy.bodyHint : modulePreassembly ? copy.preassemblyHint : roofCoverDetail ? copy.roofCoverHint : ['step', 'detail'].includes(descriptor.type) ? copy.contextHint : '' }, heading, items: descriptor.items || [], icons, k: currentPage, n: total, fill: sceneFill(scene), frontMarks: left.marks, backMarks: right.marks, instructions, stamp, partsH: descriptor.partsH, headerH: descriptor.headerH, instructionLines: descriptor.instructionLines });
           if (consumed !== (descriptor.items?.length || 0)) throw manualError('pagination', '步骤料表分页与实际绘制不一致');
           const box = pageBox;
           if (descriptor.type !== 'detail') drawManualArrows(ctx, left.img, mm(box.x0), mm(box.imgY), mm(box.imgW), mm(box.imgH), left.arrows, left.marks);
@@ -1672,7 +1727,7 @@ export async function exportAssemblyPdf(opts) {
     await onDocument?.({ doc, blob, pages: total, plan });
     if (save) doc.save(filename || `${name || 'design'}.pdf`);
     onProgress?.({ page: total, total, phase: 'complete' });
-    return { pages: total, coverRows: itemsCover.length, steps: steps.length, diagnostics: plan.diagnostics, missingPictures: itemsCover.filter(item => !partImageSrc(item.id)).map(item => item.id), blob };
+    return { pages: total, coverRows: itemsCover.length, steps: reading.steps.length, diagnostics: plan.diagnostics, readingPlan: reading, missingPictures: itemsCover.filter(item => !partImageSrc(item.id)).map(item => item.id), blob };
   } catch (error) {
     error.page = currentPage; error.total = total;
     throw error;

@@ -50,6 +50,19 @@ export const assemblyPdfStrings: Record<Lang, Record<string, string>> = {
   de: { actionView: 'Montagebewegung', completeView: 'Fertiger Schritt', regionOverview: 'Baubereiche im Überblick', regionShape: 'Form des Bereichs', regionLocation: 'Position im gesamten Modell', regionOrder: 'Baureihenfolge', finalTitle: 'Fertiges Modell', detailTitle: 'Verbindungsdetails', instructionsTitle: 'Bauanleitung' },
 }
 
+const readingCopy: Record<Lang, Record<string, string>> = {
+  zh: { readingBase: '底层框架', readingLayer: '{height} cm层', readingArea: '{area}区放大', readingAreaParts: '{area}区所需零件 · 灰色为参照件', readingStructureFront: '框架 · 正面', readingCompleteBack: '完整局部 · 背面', readingLayerStructure: '本层结构', readingModule: '预拼结构', readingWholeLocation: '主体定位', readingLocation: '主体定位', readingStepHeading: '第{k}/{n}步 · {title}', readingQuantityNote: '局部小计包含在本层总量中。' },
+  en: { readingBase: 'Base frame', readingLayer: '{height} cm layer', readingArea: 'Area {area} closeup', readingAreaParts: 'Parts for area {area} · grey parts are references', readingStructureFront: 'Frame · front', readingCompleteBack: 'Complete area · back', readingLayerStructure: 'Layer structure', readingModule: 'Preassembled module', readingWholeLocation: 'Location in the structure', readingLocation: 'Location', readingStepHeading: 'Step {k}/{n} · {title}', readingQuantityNote: 'Area quantities are included in the layer total.' },
+  de: { readingBase: 'Grundrahmen', readingLayer: 'Ebene bei {height} cm', readingArea: 'Bereich {area} vergrößert', readingAreaParts: 'Teile für Bereich {area} · graue Teile dienen als Referenz', readingStructureFront: 'Rahmen · Vorderansicht', readingCompleteBack: 'Gesamter Bereich · Rückansicht', readingLayerStructure: 'Struktur der Ebene', readingModule: 'Vormontiertes Modul', readingWholeLocation: 'Position im Aufbau', readingLocation: 'Position', readingStepHeading: 'Schritt {k}/{n} · {title}', readingQuantityNote: 'Die Bereichsmengen sind in der Ebenensumme enthalten.' },
+}
+for (const lang of ['zh', 'en', 'de'] as const) Object.assign(assemblyPdfStrings[lang], readingCopy[lang])
+assemblyPdfStrings.zh.readingPhysicalStatus = '现场搭建及承载尚未验证。'
+assemblyPdfStrings.en.readingPhysicalStatus = 'Physical assembly and load capacity remain unverified.'
+assemblyPdfStrings.de.readingPhysicalStatus = 'Praktischer Aufbau und Belastbarkeit wurden nicht geprüft.'
+assemblyPdfStrings.zh.readingLocatorError = '完整模型定位图超出安全画面。'
+assemblyPdfStrings.en.readingLocatorError = 'The complete model does not fit inside the locator frame.'
+assemblyPdfStrings.de.readingLocatorError = 'Das gesamte Modell passt nicht in den Positionsrahmen.'
+
 assemblyPdfStrings.zh.contextHint = '操作图暂时隐藏周围零件；完整形态见区域页和成品页。'
 assemblyPdfStrings.zh.beforeView = '装配前'
 assemblyPdfStrings.zh.layerAction = '本层安装'
