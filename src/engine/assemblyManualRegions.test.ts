@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { manualRegionDescriptors } from './assemblyManual.js'
 
+type RegionDescriptor = { type: string; region: { id: string; name: string; partIds: string[]; label?: string }; partIds: string[]; label: string }
+
 describe('PDF region pages after accessory scheduling, without model planning', () => {
   it('omits an empty relocated accessory region even though its completed locator would show gray model context', () => {
     const model = { nodes: new Map([['n1', { x: 0, y: 0, z: 0 }]]), tubes: new Map(), slides: new Map([['slide', { kind: 'slide2' }]]) }
@@ -10,7 +12,7 @@ describe('PDF region pages after accessory scheduling, without model planning', 
     ], steps: [{ id: 'body-step', regionId: 'body', partIds: ['n1', 'slide'], operations: [{ id: 'fit-slide', partIds: ['slide'] }] }],
       bom: { slides: [{ id: 'slide2', count: 1 }] }, ledger: { instances: [{ id: 'slide-instance', partIds: ['slide'], stepId: 'body-step' }] } }
     const before = structuredClone({ model, plan })
-    const pages = manualRegionDescriptors(model, plan)
+    const pages: RegionDescriptor[] = manualRegionDescriptors(model, plan)
     expect(pages.map(page => [page.type, page.region.id, page.label, page.partIds])).toEqual([['region', 'body', 'A', ['n1', 'slide']]])
     // The empty region would otherwise show no current/new mesh on the left,
     // while its locator's all-visible model still contains the real slide.
@@ -32,7 +34,7 @@ describe('PDF region pages after accessory scheduling, without model planning', 
       { id: 'legacy', name: 'Legacy region', partIds: ['n5'] },
     ], steps: [{ id: 'main1', regionId: 'body', partIds: ['n1', 'pipe'] }], bom: { tubes: [{ count: 1 }], fittings: [{ count: 1 }] } }
     const before = structuredClone({ model, plan })
-    const pages = manualRegionDescriptors(model, plan)
+    const pages: RegionDescriptor[] = manualRegionDescriptors(model, plan)
     expect(pages.map(page => page.region.id)).toEqual(['body', 'standalone', 'legacy'])
     expect(pages.map(page => page.label)).toEqual(['A', 'C', 'R5'])
     expect(pages.map(page => page.partIds)).toEqual([['n1', 'pipe'], ['accessory'], ['n5']])
