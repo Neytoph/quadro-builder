@@ -199,7 +199,7 @@ export default function AssemblyPreview() {
   const detail: E = !whole && !marked.length ? details.find(group => group.id === detailId) : null
   const detailIndex = detail ? details.findIndex(group => group.id === detail.id) : -1
   const materials: E[] = detail?.materials || entry?.materials || (index === 0 ? reading.items : [])
-  const heading = entry ? copy.readingStepHeading.replace('{k}', String(index)).replace('{n}', String(reading.steps.length)).replace('{title}', entry.title) : index === 0 ? copy.coverTitle : copy.finalTitle
+  const heading = entry ? copy.readingStepHeading.replace('{k}', String(index)).replace('{n}', String(reading.steps.length)).replace('{title}', entry.title) : index === 0 ? s.all : copy.finalTitle
   const viewCaption = detail ? action ? copy.readingStructureFront : copy.readingCompleteBack : entry ? action ? entry.kind === 'module' ? copy.readingModule : copy.readingLayerStructure : copy.readingWholeLocation : s.overview
   const selectDetail = (id: string | null) => { setDetailId(id); setWhole(false); setMarked([]); setAction(true) }
   const selectStep = (i: number) => { setIndex(i); setDetailId(null); setWhole(false); setMarked([]); setAction(true) }
