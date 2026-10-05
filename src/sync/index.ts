@@ -121,7 +121,7 @@ export function createSync(opts: SyncOptions = {}) {
     const queued = new Set(queue.map(doc => doc.id))
     for (const doc of queue) {
       active()
-      if (!doc.saveId && doc.rev > 0) {
+      if (doc.legacyPending || !doc.saveId && doc.rev > 0) {
         const protectedDoc = await docs.protectLegacyDoc(doc)
         active()
         if (!protectedDoc.local) continue

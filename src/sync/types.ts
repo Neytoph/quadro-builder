@@ -20,6 +20,8 @@ export interface DocRecord {
   saveId?: string
   parentSaveId?: string
   legacyRecoveryId?: string
+  /** 原ID的历史基线尚未经真实GET确认，手动保存只能落恢复副本。 */
+  legacyPending?: boolean
   /** 旧版删除未保留模型，真实核对后仍保留该删除意图。 */
   legacyDeletionAt?: number
   recoveryData?: unknown

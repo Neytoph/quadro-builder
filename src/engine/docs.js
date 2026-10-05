@@ -39,6 +39,17 @@ function putSaveLink(store, doc, baseRev = doc.rev) {
   if (doc.saveId) store.put({ id: saveLinkKey(doc.id, doc.saveId), parentSaveId: doc.parentSaveId, baseRev });
 }
 
+function isLegacyUnverified(doc) {
+  return Boolean(doc && (doc.legacyPending || doc.dirty && !doc.saveId && doc.rev > 0));
+}
+
+function contentJSON(data) {
+  return JSON.stringify(data, (_key, value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+    return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)));
+  });
+}
+
 // --- Dateien ------------------------------------------------------------
 
 /** Alle Dateien, zuletzt geänderte zuerst. Grabsteine bleiben außen vor. */
@@ -224,6 +235,8 @@ export function resolveDocConflict(sent, remote, authoritativeLegacy = false) {
         delete copy.pendingRemote;
         delete copy.conflictCopies;
         delete copy.parentSaveId;
+        delete copy.legacyPending;
+        delete copy.legacyRecoveryId;
         store.put(copy);
         copies[key] = copyId;
         result.copies[key] = copyId;
@@ -255,8 +268,9 @@ export function protectLegacyDoc(sent) {
     const request = store.get(sent.id);
     request.onsuccess = () => {
       const current = request.result;
-      if (!current?.dirty || current.saveId || !(current.rev > 0)) return;
+      if (!isLegacyUnverified(current)) return;
       if (current.deletedAt && !hasRecoverableData(current)) {
+        store.put({ ...current, legacyPending: true });
         result.local = current;
         return;
       }
@@ -270,11 +284,13 @@ export function protectLegacyDoc(sent) {
         delete copy.pendingRemote;
         delete copy.conflictCopies;
         delete copy.parentSaveId;
+        delete copy.legacyPending;
+        delete copy.legacyRecoveryId;
         store.put(copy);
         copies[key] = copy.id;
-        store.put({ ...current, conflictCopies: copies, legacyRecoveryId: copies[key] });
+        store.put({ ...current, conflictCopies: copies, legacyRecoveryId: copies[key], legacyPending: true });
       }
-      if (!current.legacyRecoveryId && copies[key]) store.put({ ...current, conflictCopies: copies, legacyRecoveryId: copies[key] });
+      if (copies[key]) store.put({ ...current, conflictCopies: copies, legacyRecoveryId: copies[key], legacyPending: true });
       result.local = current;
       result.copyId = copies[key];
     };
@@ -291,9 +307,9 @@ export function docByName(name) {
 /**
  * Datei anlegen oder überschreiben. Ohne `docId` entsteht eine neue Datei.
  * Liefert den gespeicherten Datensatz zurück.
- * @param {{docId?: string | null, name: string, data: unknown, baseRev?: number | null, parentSaveId?: string}} options
+ * @param {{docId?: string | null, name: string, data: unknown, baseRev?: number | null, parentSaveId?: string, baseContent?: string}} options
  */
-export function saveDoc({ docId, name, data, baseRev = null, parentSaveId }) {
+export function saveDoc({ docId, name, data, baseRev = null, parentSaveId, baseContent }) {
   const jetzt = Date.now();
   const savedId = docId || id("d");
   // Read and write in one transaction so concurrent saves receive distinct versions.
@@ -301,30 +317,64 @@ export function saveDoc({ docId, name, data, baseRev = null, parentSaveId }) {
     const store = stores[DB_STORES.docs];
     const doc = {};
     const request = store.get(savedId);
-    request.onsuccess = () => {
-      const alt = request.result?.deletedAt ? null : request.result;
+    const writeSaved = (previous, targetId, redirected = false) => {
+      const alt = previous?.deletedAt ? null : previous;
       const confirmedParent = typeof parentSaveId === "string" && alt?.saveId === parentSaveId
         && alt.syncedSaveId === parentSaveId && !alt.pendingRemote;
-      let rev = typeof baseRev === "number" ? baseRev : alt?.rev || 0;
+      const actualParent = parentSaveId && (!redirected || alt?.saveId === parentSaveId);
+      let rev = alt?.rev || 0;
+      if (!redirected && typeof baseRev === "number") rev = baseRev;
       if (confirmedParent) rev = Math.max(rev, alt.rev || 0);
       Object.assign(doc, {
-        id: savedId,
+        id: targetId,
         name: (name || alt?.name || "").trim() || "Unbenannt",
         data,
         createdAt: alt?.createdAt || jetzt,
         updatedAt: Math.max(jetzt, (alt?.updatedAt || 0) + 1),
         rev,
         saveId: id("s"),
-        ...(parentSaveId ? { parentSaveId } : {}),
+        ...(actualParent ? { parentSaveId } : {}),
         dirty: true,
       });
       if (alt?.conflictCopies) doc.conflictCopies = alt.conflictCopies;
       if (alt?.legacyRecoveryId) doc.legacyRecoveryId = alt.legacyRecoveryId;
-      if (typeof baseRev !== "number" && alt?.cover) doc.cover = alt.cover;
+      if ((redirected || typeof baseRev !== "number") && alt?.cover && contentJSON(alt.data) === contentJSON(data)) doc.cover = alt.cover;
       if (alt?.pendingRemote) doc.pendingRemote = alt.pendingRemote;
       if (alt && !alt.dirty && (alt.rev || 0) > doc.rev) doc.pendingRemote = alt;
       store.put(doc);
       putSaveLink(stores[DB_STORES.sync], doc);
+    };
+    request.onsuccess = () => {
+      const original = request.result;
+      const explicitParent = typeof parentSaveId === "string" && original?.saveId === parentSaveId;
+      const verifiedContent = typeof baseRev === "number" && baseRev === original?.rev
+        && typeof baseContent === "string" && baseContent === contentJSON(original?.data);
+      const staleRecoveryBinding = original?.legacyRecoveryId && !explicitParent && !verifiedContent;
+      if (!isLegacyUnverified(original) && !staleRecoveryBinding) { writeSaved(original, savedId); return; }
+      // 未核对历史记录的原 ID 永远只等待 GET；手动保存也不能洗掉保护。
+      const copyId = original.legacyRecoveryId || id("d");
+      const copies = { ...(original.conflictCopies || {}), [`legacy:${original.updatedAt}`]: copyId };
+      store.put({ ...original, ...(isLegacyUnverified(original) ? { dirty: true, legacyPending: true } : {}),
+        legacyRecoveryId: copyId, conflictCopies: copies });
+      const copyRequest = store.get(copyId);
+      copyRequest.onsuccess = () => {
+        const existing = copyRequest.result;
+        const copy = existing || { createdAt: jetzt, rev: 0, data: original.data ?? original.recoveryData, cover: original.cover };
+        const copyContent = contentJSON(copy.data);
+        const originalContent = contentJSON(original.data ?? original.recoveryData);
+        const distinctWork = existing && !existing.deletedAt && copyContent !== contentJSON(data) && copyContent !== originalContent
+          && parentSaveId !== existing.saveId && baseContent !== copyContent;
+        if (distinctWork) {
+          // 另一标签已编辑恢复copy；没有父保存/基线证明时保全它，另存当前工作。
+          const nextId = id("d");
+          copies[`legacy:${original.updatedAt}`] = nextId;
+          store.put({ ...original, ...(isLegacyUnverified(original) ? { dirty: true, legacyPending: true } : {}),
+            legacyRecoveryId: nextId, conflictCopies: copies });
+          writeSaved(null, nextId, true);
+          return;
+        }
+        writeSaved(copy, copyId, true);
+      };
     };
     return doc;
   });
@@ -340,6 +390,7 @@ export function setDocCover(docId, cover, expectUpdatedAt, expectSaveId) {
     request.onsuccess = () => {
       const doc = request.result;
       if (!doc || doc.deletedAt || (typeof expectSaveId === "string" ? doc.saveId !== expectSaveId : typeof expectUpdatedAt === "number" && doc.updatedAt !== expectUpdatedAt)) return;
+      if (isLegacyUnverified(doc)) doc.legacyPending = true;
       if (!doc.saveId && !doc.dirty) doc.saveId = id("s");
       doc.cover = cover;
       doc.updatedAt = Math.max(Date.now(), (doc.updatedAt || 0) + 1);
@@ -357,6 +408,7 @@ export function renameDoc(docId, name) {
     request.onsuccess = () => {
       const doc = request.result;
       if (!doc || doc.deletedAt) return;
+      if (isLegacyUnverified(doc)) doc.legacyPending = true;
       if (!doc.saveId && !doc.dirty) doc.saveId = id("s");
       doc.name = (name || "").trim() || doc.name;
       doc.updatedAt = Math.max(Date.now(), (doc.updatedAt || 0) + 1);
@@ -380,8 +432,10 @@ export function removeDoc(docId) {
       const doc = request.result;
       if (!doc || doc.deletedAt) return;
       if (!doc.rev) { store.delete(docId); return; }
+      const legacyPending = isLegacyUnverified(doc);
       store.put({ ...doc, data: null, recoveryData: doc.data, deletedAt: Date.now(),
-        updatedAt: Math.max(Date.now(), (doc.updatedAt || 0) + 1), saveId: id("s"), dirty: true });
+        updatedAt: Math.max(Date.now(), (doc.updatedAt || 0) + 1),
+        ...(legacyPending ? { legacyPending: true } : { saveId: id("s") }), dirty: true });
     };
     return request;
   });

@@ -524,6 +524,144 @@ describe('存档及同步竞争保护（内存 IndexedDB、隔离请求夹具，
     }
   })
 
+  it.each(['old-canvas', 'edited-canvas'])('旧GET失败后手动保存%s只更新恢复副本，重建sync实例仍不覆盖云原模型', async version => {
+    const legacy = { ...remote('A', 2, 'old-canvas'), dirty: true }
+    await storage.dbTx(storage.DB_STORES.docs, 'readwrite', (store: IDBObjectStore) => store.put(legacy))
+    const cloud = remote('A', 2, 'cloud-v2')
+    let offline = true
+    const calls: string[] = []
+    let sent: Record<string, unknown> | undefined
+    const fetchImpl = sink((url, init) => {
+      calls.push(`${init?.method || 'GET'} ${url}`)
+      if (url.endsWith('/models/A')) return offline ? response({}, 500) : response(cloud)
+      if (init?.method === 'PUT') {
+        sent = JSON.parse(init.body as string)
+        return response({ rev: 3, saveId: sent!.saveId })
+      }
+      return response({ items: [cloud], rev: 3 })
+    })
+    const sync = createSync({ baseUrl: '/quadro', accountId, fetchImpl })
+    await sync.syncNow(); sync.stop()
+    const protectedRecord = await docs.getDoc('A')
+    expect(protectedRecord!.legacyPending).toBe(true)
+    const saved = await docs.saveDoc({ docId: 'A', name: 'manual', data: model(version), baseRev: 2,
+      baseContent: JSON.stringify(legacy.data) })
+    expect(saved.id).toBe(protectedRecord!.legacyRecoveryId)
+    expect(saved.rev).toBe(0)
+    expect(saved.legacyPending).toBeUndefined()
+    expect((await docs.getDoc('A'))!.data).toEqual(legacy.data)
+    storage.setAccountScope(null); storage.setAccountScope(accountId)
+    expect((await docs.getDoc(saved.id))!.data).toEqual(model(version))
+    offline = false
+    const restarted = createSync({ baseUrl: '/quadro', accountId, fetchImpl })
+    const receipt = await restarted.syncSavedDoc(saved.id, saved.saveId)
+    restarted.stop()
+    expect(receipt).toMatchObject({ status: 'synced', id: saved.id, saveId: saved.saveId })
+    expect(calls.some(call => call === 'PUT /quadro/models/A' || call.startsWith('DELETE '))).toBe(false)
+    expect(sent!.data).toEqual(model(version))
+    expect((await docs.getDoc('A'))!.data).toEqual(cloud.data)
+    expect((await docs.getDoc('A'))!.legacyPending).toBeUndefined()
+    expect((await docs.getDoc(saved.id))!.syncedSaveId).toBe(saved.saveId)
+    expect(await docs.listDocs()).toHaveLength(2)
+  })
+
+  it('protect尚未启动的直接保存也原子分叉，连续旧调用复用copy且账户隔离', async () => {
+    const legacy = { ...remote('A', 2, 'old'), dirty: true }
+    await storage.dbTx(storage.DB_STORES.docs, 'readwrite', (store: IDBObjectStore) => store.put(legacy))
+    const first = await docs.saveDoc({ docId: 'A', name: 'manual', data: model('one'), baseRev: 2 })
+    const second = await docs.saveDoc({ docId: 'A', name: 'manual', data: model('two'), parentSaveId: first.saveId })
+    expect(first.id).not.toBe('A')
+    expect(second.id).toBe(first.id)
+    expect(second.rev).toBe(0)
+    expect((await docs.getDoc('A'))).toMatchObject({ data: legacy.data, legacyPending: true, legacyRecoveryId: first.id })
+    expect(await docs.listDocs()).toHaveLength(2)
+    storage.setAccountScope(`${accountId}-other`)
+    const other = await docs.saveDoc({ docId: 'A', name: 'other', data: model('other') })
+    expect(other.id).toBe('A')
+    storage.setAccountScope(accountId)
+    expect((await docs.getDoc(first.id))!.data).toEqual(model('two'))
+  })
+
+  it('GET同rev接受新云模型后旧标签保存仍分叉，真实读新内容的标签正常保存原id', async () => {
+    const legacy = { ...remote('A', 2, 'old'), dirty: true }
+    await storage.dbTx(storage.DB_STORES.docs, 'readwrite', (store: IDBObjectStore) => store.put(legacy))
+    await docs.protectLegacyDoc(legacy)
+    const cloud = remote('A', 2, 'cloud')
+    await docs.resolveDocConflict(legacy, cloud, true)
+    const content = (data: unknown) => JSON.stringify(data, (_key, value: unknown) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return value
+      return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)))
+    })
+    const stale = await docs.saveDoc({ docId: 'A', name: 'stale', data: model('edited-old'), baseRev: 2, baseContent: content(legacy.data) })
+    expect(stale.id).not.toBe('A')
+    expect((await docs.getDoc('A'))!.data).toEqual(cloud.data)
+    expect((await docs.getDoc('A'))!.dirty).toBe(false)
+    const missingProof = await docs.saveDoc({ docId: 'A', name: 'old caller', data: model('unknown'), baseRev: 2 })
+    expect(missingProof.id).not.toBe('A')
+    expect((await docs.getDoc(stale.id))!.data).toEqual(model('edited-old'))
+    const fresh = await docs.saveDoc({ docId: 'A', name: 'fresh', data: model('edited-cloud'), baseRev: 2, baseContent: content(cloud.data) })
+    expect(fresh.id).toBe('A')
+    const child = await docs.saveDoc({ docId: 'A', name: 'fresh', data: model('next-cloud'), baseRev: 2, parentSaveId: fresh.saveId })
+    expect(child.id).toBe('A')
+    expect(child.parentSaveId).toBe(fresh.saveId)
+  })
+
+  it('未知legacy改名封面再删除仍待真实GET，不因新删除saveId逃逸为DELETE', async () => {
+    const legacy = { ...remote('A', 2, 'old'), dirty: true }
+    await storage.dbTx(storage.DB_STORES.docs, 'readwrite', (store: IDBObjectStore) => store.put(legacy))
+    await docs.renameDoc('A', 'renamed')
+    await docs.setDocCover('A', 'cover')
+    docs.setSyncMode(true)
+    await docs.removeDoc('A')
+    const pending = (await docs.allRecords()).find((doc: DocRecord) => doc.id === 'A')
+    expect(pending.legacyPending).toBe(true)
+    expect(pending.saveId).toBeUndefined()
+    expect(pending.recoveryData).toEqual(legacy.data)
+    let offline = true
+    const calls: string[] = []
+    const cloud = remote('A', 2, 'cloud')
+    const sync = createSync({ baseUrl: '/quadro', accountId, fetchImpl: sink((url, init) => {
+      calls.push(`${init?.method || 'GET'} ${url}`)
+      if (url.endsWith('/models/A')) return offline ? response({}, 500) : response(cloud)
+      if (init?.method === 'PUT') return response({ rev: 3, saveId: JSON.parse(init.body as string).saveId })
+      return response({ items: [cloud], rev: 3 })
+    }) })
+    await sync.syncNow()
+    offline = false
+    await sync.syncNow(); sync.stop()
+    expect(calls.some(call => call === 'PUT /quadro/models/A' || call.startsWith('DELETE '))).toBe(false)
+    expect((await docs.getDoc('A'))!.data).toEqual(cloud.data)
+    const copy = await docs.getDoc((await docs.getDoc('A'))!.legacyRecoveryId)
+    expect(copy!.data).toEqual(legacy.data)
+    expect(copy!.name).toContain('renamed')
+    expect(copy!.legacyPending).toBeUndefined()
+  })
+
+  it('未证明父链的旧标签保存不覆写已编辑恢复副本，封面只继承同内容快照', async () => {
+    const legacy = { ...remote('A', 2, 'old'), dirty: true, cover: 'old-cover' }
+    await storage.dbTx(storage.DB_STORES.docs, 'readwrite', (store: IDBObjectStore) => store.put(legacy))
+    const protection = await docs.protectLegacyDoc(legacy)
+    const copyId = protection.copyId
+    const edited = await docs.saveDoc({ docId: copyId, name: 'edited', data: model('edited') })
+    expect(edited.cover).toBeUndefined()
+    await docs.setDocCover(copyId, 'edited-cover', undefined, edited.saveId)
+    const oldTab = await docs.saveDoc({ docId: 'A', name: 'old tab', data: legacy.data, baseRev: 2 })
+    expect(oldTab.id).not.toBe(copyId)
+    expect((await docs.getDoc(copyId))!.data).toEqual(model('edited'))
+    expect((await docs.getDoc(copyId))!.cover).toBe('edited-cover')
+    expect(oldTab.data).toEqual(legacy.data)
+    expect(oldTab.cover).toBeUndefined()
+    expect((await docs.getDoc('A'))!.legacyRecoveryId).toBe(oldTab.id)
+    await docs.setDocCover(oldTab.id, 'same-cover', undefined, oldTab.saveId)
+    const same = await docs.saveDoc({ docId: 'A', name: 'same', data: legacy.data, baseRev: 2 })
+    expect(same.id).toBe(oldTab.id)
+    expect(same.cover).toBe('same-cover')
+    const changed = await docs.saveDoc({ docId: 'A', name: 'changed', data: model('changed'), baseRev: 2, parentSaveId: same.saveId })
+    expect(changed.id).toBe(oldTab.id)
+    expect(changed.cover).toBeUndefined()
+    expect(changed.parentSaveId).toBe(same.saveId)
+  })
+
   it('无saveId的正常clean云端记录不迁移，新rename/cover分配已知内容标识', async () => {
     const cloud = remote('clean', 2)
     await docs.putRemoteDoc(cloud)
