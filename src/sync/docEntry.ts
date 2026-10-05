@@ -1,8 +1,7 @@
 // ?doc=<doc id>：打开自己「我的设计」里的这一座（站点工作台「我的设计」点卡片时用）。
-// 同步跑完一轮以后本机一般就有了；本机还是没有（这台设备上登过别的账号，拉取游标跑到了前面），
-// 就把服务端的整份列表拉一遍取这一座。服务端只给自己的，别人的、删掉的都拿不到。
+// 已有本机存档也核对服务端最新内容；单文档读取不代表完整拉取进度。
 import { docs, storage } from '../engine-api'
-import type { PullResponse, RemoteDoc } from './types'
+import type { RemoteDoc } from './types'
 
 /** 服务端列表里的这一座，删掉的不算 */
 export function pickRemote(items: RemoteDoc[], id: string): RemoteDoc | null {
@@ -14,18 +13,19 @@ export async function hasLocalDoc(id: string): Promise<boolean> {
   return !!(await docs.getDoc(id))
 }
 
-/** 本机没有就从 /models 拉下来放进本机。拉到了（或者本来就有）返回 true，服务端也没有返回 false */
+/** 单文档核对最新服务端内容；不改变完整拉取的检查点。 */
 export async function pullDoc(baseUrl: string, id: string): Promise<boolean> {
   const epoch = storage.getAccountEpoch()
   const scope = storage.getAccountScope()
-  if (await hasLocalDoc(id)) return true
   if (!scope.startsWith('user:')) throw new Error('verified account required')
   const userId = scope.slice(5)
-  const res = await fetch(`${baseUrl}/models?since=0`, { credentials: 'include', headers: { Accept: 'application/json', 'X-Builder-User-ID': userId } })
-  if (!res.ok) throw new Error(`GET /models → ${res.status}`)
-  const doc = pickRemote(((await res.json()) as PullResponse).items, id)
+  const res = await fetch(`${baseUrl}/models/${encodeURIComponent(id)}`, { credentials: 'include', cache: 'no-store', headers: { Accept: 'application/json', 'X-Builder-User-ID': userId } })
   if (epoch !== storage.getAccountEpoch() || res.headers.get('X-Builder-User-ID') !== userId) throw new Error('account changed')
-  if (!doc) return false
+  if (res.status === 404) return false
+  if (!res.ok) throw new Error(`GET /models/${id} → ${res.status}`)
+  const doc = await res.json() as RemoteDoc
+  if (epoch !== storage.getAccountEpoch()) throw new Error('account changed')
+  if (doc.id !== id || !Number.isSafeInteger(doc.rev)) throw new Error('invalid remote model')
   await docs.putRemoteDoc(doc)
-  return true
+  return !doc.deletedAt && doc.data !== null && doc.data !== undefined
 }

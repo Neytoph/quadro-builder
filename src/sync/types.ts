@@ -17,6 +17,10 @@ export interface DocRecord {
   deletedAt?: number
   /** 还没交上去的封面（图片的 data URL），下一次推送时带上。 */
   cover?: string
+  saveId?: string
+  syncedSaveId?: string
+  pendingRemote?: RemoteDoc
+  conflictCopies?: Record<string, string>
 }
 
 /**
@@ -35,6 +39,7 @@ export interface RemoteDoc {
   updatedAt: number
   rev: number
   deletedAt?: number | null
+  saveId?: string
 }
 
 export interface PullResponse {
@@ -45,7 +50,16 @@ export interface PullResponse {
 
 export interface PushResponse {
   rev: number
+  saveId?: string
+  coverApplied?: boolean
+  coverError?: string
+  originError?: string
 }
+
+export type SavedDocSyncResult =
+  | { status: 'synced'; id: string; saveId: string; rev: number }
+  | { status: 'conflict'; id: string; saveId: string; copyId: string }
+  | { status: 'pending'; id: string; saveId: string; error?: unknown }
 
 /** 服务端上的库存。每人一份，所以没有 id、没有墓碑。 */
 export interface RemoteInventory {
@@ -57,9 +71,9 @@ export interface RemoteInventory {
 export type SyncEvent =
   | { type: 'start' }
   | { type: 'idle'; rev: number }
-  | { type: 'pushed'; id: string; rev: number }
+  | { type: 'pushed'; id: string; rev: number; saveId?: string }
   | { type: 'pulled'; count: number; rev: number }
-  | { type: 'conflict'; id: string; copyId: string }
+  | { type: 'conflict'; id: string; copyId: string; saveId?: string }
   | { type: 'inventory-pushed'; rev: number }
   | { type: 'inventory-pulled'; rev: number }
   /** 库存两端都改过。服务端那份已生效，本地那份存进了 stashKey。 */

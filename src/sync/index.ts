@@ -12,20 +12,16 @@ import { statsOfData } from '../designStats'
 import { forgetOrigin, originOf } from './origin'
 import type {
   DesignParts, DocRecord, PullResponse, PushResponse, RemoteDoc, RemoteInventory,
-  SyncEvent, SyncOptions,
+  SavedDocSyncResult, SyncEvent, SyncOptions,
 } from './types'
 
-/**
- * 拉取游标：本地记录里最大的 rev。
- *
- * 游标跟文档放在同一个 IndexedDB 里算出来，两者同生同灭。浏览器单独清掉
- * IndexedDB 时，游标跟着归零，下一轮把服务器上的整份重新拉回来。
- * 服务端每次改动都给这个用户的 rev 加一，拉下来的记录全部落进本地，
- * 所以本地最大的 rev 之前的改动都已经在本地。
- */
 async function readCursor(): Promise<number> {
-  const all = (await docs.allRecords()) as DocRecord[]
-  return all.reduce((max, d) => Math.max(max, d.rev || 0), 0)
+  return docs.readPullCheckpoint()
+}
+
+function contentJSON(data: unknown): string | undefined {
+  return JSON.stringify(data, (_key, value) => value && typeof value === 'object' && !Array.isArray(value)
+    ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]])) : value)
 }
 
 /** 402 = 配额用尽。带上服务端给的用量信息，UI 好提示。 */
@@ -61,6 +57,8 @@ export function createSync(opts: SyncOptions = {}) {
   // 一轮在跑，返回 undefined 就成了「以为推完了，其实刚开始」。
   let inflight: Promise<void> | null = null
   let stopped = false
+  let lastError: unknown
+  const receipts = new Map<string, SavedDocSyncResult>()
   const controller = new AbortController()
   const scopeEpoch = storage.getAccountEpoch()
   function active() {
@@ -104,21 +102,16 @@ export function createSync(opts: SyncOptions = {}) {
   /** 冲突不丢数据：本地版本另存一份，再接受服务端版本。 */
   async function forkConflict(local: DocRecord, remote: RemoteDoc): Promise<void> {
     active()
-    const copy = await docs.saveDoc({
-      docId: undefined,                 // 新建：engine 侧会生成 id
-      name: `${local.name}（冲突副本）`,
-      data: local.data,
-    })
+    const result = await docs.resolveDocConflict(local, remote)
     active()
-    if (local.cover) await docs.setDocCover(copy.id, local.cover)
-    active()
-    await docs.putRemoteDoc(remote)
-    emit({ type: 'conflict', id: local.id, copyId: copy.id })
+    for (const [saveId, copyId] of Object.entries(result.copies)) {
+      receipts.set(`${local.id}:${saveId}`, { status: 'conflict', id: local.id, saveId, copyId: copyId as string })
+      emit({ type: 'conflict', id: local.id, copyId: copyId as string, saveId })
+    }
   }
 
   /**
-   * 推送本地改动。必须先于 pull——putRemoteDoc 是无条件覆盖，
-   * 先拉会把还没上传的修改冲掉。
+   * 推送本地改动。拉取会保留dirty及远端分歧，上传以存档基线为准。
    */
   async function push(): Promise<void> {
     const all = (await docs.allRecords()) as DocRecord[]
@@ -128,54 +121,65 @@ export function createSync(opts: SyncOptions = {}) {
       // markDocSynced 靠它判断该不该清 dirty。
       const stamp = doc.updatedAt
       try {
+        let response: PushResponse
         if (doc.deletedAt) {
-          const r = await call<PushResponse>(
+          response = await call<PushResponse>(
             `/models/${encodeURIComponent(doc.id)}?baseRev=${doc.rev}`, { method: 'DELETE' })
-          await docs.markDocSynced(doc.id, r.rev, stamp)
+          if (!Number.isSafeInteger(response.rev) || response.rev < doc.rev) throw new Error('invalid delete receipt')
+          await docs.markDocSynced(doc.id, response.rev, stamp, undefined, doc.saveId, doc.rev)
         } else {
           const parts = partsOfData(doc.data) as DesignParts | null
           // stats：这一版的量（../designStats.ts），服务端拿它当客观量，和 parts 一样由引擎算
           // origin：这一座是从哪个方案打开的（见 ./origin.ts），第一次推上去时带上
-          const r = await call<PushResponse>(`/models/${encodeURIComponent(doc.id)}`, {
+          response = await call<PushResponse>(`/models/${encodeURIComponent(doc.id)}`, {
             method: 'PUT',
             body: JSON.stringify({
               name: doc.name, data: doc.data, parts, stats: statsOfData(doc.data), baseRev: doc.rev, origin: originOf(doc.id),
+              ...(doc.saveId ? { saveId: doc.saveId } : {}),
               ...(doc.cover ? { cover: doc.cover } : {}),
             }),
           })
-          await docs.markDocSynced(doc.id, r.rev, stamp, doc.cover)
-          forgetOrigin(doc.id)
+          if (!Number.isSafeInteger(response.rev) || response.rev <= doc.rev) throw new Error('invalid save receipt')
+          if (response.saveId && response.saveId !== doc.saveId) throw new Error('save receipt mismatch')
+          await docs.markDocSynced(doc.id, response.rev, stamp, response.coverApplied === false ? undefined : doc.cover, doc.saveId, doc.rev)
+          if (!response.originError) forgetOrigin(doc.id)
+          if (response.coverError || response.originError) emit({ type: 'error', error: new Error(response.coverError || response.originError) })
         }
-        emit({ type: 'pushed', id: doc.id, rev: doc.rev })
+        active()
+        if (doc.saveId) receipts.set(`${doc.id}:${doc.saveId}`, { status: 'synced', id: doc.id, saveId: doc.saveId, rev: response.rev })
+        emit({ type: 'pushed', id: doc.id, rev: response.rev, saveId: doc.saveId })
       } catch (err) {
         active()
-        if (err instanceof ConflictError) { await forkConflict(doc, err.remote); continue }
+        if (err instanceof ConflictError) {
+          if (!err.remote || err.remote.id !== doc.id || !Number.isSafeInteger(err.remote.rev)) throw new Error('invalid conflict response')
+          // 响应丢失后的重试：远端确实是这份完整模型才可确认。
+          if (!doc.deletedAt && !err.remote.deletedAt && err.remote.name === doc.name && contentJSON(err.remote.data) === contentJSON(doc.data)) {
+            await docs.markDocSynced(doc.id, err.remote.rev, stamp, undefined, doc.saveId, doc.rev)
+            active()
+            if (doc.saveId) receipts.set(`${doc.id}:${doc.saveId}`, { status: 'synced', id: doc.id, saveId: doc.saveId, rev: err.remote.rev })
+            emit({ type: 'pushed', id: doc.id, rev: err.remote.rev, saveId: doc.saveId })
+          } else await forkConflict(doc, err.remote)
+          continue
+        }
         if (err instanceof QuotaError) {
           // 配额用尽：保持 dirty，停止本轮推送，别把服务器打满。
           emit({ type: 'quota', feature: err.feature, used: err.used, limit: err.limit })
-          return
+          throw err
         }
         throw err
       }
     }
   }
 
-  /** 拉取服务端变更。跳过仍为 dirty 的记录，它们下一轮由 push 处理。 */
+  /** 拉取服务端变更。dirty记录的远端分歧与检查点一起持久化。 */
   async function pull(): Promise<void> {
     const since = await readCursor()
     const { rev, items } = await call<PullResponse>(`/models?since=${since}`)
-    if (!items.length) return
-
-    const local = new Map(
-      ((await docs.allRecords()) as DocRecord[]).map((d) => [d.id, d]))
     active()
-    let n = 0
-    for (const item of items) {
-      active()
-      if (local.get(item.id)?.dirty) continue        // 本地更新，别覆盖
-      await docs.putRemoteDoc(item)
-      n++
-    }
+    if (!Number.isSafeInteger(rev) || rev < since || !Array.isArray(items)
+      || items.some(item => !item.id || !Number.isSafeInteger(item.rev) || item.rev > rev || item.rev <= since)) throw new Error('invalid models pull snapshot')
+    const n = await docs.applyRemoteBatch(items, rev)
+    active()
     emit({ type: 'pulled', count: n, rev })
   }
 
@@ -241,6 +245,7 @@ export function createSync(opts: SyncOptions = {}) {
 
   async function round(): Promise<void> {
     emit({ type: 'start' })
+    lastError = undefined
     try {
       active()
       const response = await fetchImpl(`${baseUrl}/identity`, { credentials: 'include', signal: controller.signal, cache: 'no-store' })
@@ -250,12 +255,19 @@ export function createSync(opts: SyncOptions = {}) {
       const identity = await response.json() as { userId?: string }
       active()
       if (identity.userId !== accountId) { stop(); onIdentityChange?.(); return }
-      await push()
+      try { await push() }
+      catch (error) {
+        if (!(error instanceof QuotaError)) throw error
+        // 配额阻止上传时仍能安全拉取；整轮保留失败状态。
+        await pull()
+        throw error
+      }
       await pull()
       await pushInventory()
       await pullInventory()
       emit({ type: 'idle', rev: await readCursor() })
     } catch (error) {
+      lastError = error
       if (!stopped && storage.getAccountEpoch() === scopeEpoch) emit({ type: 'error', error })
     }
   }
@@ -265,6 +277,28 @@ export function createSync(opts: SyncOptions = {}) {
     if (!enabled || stopped) return Promise.resolve()
     if (!inflight) inflight = round().finally(() => { inflight = null })
     return inflight
+  }
+
+  async function syncSavedDoc(id: string, saveId: string): Promise<SavedDocSyncResult> {
+    const key = `${id}:${saveId}`
+    const check = async (): Promise<SavedDocSyncResult | undefined> => {
+      const receipt = receipts.get(key)
+      if (receipt) return receipt
+      const doc = await docs.getDoc(id) as DocRecord | null
+      if (doc?.conflictCopies?.[saveId]) return { status: 'conflict', id, saveId, copyId: doc.conflictCopies[saveId] }
+      if (doc?.syncedSaveId === saveId) return { status: 'synced', id, saveId, rev: doc.rev }
+    }
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (stopped || storage.getAccountEpoch() !== scopeEpoch) return { status: 'pending', id, saveId, error: lastError || new Error('account changed') }
+      const result = await check()
+      if (result) return result
+      if (!enabled) break
+      await syncNow()
+      const completed = await check()
+      if (completed) return completed
+      if (lastError || stopped) break
+    }
+    return { status: 'pending', id, saveId, error: lastError }
   }
 
   function start(): void {
@@ -281,5 +315,5 @@ export function createSync(opts: SyncOptions = {}) {
     docs.setSyncMode(false)
   }
 
-  return { enabled, start, stop, syncNow }
+  return { enabled, start, stop, syncNow, syncSavedDoc }
 }

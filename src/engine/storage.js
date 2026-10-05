@@ -64,15 +64,17 @@ const LIB_STORE = "designs";
 // Modell wiegt schon gut 150 KB.
 const DOC_STORE = "docs";
 const SESSION_STORE = "session";
+const SYNC_STORE = "sync";
 
 function openLib(scope = accountScope) {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(scope === "local" ? LIB_DB : `${LIB_DB}.${encodeURIComponent(scope)}`, 2);
+    const req = indexedDB.open(scope === "local" ? LIB_DB : `${LIB_DB}.${encodeURIComponent(scope)}`, 3);
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains(LIB_STORE)) db.createObjectStore(LIB_STORE, { keyPath: "id" });
       if (!db.objectStoreNames.contains(DOC_STORE)) db.createObjectStore(DOC_STORE, { keyPath: "id" });
       if (!db.objectStoreNames.contains(SESSION_STORE)) db.createObjectStore(SESSION_STORE, { keyPath: "id" });
+      if (!db.objectStoreNames.contains(SYNC_STORE)) db.createObjectStore(SYNC_STORE, { keyPath: "id" });
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -85,14 +87,16 @@ export function dbTx(storeName, mode, fn) {
   return openLib().then((db) => new Promise((resolve, reject) => {
     if (epoch !== accountEpoch) { db.close(); reject(new Error("account changed")); return; }
     const tx = db.transaction(storeName, mode);
-    const out = fn(tx.objectStore(storeName));
+    const out = fn(Array.isArray(storeName)
+      ? Object.fromEntries(storeName.map(name => [name, tx.objectStore(name)]))
+      : tx.objectStore(storeName));
     tx.oncomplete = () => { db.close(); resolve(out instanceof IDBRequest ? out.result : out); };
     tx.onerror = () => { db.close(); reject(tx.error); };
     tx.onabort = () => { db.close(); reject(tx.error); };
   }));
 }
 
-export const DB_STORES = { docs: DOC_STORE, session: SESSION_STORE };
+export const DB_STORES = { docs: DOC_STORE, session: SESSION_STORE, sync: SYNC_STORE };
 
 /** 旧版没有账户归属：只在用户主动备份时读取，不将内容写入当前账户库。 */
 export async function legacyBackup() {

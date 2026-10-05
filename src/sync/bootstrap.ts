@@ -1,12 +1,25 @@
 import { track } from '../analytics/track'
 import { storage } from '../engine-api'
 import { createSync, QuotaError } from './index'
-import type { SyncEvent } from './types'
+import type { SavedDocSyncResult, SyncEvent } from './types'
 
 let started = false
 let initialized = false
 let live: ReturnType<typeof createSync> | null = null
 const waiting = new Set<() => void>()
+const subscribers = new Set<(e: SyncEvent) => void>()
+let recentEvent: SyncEvent | undefined
+function publish(e: SyncEvent): void {
+  recentEvent = e
+  for (const cb of subscribers) {
+    try { cb(e) } catch (error) { console.warn('[sync] event subscriber', error) }
+  }
+}
+export function onSyncEvent(cb: (e: SyncEvent) => void): () => void {
+  subscribers.add(cb)
+  if (recentEvent) cb(recentEvent)
+  return () => { subscribers.delete(cb) }
+}
 let probeDone: (ok: boolean | null) => void = () => {}
 const probed = new Promise<boolean | null>(resolve => { probeDone = resolve })
 
@@ -15,6 +28,9 @@ export function syncProbe(): Promise<boolean | null> {
 }
 export function syncNow(): Promise<void> {
   return started && live ? live.syncNow() : Promise.resolve()
+}
+export function syncSavedDoc(id: string, saveId: string): Promise<SavedDocSyncResult> {
+  return started && live ? live.syncSavedDoc(id, saveId) : Promise.resolve({ status: 'pending', id, saveId })
 }
 export function syncConfigured(): boolean { return Boolean(import.meta.env.VITE_SYNC_BASE) }
 export function syncStarted(): boolean { return started }
@@ -54,6 +70,7 @@ export function startSyncIfConfigured(onEvent?: (e: SyncEvent) => void, onUnauth
           if (e.type === 'error') console.warn('[sync]', e.error)
           if (e.type === 'quota') track('builder.sync.quota', { feature: e.feature, limit: e.limit })
           onEvent?.(e)
+          publish(e)
         } })
         started = Boolean(live)
         live?.start()
@@ -72,14 +89,19 @@ export function startSyncIfConfigured(onEvent?: (e: SyncEvent) => void, onUnauth
       console.warn('[sync] identity unavailable', error)
       probeDone(null)
       onEvent?.({ type: 'error', error })
+      publish({ type: 'error', error })
     }
     const recheck = async () => {
       if (document.visibilityState !== 'visible') return
-      try { if (await identity() !== initialId) resetIdentity() }
-      catch (error) { onEvent?.({ type: 'error', error }) }
+      try {
+        if (await identity() !== initialId) { resetIdentity(); return }
+        await syncNow()
+      }
+      catch (error) { onEvent?.({ type: 'error', error }); publish({ type: 'error', error }) }
     }
     document.addEventListener('visibilitychange', recheck)
     window.addEventListener('focus', recheck)
+    window.addEventListener('online', recheck)
     window.addEventListener('pagehide', () => { live?.stop() })
     window.addEventListener('pageshow', event => { if (event.persisted) resetIdentity() })
   })()
