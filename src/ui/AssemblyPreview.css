@@ -74,3 +74,11 @@
 .assembly-detail-materials small { font-size: 12px; }
 @media (max-width: 1000px) { .assembly-preview-body { grid-template-columns: 210px minmax(220px,1fr) 250px; } }
 @media (max-width: 760px) { .assembly-preview { inset: 0; border-radius: 0; } .assembly-preview header { padding: 12px; gap: 10px; } .assembly-preview h2 { font-size: 17px; } .assembly-preview header p { display: none; } .assembly-preview-body { display: flex; flex-direction: column; overflow-y: auto; } .assembly-preview-canvas { order: -2; flex: 0 0 auto; min-height: 0; overflow: visible; } .assembly-drawing { flex: 0 0 42vh; min-height: 260px; } .assembly-reading-sidebar { order: -1; } .assembly-preview-sidebar { overflow: visible; border: 0; padding: 12px; min-width: 0; } .assembly-preview-sidebar:last-child { border-left: 0; } .assembly-preview button, .assembly-preview select { min-height: 44px; } .assembly-preview-footer { padding: 8px 12px; flex-wrap: wrap; gap: 6px; } .assembly-preview-footer p { flex: 1 1 45%; font-size: 12px; } .assembly-preview-footer .assembly-small { font-size: 12px; } .assembly-view-toolbar { padding: 10px; } .assembly-view-heading { font-size: 14px; } .assembly-view-toolbar .assembly-preview-tools { gap: 5px; } .assembly-view-toolbar .qb-btn { font-size: 12px; flex: 1; white-space: normal; } .assembly-preview-expanded .assembly-drawing { flex-basis: 55vh; } .assembly-read-instructions { display: block; } }
+@media (max-width: 760px) {
+  /* 放大页按剩余高度分配主图，给完整定位图和操作按钮保留空间。 */
+  .assembly-preview-expanded .assembly-preview-body { overflow: hidden; }
+  .assembly-preview-expanded .assembly-preview-canvas { flex: 1 1 0; min-height: 0; overflow: hidden; }
+  .assembly-preview-expanded .assembly-drawing { flex: 1 1 0; min-height: 0; }
+  .assembly-preview-expanded .assembly-view-toolbar,
+  .assembly-preview-expanded .assembly-view-caption { flex-shrink: 0; }
+}
