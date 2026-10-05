@@ -886,6 +886,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       })
     }
     const stop = onSyncEvent(event => {
+      if (event.type === 'legacy-deletion') notifyRef.current(t('sync.legacyDeletion'), 'warn')
       if (event.type === 'pushed') {
         for (const tab of tabsRef.current) {
           if (tab.docId !== event.id || !event.saveId || tab.saveId !== event.saveId) continue
