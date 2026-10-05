@@ -221,7 +221,7 @@ describe('存档及同步竞争保护（内存 IndexedDB、隔离请求夹具，
       return response({ items: [{ ...remote('A', serverRev), data: serverData }], rev: serverRev })
     }) })
     const firstCompletion = sync.syncSavedDoc('A', first.saveId); await waiting
-    const second = await docs.saveDoc({ docId: 'A', name: 'A', data: model('second'), baseRev: 1 })
+    const second = await docs.saveDoc({ docId: 'A', name: 'A', data: model('second'), baseRev: 1, parentSaveId: first.saveId })
     release()
     expect((await firstCompletion).status).toBe('synced')
     expect((await sync.syncSavedDoc('A', second.saveId)).status).toBe('synced')
@@ -342,5 +342,143 @@ describe('存档及同步竞争保护（内存 IndexedDB、隔离请求夹具，
     expect(copy!.data).toEqual(sent.data)
     await docs.applyRemoteBatch([remote('A', 3)], 3)
     expect((await docs.getDoc('A'))!.conflictCopies[sent.saveId]).toBe(result.copyId)
+  })
+
+  it('独立旧页面同rev保存不属于当前PUT父链，ACK后仍409保全独立分支', async () => {
+    const first = await docs.saveDoc({ docId: 'A', name: 'A', data: model('page-A'), baseRev: 1, parentSaveId: 'common-parent' })
+    const independent = await docs.saveDoc({ docId: 'A', name: 'A', data: model('page-B'), baseRev: 1, parentSaveId: 'common-parent' })
+    await docs.markDocSynced('A', 2, first.updatedAt, undefined, first.saveId, 1)
+    expect((await docs.getDoc('A'))!.rev).toBe(1)
+    expect((await docs.getDoc('A'))!.parentSaveId).toBe('common-parent')
+    const puts: number[] = []
+    const cloud = remote('A', 2, 'page-A')
+    const sync = createSync({ baseUrl: '/quadro', accountId, fetchImpl: sink((_url, init) => {
+      if (init?.method === 'PUT') { puts.push(JSON.parse(init.body as string).baseRev); return response({ remote: cloud }, 409) }
+      return response({ items: [cloud], rev: 2 })
+    }) })
+    const result = await sync.syncSavedDoc('A', independent.saveId)
+    expect(result.status).toBe('conflict')
+    expect(puts).toEqual([1])
+    expect((await docs.getDoc('A'))!.data).toEqual(first.data)
+    if (result.status === 'conflict') expect((await docs.getDoc(result.copyId))!.data).toEqual(independent.data)
+    sync.stop()
+  })
+
+  it('同页多次保存保留明确祖先链，首ACK能推进最新后代且不清dirty', async () => {
+    const first = await docs.saveDoc({ docId: 'A', name: 'A', data: model('first'), baseRev: 1 })
+    let previous = first
+    for (let i = 0; i < 5; i++) previous = await docs.saveDoc({ docId: 'A', name: 'A', data: model(`next-${i}`), baseRev: 1, parentSaveId: previous.saveId })
+    await docs.markDocSynced('A', 2, first.updatedAt, undefined, first.saveId, 1)
+    const current = await docs.getDoc('A')
+    expect(current!.rev).toBe(2)
+    expect(current!.saveId).toBe(previous.saveId)
+    expect(current!.data).toEqual(previous.data)
+    expect(current!.dirty).toBe(true)
+    expect(current!.syncedSaveId).toBeUndefined()
+  })
+
+  it('未传实际parentSaveId时不把DB上一记录猜作父保存', async () => {
+    const first = await docs.saveDoc({ docId: 'A', name: 'A', data: model('first'), baseRev: 1 })
+    const independent = await docs.saveDoc({ docId: 'A', name: 'A', data: model('independent'), baseRev: 1 })
+    await docs.markDocSynced('A', 2, first.updatedAt, undefined, first.saveId, 1)
+    expect((await docs.getDoc('A'))!.saveId).toBe(independent.saveId)
+    expect((await docs.getDoc('A'))!.rev).toBe(1)
+    expect((await docs.getDoc('A'))!.parentSaveId).toBeUndefined()
+  })
+
+  it('祖先查找在不同工作基线停止，不借历史祖先ACK抬升新分支', async () => {
+    const first = await docs.saveDoc({ docId: 'A', name: 'A', data: model('first'), baseRev: 1 })
+    const boundary = await docs.saveDoc({ docId: 'A', name: 'A', data: model('boundary'), baseRev: 2, parentSaveId: first.saveId })
+    const latest = await docs.saveDoc({ docId: 'A', name: 'A', data: model('latest'), baseRev: 1, parentSaveId: boundary.saveId })
+    await docs.markDocSynced('A', 2, first.updatedAt, undefined, first.saveId, 1)
+    expect((await docs.getDoc('A'))!.saveId).toBe(latest.saveId)
+    expect((await docs.getDoc('A'))!.rev).toBe(1)
+  })
+
+  it('旧dirty借用最新rev的存档先GET并另存恢复copy，绝不PUT原id', async () => {
+    const legacy = { ...remote('legacy', 2, 'old-canvas'), dirty: true }
+    await storage.dbTx(storage.DB_STORES.docs, 'readwrite', (store: IDBObjectStore) => store.put(legacy))
+    const calls: string[] = []
+    const cloud = remote('legacy', 2, 'new-cloud')
+    const sync = createSync({ baseUrl: '/quadro', accountId, fetchImpl: sink((url, init) => {
+      calls.push(`${init?.method || 'GET'} ${url}`)
+      if (url.endsWith('/models/legacy')) return response(cloud)
+      if (init?.method === 'PUT') return response({ rev: 3, saveId: JSON.parse(init.body as string).saveId })
+      return response({ items: [cloud], rev: 3 })
+    }) })
+    await sync.syncNow(); sync.stop()
+    expect(calls).toContain('GET /quadro/models/legacy')
+    expect(calls).not.toContain('PUT /quadro/models/legacy')
+    expect((await docs.getDoc('legacy'))!.data).toEqual(cloud.data)
+    const copyId = (await docs.getDoc('legacy'))!.legacyRecoveryId
+    const copy = await docs.getDoc(copyId)
+    expect(copy!.data).toEqual(legacy.data)
+    expect(copy!.syncedSaveId).toBe(copy!.saveId)
+    expect(calls.filter(call => call.startsWith('PUT '))).toHaveLength(1)
+  })
+
+  it('旧dirty核对失败仍保护原记录和幂等副本，不上传不可信原id', async () => {
+    const legacy = { ...remote('A', 2, 'legacy'), dirty: true }
+    await storage.dbTx(storage.DB_STORES.docs, 'readwrite', (store: IDBObjectStore) => store.put(legacy))
+    const puts: string[] = []
+    const sync = createSync({ baseUrl: '/quadro', accountId, fetchImpl: sink((url, init) => {
+      if (init?.method === 'PUT') puts.push(url)
+      return response({}, 500)
+    }) })
+    await sync.syncNow(); await sync.syncNow(); sync.stop()
+    expect(puts).toEqual([])
+    const current = await docs.getDoc('A')
+    expect(current!.dirty).toBe(true)
+    expect(current!.data).toEqual(legacy.data)
+    expect(current!.saveId).toBeUndefined()
+    expect((await docs.listDocs()).length).toBe(2)
+    expect((await docs.getDoc(current!.legacyRecoveryId))!.data).toEqual(legacy.data)
+    expect(await docs.readPullCheckpoint()).toBe(0)
+  })
+
+  it('旧dirty远端墓碑和404均保留恢复copy，单目标核对不推进checkpoint', async () => {
+    for (const missing of [false, true]) {
+      const docId = missing ? 'missing' : 'deleted'
+      const legacy = { ...remote(docId, 2, 'legacy'), dirty: true }
+      await storage.dbTx(storage.DB_STORES.docs, 'readwrite', (store: IDBObjectStore) => store.put(legacy))
+      let release!: () => void
+      let reached!: () => void
+      const waiting = new Promise<void>(resolve => { reached = resolve })
+      const sync = createSync({ baseUrl: '/quadro', accountId, fetchImpl: sink(async (url, init) => {
+        if (url.endsWith(`/models/${docId}`)) return missing ? response({}, 404) : response({ ...remote(docId, 3), data: null, deletedAt: 3 })
+        if (init?.method === 'PUT') return response({ rev: 4, saveId: JSON.parse(init.body as string).saveId })
+        reached(); await new Promise<void>(resolve => { release = resolve })
+        return response({ items: [], rev: 4 })
+      }) })
+      const running = sync.syncNow(); await waiting
+      expect(await docs.readPullCheckpoint()).toBe(missing ? 4 : 0)
+      const tomb = (await docs.allRecords()).find((doc: DocRecord) => doc.id === docId)
+      expect(tomb.deletedAt).toBeGreaterThan(0)
+      expect(tomb.dirty).toBe(false)
+      expect((await docs.getDoc(tomb.legacyRecoveryId))!.data).toEqual(legacy.data)
+      release(); await running; sync.stop()
+    }
+  })
+
+  it('无saveId的正常clean云端记录不迁移，新rename/cover分配已知内容标识', async () => {
+    const cloud = remote('clean', 2)
+    await docs.putRemoteDoc(cloud)
+    const requests: string[] = []
+    const sync = createSync({ baseUrl: '/quadro', accountId, fetchImpl: sink(url => {
+      requests.push(url)
+      return response({ items: [cloud], rev: 2 })
+    }) })
+    await sync.syncNow(); sync.stop()
+    expect(requests).toEqual(['/quadro/models?since=0'])
+    expect((await docs.listDocs()).length).toBe(1)
+    expect((await docs.getDoc('clean'))!.legacyRecoveryId).toBeUndefined()
+    await docs.renameDoc('clean', 'new-name')
+    const renamed = await docs.getDoc('clean')
+    expect(typeof renamed!.saveId).toBe('string')
+    await docs.setDocCover('clean', 'new-cover')
+    expect((await docs.getDoc('clean'))!.saveId).toBe(renamed!.saveId)
+    await docs.putRemoteDoc(remote('cover-only', 3))
+    await docs.setDocCover('cover-only', 'cover')
+    expect(typeof (await docs.getDoc('cover-only'))!.saveId).toBe('string')
   })
 })

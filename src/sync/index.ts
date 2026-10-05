@@ -93,6 +93,7 @@ export function createSync(opts: SyncOptions = {}) {
       active()
       throw new ConflictError(b.remote as RemoteDoc)
     }
+    if (res.status === 404 && init?.method === 'GET') return null as T
     if (!res.ok) throw new Error(`${init?.method ?? 'GET'} ${path} → ${res.status}`)
     const result = res.status === 204 ? (undefined as T) : ((await res.json()) as T)
     active()
@@ -100,14 +101,15 @@ export function createSync(opts: SyncOptions = {}) {
   }
 
   /** 冲突不丢数据：本地版本另存一份，再接受服务端版本。 */
-  async function forkConflict(local: DocRecord, remote: RemoteDoc): Promise<void> {
+  async function forkConflict(local: DocRecord, remote: RemoteDoc, authoritativeLegacy = false): Promise<Record<string, string>> {
     active()
-    const result = await docs.resolveDocConflict(local, remote)
+    const result = await docs.resolveDocConflict(local, remote, authoritativeLegacy)
     active()
     for (const [saveId, copyId] of Object.entries(result.copies)) {
       receipts.set(`${local.id}:${saveId}`, { status: 'conflict', id: local.id, saveId, copyId: copyId as string })
       emit({ type: 'conflict', id: local.id, copyId: copyId as string, saveId })
     }
+    return result.copies
   }
 
   /**
@@ -115,8 +117,27 @@ export function createSync(opts: SyncOptions = {}) {
    */
   async function push(): Promise<void> {
     const all = (await docs.allRecords()) as DocRecord[]
-    for (const doc of all.filter((d) => d.dirty)) {
+    const queue = all.filter((d) => d.dirty)
+    const queued = new Set(queue.map(doc => doc.id))
+    for (const doc of queue) {
       active()
+      if (!doc.saveId && doc.rev > 0) {
+        const protectedDoc = await docs.protectLegacyDoc(doc)
+        active()
+        if (!protectedDoc.local) continue
+        const legacy = protectedDoc.local as DocRecord
+        const remote = await call<RemoteDoc | null>(`/models/${encodeURIComponent(doc.id)}`, { method: 'GET', cache: 'no-store' })
+        if (remote && (remote.id !== doc.id || !Number.isSafeInteger(remote.rev))) throw new Error('invalid legacy remote model')
+        const copies = await forkConflict(legacy, remote || { id: doc.id, name: legacy.name, data: null,
+          createdAt: legacy.createdAt, updatedAt: Date.now(), deletedAt: Date.now(), rev: 0 }, true)
+        for (const copyId of new Set(Object.values(copies))) {
+          if (queued.has(copyId)) continue
+          const copy = await docs.getDoc(copyId) as DocRecord | null
+          active()
+          if (copy?.dirty) { queue.push(copy); queued.add(copyId) }
+        }
+        continue
+      }
       // 记下这一刻的 updatedAt：上传期间用户可能又改了，
       // markDocSynced 靠它判断该不该清 dirty。
       const stamp = doc.updatedAt

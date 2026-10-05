@@ -33,6 +33,12 @@ function id(prefix) {
   return `${prefix}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
 }
 
+function saveLinkKey(docId, saveId) { return `models-save:${JSON.stringify([docId, saveId])}`; }
+
+function putSaveLink(store, doc, baseRev = doc.rev) {
+  if (doc.saveId) store.put({ id: saveLinkKey(doc.id, doc.saveId), parentSaveId: doc.parentSaveId, baseRev });
+}
+
 // --- Dateien ------------------------------------------------------------
 
 /** Alle Dateien, zuletzt geänderte zuerst. Grabsteine bleiben außen vor. */
@@ -93,6 +99,7 @@ function applyRemote(store, record, result) {
     if (current && (current.rev || 0) >= record.rev) { result.doc = current; return; }
     result.doc = remoteDoc(record);
     if (current?.conflictCopies) result.doc.conflictCopies = current.conflictCopies;
+    if (current?.legacyRecoveryId) result.doc.legacyRecoveryId = current.legacyRecoveryId;
     store.put(result.doc);
     result.applied = true;
   };
@@ -141,7 +148,9 @@ export function applyRemoteBatch(items, rev) {
  */
 export function markDocSynced(docId, rev, expectUpdatedAt, sentCover, expectSaveId, sentBaseRev) {
   const result = {};
-  return dbTx(DB_STORES.docs, "readwrite", store => {
+  return dbTx([DB_STORES.docs, DB_STORES.sync], "readwrite", stores => {
+    const store = stores[DB_STORES.docs];
+    const links = stores[DB_STORES.sync];
     const request = store.get(docId);
     request.onsuccess = () => {
       const doc = request.result;
@@ -149,9 +158,24 @@ export function markDocSynced(docId, rev, expectUpdatedAt, sentCover, expectSave
       const sameSave = typeof expectSaveId === "string" ? doc.saveId === expectSaveId : typeof expectUpdatedAt !== "number" || doc.updatedAt === expectUpdatedAt;
       if (!sameSave) {
         // 同一本地分支在等待回执时又保存：只推进已确认的基线，保留新内容及dirty。
-        if (typeof sentBaseRev === "number" && doc.rev === sentBaseRev && !doc.pendingRemote) {
-          doc.rev = Math.max(rev, doc.rev || 0);
-          store.put(doc);
+        if (typeof expectSaveId === "string" && typeof sentBaseRev === "number"
+          && doc.rev === sentBaseRev && !doc.pendingRemote) {
+          const seen = new Set();
+          const follow = parent => {
+            if (!parent || seen.has(parent)) return;
+            if (parent === expectSaveId) {
+              doc.rev = Math.max(rev, doc.rev || 0);
+              store.put(doc);
+              putSaveLink(links, doc);
+              return;
+            }
+            seen.add(parent);
+            const link = links.get(saveLinkKey(doc.id, parent));
+            link.onsuccess = () => {
+              if (link.result?.baseRev === sentBaseRev) follow(link.result.parentSaveId);
+            };
+          };
+          follow(doc.parentSaveId);
         }
         result.doc = doc;
         return;
@@ -165,13 +189,14 @@ export function markDocSynced(docId, rev, expectUpdatedAt, sentCover, expectSave
       if (doc.pendingRemote?.rev <= rev) delete doc.pendingRemote;
       result.doc = doc;
       store.put(doc);
+      putSaveLink(links, doc);
     };
     return result;
   }).then(() => result.doc || null);
 }
 
 /** PUT 等待期间的最新保存和发送快照都在同一事务内保全。 */
-export function resolveDocConflict(sent, remote) {
+export function resolveDocConflict(sent, remote, authoritativeLegacy = false) {
   const result = { copies: {} };
   return dbTx(DB_STORES.docs, "readwrite", store => {
     const request = store.get(sent.id);
@@ -184,12 +209,13 @@ export function resolveDocConflict(sent, remote) {
         const key = candidate.saveId || `legacy:${candidate.updatedAt}`;
         if (copies[key]) { result.copies[key] = copies[key]; continue; }
         const copyId = id("d");
-        const copy = { ...candidate, id: copyId, name: `${candidate.name}（冲突副本）`,
+        const copy = { ...candidate, id: copyId, saveId: candidate.saveId || id("s"), name: `${candidate.name}（冲突副本）`,
           data: candidate.data ?? candidate.recoveryData, rev: 0, dirty: true };
         delete copy.deletedAt;
         delete copy.syncedSaveId;
         delete copy.pendingRemote;
         delete copy.conflictCopies;
+        delete copy.parentSaveId;
         store.put(copy);
         copies[key] = copyId;
         result.copies[key] = copyId;
@@ -202,8 +228,41 @@ export function resolveDocConflict(sent, remote) {
       result.copyId = copies[sent.saveId || `legacy:${sent.updatedAt}`];
       // 新的本地保存已保全为副本；接受的远端不冒充本次保存回执。
       const latestRemote = current?.pendingRemote?.rev > remote.rev ? current.pendingRemote : remote;
-      if (!current || (current.rev || 0) <= latestRemote.rev) store.put({ ...remoteDoc(latestRemote), conflictCopies: copies });
+      const legacyRecoveryId = authoritativeLegacy && current?.dirty && !current.saveId
+        ? copies[`legacy:${current.updatedAt}`] : current?.legacyRecoveryId;
+      if (!current || current.dirty && authoritativeLegacy || (current.rev || 0) <= latestRemote.rev) store.put({ ...remoteDoc(latestRemote), conflictCopies: copies,
+        ...(legacyRecoveryId ? { legacyRecoveryId } : {}) });
       else store.put({ ...current, conflictCopies: copies });
+    };
+    return result;
+  });
+}
+
+/** 历史dirty基线不可信；先留可恢复副本及幂等定位，等待云端核对。 */
+export function protectLegacyDoc(sent) {
+  const result = {};
+  return dbTx(DB_STORES.docs, "readwrite", store => {
+    const request = store.get(sent.id);
+    request.onsuccess = () => {
+      const current = request.result;
+      if (!current?.dirty || current.saveId || !(current.rev > 0)) return;
+      const key = `legacy:${current.updatedAt}`;
+      const copies = { ...(current.conflictCopies || {}) };
+      if (!copies[key]) {
+        const copy = { ...current, id: id("d"), saveId: id("s"), name: `${current.name}（冲突副本）`,
+          data: current.data ?? current.recoveryData, rev: 0, dirty: true };
+        delete copy.deletedAt;
+        delete copy.syncedSaveId;
+        delete copy.pendingRemote;
+        delete copy.conflictCopies;
+        delete copy.parentSaveId;
+        store.put(copy);
+        copies[key] = copy.id;
+        store.put({ ...current, conflictCopies: copies, legacyRecoveryId: copies[key] });
+      }
+      if (!current.legacyRecoveryId && copies[key]) store.put({ ...current, conflictCopies: copies, legacyRecoveryId: copies[key] });
+      result.local = current;
+      result.copyId = copies[key];
     };
     return result;
   });
@@ -224,7 +283,8 @@ export function saveDoc({ docId, name, data, baseRev = null, parentSaveId }) {
   const jetzt = Date.now();
   const savedId = docId || id("d");
   // Read and write in one transaction so concurrent saves receive distinct versions.
-  return dbTx(DB_STORES.docs, "readwrite", (store) => {
+  return dbTx([DB_STORES.docs, DB_STORES.sync], "readwrite", (stores) => {
+    const store = stores[DB_STORES.docs];
     const doc = {};
     const request = store.get(savedId);
     request.onsuccess = () => {
@@ -241,13 +301,16 @@ export function saveDoc({ docId, name, data, baseRev = null, parentSaveId }) {
         updatedAt: Math.max(jetzt, (alt?.updatedAt || 0) + 1),
         rev,
         saveId: id("s"),
+        ...(parentSaveId ? { parentSaveId } : {}),
         dirty: true,
       });
       if (alt?.conflictCopies) doc.conflictCopies = alt.conflictCopies;
+      if (alt?.legacyRecoveryId) doc.legacyRecoveryId = alt.legacyRecoveryId;
       if (typeof baseRev !== "number" && alt?.cover) doc.cover = alt.cover;
       if (alt?.pendingRemote) doc.pendingRemote = alt.pendingRemote;
       if (alt && !alt.dirty && (alt.rev || 0) > doc.rev) doc.pendingRemote = alt;
       store.put(doc);
+      putSaveLink(stores[DB_STORES.sync], doc);
     };
     return doc;
   });
@@ -263,6 +326,7 @@ export function setDocCover(docId, cover, expectUpdatedAt, expectSaveId) {
     request.onsuccess = () => {
       const doc = request.result;
       if (!doc || doc.deletedAt || (typeof expectSaveId === "string" ? doc.saveId !== expectSaveId : typeof expectUpdatedAt === "number" && doc.updatedAt !== expectUpdatedAt)) return;
+      if (!doc.saveId && !doc.dirty) doc.saveId = id("s");
       doc.cover = cover;
       doc.updatedAt = Math.max(Date.now(), (doc.updatedAt || 0) + 1);
       doc.dirty = true;
@@ -279,6 +343,7 @@ export function renameDoc(docId, name) {
     request.onsuccess = () => {
       const doc = request.result;
       if (!doc || doc.deletedAt) return;
+      if (!doc.saveId && !doc.dirty) doc.saveId = id("s");
       doc.name = (name || "").trim() || doc.name;
       doc.updatedAt = Math.max(Date.now(), (doc.updatedAt || 0) + 1);
       doc.dirty = true;

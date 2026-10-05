@@ -18,6 +18,8 @@ export interface DocRecord {
   /** 还没交上去的封面（图片的 data URL），下一次推送时带上。 */
   cover?: string
   saveId?: string
+  parentSaveId?: string
+  legacyRecoveryId?: string
   syncedSaveId?: string
   pendingRemote?: RemoteDoc
   conflictCopies?: Record<string, string>
