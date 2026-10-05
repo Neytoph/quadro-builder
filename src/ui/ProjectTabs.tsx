@@ -5,9 +5,10 @@ import { TAB_BAR_H } from './panelLayout'
 import { DOCK_PILLS, PLAN_PILLS, useDock } from './dock'
 import { useCollab } from '../collab/CollabContext'
 import ShareCluster from '../collab/ui/ShareCluster'
-import { Box, Plus, X } from 'lucide-react'
+import { AlertTriangle, Box, Check, CloudUpload, Plus, RotateCw, X } from 'lucide-react'
 import { DockChevron, DockIcon } from './DockIcon'
 import { useOverflowCompact } from './useOverflowCompact'
+import { displaySaveState } from '../store/personalTabs'
 import './builderChrome.css'
 
 const GROUPS: (typeof DOCK_PILLS)[] = [
@@ -66,6 +67,7 @@ export default function ProjectTabs() {
       {api.tabs.map(tab => {
         // 共享方案：创建人、编辑者改的是方案的名字，评论者和访客不能改
         const renamable = !tab.planId || collab.renamable(tab.planId)
+        const state = displaySaveState(tab, tab.dirty)
         return (
         <div key={tab.tabId} data-plan-tab={tab.planId || undefined}
           className="m-tab qb-project-tab" data-active={tab.tabId === api.activeTabId}>
@@ -83,6 +85,19 @@ export default function ProjectTabs() {
               <Box size={16} strokeWidth={1.65} aria-hidden="true" /><span>{tab.name}</span>{tab.dirty ? <span aria-hidden="true">•</span> : null}
             </button>
           )}
+          {!tab.planId && tab.docId && <button type="button" data-ui="save-status" data-save-state={tab.saveState || 'unsaved'}
+            className="qb-tab-close !w-auto gap-1 px-1.5 shrink-0"
+            title={t(`sync.${state}`)} aria-label={t(`sync.${state}`)}
+            onClick={() => {
+              if (tab.saveState === 'conflict' && tab.conflictDocId) void api.openDoc(tab.conflictDocId)
+              else if (tab.saveState === 'failed' || tab.saveState === 'local') void api.retrySave(tab.tabId)
+            }}>
+            {state === 'conflict' && <AlertTriangle size={14} />}
+            {state === 'failed' && <RotateCw size={14} />}
+            {state === 'synced' && <Check size={14} />}
+            {!['conflict', 'failed', 'synced'].includes(state) && <CloudUpload size={14} />}
+            <span className="text-[10px] max-w-24 truncate">{t(`sync.${state}`)}</span>
+          </button>}
           <button onClick={() => close(tab.tabId, tab.dirty)} className="qb-tab-close"
             title={t('chrome.closeTab')} aria-label={`${t('chrome.closeTab')} · ${tab.name}`}><X size={14} aria-hidden="true" /></button>
         </div>

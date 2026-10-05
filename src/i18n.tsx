@@ -25,6 +25,20 @@ function isLang(v: string | null): v is Lang {
 type Dict = Record<string, string>
 
 const zh: Dict = {
+  'sync.unsaved': '未保存',
+  'sync.viewLatest': '查看最新设计',
+  'sync.retry': '重试同步',
+  'sync.localFailed': '本机保存失败，请重试保存。当前工作内容仍保留在标签页中。',
+  'sync.local': '已保存到本机',
+  'sync.syncing': '已保存到本机，正在同步',
+  'sync.synced': '已同步',
+  'sync.failed': '同步失败，点击重试',
+  'sync.conflict': '有版本冲突，查看最新设计',
+  'sync.waiting': '请完成当前操作后再保存',
+  'sync.recoveryName': '{name}（本机恢复副本）',
+  'sync.conflictProtected': '其他设备有更新。本机内容已保留为恢复副本，最新设计可从标签页或我的设计打开。',
+  'sync.deletedProtected': '此设计已被删除。本机内容已保留为恢复副本。',
+  'sync.coverFailed': '模型已保存，封面生成失败。可稍后重试保存。',
   'app.title': 'Quadro Builder',
   'app.docTitle': 'Quadro Builder · 攀爬架设计器',
   'app.metaDesc': 'QUADRO 攀爬架 3D 设计器 — 界面来自 vokako，搭建能力来自 quadro-3D。',
@@ -705,6 +719,20 @@ const zh: Dict = {
 }
 
 const en: Dict = {
+  'sync.unsaved': 'Unsaved',
+  'sync.viewLatest': 'View latest design',
+  'sync.retry': 'Retry sync',
+  'sync.localFailed': 'Saving on this device failed. Try saving again. Your work remains in this tab.',
+  'sync.local': 'Saved on this device',
+  'sync.syncing': 'Saved on this device, syncing',
+  'sync.synced': 'Synced',
+  'sync.failed': 'Sync failed. Click to retry',
+  'sync.conflict': 'Version conflict. View latest design',
+  'sync.waiting': 'Finish the current action before saving',
+  'sync.recoveryName': '{name} (device recovery copy)',
+  'sync.conflictProtected': 'Another device has updated this design. Your work is kept in a recovery copy. Open the latest design from its tab or My designs.',
+  'sync.deletedProtected': 'This design was deleted. Your work is kept in a recovery copy.',
+  'sync.coverFailed': 'The model is saved, but its cover could not be generated. Try saving again later.',
   'app.title': 'Quadro Builder',
   'app.docTitle': 'Quadro Builder · Climbing frame designer',
   'app.metaDesc': 'QUADRO climbing-frame 3D designer — UI from vokako, build engine from quadro-3D.',
@@ -1385,6 +1413,20 @@ const en: Dict = {
 }
 
 const de: Dict = {
+  'sync.unsaved': 'Nicht gespeichert',
+  'sync.viewLatest': 'Aktuellen Entwurf ansehen',
+  'sync.retry': 'Synchronisierung wiederholen',
+  'sync.localFailed': 'Speichern auf diesem Gerät fehlgeschlagen. Bitte erneut speichern. Deine Arbeit bleibt in diesem Tab erhalten.',
+  'sync.local': 'Auf diesem Gerät gespeichert',
+  'sync.syncing': 'Auf diesem Gerät gespeichert, wird synchronisiert',
+  'sync.synced': 'Synchronisiert',
+  'sync.failed': 'Synchronisierung fehlgeschlagen. Zum Wiederholen klicken',
+  'sync.conflict': 'Versionskonflikt. Aktuellen Entwurf ansehen',
+  'sync.waiting': 'Bitte den aktuellen Vorgang vor dem Speichern abschließen',
+  'sync.recoveryName': '{name} (Wiederherstellungskopie)',
+  'sync.conflictProtected': 'Ein anderes Gerät hat diesen Entwurf aktualisiert. Deine Arbeit bleibt als Wiederherstellungskopie erhalten. Öffne den aktuellen Entwurf über seinen Tab oder Meine Entwürfe.',
+  'sync.deletedProtected': 'Dieser Entwurf wurde gelöscht. Deine Arbeit bleibt als Wiederherstellungskopie erhalten.',
+  'sync.coverFailed': 'Das Modell ist gespeichert, aber das Vorschaubild konnte nicht erstellt werden. Bitte später erneut speichern.',
   'app.title': 'Quadro Builder',
   'app.docTitle': 'Quadro Builder · Klettergerüst-Planer',
   'app.metaDesc': 'QUADRO Klettergerüst-3D-Planer — Oberfläche nach vokako, Aufbaukern von quadro-3D.',

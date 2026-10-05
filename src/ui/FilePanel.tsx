@@ -6,6 +6,7 @@ import { useCollab } from '../collab/CollabContext'
 import BatchImport from '../collab/ui/BatchImport'
 import { storage } from '../engine-api'
 import { syncConfigured } from '../sync/bootstrap'
+import { displaySaveState } from '../store/personalTabs'
 import { legacyBackupWithTabs } from '../collab/legacyBackup'
 import { Modal } from '../collab/ui/Modals'
 import { Box, BookOpen, ChevronDown, FileJson, FolderInput, Image, Link, Plus, Save, Sparkles, Upload } from 'lucide-react'
@@ -28,11 +29,17 @@ export default function FilePanel() {
   ].filter(row => row.data && typeof row.data === 'object' && Array.isArray((row.data as { nodes?: unknown }).nodes)) : []
   // 共享方案随改随同步，没有「保存」；「另存为」存一份到自己的设计里
   const plan = collab.mode === 'plan'
+  const active = api.tabs.find(tab => tab.tabId === api.activeTabId)
 
   return (
     <div className="qb-file-panel">
       <section aria-labelledby="qb-file-start">
         <h2 id="qb-file-start" className="qb-file-section">{t('chrome.start')}</h2>
+        {!plan && active && <div role="status" data-ui="file-save-status" className="text-xs text-amber-800 px-2 pb-2 leading-relaxed">
+          {t(`sync.${displaySaveState(active, active.dirty)}`)}
+          {active.saveState === 'conflict' && active.conflictDocId && <button className="qb-file-row" onClick={() => void api.openDoc(active.conflictDocId!)}>{t('sync.viewLatest')}</button>}
+          {active.saveState === 'failed' && <button className="qb-file-row" onClick={() => void api.retrySave(active.tabId)}>{t('sync.retry')}</button>}
+        </div>}
         {!plan && <button onClick={() => void api.saveCurrent()} className={`${btn} qb-file-primary`}><Save aria-hidden="true" /><span>{t('chrome.save')}</span><kbd>{t('chrome.saveShortcut')}</kbd></button>}
         <div className="qb-file-two">
           <button onClick={() => { api.newTab(); api.notify(t('toast.newTab')) }} className={btn}><Plus aria-hidden="true" /><span>{t('btn.new')}</span></button>

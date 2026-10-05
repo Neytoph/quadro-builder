@@ -13,6 +13,7 @@ import { IndexeddbPersistence, clearDocument } from 'y-indexeddb'
 import { docIsEmpty, writeJSON, type ModelJSON } from './ymodel'
 import { ModelHistory } from './history'
 import { accountKey } from '../engine/storage.js'
+import type { PersonalState } from '../store/personalTabs'
 
 /** 从存档、旧会话、文件、服务器 data 写进一份空文档时的 origin：不进撤销记录。 */
 export const SEED_ORIGIN = { name: 'seed' }
@@ -21,6 +22,21 @@ export interface LocalDoc {
   doc: Y.Doc
   history: ModelHistory
   persistence: IndexeddbPersistence | null
+}
+
+/** 工作基线随 Yjs 文档持久化，避免会话防抖尚未写入时关闭页面丢失基线。 */
+export function readPersonalState(local: LocalDoc): PersonalState {
+  return local.doc.getMap('personal-state').toJSON() as PersonalState
+}
+
+export function writePersonalState(local: LocalDoc, state: PersonalState) {
+  local.doc.transact(() => {
+    const map = local.doc.getMap('personal-state')
+    for (const [key, value] of Object.entries(state)) {
+      if (value !== undefined) map.set(key, value)
+      else map.delete(key)
+    }
+  }, local.history.origin)
 }
 
 function tabDbName(tabId: string) {

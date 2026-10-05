@@ -7,8 +7,9 @@ import {
   computeBuildPlan, partsOfModel, textilePart,
 } from '../engine-api'
 import { useI18n } from '../i18n'
-import { syncNow, syncProbe, syncStarted } from '../sync/bootstrap'
+import { onSyncEvent, syncSavedDoc, syncNow, syncProbe, syncStarted } from '../sync/bootstrap'
 import { tabOpenedFrom, tabSavedAs } from '../sync/origin'
+import { pullDoc } from '../sync/docEntry'
 import { bootEntry, SESSIONLESS, VIEW_ONLY, type ResumeExport } from '../entry'
 import { publishSharePage, sharePagesEnabled, stampFor, type ExportKind, type Stamp } from '../sharePage'
 import { statsOfModel } from '../designStats'
@@ -24,9 +25,10 @@ import { takeModelThumb, waitSceneReady } from '../engine/thumbShot.js'
 import { bomToCsv, bomToPngDataUrl, loadImage } from '../ui/bomExport'
 import { shareImageDataUrl } from '../ui/shareImage'
 import { MOTION } from '../ui/motion'
-import { createTabDoc, dropTabDoc, memoryDoc, openTabDoc, SEED_ORIGIN, type LocalDoc } from '../collab/localDocs'
+import { createTabDoc, dropTabDoc, memoryDoc, openTabDoc, readPersonalState, writePersonalState, SEED_ORIGIN, type LocalDoc } from '../collab/localDocs'
 import { partCountOf, writeJSON, type ModelJSON } from '../collab/ymodel'
 import { appendTab } from './tabs'
+import { modelContent, personalDecision, readPersonalBinding, samePersonalBinding, savedGenerationUnchanged, savedRecordState, type PersonalState } from './personalTabs'
 import { renderModelCover } from './modelCover'
 import { computeAssemblyPlan } from '../engine/assemblyPlan.js'
 import { proposeAssemblyRepairs } from '../engine/connectionResolver.js'
@@ -67,7 +69,7 @@ export interface SafetyResult {
 
 export type ThumbJob = { kind: 'official' | 'preset'; id: string } | { kind: 'model'; data: unknown }
 
-export interface TabInfo {
+export interface TabInfo extends PersonalState {
   tabId: string
   docId: string | null
   name: string
@@ -238,7 +240,8 @@ interface EngineApi {
   answerName: (name: string | null) => void
   nameAsk: { title: string; ok: string; value: string } | null
   openDoc: (docId: string) => Promise<void>
-  /** `local`：还没传到服务器过（rev 为 0），只在这台设备上。 */
+  retrySave: (tabId: string) => Promise<void>
+  /** `local`：本次保存尚未全部交给服务器。 */
   listDocs: () => Promise<Array<{ id: string; name: string; updatedAt: number; local: boolean }>>
   removeDoc: (docId: string) => Promise<void>
   renameDoc: (docId: string, name: string) => Promise<void>
@@ -456,7 +459,13 @@ function replaceTabModel(tab: Tab, json: ModelJSON) {
 function makeTab(seed: ModelJSON, name: string, docId: string | null): Tab {
   const tabId = docs.newTabId()
   const local = SESSIONLESS ? memoryDoc(seed) : createTabDoc(tabId, seed)
-  return { tabId, docId, name, dirty: false, planId: null, view: {}, local }
+  return { tabId, docId, name, dirty: false, planId: null, view: {}, local, editGeneration: 0, saveState: 'unsaved' }
+}
+
+function persistPersonal(tab: Tab) {
+  if (tab.planId || tab.readOnly) return
+  const { baseRev, savedContent, editGeneration, saveId, saveState, conflictDocId } = tab
+  writePersonalState(tab.local, { baseRev, savedContent, editGeneration, saveId, saveState, conflictDocId })
 }
 
 /**
@@ -697,6 +706,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     return docs.saveSession({
       tabs: tabsRef.current.map(tb => ({
         tabId: tb.tabId, docId: tb.docId, name: tb.name, dirty: tb.dirty, planId: tb.planId, view: tb.view,
+        baseRev: tb.baseRev, savedContent: tb.savedContent, editGeneration: tb.editGeneration, saveId: tb.saveId,
+        saveState: tb.saveState, conflictDocId: tb.conflictDocId,
       })),
       activeTabId: activeRef.current,
     }) as Promise<void>
@@ -709,7 +720,9 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   }, [saveSessionNow])
 
   const syncTabs = useCallback(() => {
-    setTabs(tabsRef.current.map(({ tabId, docId, name, dirty, planId }) => ({ tabId, docId, name, dirty, planId })))
+    for (const tab of tabsRef.current) persistPersonal(tab)
+    setTabs(tabsRef.current.map(({ tabId, docId, name, dirty, planId, baseRev, savedContent, editGeneration, saveId, saveState, conflictDocId }) =>
+      ({ tabId, docId, name, dirty, planId, baseRev, savedContent, editGeneration, saveId, saveState, conflictDocId })))
     setActiveTabId(activeRef.current)
     persistSession()
   }, [persistSession])
@@ -718,8 +731,10 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     if (switching.current) return
     const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
     // 共享方案随改随同步，没有「没保存」这回事
-    if (tab && !tab.dirty && !tab.planId) {
+    if (tab && !tab.planId && !tab.readOnly) {
+      tab.editGeneration = (tab.editGeneration || 0) + 1
       tab.dirty = true
+      if (tab.saveState !== 'conflict') tab.saveState = 'unsaved'
       syncTabs()
     } else {
       persistSession()
@@ -769,6 +784,136 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     flushModel()
     tab.view = { ...(e.builder.uiState() as AnyRec), camera: e.scene.cameraState() }
   }, [flushModel])
+
+  const reconcilePersonalNow = useCallback(async (tab: Tab, supplied?: AnyRec | null) => {
+    if (!tab.docId || tab.planId || tab.readOnly || SESSIONLESS) return
+    if (tab.tabId === activeRef.current && eng.current?.builder.busy()) return
+    if (tab.tabId === activeRef.current) snapshotActive()
+    const originalId = tab.docId
+    const binding = { docId: originalId, saveId: tab.saveId }
+    const stored = supplied === undefined ? await docs.getDoc(originalId) as AnyRec | null : supplied
+    const record = stored?.pendingRemote || stored
+    if (!tabsRef.current.includes(tab) || !samePersonalBinding(tab, binding)) return
+    const remoteData = record?.data ? normalizeModel(record.data) : null
+    const current = tab.local.history.toJSON()
+    const decision = personalDecision(tab, tab.dirty, current, remoteData ? { data: remoteData, rev: Number(record?.rev || 0) } : null)
+    if (decision === 'same') {
+      if (remoteData && modelContent(current) === modelContent(remoteData)) {
+        tab.baseRev = Number(record?.rev || 0)
+        tab.savedContent = modelContent(remoteData)
+        if (!tab.dirty) {
+          tab.name = String(record?.name || tab.name)
+          tab.saveId = record?.saveId
+          const nextState = savedRecordState(record || {})
+          const retrying = record?.dirty && (tab.saveState === 'syncing' || tab.saveState === 'failed')
+          if (tab.saveState !== 'conflict' && !retrying) tab.saveState = nextState
+        }
+      }
+      persistPersonal(tab)
+      return
+    }
+    if (decision === 'refresh' && remoteData) {
+      // 文档变化通知和清撤销会同步调用引擎；整个替换期间禁止反向 flush/markDirty。
+      switching.current = true
+      try { replaceTabModel(tab, remoteData) } finally { switching.current = false }
+      tab.name = String(record?.name || tab.name)
+      tab.baseRev = Number(record?.rev || 0)
+      tab.savedContent = modelContent(remoteData)
+      tab.saveId = record?.saveId
+      tab.saveState = 'synced'
+      tab.dirty = false
+      if (tab.tabId === activeRef.current) applyTab(tab)
+    } else {
+      // 不可靠历史基线、未保存工作或墓碑：保全工作副本，原设计另开最新内容。
+      const copyName = t('sync.recoveryName', { name: tab.name })
+      const generation = tab.editGeneration || 0
+      const preservedId = tab.saveId && stored?.conflictCopies?.[tab.saveId]
+      const preserved = preservedId ? await docs.getDoc(preservedId) as AnyRec | null : null
+      const copy = preserved && modelContent(normalizeModel(preserved.data) || EMPTY_MODEL) === modelContent(current)
+        ? preserved : await docs.saveDoc({ docId: null, name: copyName, data: structuredClone(current), baseRev: 0 })
+      if (!tabsRef.current.includes(tab) || !samePersonalBinding(tab, binding)) return
+      tab.docId = String(copy.id)
+      if ((tab.editGeneration || 0) === generation) tab.name = String(copy.name)
+      tab.baseRev = Number(copy.rev || 0)
+      tab.savedContent = modelContent(current)
+      tab.saveId = String(copy.saveId)
+      tab.dirty = !savedGenerationUnchanged(tab, generation, current, tab.local.history.toJSON())
+      tab.saveState = 'conflict'
+      tab.conflictDocId = remoteData ? originalId : undefined
+      if (remoteData && !tabsRef.current.some(x => x.docId === originalId)) {
+        const latest = makeTab(remoteData, String(record?.name || ''), originalId)
+        Object.assign(latest, { baseRev: Number(record?.rev || 0), savedContent: modelContent(remoteData), saveId: record?.saveId, saveState: 'synced' })
+        tabsRef.current.push(latest)
+      }
+      notify(t(remoteData ? 'sync.conflictProtected' : 'sync.deletedProtected'), 'warn')
+    }
+    persistPersonal(tab)
+  }, [applyTab, notify, snapshotActive, t])
+
+  const reconcilingTabs = useRef(new Map<string, Promise<void>>())
+  const reconcilePersonal = useCallback((tab: Tab, supplied?: AnyRec | null): Promise<void> => {
+    const pending = reconcilingTabs.current.get(tab.tabId)
+    if (pending) return pending
+    const next = reconcilePersonalNow(tab, supplied).finally(() => {
+      reconcilingTabs.current.delete(tab.tabId)
+    })
+    reconcilingTabs.current.set(tab.tabId, next)
+    return next
+  }, [reconcilePersonalNow])
+
+  const reconcileRef = useRef(reconcilePersonal)
+  reconcileRef.current = reconcilePersonal
+
+  useEffect(() => {
+    if (!ready || SESSIONLESS) return
+    let dead = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let queued = Promise.resolve()
+    const reconcile = () => {
+      if (dead) return
+      if (eng.current?.builder.busy()) {
+        timer = setTimeout(reconcile, 150)
+        return
+      }
+      queued = queued.then(async () => {
+        if (dead) return
+        for (const tab of [...tabsRef.current]) await reconcileRef.current(tab)
+        if (!dead) syncTabsRef.current()
+      }).catch(error => {
+        console.warn('[personal tabs]', error)
+        if (!dead) notifyRef.current(t('sync.failed'), 'warn')
+      })
+    }
+    const stop = onSyncEvent(event => {
+      if (event.type === 'pushed') {
+        for (const tab of tabsRef.current) {
+          if (tab.docId !== event.id || !event.saveId || tab.saveId !== event.saveId) continue
+          tab.baseRev = event.rev
+          if (!tab.dirty && tab.saveState !== 'conflict') tab.saveState = 'synced'
+        }
+        syncTabsRef.current()
+        // 较早保存的回执可以推进同一工作链中较新保存的基线；存档事务负责核对因果关系。
+        queued = queued.then(async () => {
+          for (const tab of tabsRef.current) {
+            if (tab.docId !== event.id || !tab.saveId) continue
+            const doc = await docs.getDoc(event.id) as AnyRec | null
+            if (doc?.saveId === tab.saveId && !doc.pendingRemote) tab.baseRev = Number(doc.rev || 0)
+          }
+          if (!dead) syncTabsRef.current()
+        }).catch(error => console.warn('[save baseline]', error))
+      }
+      if (event.type === 'error' || event.type === 'quota') {
+        for (const tab of tabsRef.current) {
+          if (tab.saveState === 'syncing' || tab.saveState === 'local') tab.saveState = 'failed'
+        }
+        syncTabsRef.current()
+        notifyRef.current(t('sync.failed'), 'warn')
+      }
+      if (event.type === 'pulled' || event.type === 'idle' || event.type === 'conflict') reconcile()
+    })
+    reconcile()
+    return () => { dead = true; stop(); if (timer) clearTimeout(timer) }
+  }, [ready, t])
 
   const markDirtyRef = useRef(markDirty)
   const bumpRef = useRef(bump)
@@ -851,21 +996,27 @@ export function EngineProvider({ children }: { children: ReactNode }) {
               planId: (tb.planId as string) || null,
               view: (tb.view as AnyRec) || {},
               local,
+              baseRev: typeof tb.baseRev === 'number' ? tb.baseRev : undefined,
+              savedContent: typeof tb.savedContent === 'string' ? tb.savedContent : undefined,
+              editGeneration: Number(tb.editGeneration || 0),
+              saveId: tb.saveId,
+              saveState: tb.saveState,
+              conflictDocId: tb.conflictDocId,
+              ...readPersonalState(local),
             })
           }
-          // 有存档、这一页却是空的（存档是别的设备同步过来的）：用存档的内容
           for (const tb of mapped) {
-            if (!tb.docId || tabParts(tb) > 0) continue
-            const doc = await docs.getDoc(tb.docId) as AnyRec | null
-            if (dead) return
-            const data = doc?.data ? normalizeModel(doc.data) : null
-            if (data && modelPartCount(data) > 0) {
-              writeJSON(tb.local.doc, data, SEED_ORIGIN)
-              tb.dirty = false
-              if (doc?.name) tb.name = String(doc.name)
+            if (!tb.planId && tb.savedContent && tb.savedContent !== modelContent(tb.local.history.toJSON())) {
+              tb.dirty = true
+              if (tb.saveState !== 'conflict') tb.saveState = 'unsaved'
             }
           }
-          const { keep, gone } = pruneSessionTabs(mapped)
+          tabsRef.current = mapped
+          for (const tb of [...mapped]) {
+            await reconcileRef.current(tb)
+            if (dead) return
+          }
+          const { keep, gone } = pruneSessionTabs(tabsRef.current)
           for (const tb of gone) await dropTabDoc(tb.tabId, tb.local)
           tabsRef.current = keep
           const wanted = session.activeTabId && tabsRef.current.some(x => x.tabId === session.activeTabId)
@@ -1126,7 +1277,11 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     activeRef.current = tabId
     applyTab(tab)
     syncTabs()
-  }, [applyTab, snapshotActive, syncTabs])
+    void reconcilePersonal(tab).then(syncTabs).catch(error => {
+      console.warn('[personal tabs]', error)
+      notify(t('sync.failed'), 'warn')
+    })
+  }, [applyTab, notify, reconcilePersonal, snapshotActive, syncTabs, t])
 
   const attachDoc = useCallback((o: { local: LocalDoc; name: string; readOnly: boolean }) => {
     const old = tabsRef.current
@@ -1227,7 +1382,9 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const tab = tabsRef.current.find(x => x.tabId === tabId)
     if (!tab) return
     tab.name = name.trim() || t('tab.untitled')
+    tab.editGeneration = (tab.editGeneration || 0) + 1
     tab.dirty = true
+    tab.saveState = 'unsaved'
     syncTabs()
   }, [syncTabs, t])
 
@@ -1256,12 +1413,47 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     ask?.resolve(name)
   }, [])
 
+  const localSaveSequence = useRef(new Map<string, number>())
+  function beginLocalSave(tab: Tab) {
+    const sequence = (localSaveSequence.current.get(tab.tabId) || 0) + 1
+    localSaveSequence.current.set(tab.tabId, sequence)
+    const binding = { docId: tab.docId, saveId: tab.saveId }
+    return () => tabsRef.current.includes(tab) && samePersonalBinding(tab, binding)
+      && localSaveSequence.current.get(tab.tabId) === sequence
+  }
+
+  async function saveSnapshot(tab: Tab, options: Parameters<typeof docs.saveDoc>[0]) {
+    try { return await docs.saveDoc(options) }
+    catch (error) {
+      console.warn('[save local]', error)
+      if (tabsRef.current.includes(tab)) {
+        tab.dirty = true
+        tab.saveState = 'unsaved'
+        syncTabs()
+      }
+      notify(t('sync.localFailed'), 'err')
+      return null
+    }
+  }
+
   const saveCurrent = useCallback(async (name?: string) => {
     const e2 = eng.current
     const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
-    if (!e2 || !tab) return null
+    if (!e2 || !tab || tab.readOnly) return null
     if (tab.planId) {
       notify(t('collab.autoSynced'))
+      return null
+    }
+    if (tab.docId && tab.saveId) {
+      const binding = { docId: tab.docId, saveId: tab.saveId }
+      const current = await docs.getDoc(tab.docId) as AnyRec | null
+      if (!tabsRef.current.includes(tab)) return null
+      if (samePersonalBinding(tab, binding) && current?.saveId === tab.saveId && !current.pendingRemote) tab.baseRev = Number(current.rev || 0)
+    }
+    if (e2.builder.busy()) {
+      tab.saveState = 'waiting'
+      syncTabs()
+      notify(t('sync.waiting'), 'warn')
       return null
     }
     let saveName = name || tab.name
@@ -1270,43 +1462,93 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       if (typed == null) return null
       saveName = typed.trim() || t('tab.untitled')
     }
+    if (!tabsRef.current.includes(tab)) return null
+    if (tab.tabId === activeRef.current && e2.builder.busy()) { notify(t('sync.waiting'), 'warn'); return null }
     const data = structuredClone(exportTab(tab))
-    const saved = await docs.saveDoc({ docId: tab.docId, name: saveName, data })
+    const generation = tab.editGeneration || 0
+    const stillCurrent = beginLocalSave(tab)
+    // 没有可靠基线时只能保存成新设计，不能借存档库最新 rev 覆盖原设计。
+    const targetId = tab.baseRev === undefined && tab.docId ? null : tab.docId
+    const saved = await saveSnapshot(tab, { docId: targetId, name: saveName, data, baseRev: tab.baseRev || 0,
+      parentSaveId: targetId && tab.baseRev !== undefined ? tab.saveId : undefined })
+    if (!saved) return null
     tabSavedAs(tab.tabId, saved.id)
-    tab.docId = saved.id
-    tab.name = saved.name
-    tab.dirty = false
+    const attached = stillCurrent()
+    if (attached) {
+      tab.docId = saved.id
+      if ((tab.editGeneration || 0) === generation) tab.name = saved.name
+      tab.baseRev = Number(saved.rev || 0)
+      tab.savedContent = modelContent(data)
+      tab.saveId = String(saved.saveId)
+      tab.conflictDocId = undefined
+      tab.dirty = !savedGenerationUnchanged(tab, generation, data, tab.local.history.toJSON())
+      tab.saveState = syncStarted() ? 'syncing' : 'local'
+      if (tab.dirty) tab.saveState = 'unsaved'
+    }
     syncTabs()
     track('builder.design.save', { ...modelShape(data), named: !!name })
-    notify(t('toast.saved', { name: saved.name }))
-    // 存下就推上去。等一个同步周期的话，这中间关掉页面这一座就只在这台
-    // 机器上；社区发帖页更是当场就要读服务器那张列表。不挡着上面那句提示：
-    // 存进本地这件事已经成了，网络慢不该让用户对着按钮等。
-    await coverSaved(String(saved.id), data, saved.updatedAt)
-    void pushSaved(String(saved.id), String(saved.name), data)
+    notify(t(syncStarted() ? 'sync.syncing' : 'sync.local'))
+    void pushSaved(String(saved.id), String(saved.name), data, String(saved.saveId), attached ? tab : undefined)
+    void coverSaved(String(saved.id), data, saved.updatedAt, String(saved.saveId)).catch(error => {
+      console.warn('[cover]', error)
+      notify(t('sync.coverFailed'), 'warn')
+    })
     return { docId: String(saved.id), name: String(saved.name), data }
     // coverSaved、pushSaved 每次渲染重建，只在回调里调用，不进依赖表
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [askName, exportTab, notify, syncTabs, t])
 
   /**
-   * 登录着（同步在跑）的时候，存下的这一座截一张画面记成封面，跟着这一版交上去，
-   * 「我的设计」和发布出去的方案用的就是它。截完才算存完：存下之后紧接着的事
-   * （比如开启共享）也要截图，两次截图不能叠在一起。
+   * 使用独立场景给已保存快照生成封面；JSON 无需等待，晚到封面按 saveId 核对内容。
    */
-  async function coverSaved(docId: string, data: ModelJSON, updatedAt: number) {
+  async function coverSaved(docId: string, data: ModelJSON, updatedAt: number, saveId: string) {
     if (!syncStarted()) return
     const cover = await renderModelCover(data)
-    if (cover) await docs.setDocCover(docId, cover, updatedAt)
+    if (!cover && modelPartCount(data) > 0) throw new Error('saved cover unavailable')
+    if (cover) {
+      await docs.setDocCover(docId, cover, updatedAt, saveId)
+      void syncNow()
+    }
   }
 
   /**
    * 存下以后推上去；送到服务器以后发一个 quadro:design-saved 事件，
    * 托管页面接着做它的事（比如提示去发布），Builder 自己不管。
    */
-  async function pushSaved(docId: string, name: string, data: ModelJSON) {
-    if (!syncStarted()) { void syncNow(); return }
-    if (!await pushDoc(docId)) return
+  async function pushSaved(docId: string, name: string, data: ModelJSON, saveId: string, tab?: Tab) {
+    if (!syncStarted()) return
+    let result: Awaited<ReturnType<typeof syncSavedDoc>>
+    try { result = await syncSavedDoc(docId, saveId) }
+    catch (error) {
+      console.warn('[save sync]', error)
+      result = { status: 'pending', id: docId, saveId, error }
+    }
+    const binding = { docId, saveId }
+    if (tab && tabsRef.current.includes(tab) && samePersonalBinding(tab, binding)) {
+      if (result.status === 'synced') {
+        tab.baseRev = result.rev
+        if (!tab.dirty) tab.saveState = 'synced'
+      } else if (result.status === 'conflict') {
+        const read = await readPersonalBinding(tab, binding, () => tabsRef.current.includes(tab),
+          () => docs.getDoc(result.copyId) as Promise<AnyRec | null>)
+        if (!read) return
+        const copy = read.value
+        if (copy) {
+          tab.docId = result.copyId
+          if (!tab.dirty) tab.name = String(copy.name)
+          tab.baseRev = Number(copy.rev || 0)
+          tab.saveId = copy.saveId
+        }
+        tab.saveState = 'conflict'
+        tab.conflictDocId = docId
+        notify(t('sync.conflictProtected'), 'warn')
+      } else {
+        if (!tab.dirty) tab.saveState = 'failed'
+        notify(t('sync.failed'), 'warn')
+      }
+      syncTabs()
+    }
+    if (result.status !== 'synced') return
     window.dispatchEvent(new CustomEvent('quadro:design-saved', {
       detail: { docId, name, parts: modelPartCount(data) },
     }))
@@ -1330,23 +1572,39 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const e2 = eng.current
     const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
     if (!e2 || !tab) return
+    if (e2.builder.busy()) { notify(t('sync.waiting'), 'warn'); return }
     const suggested = isUntitledName(tab.name) ? '' : await freeDocName(tab.name)
     const typed = await askName(t('saves.saveAsTitle'), t('saves.saveOk'), suggested)
     if (typed == null) return
+    if (!tabsRef.current.includes(tab)) return
+    if (tab.tabId === activeRef.current && e2.builder.busy()) { notify(t('sync.waiting'), 'warn'); return }
     const data = structuredClone(exportTab(tab))
-    const saved = await docs.saveDoc({ docId: null, name: typed.trim() || t('tab.untitled'), data })
+    const generation = tab.editGeneration || 0
+    const stillCurrent = beginLocalSave(tab)
+    const saved = await saveSnapshot(tab, { docId: null, name: typed.trim() || t('tab.untitled'), data })
+    if (!saved) return
     tabSavedAs(tab.tabId, saved.id)
     // 共享方案另存一份到「我的设计」：标签页还是那个方案
-    if (!tab.planId) {
+    const attached = !tab.planId && stillCurrent()
+    if (attached) {
       tab.docId = saved.id
-      tab.name = saved.name
-      tab.dirty = false
+      if ((tab.editGeneration || 0) === generation) tab.name = saved.name
+      tab.baseRev = Number(saved.rev || 0)
+      tab.savedContent = modelContent(data)
+      tab.saveId = String(saved.saveId)
+      tab.conflictDocId = undefined
+      tab.dirty = !savedGenerationUnchanged(tab, generation, data, tab.local.history.toJSON())
+      tab.saveState = syncStarted() ? 'syncing' : 'local'
+      if (tab.dirty) tab.saveState = 'unsaved'
     }
     syncTabs()
     track('builder.design.saveAs', { ...modelShape(data) })
-    notify(t('toast.saved', { name: saved.name }))
-    await coverSaved(String(saved.id), data, saved.updatedAt)
-    void pushSaved(String(saved.id), String(saved.name), data)
+    notify(t(syncStarted() ? 'sync.syncing' : 'sync.local'))
+    void pushSaved(String(saved.id), String(saved.name), data, String(saved.saveId), attached ? tab : undefined)
+    void coverSaved(String(saved.id), data, saved.updatedAt, String(saved.saveId)).catch(error => {
+      console.warn('[cover]', error)
+      notify(t('sync.coverFailed'), 'warn')
+    })
     // coverSaved、pushSaved 每次渲染重建，只在回调里调用，不进依赖表
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [askName, freeDocName, notify, syncTabs, t])
@@ -1363,41 +1621,61 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   /**
    * 把这一座送到服务器上，送到了才返回 true。
    *
-   * 问的不是"同步跑过了"而是"服务器上确实有这一座"：本地记账里 rev 有了、
-   * dirty 没了，才算真的过去。要它的是"发到社区"——对面只认服务器那张列表，
-   * 没送到就跳过去，用户看到的是一句"你还没存过造型"。
-   *
-   * 推两轮：点下来的那一刻可能正好有一轮在跑，而那一轮开始时这一座
-   * 还没存下，等到它结束什么也没带走。
+   * 社区入口只接受指定 saveId 的模型回执；已同步模型的异步封面可继续等待。
    */
   const pushDoc = useCallback(async (docId: string) => {
-    for (let i = 0; i < 2; i++) {
-      await syncNow()
-      const doc = await docs.getDoc(docId) as AnyRec | null
-      if (doc && Number(doc.rev) > 0 && !doc.dirty) return true
-    }
-    return false
+    const doc = await docs.getDoc(docId) as AnyRec | null
+    if (!doc) return false
+    if (!doc.saveId) return Number(doc.rev) > 0 && !doc.dirty
+    return (await syncSavedDoc(docId, String(doc.saveId))).status === 'synced'
   }, [])
 
+  const retrySave = useCallback(async (tabId: string) => {
+    const tab = tabsRef.current.find(x => x.tabId === tabId)
+    if (!tab?.docId || !tab.saveId || tab.planId || tab.readOnly) return
+    if (!syncStarted()) { notify(t('sync.local')); return }
+    const binding = { docId: tab.docId, saveId: tab.saveId }
+    const doc = await docs.getDoc(tab.docId) as AnyRec | null
+    if (!doc?.data || !tabsRef.current.includes(tab) || !samePersonalBinding(tab, binding) || doc.saveId !== tab.saveId) return
+    tab.saveState = 'syncing'
+    syncTabs()
+    await pushSaved(tab.docId, String(doc.name), doc.data as ModelJSON, tab.saveId, tab)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notify, syncTabs, t])
+
   const openDoc = useCallback(async (docId: string) => {
+    await syncNow()
+    if (syncStarted()) {
+      try { await pullDoc(import.meta.env.VITE_SYNC_BASE as string, docId) }
+      catch (error) {
+        console.warn('[open design]', error)
+        notify(t('sync.failed'), 'warn')
+      }
+    }
     const doc = await docs.getDoc(docId)
     if (!doc) return
     snapshotActive()
     const existing = tabsRef.current.find(x => x.docId === docId)
     if (existing) {
-      activeRef.current = existing.tabId
-      applyTab(existing)
+      await reconcilePersonal(existing, doc as AnyRec)
+      let latest = tabsRef.current.find(x => x.docId === docId)
+      if (!latest && tabsRef.current.includes(existing)) latest = existing
+      if (!latest) return
+      activeRef.current = latest.tabId
+      applyTab(latest)
       syncTabs()
       return
     }
     const data = normalizeModel(doc.data)
     if (!data) { notify(t('lib.loadFailed'), 'err'); return }
     const tab = makeTab(data, String(doc.name), String(doc.id))
+    Object.assign(tab, { baseRev: Number(doc.rev || 0), savedContent: modelContent(data), saveId: doc.saveId,
+      saveState: savedRecordState(doc) })
     tabsRef.current = [...tabsRef.current, tab]
     activeRef.current = tab.tabId
     applyTab(tab)
     syncTabs()
-  }, [applyTab, notify, snapshotActive, syncTabs, t])
+  }, [applyTab, notify, reconcilePersonal, snapshotActive, syncTabs, t])
 
   const openLibraryId = useCallback(async (id: string) => {
     const official = parseOfficialId(id)
@@ -2057,17 +2335,29 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const e2 = eng.current
     const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
     if (!e2 || !tab) return
+    if (e2.builder.busy()) { notify(t('sync.waiting'), 'warn'); return }
     const data = exportTab(tab)
-    const saved = await docs.saveDoc({ docId: null, name: await freeDocName(tab.name), data })
+    const generation = tab.editGeneration || 0
+    const stillCurrent = beginLocalSave(tab)
+    const saved = await saveSnapshot(tab, { docId: null, name: await freeDocName(tab.name), data })
+    if (!saved) return
     tabSavedAs(tab.tabId, saved.id)
-    tab.docId = saved.id
-    tab.name = saved.name
-    tab.dirty = false
+    const attached = stillCurrent()
+    if (attached) {
+      tab.docId = saved.id
+      if ((tab.editGeneration || 0) === generation) tab.name = saved.name
+      tab.baseRev = Number(saved.rev || 0)
+      tab.savedContent = modelContent(data)
+      tab.saveId = String(saved.saveId)
+      tab.dirty = !savedGenerationUnchanged(tab, generation, data, tab.local.history.toJSON())
+      tab.saveState = syncStarted() ? 'syncing' : 'local'
+      if (tab.dirty) tab.saveState = 'unsaved'
+    }
     syncTabs()
     track('builder.design.copy', { ...modelShape(data) })
-    if (await syncProbe() && await pushDoc(saved.id)) notify(t('toast.copiedToAccount', { name: saved.name }))
-    else notify(t('toast.copiedLocal', { name: saved.name }), 'warn')
-  }, [freeDocName, notify, pushDoc, syncTabs, t])
+    await pushSaved(String(saved.id), String(saved.name), data, String(saved.saveId), attached ? tab : undefined)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exportTab, freeDocName, notify, syncTabs, t])
 
   // 地址上带着一座进来的：#s= 分享链接，或者 ?src= 造型文件（方案页、帖子、官方造型页）。
   // 打开它；带了 &copy=1 的再存一份到自己的存档里。
@@ -2325,8 +2615,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       bump()
     },
     grassOn: !!scene?._sceneOn,
-    highlight, highlightIds, safety, setInv, newTab, closeTab, activateTab, renameTab, setTabName, saveCurrent, saveCurrentAs, askName, answerName, nameAsk, openDoc,
-    listDocs: async () => (await docs.listDocs()).map((d: AnyRec) => ({ id: String(d.id), name: String(d.name), updatedAt: Number(d.updatedAt || 0), local: !Number(d.rev) })),
+    highlight, highlightIds, safety, setInv, newTab, closeTab, activateTab, renameTab, setTabName, saveCurrent, saveCurrentAs, askName, answerName, nameAsk, openDoc, retrySave,
+    listDocs: async () => (await docs.listDocs()).map((d: AnyRec) => ({ id: String(d.id), name: String(d.name), updatedAt: Number(d.updatedAt || 0), local: !Number(d.rev) || !!d.dirty || (!!d.saveId && d.syncedSaveId !== d.saveId) })),
     removeDoc: async (id) => { await docs.removeDoc(id); bump() },
     renameDoc: async (id, name) => { await docs.renameDoc(id, name); bump() },
     duplicateDoc: async (id) => { await duplicateDoc(id); bump() },
