@@ -28,7 +28,7 @@ import { MOTION } from '../ui/motion'
 import { createTabDoc, dropTabDoc, memoryDoc, openTabDoc, readPersonalState, writePersonalState, SEED_ORIGIN, type LocalDoc } from '../collab/localDocs'
 import { partCountOf, writeJSON, type ModelJSON } from '../collab/ymodel'
 import { appendTab } from './tabs'
-import { modelContent, personalDecision, readPersonalBinding, samePersonalBinding, savedGenerationUnchanged, savedRecordState, type PersonalState } from './personalTabs'
+import { modelContent, personalDecision, readPersonalBinding, restorePersonalBinding, samePersonalBinding, savedGenerationUnchanged, savedRecordState, type PersonalState } from './personalTabs'
 import { renderModelCover } from './modelCover'
 import { computeAssemblyPlan } from '../engine/assemblyPlan.js'
 import { proposeAssemblyRepairs } from '../engine/connectionResolver.js'
@@ -463,9 +463,9 @@ function makeTab(seed: ModelJSON, name: string, docId: string | null): Tab {
 }
 
 function persistPersonal(tab: Tab) {
-  if (tab.planId || tab.readOnly) return
-  const { baseRev, savedContent, editGeneration, saveId, saveState, conflictDocId } = tab
-  writePersonalState(tab.local, { baseRev, savedContent, editGeneration, saveId, saveState, conflictDocId })
+  if (tab.planId || tab.readOnly || SESSIONLESS) return
+  const { docId, name, dirty, baseRev, savedContent, editGeneration, saveId, saveState, conflictDocId } = tab
+  writePersonalState(tab.local, { bindingVersion: 1, docId, name, dirty, baseRev, savedContent, editGeneration, saveId, saveState, conflictDocId })
 }
 
 /**
@@ -827,9 +827,10 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       // 不可靠历史基线、未保存工作或墓碑：保全工作副本，原设计另开最新内容。
       const copyName = t('sync.recoveryName', { name: tab.name })
       const generation = tab.editGeneration || 0
-      const preservedId = tab.saveId && stored?.conflictCopies?.[tab.saveId]
+      const preservedId = tab.saveId ? stored?.conflictCopies?.[tab.saveId] : stored?.legacyRecoveryId
       const preserved = preservedId ? await docs.getDoc(preservedId) as AnyRec | null : null
-      const copy = preserved && modelContent(normalizeModel(preserved.data) || EMPTY_MODEL) === modelContent(current)
+      const preservedData = preserved?.data ? normalizeModel(preserved.data) : null
+      const copy = preserved && preservedData && modelContent(preservedData) === modelContent(current)
         ? preserved : await docs.saveDoc({ docId: null, name: copyName, data: structuredClone(current), baseRev: 0 })
       if (!tabsRef.current.includes(tab) || !samePersonalBinding(tab, binding)) return
       tab.docId = String(copy.id)
@@ -988,7 +989,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
             const legacy = tb.model ? normalizeModel(tb.model) : null
             const local = await openTabDoc(tabId, legacy)
             if (dead) return
-            mapped.push({
+            const restored: Tab = {
               tabId,
               docId: (tb.docId as string) || null,
               name: String(tb.name || t('tab.untitled')),
@@ -1002,8 +1003,9 @@ export function EngineProvider({ children }: { children: ReactNode }) {
               saveId: tb.saveId,
               saveState: tb.saveState,
               conflictDocId: tb.conflictDocId,
-              ...readPersonalState(local),
-            })
+            }
+            mapped.push(restored.planId || restored.readOnly || SESSIONLESS ? restored
+              : restorePersonalBinding(restored, readPersonalState(local)))
           }
           for (const tb of mapped) {
             if (!tb.planId && tb.savedContent && tb.savedContent !== modelContent(tb.local.history.toJSON())) {

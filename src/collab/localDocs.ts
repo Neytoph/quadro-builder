@@ -13,7 +13,7 @@ import { IndexeddbPersistence, clearDocument } from 'y-indexeddb'
 import { docIsEmpty, writeJSON, type ModelJSON } from './ymodel'
 import { ModelHistory } from './history'
 import { accountKey } from '../engine/storage.js'
-import type { PersonalState } from '../store/personalTabs'
+import type { PersonalState, PersonalTabBinding } from '../store/personalTabs'
 
 /** 从存档、旧会话、文件、服务器 data 写进一份空文档时的 origin：不进撤销记录。 */
 export const SEED_ORIGIN = { name: 'seed' }
@@ -24,12 +24,12 @@ export interface LocalDoc {
   persistence: IndexeddbPersistence | null
 }
 
-/** 工作基线随 Yjs 文档持久化，避免会话防抖尚未写入时关闭页面丢失基线。 */
-export function readPersonalState(local: LocalDoc): PersonalState {
-  return local.doc.getMap('personal-state').toJSON() as PersonalState
+/** 文档归属与工作基线随同一份 Yjs 文档持久化，避免与较旧会话混搭。 */
+export function readPersonalState(local: LocalDoc): PersonalState & Partial<PersonalTabBinding> {
+  return local.doc.getMap('personal-state').toJSON() as PersonalState & Partial<PersonalTabBinding>
 }
 
-export function writePersonalState(local: LocalDoc, state: PersonalState) {
+export function writePersonalState(local: LocalDoc, state: PersonalState & Partial<PersonalTabBinding>) {
   local.doc.transact(() => {
     const map = local.doc.getMap('personal-state')
     for (const [key, value] of Object.entries(state)) {

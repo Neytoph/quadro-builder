@@ -2,10 +2,10 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { storeState } from 'y-indexeddb'
-import { BuildModel, buildableTubes, geometry, loadCatalog, panels, parseQDF, storage } from '../engine-api'
+import { BuildModel, buildableTubes, docs, geometry, loadCatalog, panels, parseQDF, storage } from '../engine-api'
 import { createTabDoc, dropTabDoc, openTabDoc, readPersonalState, writePersonalState } from '../collab/localDocs'
 import type { ModelJSON } from '../collab/ymodel'
-import { displaySaveState, modelContent, personalDecision, readPersonalBinding, savedGenerationUnchanged, savedRecordState } from './personalTabs'
+import { displaySaveState, modelContent, personalDecision, readPersonalBinding, restorePersonalBinding, savedGenerationUnchanged, savedRecordState } from './personalTabs'
 
 // 隔离单元夹具使用真实官方模型；IndexedDB 由测试环境提供，浏览器验收另行执行。
 let original: ModelJSON
@@ -96,5 +96,53 @@ describe('personal tab working baseline', () => {
     expect(modelContent(restored.history.toJSON())).toBe(modelContent(original))
     await dropTabDoc(id, restored)
     storage.setAccountScope(null)
+  })
+
+  it.each(['saveAs', 'conflict'] as const)('restores the complete %s binding when the persisted session still points to the original', async kind => {
+    storage.setAccountScope(`frontend-binding-${kind}`)
+    const tabId = `binding-${kind}-${Date.now()}`
+    const oldDoc = { id: 'original-design', name: 'Original', data: original, rev: 7, createdAt: 1, updatedAt: 2, saveId: 'old-save' }
+    await docs.putRemoteDoc(oldDoc)
+    const oldSession = { tabId, docId: oldDoc.id, name: oldDoc.name, dirty: false, baseRev: 7,
+      savedContent: modelContent(original), editGeneration: 3, saveId: 'old-save', saveState: 'synced' as const }
+    await docs.saveSession({ tabs: [oldSession], activeTabId: tabId })
+    const local = createTabDoc(tabId, original)
+    await local.persistence!.whenSynced
+    local.history.commit(JSON.stringify(original), JSON.stringify(changed))
+    const current = local.history.toJSON()
+    const copy = await docs.saveDoc({ docId: null, name: kind === 'saveAs' ? 'New design' : 'Recovery copy', data: current, baseRev: 0 })
+    writePersonalState(local, { bindingVersion: 1, docId: copy.id, name: copy.name, dirty: kind === 'conflict',
+      baseRev: 0, savedContent: modelContent(current), editGeneration: 4, saveId: copy.saveId,
+      saveState: kind === 'saveAs' ? 'local' : 'conflict', conflictDocId: kind === 'conflict' ? oldDoc.id : undefined })
+    // 只等待 Yjs 落库，不更新会话：模拟400ms会话防抖窗口内关闭页面。
+    await storeState(local.persistence!, true)
+    await local.persistence!.destroy()
+    local.history.destroy()
+    local.doc.destroy()
+    const session = await docs.loadSession()
+    expect(session.tabs[0].docId).toBe(oldDoc.id)
+    const reopened = await openTabDoc(tabId, null)
+    const restored = restorePersonalBinding(session.tabs[0], readPersonalState(reopened))
+    expect(restored.docId).toBe(copy.id)
+    expect(restored.name).toBe(copy.name)
+    expect(restored.baseRev).toBe(0)
+    expect(restored.saveId).toBe(copy.saveId)
+    expect(restored.dirty).toBe(kind === 'conflict')
+    expect(restored.saveState).toBe(kind === 'saveAs' ? 'local' : 'conflict')
+    expect(restored.conflictDocId).toBe(kind === 'conflict' ? oldDoc.id : undefined)
+    expect(modelContent(reopened.history.toJSON())).toBe(modelContent(current))
+    const boundDoc = await docs.getDoc(restored.docId)
+    expect(modelContent(boundDoc.data)).toBe(modelContent(current))
+    await dropTabDoc(tabId, reopened)
+    storage.setAccountScope(null)
+  })
+
+  it('an explicit unbound Yjs record clears the older session identity and baseline; missing or partial metadata preserves the session', () => {
+    const session = { docId: 'original', name: 'Original', dirty: false, baseRev: 7, saveId: 'old', savedContent: modelContent(original) }
+    const restored = restorePersonalBinding(session, { bindingVersion: 1, docId: null, name: 'Draft', dirty: true })
+    expect(restored).toEqual({ docId: null, name: 'Draft', dirty: true, baseRev: undefined, saveId: undefined,
+      savedContent: undefined, editGeneration: undefined, saveState: undefined, conflictDocId: undefined })
+    expect(restorePersonalBinding(session, {})).toBe(session)
+    expect(restorePersonalBinding(session, { baseRev: 0, saveId: 'unknown-binding' })).toBe(session)
   })
 })

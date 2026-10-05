@@ -10,6 +10,23 @@ export interface PersonalState {
   conflictDocId?: string
 }
 
+export interface PersonalTabBinding extends PersonalState {
+  bindingVersion: 1
+  docId: string | null
+  name: string
+  dirty: boolean
+}
+
+/** 完整归属和工作基线必须来自同一次写入；旧版本无完整元信息时保留会话来源。 */
+export function restorePersonalBinding<T extends PersonalState & { docId: string | null; name: string; dirty: boolean }>(
+  session: T, persisted: PersonalState & Partial<PersonalTabBinding>): T {
+  if (persisted.bindingVersion !== 1 || !(persisted.docId === null || typeof persisted.docId === 'string')
+    || typeof persisted.name !== 'string' || typeof persisted.dirty !== 'boolean') return session
+  return { ...session, docId: persisted.docId, name: persisted.name, dirty: persisted.dirty,
+    baseRev: persisted.baseRev, savedContent: persisted.savedContent, editGeneration: persisted.editGeneration,
+    saveId: persisted.saveId, saveState: persisted.saveState, conflictDocId: persisted.conflictDocId }
+}
+
 export function samePersonalBinding(state: PersonalState & { docId: string | null },
   expected: { docId: string | null; saveId?: string }): boolean {
   return state.docId === expected.docId && state.saveId === expected.saveId
