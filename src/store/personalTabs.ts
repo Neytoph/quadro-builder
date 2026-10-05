@@ -48,11 +48,27 @@ export function modelContent(data: ModelJSON): string {
   })
 }
 
+/** 旧存档尚未经服务器核对；同内容的本机记录不能证明云端工作基线。 */
+export function personalRecordUnconfirmed(record: { rev?: number; dirty?: boolean; saveId?: string; legacyPending?: boolean } | null): boolean {
+  return !!record && (!!record.legacyPending || (!!record.dirty && Number(record.rev) > 0 && !record.saveId))
+}
+
+/** 只冻结标签自己的基线，不能临时借存档中较新的内容作为旧画布的依据。 */
+export function personalSaveBaseline(state: PersonalState): { baseRev: number; parentSaveId?: string; baseContent?: string } {
+  return { baseRev: state.baseRev || 0, parentSaveId: state.baseRev !== undefined ? state.saveId : undefined,
+    baseContent: state.savedContent }
+}
+
 export function personalDecision(state: PersonalState, dirty: boolean, current: ModelJSON,
-  remote: { data: ModelJSON; rev: number } | null): 'same' | 'refresh' | 'protect' {
+  remote: { data: ModelJSON; rev: number; dirty?: boolean; saveId?: string; legacyPending?: boolean; legacyRecoveryId?: string } | null): 'same' | 'refresh' | 'protect' {
   const content = modelContent(current)
-  if (remote && content === modelContent(remote.data)) return 'same'
-  if (remote && typeof state.baseRev === 'number' && remote.rev <= state.baseRev) return 'same'
+  const remoteContent = remote ? modelContent(remote.data) : undefined
+  if (personalRecordUnconfirmed(remote)) return 'protect'
+  if (remote && content === remoteContent) return 'same'
+  // 历史恢复已接受云端也不能给旧画布借版本号；新打开云端的标签拥有真实内容基线。
+  if (remote?.legacyRecoveryId && !state.saveId && state.savedContent !== remoteContent) return 'protect'
+  if (remote && typeof state.baseRev === 'number' && remote.rev <= state.baseRev
+    && state.savedContent === remoteContent) return 'same'
   // dirty=false 在旧版本中只证明点过保存，不能证明画布基于当前存档。
   if (typeof state.baseRev !== 'number' || state.savedContent === undefined) return 'protect'
   if (dirty || content !== state.savedContent) return 'protect'

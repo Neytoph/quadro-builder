@@ -6,7 +6,7 @@ import * as Y from 'yjs'
 import { BuildModel, buildableTubes, docs, geometry, loadCatalog, panels, parseQDF, storage } from '../engine-api'
 import { createTabDoc, dropTabDoc, memoryDoc, openTabDoc, readPersonalState, writePersonalState } from '../collab/localDocs'
 import type { ModelJSON } from '../collab/ymodel'
-import { displaySaveState, modelContent, personalDecision, readPersonalBinding, restorePersonalBinding, savedGenerationUnchanged, savedRecordState } from './personalTabs'
+import { displaySaveState, modelContent, personalDecision, personalRecordUnconfirmed, personalSaveBaseline, readPersonalBinding, restorePersonalBinding, savedGenerationUnchanged, savedRecordState } from './personalTabs'
 
 // 隔离单元夹具使用真实官方模型；IndexedDB 由测试环境提供，浏览器验收另行执行。
 let original: ModelJSON
@@ -39,6 +39,51 @@ describe('personal tab working baseline', () => {
     expect(personalDecision(state, true, changed, { rev: 2, data: original })).toBe('protect')
     expect(personalDecision(state, true, changed, { rev: 1, data: original })).toBe('same')
     expect(personalDecision(state, false, changed, { rev: 2, data: original })).toBe('protect')
+  })
+
+  it('does not trust same-revision content or an unconfirmed legacy record as the canvas baseline', () => {
+    const poisoned = { baseRev: 31, savedContent: modelContent(original) }
+    expect(personalDecision(poisoned, true, original, { rev: 31, data: changed })).toBe('protect')
+    expect(personalDecision(poisoned, false, original, { rev: 31, data: changed, legacyRecoveryId: 'copy' })).toBe('protect')
+    expect(personalDecision({}, false, original, { rev: 31, data: original, dirty: true })).toBe('protect')
+    expect(personalDecision(poisoned, false, original, { rev: 31, data: original, legacyPending: true, saveId: 'renamed' })).toBe('protect')
+    expect(personalRecordUnconfirmed({ rev: 31, dirty: true })).toBe(true)
+    expect(personalRecordUnconfirmed({ rev: 31, legacyPending: true, saveId: 'renamed' })).toBe(true)
+    expect(personalRecordUnconfirmed({ rev: 31, dirty: true, saveId: 'known' })).toBe(false)
+    // 新打开云端V2后修改的标签有真实V2基线，可以继续原设计。
+    expect(personalDecision({ baseRev: 31, savedContent: modelContent(changed) }, true, original,
+      { rev: 31, data: changed, legacyRecoveryId: 'copy' })).toBe('same')
+  })
+
+  it.each(['pending', 'accepted'] as const)('freezes the old canvas baseline and atomically saves to its stable recovery copy after legacy %s', async phase => {
+    storage.setAccountScope(`frontend-legacy-${phase}`)
+    const legacy = { id: `legacy-${phase}`, name: 'Old design', data: original, rev: 31,
+      createdAt: 1, updatedAt: 2, dirty: true }
+    await storage.dbTx(storage.DB_STORES.docs, 'readwrite', (store: IDBObjectStore) => store.put(legacy))
+    const protection = await docs.protectLegacyDoc(legacy)
+    const poisoned = { baseRev: 31, savedContent: modelContent(original) }
+    const frozen = personalSaveBaseline(poisoned)
+    if (phase === 'accepted') await docs.resolveDocConflict(legacy,
+      { ...legacy, name: 'Cloud V2', data: changed, dirty: false }, true)
+    const current = await docs.getDoc(legacy.id)
+    expect(personalDecision(poisoned, false, original, current)).toBe('protect')
+    // 冻结后标签/存档变更不能让保存请求临时借到新云端基线。
+    poisoned.savedContent = modelContent(changed)
+    expect(frozen.baseContent).toBe(modelContent(original))
+    expect(frozen.parentSaveId).toBeUndefined()
+    const saved = await docs.saveDoc({ docId: legacy.id, name: 'Recovered', data: original, ...frozen })
+    expect(saved.id).toBe(protection.copyId)
+    expect(saved.id).not.toBe(legacy.id)
+    expect(modelContent(saved.data as ModelJSON)).toBe(modelContent(original))
+    const kept = await docs.getDoc(legacy.id)
+    expect(modelContent(kept.data as ModelJSON)).toBe(modelContent(phase === 'pending' ? original : changed))
+    if (phase === 'pending') expect(kept.legacyPending).toBe(true)
+    else {
+      const fresh = await docs.saveDoc({ docId: legacy.id, name: 'Fresh cloud edit', data: original,
+        ...personalSaveBaseline({ baseRev: 31, savedContent: modelContent(changed) }) })
+      expect(fresh.id).toBe(legacy.id)
+    }
+    storage.setAccountScope(null)
   })
 
   it('preserves work when the remote design was deleted', () => {

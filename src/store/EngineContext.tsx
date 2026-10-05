@@ -28,7 +28,7 @@ import { MOTION } from '../ui/motion'
 import { createTabDoc, dropTabDoc, memoryDoc, openTabDoc, readPersonalState, writePersonalState, SEED_ORIGIN, type LocalDoc } from '../collab/localDocs'
 import { partCountOf, writeJSON, type ModelJSON } from '../collab/ymodel'
 import { appendTab } from './tabs'
-import { modelContent, personalDecision, readPersonalBinding, restorePersonalBinding, samePersonalBinding, savedGenerationUnchanged, savedRecordState, type PersonalState } from './personalTabs'
+import { modelContent, personalDecision, personalRecordUnconfirmed, personalSaveBaseline, readPersonalBinding, restorePersonalBinding, samePersonalBinding, savedGenerationUnchanged, savedRecordState, type PersonalState } from './personalTabs'
 import { renderModelCover } from './modelCover'
 import { computeAssemblyPlan } from '../engine/assemblyPlan.js'
 import { proposeAssemblyRepairs } from '../engine/connectionResolver.js'
@@ -794,9 +794,11 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const stored = supplied === undefined ? await docs.getDoc(originalId) as AnyRec | null : supplied
     const record = stored?.pendingRemote || stored
     if (!tabsRef.current.includes(tab) || !samePersonalBinding(tab, binding)) return
-    const remoteData = record?.data ? normalizeModel(record.data) : null
+    // 未确认的旧本机内容不是云端快照，不能赋予工作基线或作为“最新”标签。
+    const unconfirmed = personalRecordUnconfirmed(stored)
+    const remoteData = record?.data && (!unconfirmed || stored?.pendingRemote) ? normalizeModel(record.data) : null
     const current = tab.local.history.toJSON()
-    const decision = personalDecision(tab, tab.dirty, current, remoteData ? { data: remoteData, rev: Number(record?.rev || 0) } : null)
+    const decision = personalDecision(tab, tab.dirty, current, remoteData ? { ...record, data: remoteData, rev: Number(record?.rev || 0) } : null)
     if (decision === 'same') {
       if (remoteData && modelContent(current) === modelContent(remoteData)) {
         tab.baseRev = Number(record?.rev || 0)
@@ -830,8 +832,11 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       const preservedId = tab.saveId ? stored?.conflictCopies?.[tab.saveId] : stored?.legacyRecoveryId
       const preserved = preservedId ? await docs.getDoc(preservedId) as AnyRec | null : null
       const preservedData = preserved?.data ? normalizeModel(preserved.data) : null
+      // 历史副本的建立/选择交给同一存储事务，避免与真实 GET 并发时重复保全或覆盖别的草稿。
+      const legacySource = unconfirmed || !!stored?.legacyRecoveryId && !tab.saveId
       const copy = preserved && preservedData && modelContent(preservedData) === modelContent(current)
-        ? preserved : await docs.saveDoc({ docId: null, name: copyName, data: structuredClone(current), baseRev: 0 })
+        ? preserved : await docs.saveDoc({ docId: legacySource ? originalId : null, name: copyName,
+          data: structuredClone(current), ...(legacySource ? personalSaveBaseline(tab) : { baseRev: 0 }) })
       if (!tabsRef.current.includes(tab) || !samePersonalBinding(tab, binding)) return
       tab.docId = String(copy.id)
       if ((tab.editGeneration || 0) === generation) tab.name = String(copy.name)
@@ -846,7 +851,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
         Object.assign(latest, { baseRev: Number(record?.rev || 0), savedContent: modelContent(remoteData), saveId: record?.saveId, saveState: 'synced' })
         tabsRef.current.push(latest)
       }
-      notify(t(remoteData ? 'sync.conflictProtected' : 'sync.deletedProtected'), 'warn')
+      notify(t(remoteData || unconfirmed ? 'sync.conflictProtected' : 'sync.deletedProtected'), 'warn')
     }
     persistPersonal(tab)
   }, [applyTab, notify, snapshotActive, t])
@@ -1472,8 +1477,9 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const stillCurrent = beginLocalSave(tab)
     // 没有可靠基线时只能保存成新设计，不能借存档库最新 rev 覆盖原设计。
     const targetId = tab.baseRev === undefined && tab.docId ? null : tab.docId
-    const saved = await saveSnapshot(tab, { docId: targetId, name: saveName, data, baseRev: tab.baseRev || 0,
-      parentSaveId: targetId && tab.baseRev !== undefined ? tab.saveId : undefined })
+    const baseline = personalSaveBaseline(tab)
+    const saved = await saveSnapshot(tab, { docId: targetId, name: saveName, data, ...baseline,
+      parentSaveId: targetId ? baseline.parentSaveId : undefined })
     if (!saved) return null
     tabSavedAs(tab.tabId, saved.id)
     const attached = stillCurrent()
@@ -1483,14 +1489,16 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       tab.baseRev = Number(saved.rev || 0)
       tab.savedContent = modelContent(data)
       tab.saveId = String(saved.saveId)
-      tab.conflictDocId = undefined
+      tab.conflictDocId = targetId && String(saved.id) !== targetId ? targetId : undefined
       tab.dirty = !savedGenerationUnchanged(tab, generation, data, tab.local.history.toJSON())
       tab.saveState = syncStarted() ? 'syncing' : 'local'
       if (tab.dirty) tab.saveState = 'unsaved'
+      if (tab.conflictDocId) tab.saveState = 'conflict'
     }
     syncTabs()
     track('builder.design.save', { ...modelShape(data), named: !!name })
-    notify(t(syncStarted() ? 'sync.syncing' : 'sync.local'))
+    if (attached && tab.conflictDocId) notify(t('sync.conflictProtected'), 'warn')
+    else notify(t(syncStarted() ? 'sync.syncing' : 'sync.local'))
     void pushSaved(String(saved.id), String(saved.name), data, String(saved.saveId), attached ? tab : undefined)
     void coverSaved(String(saved.id), data, saved.updatedAt, String(saved.saveId)).catch(error => {
       console.warn('[cover]', error)
@@ -1672,9 +1680,12 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const data = normalizeModel(doc.data)
     if (!data) { notify(t('lib.loadFailed'), 'err'); return }
     const tab = makeTab(data, String(doc.name), String(doc.id))
-    Object.assign(tab, { baseRev: Number(doc.rev || 0), savedContent: modelContent(data), saveId: doc.saveId,
+    const unconfirmed = personalRecordUnconfirmed(doc)
+    if (!unconfirmed) Object.assign(tab, { baseRev: Number(doc.rev || 0), savedContent: modelContent(data), saveId: doc.saveId,
       saveState: savedRecordState(doc) })
     tabsRef.current = [...tabsRef.current, tab]
+    if (unconfirmed) await reconcilePersonal(tab, doc as AnyRec)
+    if (!tabsRef.current.includes(tab)) return
     activeRef.current = tab.tabId
     applyTab(tab)
     syncTabs()
