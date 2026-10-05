@@ -31,6 +31,7 @@ import { appendTab } from './tabs'
 import { modelContent, personalDecision, personalRecordUnconfirmed, personalSaveBaseline, readPersonalBinding, restorePersonalBinding, samePersonalBinding, savedGenerationUnchanged, savedRecordState, type PersonalState } from './personalTabs'
 import { renderModelCover } from './modelCover'
 import { computeAssemblyPlan } from '../engine/assemblyPlan.js'
+import { createAssemblyReadingPlan } from '../engine/assemblyReadingPlan.js'
 import { proposeAssemblyRepairs } from '../engine/connectionResolver.js'
 import { validAssemblyConfig } from '../engine/assemblyConfig.js'
 import { assemblyPdfStrings, assemblyStrings } from '../ui/assemblyStrings'
@@ -2035,7 +2036,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       model: stampModel.toJSON(),
       parts: partsOfModel(stampModel) as Record<string, Record<string, number>>,
       size: [Math.round(b.size[0]), Math.round(b.size[2]), Math.round(b.size[1])],
-      steps: preview?.plan.steps.length ?? (computeBuildPlan(e2.model, e2.builder.assemblyOrder || 'y+') as { steps: unknown[] }).steps.length,
+      steps: preview ? createAssemblyReadingPlan(stampModel, preview.plan).steps.length : (computeBuildPlan(e2.model, e2.builder.assemblyOrder || 'y+') as { steps: unknown[] }).steps.length,
       cover,
       stats: statsOfModel(stampModel),
     })
