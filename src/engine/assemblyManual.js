@@ -219,6 +219,43 @@ export function layoutOperationCallouts(marks, width, height, options = {}) {
   return placed;
 }
 
+/** Material circles stay near their true anchors, outside connector/letter boxes.
+ * Dimensions and radius share the actual drawing-pixel unit.
+ * @param {any[]} marks
+ * @param {any[]} blockedRects
+ */
+export function layoutReadingMaterialCallouts(marks, width, height, blockedRects = [], radius = mm(2.8)) {
+  if (marks.length > 6) throw manualError('labels', 'A reading image has more than six material labels');
+  return layoutOperationCallouts(marks.map(mark => ({ ...mark, boxWidth: radius * 2, boxHeight: radius * 2 })), width, height,
+    { blockedRects, padding: mm(1), gap: mm(.5), arrowClearance: 0 });
+}
+
+function drawReadingMarks(ctx, image, x, y, w, h) {
+  const { img, marks = [], connectorCalloutRects = [] } = image;
+  if (!img?.width || !marks.length) return;
+  const radius = mm(2.8), scale = Math.max(w / img.width, h / img.height);
+  const dw = img.width * scale, dh = img.height * scale, ox = (w - dw) / 2, oy = (h - dh) / 2;
+  const letters = projectedManualMarks(img, 0, 0, w, h, marks.filter(mark => !/^\d+$/.test(String(mark.num))), false);
+  const source = marks.filter(mark => /^\d+$/.test(String(mark.num))).map(mark => ({ x: ox + mark.u * dw, y: oy + mark.v * dh, label: String(mark.num) }));
+  const blockers = [
+    { x: w / 2, y: h - mm(5), boxWidth: w, boxHeight: mm(10) },
+    ...letters.map(mark => ({ x: mark.x, y: mark.y, boxWidth: radius * 2, boxHeight: radius * 2 })),
+    ...connectorCalloutRects.map(rect => ({ x: ox + rect.u * dw, y: oy + rect.v * dh, boxWidth: rect.width * dw, boxHeight: rect.height * dh })),
+  ];
+  const materials = layoutReadingMaterialCallouts(source, w, h, blockers, radius);
+  if (materials.some(mark => !mark.placementClear)) throw manualError('labels', 'Reading material labels cannot be placed clear of visible connectors');
+  ctx.save();
+  roundRect(ctx, x, y, w, h, mm(1.2)); ctx.clip();
+  for (const mark of [...letters, ...materials]) {
+    if (Math.hypot(mark.x - mark.anchorX, mark.y - mark.anchorY) > 1) {
+      ctx.beginPath(); ctx.moveTo(x + mark.anchorX, y + mark.anchorY); ctx.lineTo(x + mark.x, y + mark.y);
+      ctx.strokeStyle = 'rgba(92,101,112,0.75)'; ctx.lineWidth = 1.5; ctx.stroke();
+    }
+    drawBadge(ctx, x + mark.x, y + mark.y, mark.label, radius);
+  }
+  ctx.restore();
+}
+
 function projectedManualMarks(img, x, y, w, h, marks, local) {
   const s = Math.max(w / img.width, h / img.height), dw = img.width * s, dh = img.height * s;
   const ox = (w - dw) / 2, oy = (h - dh) / 2, r = mm(2.8);
@@ -1623,7 +1660,9 @@ export async function exportAssemblyPdf(opts) {
             addMarks(left, leftState, leftBounds, leftDirection, markers);
             addMarks(right, rightState, fullBounds, rightDirection, markers);
           }
-          const consumed = paintStep(ctx, { front: left.img, back: right.img, copy: { ...copy, front: localized ? copy.readingStructureFront : module ? copy.readingModule : copy.readingLayerStructure, back: localized ? copy.readingCompleteBack : copy.readingWholeLocation, thisStep: localized ? (copy.readingAreaParts || '{area}').replace('{area}', area.label) : copy.thisStep, contextHint: '' }, heading: descriptor.heading, items: descriptor.items, icons, k: currentPage, n: total, fill: sceneFill(scene), frontMarks: left.marks, backMarks: right.marks, instructions: [], stamp, partsH: descriptor.partsH, headerH: descriptor.headerH, imageBox: pageBox });
+          const consumed = paintStep(ctx, { front: left.img, back: right.img, copy: { ...copy, front: localized ? copy.readingStructureFront : module ? copy.readingModule : copy.readingLayerStructure, back: localized ? copy.readingCompleteBack : copy.readingWholeLocation, thisStep: localized ? (copy.readingAreaParts || '{area}').replace('{area}', area.label) : copy.thisStep, contextHint: '' }, heading: descriptor.heading, items: descriptor.items, icons, k: currentPage, n: total, fill: sceneFill(scene), frontMarks: [], backMarks: [], instructions: [], stamp, partsH: descriptor.partsH, headerH: descriptor.headerH, imageBox: pageBox });
+          drawReadingMarks(ctx, left, mm(pageBox.x0), mm(pageBox.imgY), mm(pageBox.imgW), mm(pageBox.imgH));
+          drawReadingMarks(ctx, right, mm(pageBox.x1), mm(pageBox.imgY), mm(pageBox.imgW), mm(pageBox.imgH));
           if (consumed !== descriptor.items.length) throw manualError('pagination', '阅读页材料分页与实际绘制不一致');
           if (localized) {
             // 定位图另占安全框，标题下方留白；截图和绘制使用相同纵横比。
