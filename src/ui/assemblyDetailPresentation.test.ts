@@ -170,6 +170,20 @@ describe('同一步局部导航与共用材料编号', () => {
     expect(ui.physicalUnverified).not.toContain('已完成')
   })
 
+  it('前置主步骤诊断提供三语顺序说明并保留未知诊断回退', () => {
+    const zh = assemblyDiagnosticText('zh', 'INVALID_STEP_DEPENDENCY', 'fallback')
+    const en = assemblyDiagnosticText('en', 'INVALID_STEP_DEPENDENCY', 'fallback')
+    const de = assemblyDiagnosticText('de', 'INVALID_STEP_DEPENDENCY', 'fallback')
+    expect(new Set([zh, en, de]).size).toBe(3)
+    expect(zh).toMatch(/前置步骤缺失或顺序无效/)
+    expect(en).toMatch(/prerequisite step.*missing or out of order/)
+    expect(de).toMatch(/Bauschritt fehlt.*falschen Reihenfolge/)
+    for (const lang of ['zh', 'en', 'de'] as const) {
+      expect(assemblyDiagnosticText(lang, 'INVALID_STEP_DEPENDENCY', 'fallback')).not.toBe('fallback')
+      expect(assemblyDiagnosticText(lang, 'UNRECOGNIZED_DIAGNOSTIC', 'original diagnostic')).toBe('original diagnostic')
+    }
+  })
+
   it.each(['ACCESSORY_INSTALLATION_PATH_UNRESOLVED', 'REINFORCEMENT_CHANNEL_SPLIT', 'UNKNOWN_INSTALLATION_GEOMETRY', 'MISSING_WHEEL_BEARING'])('%s 阻断提示有真实英德翻译', code => {
     const zh = assemblyDiagnosticText('zh', code, 'fallback')
     const en = assemblyDiagnosticText('en', code, 'fallback')

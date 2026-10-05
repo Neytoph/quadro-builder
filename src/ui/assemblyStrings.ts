@@ -93,6 +93,7 @@ for (const lang of ['zh', 'en', 'de'] as const) {
 }
 
 const diagnosticCopy: Record<string, [string, string, string]> = {
+  INVALID_STEP_DEPENDENCY: ['主步骤的前置步骤缺失或顺序无效，请检查区域设置和搭建顺序。', 'A prerequisite step is missing or out of order. Check the regions and assembly order.', 'Ein vorausgesetzter Bauschritt fehlt oder steht in der falschen Reihenfolge. Baubereiche und Aufbaureihenfolge prüfen.'],
   MISSING_THREAD_SUPPORT: ['穿管配件缺少可确认的支撑管，无法安排封口前安装。请检查部件及管轴。', 'A threaded accessory has no confirmed support tube. Check the part and tube axis before scheduling closure.', 'Für das aufgefädelte Zubehör ist kein Trägerrohr bestätigt. Teil und Rohrachse vor dem Schließen prüfen.'],
   MISSING_DOUBLE_TUBE_SUPPORT: ['双管连接环缺少可识别的两根穿管轴，请检查连接环与支撑管。', 'The double-tube connector has no identifiable pair of tube axes. Check the connector and supports.', 'Am Doppelrohrverbinder sind keine zwei Rohrachsen erkennbar. Verbinder und Trägerrohre prüfen.'],
   MISSING_WHEEL_BEARING: ['多功能轮缺少明确的轮轴承安装引用，请核对轮轴和朝向。', 'The wheel has no confirmed bearing reference. Check its axle, bearing and orientation.', 'Für das Rad ist keine eindeutige Lagerreferenz bestätigt. Achse, Lager und Ausrichtung prüfen.'],
