@@ -875,6 +875,21 @@ function positionedItems(model, items, state = null) {
 
 export const manualPositionedItems = positionedItems;
 
+/** Region pages describe their remaining physical parts after scheduling.
+ * Keep original configuration labels; virtual tube topology alone has no mesh.
+ */
+export function manualRegionDescriptors(model, plan) {
+  const hasPhysicalPart = id => {
+    if (['nodes', 'panels', 'textiles', 'slides', 'fittings', 'clamps'].some(key => model[key]?.has(id))) return true;
+    const tube = model.tubes?.get(id);
+    return !!tube && !tube.arm && !tube.link;
+  };
+  return (plan.regions || []).flatMap((region, index) => {
+    const partIds = [...new Set((region.partIds || []).filter(hasPhysicalPart))];
+    return partIds.length ? [{ type: 'region', region, partIds, label: region.label || `R${index + 1}` }] : [];
+  });
+}
+
 export function projectOperationMarks(scene, model, state, aspect) {
   return (state?.operationNumbers || []).map(operation => {
     const positions = positionedItems(model, [{ instanceIds: operation.partIds, key: operation.id }], state)[0]?.positions || [];
@@ -1444,6 +1459,7 @@ export async function exportAssemblyPdf(opts) {
   if (!plan.canExport) throw manualError('diagnostics', '模型连接诊断尚未通过，无法导出说明书', plan.diagnostics);
   const steps = plan.steps || [];
   if (!steps.length) throw manualError('empty', '模型没有可导出的装配步骤');
+  const regionDescriptors = manualRegionDescriptors(model, plan);
   await document.fonts?.ready;
   const itemsCover = coverItems(plan.bom || opts.bom || computeBOM(model));
   for (const item of itemsCover) item.instanceIds = [...new Set((plan.ledger?.instances || []).filter(row => row.group === item.kind && row.key === item.ledgerKey).flatMap(row => row.partIds))];
@@ -1452,7 +1468,7 @@ export async function exportAssemblyPdf(opts) {
   const descriptors = [{ type: 'cover', items: coverLayout.chunks[0], partsH: coverLayout.partsH }, ...coverLayout.chunks.slice(1).map(items => ({ type: 'legend', title: copy.bomTitle, items }))];
   descriptors.push(manualSafetyDescriptor(copy, manualLang));
   descriptors.push({ type: 'overview' });
-  for (const region of plan.regions || []) descriptors.push({ type: 'region', region });
+  descriptors.push(...regionDescriptors);
   for (let index = 0; index < steps.length; index++) {
     const step = steps[index];
     const heading = (copy.stepHeading || '{k}/{n} · {title}').replace('{k}', String(index + 1)).replace('{n}', String(steps.length)).replace('{kind}', kindLabel(step.kind, copy)).replace('{title}', step.title || '');
@@ -1474,9 +1490,9 @@ export async function exportAssemblyPdf(opts) {
     const descriptor = descriptors[position];
     if (!['region', 'overview', 'final'].includes(descriptor.type)) continue;
     const region = descriptor.region;
-    const heading = region ? `${region.label || `R${plan.regions.indexOf(region) + 1}`} · ${region.name}` : descriptor.type === 'final' ? copy.finalTitle : copy.regionOverview;
+    const heading = region ? `${descriptor.label} · ${region.name}` : descriptor.type === 'final' ? copy.finalTitle : copy.regionOverview;
     const instructions = region ? [`${copy.regionOrder}: ${steps.filter(step => step.regionId === region.id).map(step => step.title).filter(Boolean).join(' → ')}`]
-      : descriptor.type === 'overview' ? [(plan.regions || []).map((region, i) => `${region.label || `R${i + 1}`} · ${region.name}`).join('   ')]
+      : descriptor.type === 'overview' ? [regionDescriptors.map(row => `${row.label} · ${row.region.name}`).join('   ')]
       : [(plan.interfaces || []).filter(marker => marker.attachment !== 'upper-frame').map(marker => `I${marker.id.split('-').at(-1)}`).join(' · ')];
     const layout = manualStepTextLayout(textMeasurement.ctx, heading, instructions);
     Object.assign(descriptor, layout);
@@ -1600,10 +1616,10 @@ export async function exportAssemblyPdf(opts) {
               }
             }
           } else if (descriptor.type === 'region') {
-            const regionIds = new Set(descriptor.region.partIds);
+            const regionIds = new Set(descriptor.partIds);
             state = { current: regionIds, done: new Set(), visible: regionIds, transforms: new Map() };
             completed = { current: regionIds, done: allIds, visible: allIds, transforms: new Map() };
-            heading = `${descriptor.region.label || `R${plan.regions.indexOf(descriptor.region) + 1}`} · ${descriptor.region.name}`;
+            heading = `${descriptor.label} · ${descriptor.region.name}`;
             leftLabel = copy.regionShape; rightLabel = copy.regionLocation;
             instructions = [`${copy.regionOrder}: ${steps.filter(step => step.regionId === descriptor.region.id).map(step => step.title).filter(Boolean).join(' → ')}`];
           } else {
@@ -1612,7 +1628,7 @@ export async function exportAssemblyPdf(opts) {
             completed = state;
             heading = descriptor.type === 'final' ? copy.finalTitle : copy.regionOverview;
             leftLabel = copy.front; rightLabel = copy.back;
-            instructions = descriptor.type === 'overview' ? (plan.regions || []).map((region, i) => `${region.label || `R${i + 1}`} · ${region.name}`).join('   ') : finalInterfaces.map(marker => `I${marker.id.split('-').at(-1)}`).join(' · ');
+            instructions = descriptor.type === 'overview' ? regionDescriptors.map(row => `${row.label} · ${row.region.name}`).join('   ') : finalInterfaces.map(marker => `I${marker.id.split('-').at(-1)}`).join(' · ');
             instructions = [instructions];
             bounds = fullBounds;
           }
@@ -1629,9 +1645,10 @@ export async function exportAssemblyPdf(opts) {
           if (descriptor.type === 'overview') {
             for (const [image, yaw] of [[left, 0], [right, Math.PI]]) {
               scene.frameFromYaw(model, yaw, { silent: true, bounds: fullBounds, aspect: image.img.width / image.img.height, margin: FIT });
-              const centers = (plan.regions || []).map(region => centroid(region.partIds.map(id => partCenter(model, id)).filter(Boolean)));
-              const positions = scene.projectWorld(centers.filter(Boolean), image.img.width / image.img.height);
-              image.marks.push(...positions.map((point, i) => ({ ...point, num: plan.regions[i]?.label || `R${i + 1}` })));
+              const locatedRegions = regionDescriptors.map(row => ({ row, center: centroid(row.partIds.map(id => partCenter(model, id)).filter(Boolean)) }))
+                .filter(value => value.center?.length === 3 && value.center.every(Number.isFinite));
+              const positions = scene.projectWorld(locatedRegions.map(value => value.center), image.img.width / image.img.height);
+              image.marks.push(...positions.flatMap((point, i) => point ? [{ ...point, num: locatedRegions[i].row.label }] : []));
             }
           }
           const consumed = paintStep(ctx, { front: left.img, back: right.img, copy: { ...copy, front: leftLabel, back: rightLabel, contextHint: layer ? copy.layerHint : bodyContext ? copy.bodyHint : modulePreassembly ? copy.preassemblyHint : roofCoverDetail ? copy.roofCoverHint : ['step', 'detail'].includes(descriptor.type) ? copy.contextHint : '' }, heading, items: descriptor.items || [], icons, k: currentPage, n: total, fill: sceneFill(scene), frontMarks: left.marks, backMarks: right.marks, instructions, stamp, partsH: descriptor.partsH, headerH: descriptor.headerH, instructionLines: descriptor.instructionLines });
