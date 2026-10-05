@@ -7,6 +7,7 @@ import { partEnvelope } from './assemblyCollision.js';
 import { nativeAccessorySupport, normalizedAssemblyQuaternion } from './assemblyAccessoryMethods.js';
 import { createCoreChannels } from './assemblyCoreChannels.js';
 import { isOriginalComponent, componentInstallCopy, componentPartId } from './accessoryInfo.js';
+import { resolveScheduledStepDependencies, validateInternalStepDependencies } from './assemblyLayerSteps.js';
 const xAxisOf=q=>rawXAxisOf(normalizedAssemblyQuaternion(q)),yAxisOf=q=>rawYAxisOf(normalizedAssemblyQuaternion(q)),zAxisOf=q=>rawZAxisOf(normalizedAssemblyQuaternion(q));
 
 const MAPS={nodeIds:'nodes',tubeIds:'tubes',panelIds:'panels',textileIds:'textiles',slideIds:'slides',fittingIds:'fittings',clampIds:'clamps'};
@@ -23,13 +24,18 @@ const diag=(diagnostics,code,message,partIds,details)=>diagnostics.push({code,se
 
 /** Reassign physical prethread parts before their carrier is closed, then defer coverings. */
 export function scheduleAssemblyAccessories(model,steps,diagnostics,regions=[],deferredAccessories=[]){
+  const originalDependencies = new Map(steps.map(step => [step.id, [...step.dependsOn]]));
+  const mergedSteps = new Map();
   for (const r of regions.filter(r=>r.kind==='roof')) {
     const pieces=steps.filter(s=>s.regionId===r.id&&s.action.type==='preassemble');
     if(pieces.length<2)continue; const first=pieces[0];
+    validateInternalStepDependencies(pieces, diagnostics);
     for(const key of Object.keys(MAPS))first[key]=[...new Set(pieces.flatMap(s=>s[key]))];
     first.partIds=[...new Set(pieces.flatMap(s=>s.partIds))];
+    const memberIds = new Set(pieces.map(step => step.id));
+    first.dependsOn = [...new Set(pieces.flatMap(step => step.dependsOn).filter(id => !memberIds.has(id)))];
     first.title=copy(`预装 ${r.name}：开放端分组后合拢`,`Preassemble ${r.name}: join open subframes`,`${r.name} vormontieren: offene Teilrahmen verbinden`);
-    for(const step of pieces.slice(1))steps.splice(steps.indexOf(step),1);
+    for(const step of pieces.slice(1)){mergedSteps.set(step.id,first.id);steps.splice(steps.indexOf(step),1);}
   }
   const physical=steps.filter(s=>s.action.type!=='attach'),owner=new Map(physical.flatMap(s=>s.partIds.map(id=>[id,s])));
   const move=(id,key,target)=>{const old=owner.get(id);if(!old||!target||old===target)return;old[key]=old[key].filter(v=>v!==id);old.partIds=old.partIds.filter(v=>v!==id);target[key].push(id);target.partIds.push(id);owner.set(id,target);
@@ -106,7 +112,7 @@ export function scheduleAssemblyAccessories(model,steps,diagnostics,regions=[],d
     for(const key of Object.keys(MAPS))s[key]=[...new Set(assembled.flatMap(p=>p[key]))];
     s.partIds=[...new Set(assembled.flatMap(p=>p.partIds))];
   }
-  for (const s of steps) s.dependsOn = s.dependsOn.filter(id => steps.findIndex(o=>o.id===id)<steps.indexOf(s));
+  resolveScheduledStepDependencies(steps, originalDependencies, mergedSteps, diagnostics);
   for(const s of steps){if(s.action.type==='attach')continue;s.partIds=[...new Set(Object.keys(MAPS).flatMap(k=>s[k]))];}
   for(const p of [...model.panels.values(),...model.fittings.values()])if(p.appearanceVersion&&(ACCESSORY_IDS.has(p.kind)||PANEL_ACCESSORY_IDS.has(p.panelId))){
     let result;try{result=p.appearanceVersion===2?confirmedDiagnostics(model,p):p.kind?model.accessoryDiagnostics(p.kind,p.tube,{facing:p.facing,ignoreId:p.id}):model.panelAccessoryDiagnostics(p);}catch(error){result={valid:false,reason:String(error)};}

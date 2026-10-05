@@ -11,15 +11,16 @@ describe('action evidence',()=>{
   it('records and validates every real model before assessing export',()=>{
     const cases=(process.env.ASSEMBLY_CASE?files.filter(file=>process.env.ASSEMBLY_CASE!.split(',').some(name=>file.includes(name))):files).map(file=>{
       const m=load(file),start=Date.now(),p=computeAssemblyPlan(m);
-      const record={file,ms:Date.now()-start,canExport:p.canExport,verification:p.verification,adjustments:p.adjustments,regions:p.regions,interfaces:p.interfaces,configuration:m.assemblyConfig,steps:p.steps,modules:p.frameModules,diagnostics:p.diagnostics.map((d:any)=>({...d,parts:d.partIds.map((id:string)=>({id,node:m.nodes.get(id),tube:m.tubes.get(id),fitting:m.fittings.get(id),panel:m.panels.get(id),slide:m.slides.get(id)}))}))};
+      const record={file,ms:Date.now()-start,canExport:p.canExport,verification:p.verification,ledger:p.ledger,adjustments:p.adjustments,regions:p.regions,interfaces:p.interfaces,configuration:m.assemblyConfig,steps:p.steps,modules:p.frameModules,diagnostics:p.diagnostics.map((d:any)=>({...d,parts:d.partIds.map((id:string)=>({id,node:m.nodes.get(id),tube:m.tubes.get(id),fitting:m.fittings.get(id),panel:m.panels.get(id),slide:m.slides.get(id)}))}))};
       writeFileSync(`../qa/operations-${file.split('/').at(-1)!.replace(/\.(json|qdf)$/,'')}.json`,JSON.stringify(record,null,2));
       console.log(file,record.ms,p.canExport,p.diagnostics.map((d:any)=>d.code).join(','));
       return {file,m,p,record};
     });
     writeFileSync('../qa/operation-evidence.json',JSON.stringify(cases.map(c=>c.record),null,2));
     for(const {file,m,p}of cases){
-      const seen=new Set<string>(),entities=new Set<string>(),material=new Set<string>();
+      const seen=new Set<string>(),completedSteps=new Set<string>(),entities=new Set<string>(),material=new Set<string>();
       for(const step of p.steps){
+        for(const dependency of step.dependsOn)expect(completedSteps.has(dependency),`${file}: ${step.id} prerequisite ${dependency}`).toBe(true);
         for(const op of step.operations){
           for(const dependency of op.dependsOn)expect(seen.has(dependency),`${file}: ${op.id}`).toBe(true);
           seen.add(op.id);
@@ -28,6 +29,7 @@ describe('action evidence',()=>{
           expect(op.verification.physical).toBe('unverified');
         }
         for(const group of step.detailGroups){expect(group.materialKeys.length).toBeLessThanOrEqual(6);const state=assemblyDetailState(p,p.steps.indexOf(step),group.id,{action:false});expect(state.focusPartIds.every((id:string)=>group.partIds.includes(id))).toBe(true);}
+        completedSteps.add(step.id);
       }
       expect(entities.size,file).toBe([...m.nodes,...m.tubes,...m.panels,...m.textiles,...m.slides,...m.fittings,...m.clamps].length);
       expect(material.size,file).toBe(p.ledger.instances.filter((i:any)=>i.group!=='screws').length);

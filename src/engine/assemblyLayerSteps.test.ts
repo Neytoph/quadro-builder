@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
-import { consolidateLayerSteps } from './assemblyLayerSteps.js';
+import { consolidateLayerSteps, resolveScheduledStepDependencies } from './assemblyLayerSteps.js';
+import { scheduleAssemblyAccessories } from './assemblyOperations.js';
 import { assemblyDetailState, assemblyState, computeAssemblyPlan } from './assemblyPlan.js';
 import { BuildModel } from './model.js';
 import { loadCatalog } from './catalog.js';
@@ -24,6 +25,88 @@ function fixture() {
 }
 
 describe('one reading step per layer', () => {
+  it('passes through two removed empty steps and preserves both completed cross-region prerequisites', () => {
+    const plan: any = fixture(), lower = plan.steps[0], columns = plan.steps[1], upper = plan.steps[2];
+    columns.regionId = 'adjacent'; columns.dependsOn = [];
+    const empty = (id: string, dependsOn: string[]) => ({ ...lower, id, dependsOn, partIds: [], tubeIds: [], operations: [], detailGroups: [] });
+    plan.steps = [lower, columns, empty('empty-1', ['floor', 'columns']), empty('empty-2', ['empty-1']), upper];
+    upper.dependsOn = ['empty-2'];
+    const before = [lower, columns, upper].map(step => ({ id: step.id, operations: step.operations, details: step.detailGroups, parts: step.parts }));
+    const model = { panels: new Map(), textiles: new Map(), slides: new Map(), fittings: new Map(), clamps: new Map(), tubes: new Map() };
+    scheduleAssemblyAccessories(model, plan.steps, plan.diagnostics, plan.regions);
+    expect(plan.steps.map((step: any) => step.id)).toEqual(['floor', 'columns', 'upper']);
+    expect(upper.dependsOn).toEqual(['floor', 'columns']);
+    expect(plan.diagnostics).toEqual([]);
+    for (const [index, step] of plan.steps.entries()) {
+      expect(step.operations).toBe(before[index].operations);
+      expect(step.detailGroups).toBe(before[index].details);
+      expect(step.parts).toBe(before[index].parts);
+    }
+  });
+
+  it('redirects a physically merged roof to its retained owner and keeps all external roof prerequisites', () => {
+    const plan: any = fixture(), body = plan.steps[0], adjacent = plan.steps[1], roof = plan.steps[2];
+    adjacent.regionId = 'adjacent'; adjacent.dependsOn = [];
+    roof.id = 'roof-1'; roof.regionId = 'roof'; roof.action = { type: 'preassemble', detached: true, operations: [] }; roof.dependsOn = [body.id];
+    const second = { ...roof, id: 'roof-2', partIds: ['roof-pipe-2'], tubeIds: ['roof-pipe-2'], dependsOn: ['roof-1', adjacent.id] };
+    const attach = { ...roof, id: 'attach-roof', action: { type: 'attach', operations: [] }, dependsOn: ['roof-2'] };
+    plan.steps = [body, adjacent, roof, second, attach];
+    const model = { panels: new Map(), textiles: new Map(), slides: new Map(), fittings: new Map(), clamps: new Map(), tubes: new Map() };
+    scheduleAssemblyAccessories(model, plan.steps, plan.diagnostics, [{ id: 'roof', kind: 'roof', name: 'Roof' }]);
+    expect(plan.steps.map((step: any) => step.id)).toEqual(['floor', 'columns', 'roof-1', 'attach-roof']);
+    expect(roof.partIds).toEqual(['upper-pipe', 'roof-pipe-2']);
+    expect(roof.dependsOn).toEqual(['floor', 'columns']);
+    expect(attach.dependsOn).toEqual(['roof-1']);
+    expect(plan.diagnostics).toEqual([]);
+  });
+
+  it('does not erase an originally cyclic or future roof-member prerequisite during physical merging', () => {
+    const plan: any = fixture(), first = plan.steps[0], second = plan.steps[1];
+    first.regionId = second.regionId = 'roof';
+    first.action = second.action = { type: 'preassemble', detached: true, operations: [] };
+    first.dependsOn = ['columns']; second.dependsOn = ['floor', 'columns'];
+    plan.steps = [first, second];
+    const model = { panels: new Map(), textiles: new Map(), slides: new Map(), fittings: new Map(), clamps: new Map(), tubes: new Map() };
+    scheduleAssemblyAccessories(model, plan.steps, plan.diagnostics, [{ id: 'roof', kind: 'roof', name: 'Roof' }]);
+    expect(plan.steps).toHaveLength(1);
+    expect(plan.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'INVALID_STEP_DEPENDENCY', severity: 'error', partIds: ['floor-pipe'], details: { stepId: 'floor', dependsOn: 'columns', reason: 'not-earlier' } }),
+      expect.objectContaining({ code: 'INVALID_STEP_DEPENDENCY', severity: 'error', partIds: ['column-pipe'], details: { stepId: 'columns', dependsOn: 'columns', reason: 'cycle' } })
+    ]));
+  });
+
+  it('retains transitive ancestors when the surviving frame and risers subsequently merge into one layer', () => {
+    const plan: any = fixture();
+    const graph = new Map([['floor', []], ['columns', ['floor']], ['empty', ['columns']], ['upper', ['empty']]]);
+    plan.steps[2].dependsOn = ['empty'];
+    const ops = plan.steps.flatMap((step: any) => step.operations).map((op: any) => ({ id: op.id, dependsOn: [...op.dependsOn] }));
+    resolveScheduledStepDependencies(plan.steps, graph, new Map(), plan.diagnostics);
+    expect(plan.steps[2].dependsOn).toEqual(['columns']);
+    consolidateLayerSteps(plan, (_group: string, row: any) => row.key);
+    expect(plan.steps[1].dependsOn).toEqual(['floor']);
+    expect(plan.steps.flatMap((step: any) => step.operations).map((op: any) => ({ id: op.id, dependsOn: op.dependsOn }))).toEqual(ops);
+    expect(plan.interfaces[0].supportStepId).toBe('floor');
+    expect(plan.diagnostics).toEqual([]);
+  });
+
+  it('diagnoses unknown, cyclic and future prerequisites instead of silently deleting them', () => {
+    const steps: any[] = [
+      { id: 'first', partIds: ['n-first'], dependsOn: ['missing', 'cycle-a', 'future', 'first'] },
+      { id: 'future', partIds: ['n-future'], dependsOn: [] }
+    ];
+    const graph = new Map([['first', [...steps[0].dependsOn]], ['cycle-a', ['cycle-b']], ['cycle-b', ['cycle-a']], ['future', []]]);
+    const diagnostics: any[] = [];
+    resolveScheduledStepDependencies(steps, graph, new Map(), diagnostics);
+    expect(steps[0].dependsOn).toEqual(['missing', 'cycle-a', 'future', 'first']);
+    expect(diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'INVALID_STEP_DEPENDENCY', severity: 'error', partIds: ['n-first'], details: { stepId: 'first', dependsOn: 'missing', reason: 'missing' } }),
+      expect.objectContaining({ details: { stepId: 'first', dependsOn: 'cycle-a', reason: 'cycle' } }),
+      expect.objectContaining({ details: { stepId: 'first', dependsOn: 'future', reason: 'not-earlier' } }),
+      expect.objectContaining({ details: { stepId: 'first', dependsOn: 'first', reason: 'cycle' } })
+    ]));
+    expect(graph.get('first')).toEqual(['missing', 'cycle-a', 'future', 'first']);
+  });
+
   it('gives a real two-level frame one main step at each height, with columns after the lower frame', () => {
     const model = new BuildModel();
     const lower = [[0, 0, 0], [40, 0, 0], [40, 0, 40], [0, 0, 40]].map(p => model.addNode(...p));

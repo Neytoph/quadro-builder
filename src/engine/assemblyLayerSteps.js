@@ -5,6 +5,59 @@ const GROUPS = ['connectors', 'tubes', 'panels', 'textiles', 'slides', 'fittings
 const unique = values => [...new Set(values)];
 const copy = (zh, en, de) => getLang() === 'zh' ? zh : getLang() === 'en' ? en : de;
 
+function dependencyError(diagnostics, step, dependency, reason) {
+  if (diagnostics.some(d => d.code === 'INVALID_STEP_DEPENDENCY' &&
+      d.details?.stepId === step.id && d.details?.dependsOn === dependency && d.details?.reason === reason)) return;
+  diagnostics.push({ code: 'INVALID_STEP_DEPENDENCY', severity: 'error',
+    message: '主步骤的前置步骤缺失、循环或尚未完成，请检查搭建顺序。',
+    nodeIds: [], partIds: [...(step.partIds || [])],
+    details: { stepId: step.id, dependsOn: dependency, reason } });
+}
+
+/** Validate IDs and order without deleting a malformed prerequisite. */
+export function validateStepDependencies(steps, diagnostics) {
+  const indices = new Map(steps.map((step, index) => [step.id, index]));
+  for (const [index, step] of steps.entries()) for (const dependency of step.dependsOn || []) {
+    const prior = indices.get(dependency);
+    if (prior === undefined) dependencyError(diagnostics, step, dependency, 'missing');
+    else if (prior === index) dependencyError(diagnostics, step, dependency, 'cycle');
+    else if (prior > index) dependencyError(diagnostics, step, dependency, 'not-earlier');
+  }
+}
+
+/** Merging may remove valid internal edges, but must retain evidence of an
+ * originally reversed or cyclic edge before any member IDs disappear.
+ */
+export function validateInternalStepDependencies(steps, diagnostics) {
+  const members = new Set(steps.map(step => step.id));
+  const internal = steps.map(step => ({ ...step, dependsOn: (step.dependsOn || []).filter(id => members.has(id)) }));
+  validateStepDependencies(internal, diagnostics);
+}
+
+/** Empty scheduled steps have no remaining physical work. Preserve their
+ * prerequisite ancestors; physically merged steps instead resolve to their
+ * surviving owner. The graph is captured before any scheduling removes IDs.
+ */
+export function resolveScheduledStepDependencies(steps, originalDependencies, redirects = new Map(), diagnostics = []) {
+  const retained = new Set(steps.map(step => step.id));
+  for (const step of steps) {
+    const resolve = (dependency, visiting) => {
+      if (visiting.has(dependency)) {
+        dependencyError(diagnostics, step, dependency, 'cycle');
+        return [dependency];
+      }
+      const next = new Set(visiting); next.add(dependency);
+      if (redirects.has(dependency)) return resolve(redirects.get(dependency), next);
+      if (retained.has(dependency)) return [dependency];
+      if (!originalDependencies.has(dependency)) return [dependency];
+      return originalDependencies.get(dependency).flatMap(ancestor => resolve(ancestor, next));
+    };
+    step.dependsOn = unique((step.dependsOn || []).flatMap(id => resolve(id, new Set([step.id]))));
+  }
+  validateStepDependencies(steps, diagnostics);
+  return steps;
+}
+
 /** Group already-validated frame and riser actions into one reading step per layer.
  * Physical operations, dependencies and material instances retain their identities.
  * This runs after scheduling and validation, so no construction action is reordered.
@@ -65,5 +118,7 @@ export function consolidateLayerSteps(plan, rowKey) {
   for (const instance of plan.ledger.instances) instance.stepId = mapId(instance.stepId);
   for (const point of plan.fixingPoints || []) point.stepId = mapId(point.stepId);
   for (const diagnostic of plan.diagnostics) if (diagnostic.details?.stepId) diagnostic.details.stepId = mapId(diagnostic.details.stepId);
+  validateStepDependencies(plan.steps, plan.diagnostics);
+  if (plan.verification && plan.diagnostics.some(d => d.code === 'INVALID_STEP_DEPENDENCY')) plan.verification.methodChecked = false;
   return plan;
 }
