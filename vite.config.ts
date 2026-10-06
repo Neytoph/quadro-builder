@@ -85,6 +85,12 @@ export default defineConfig({
         })
       },
     },
+    {
+      name: 'startup-priority',
+      transformIndexHtml(html: string) {
+        return html.replace('<script type="module"', '<script type="module" fetchpriority="high"')
+      },
+    },
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'favicon-32.png'],

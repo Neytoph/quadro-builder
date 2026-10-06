@@ -39,7 +39,7 @@ function hideBrokenImg(e: React.SyntheticEvent<HTMLImageElement>) {
   e.currentTarget.style.display = 'none'
 }
 
-function StartCard({ p, label, onClick }: { p: PresetDef; label: string; onClick: () => void }) {
+function StartCard({ p, label, onClick, showThumb }: { p: PresetDef; label: string; onClick: () => void; showThumb: boolean }) {
   return (
     <button
       type="button"
@@ -48,9 +48,9 @@ function StartCard({ p, label, onClick }: { p: PresetDef; label: string; onClick
       className="text-left rounded-xl border border-gray-800 bg-gray-900/80 hover:border-teal-400 cursor-pointer overflow-hidden"
     >
       <div className="aspect-[4/3] bg-[#edd8c4] overflow-hidden">
-        <img src={presetThumbPath(p.key)} alt="" loading="lazy" draggable={false}
+        {showThumb && <img src={presetThumbPath(p.key)} alt="" loading="lazy" draggable={false}
           className="w-full h-full object-contain"
-          onError={hideBrokenImg} />
+          onError={hideBrokenImg} />}
       </div>
       <div className="px-1.5 py-1.5">
         <div className="text-[11px] text-gray-100 leading-snug">{label}</div>
@@ -66,6 +66,17 @@ export default function LibraryPanel() {
   const folderRef = useRef<HTMLInputElement>(null)
   const filesRef = useRef<HTMLInputElement>(null)
   const [tab, setTab] = useState<Tab>('official')
+  const [showThumbs, setShowThumbs] = useState(false)
+  useEffect(() => {
+    if (!api.ready) return
+    const run = () => setShowThumbs(true)
+    if (typeof requestIdleCallback === 'function') {
+      const id = requestIdleCallback(run, { timeout: 2000 })
+      return () => cancelIdleCallback(id)
+    }
+    const id = window.setTimeout(run, 1200)
+    return () => window.clearTimeout(id)
+  }, [api.ready])
   const [rows, setRows] = useState<LibEntry[]>([])
   const [query, setQuery] = useState('')
   const [busy, setBusy] = useState<{ done: number; total: number } | null>(null)
@@ -209,7 +220,7 @@ export default function LibraryPanel() {
                   <div className="text-[11px] text-gray-300 mb-1.5">{t(g.labelKey)}</div>
                   <div className="grid grid-cols-2 gap-2">
                     {g.items.map(p => (
-                      <StartCard key={p.key} p={p} label={t(p.labelKey)} onClick={() => api.placeModule(p.key)} />
+                      <StartCard key={p.key} p={p} label={t(p.labelKey)} onClick={() => api.placeModule(p.key)} showThumb={showThumbs} />
                     ))}
                   </div>
                 </div>
@@ -224,6 +235,7 @@ export default function LibraryPanel() {
                     p={p}
                     label={t(p.labelKey)}
                     onClick={() => p.mode === 'replace' ? api.loadPreset(p.key) : api.placeModule(p.key)}
+                    showThumb={showThumbs}
                   />
                 ))}
               </div>
@@ -247,9 +259,9 @@ export default function LibraryPanel() {
                       className={`text-left rounded-xl border border-gray-800 bg-gray-900/80 hover:border-teal-400 cursor-grab active:cursor-grabbing overflow-hidden ${busyCard ? 'opacity-60' : ''}`}
                     >
                       <div className="aspect-[4/3] bg-[#edd8c4] overflow-hidden">
-                        <img src={officialThumbPath(m.id)} alt="" loading="lazy" draggable={false}
+                        {showThumbs && <img src={officialThumbPath(m.id)} alt="" loading="lazy" draggable={false}
                           className="w-full h-full object-contain"
-                          onError={hideBrokenImg} />
+                          onError={hideBrokenImg} />}
                       </div>
                       <div className="px-1.5 py-1.5">
                         <div className="text-[10px] text-teal-300 font-mono">{m.id}</div>

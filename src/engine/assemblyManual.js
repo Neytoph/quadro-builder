@@ -2,7 +2,6 @@
 // 整页先画在 2D Canvas 再压成 JPEG，避免给 jsPDF 嵌 CJK 字体。
 // 料表用「圆圈编号 + 图标 + 名称」；图上只标对应数字，不再往 3D 模型上写字。
 
-import { jsPDF } from "jspdf";
 import { Vector3 } from 'three';
 import { layoutAssemblyMarks } from '../ui/assemblyOverlay';
 import {
@@ -1548,6 +1547,7 @@ export async function exportAssemblyPdf(opts) {
   }
   textMeasurement.c.width = textMeasurement.c.height = 0;
   const total = descriptors.length;
+  const { jsPDF } = await import('jspdf');
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4', compress: true });
   const host = document.createElement('div');
   host.style.cssText = 'position:fixed;left:-10000px;top:0;width:960px;height:720px;pointer-events:none';
