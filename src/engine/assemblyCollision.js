@@ -1,6 +1,16 @@
 import { resolveNodeConnection, hasStandaloneFileC45 } from './bom.js';
 import { geometry } from './catalog.js';
-import { nativeEnvelopes, surfaceTriangles, connectorTriangles, connectorMasks, accessoryTriangles } from './assemblyNativeEnvelopes.js';
+import { assemblyMeshes } from './assemblyNativeMesh.js';
+let nativeEnvelopes = {}, surfaceTriangles = {}, connectorTriangles = {}, connectorMasks = {}, accessoryTriangles = {};
+function useMeshes() {
+  const loaded = assemblyMeshes();
+  if (!loaded) throw new Error('装配网格还没加载');
+  nativeEnvelopes = loaded.nativeEnvelopes;
+  surfaceTriangles = loaded.surfaceTriangles;
+  connectorTriangles = loaded.connectorTriangles;
+  connectorMasks = loaded.connectorMasks;
+  accessoryTriangles = loaded.accessoryTriangles;
+}
 import { componentVolumes } from './accessoryPack.js';
 import { curvePoint } from './confirmedComponentModel.js';
 import { C45_SLEEVE_LEN, C45_ARM_LEN } from './config.js';
@@ -32,7 +42,7 @@ function nativeBox(p,limits) { const basis=axes(p.quat),middle=limits.map(([a,b]
 const envelopeCache=new WeakMap();
 const portDepthCache=new WeakMap();
 export function beginAssemblyCollisionPass(model){envelopeCache.set(model,new Map());portDepthCache.set(model,new Map());}
-export function partEnvelope(model,id){const cache=envelopeCache.get(model);if(cache?.has(id))return cache.get(id);const shapes=computeEnvelope(model,id);cache?.set(id,shapes);return shapes;}
+export function partEnvelope(model,id){useMeshes();const cache=envelopeCache.get(model);if(cache?.has(id))return cache.get(id);const shapes=computeEnvelope(model,id);cache?.set(id,shapes);return shapes;}
 function computeEnvelope(model,id) {
   const radius=geometry().tubeRadius||2.45, cs=geometry().connectorSize||5;
   const tube=model.tubes.get(id);

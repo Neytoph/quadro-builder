@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Vector3 } from 'three'
 import { BuildModel, SceneManager, colorName, partName, getPartById } from '../engine-api'
 import { computeAssemblyPlan } from '../engine/assemblyPlan.js'
+import { ensureAssemblyMeshes } from '../engine/assemblyNativeMesh.js'
 import { takeModelThumb, waitSceneReady } from '../engine/thumbShot.js'
 import { coverItems, renderedBounds, manualPositionedItems, layoutManualCallouts, projectedOperationArrowHead, projectReadingLocatorBounds } from '../engine/assemblyManual.js'
 import { createAssemblyReadingPlan, assemblyReadingState, readingModuleDirection } from '../engine/assemblyReadingPlan.js'
@@ -229,10 +230,12 @@ export default function AssemblyPreview() {
     setEditing(null); setChosen([])
   }
   const auto = () => {
-    const m = new BuildModel()
-    if (!m.loadJSON({ ...preview.data, assemblyConfig: undefined }).ok) throw new Error('assembly preview cannot load snapshot')
-    const automatic = computeAssemblyPlan(m, {}, preview.order)
-    update({ version: 1, regions: automatic.regions.map((r: E) => ({ id: r.id, name: r.name, partIds: [...r.partIds] })), order: automatic.regions.map((r: E) => r.id) })
+    void ensureAssemblyMeshes().then(() => {
+      const m = new BuildModel()
+      if (!m.loadJSON({ ...preview.data, assemblyConfig: undefined }).ok) throw new Error('assembly preview cannot load snapshot')
+      const automatic = computeAssemblyPlan(m, {}, preview.order)
+      update({ version: 1, regions: automatic.regions.map((r: E) => ({ id: r.id, name: r.name, partIds: [...r.partIds] })), order: automatic.regions.map((r: E) => r.id) })
+    })
   }
   const exportPdf = async () => {
     const v = view.current

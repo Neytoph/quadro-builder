@@ -1,7 +1,7 @@
 import { reinforcementPart, getTube, partName } from './catalog.js';
 import { xAxisOf as rawXAxisOf, yAxisOf as rawYAxisOf, zAxisOf as rawZAxisOf, panelNormal as panelMountNormal, modelMiddle } from './util.js';
 import { getLang } from './i18n.js';
-import { nativeEnvelopes } from './assemblyNativeEnvelopes.js';
+import { assemblyMeshes } from './assemblyNativeMesh.js';
 import { componentMountsValid, componentFrame, confirmedDiagnostics, ACCESSORY_IDS, PANEL_ACCESSORY_IDS } from './accessoryPack.js';
 import { partEnvelope } from './assemblyCollision.js';
 import { nativeAccessorySupport, normalizedAssemblyQuaternion } from './assemblyAccessoryMethods.js';
@@ -153,6 +153,8 @@ function frameSequence(model,nodeIds,tubeIds,emit,diagnostics,threads=[]){
 }
 
 export function addAssemblyOperations(model,plan){
+  const loaded=assemblyMeshes();if(!loaded)throw new Error('装配网格还没加载');
+  const nativeEnvelopes=loaded.nativeEnvelopes;
   const {steps,diagnostics}=plan,installed=new Set(),runDone=new Set(),threadDone=new Set(),poses=new Map(),threadAssemblies=[],threadCarrierConsumed=new Set(),preparedRigid=new Set(),softLinings=[];let previous;
   const entryPanelContacts=new Map(steps.flatMap(step=>Object.entries(step.entryPanelContacts||{})));
   const linerCarrierContacts=new Map();

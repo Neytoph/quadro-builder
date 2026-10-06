@@ -31,6 +31,7 @@ import { appendTab } from './tabs'
 import { modelContent, personalDecision, personalRecordUnconfirmed, personalSaveBaseline, readPersonalBinding, restorePersonalBinding, samePersonalBinding, savedGenerationUnchanged, savedRecordState, type PersonalState } from './personalTabs'
 import { renderModelCover } from './modelCover'
 import { computeAssemblyPlan } from '../engine/assemblyPlan.js'
+import { ensureAssemblyMeshes } from '../engine/assemblyNativeMesh.js'
 import { createAssemblyReadingPlan } from '../engine/assemblyReadingPlan.js'
 import { proposeAssemblyRepairs } from '../engine/connectionResolver.js'
 import { validAssemblyConfig } from '../engine/assemblyConfig.js'
@@ -948,6 +949,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
 
     ;(async () => {
       try {
+        const identityReady = syncProbe()
         await loadCatalog()
         if (dead) return
         setCatalog({
@@ -984,6 +986,11 @@ export function EngineProvider({ children }: { children: ReactNode }) {
         eng.current = { scene, model, builder }
         // 开发模式下把引擎挂到 window 上，浏览器测试脚本靠它摆相机、查手柄
         if (import.meta.env.DEV) (window as unknown as { __quadroDev?: unknown }).__quadroDev = eng.current
+        // 碰撞网格留给搭建和步骤数，不挡住第一帧。
+        void ensureAssemblyMeshes().catch((error: unknown) => { console.warn('[assembly]', error) })
+        // 账号库必须等身份回来。界面已经在画，这一步只挡住存档。
+        await identityReady
+        if (dead) return
 
         // 只看、交付、画房间：只放这一座，不读这台设备上记着的标签页。
         // 交付由 CollabProvider 取到以后 attachDoc 换进来。
@@ -2027,6 +2034,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const e2 = eng.current
     const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
     if (!e2 || !tab) throw new Error('no design')
+    await ensureAssemblyMeshes()
     const stampModel = preview ? new BuildModel() : e2.model
     if (preview && !stampModel.loadJSON(preview.data).ok) throw new Error('invalid frozen design')
     const b = stampModel.bounds(geometry().connectorSize / 2) as { size: number[] }
@@ -2210,6 +2218,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       return
     }
     if (needAccount('manual')) return
+    await ensureAssemblyMeshes()
     putManualPreview(makeManualPreview(structuredClone(e2.model.toJSON()) as ModelJSON))
     track('builder.export.manual.ask', { parts: modelPartCount(e2.model.toJSON()) })
     setExportManualConfirm(true)

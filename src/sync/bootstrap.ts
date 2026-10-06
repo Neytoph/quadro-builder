@@ -57,7 +57,16 @@ export function startSyncIfConfigured(onEvent?: (e: SyncEvent) => void, onUnauth
     location.reload()
   }
   const identity = async (): Promise<string | null> => {
-    const response = await fetch(`${baseUrl}/identity`, { credentials: 'include', cache: 'no-store', headers: { Accept: 'application/json' } })
+    const early = takeEarlyIdentity(baseUrl)
+    let response: Response
+    try {
+      response = early
+        ? await early
+        : await fetch(`${baseUrl}/identity`, { credentials: 'include', cache: 'no-store', headers: { Accept: 'application/json' } })
+    } catch (error) {
+      if (!early) throw error
+      response = await fetch(`${baseUrl}/identity`, { credentials: 'include', cache: 'no-store', headers: { Accept: 'application/json' } })
+    }
     if (response.status === 401 || response.status === 403) return null
     if (!response.ok) throw new Error(`GET /identity → ${response.status}`)
     const value = await response.json() as { userId?: unknown }
@@ -110,6 +119,15 @@ export function startSyncIfConfigured(onEvent?: (e: SyncEvent) => void, onUnauth
     window.addEventListener('pageshow', event => { if (event.persisted) resetIdentity() })
   })()
   return live
+}
+
+function takeEarlyIdentity(baseUrl: string): Promise<Response> | null {
+  if (baseUrl !== '/quadro' && !baseUrl.endsWith('/quadro')) return null
+  const bag = globalThis as typeof globalThis & { __qhIdentity?: Promise<Response> }
+  const pending = bag.__qhIdentity
+  if (!pending) return null
+  delete bag.__qhIdentity
+  return pending
 }
 
 export { QuotaError }

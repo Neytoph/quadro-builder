@@ -4,7 +4,7 @@ import './index.css'
 import App from './App'
 import { landedFrom, startAnalytics, track } from './analytics/track'
 import { detect as detectLang } from './i18n'
-import { startSyncIfConfigured, syncProbe } from './sync/bootstrap'
+import { startSyncIfConfigured } from './sync/bootstrap'
 import { rememberSource, SESSIONLESS, VIEW_ONLY } from './entry'
 
 rememberSource()          // 带来源标记打开的，记进 cookie；开源本地版不做
@@ -35,5 +35,5 @@ startSyncIfConfigured(undefined, SESSIONLESS ? undefined : () => {
   })()
 }, !SESSIONLESS)
 
-// 确认身份后，React 才能读取 inventory、session 和 Yjs 本地库。
-void syncProbe().then(() => createRoot(document.getElementById('root')!).render(<App />))
+// 界面先挂上。账号库要等身份回来再读，这一步在引擎初始化里等 syncProbe。
+createRoot(document.getElementById('root')!).render(<App />)

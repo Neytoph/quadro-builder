@@ -2,6 +2,7 @@
 // Einziger Ort, der das JSON kennt -> spaeter leicht durch ein Backend ersetzbar.
 
 import { t, getLang } from "./i18n.js";
+import rawParts from "../../public/data/parts.json";
 import { ACCESSORY_PACK } from './accessoryPack.js';
 import { CONFIRMED_COMPONENTS } from './componentPack.js';
 import { COLOR_HEX, isHexColor } from "./colors.js";
@@ -11,9 +12,8 @@ let _data = null;
 
 export async function loadCatalog() {
   if (_data) return _data;
-  const res = await fetch(`${import.meta.env.BASE_URL}data/parts.json`, { cache: "no-cache" });
-  if (!res.ok) throw new Error(t("catalog_load_error", res.status));
-  _data = await res.json();
+  // 目录跟着启动包走，打开时不再单独请求。每次拷一份，改色调不会写回模块里的原件。
+  _data = structuredClone(rawParts);
   _data.accessories.push(...ACCESSORY_PACK.map(part => ({ ...part, compat: true, qdf: part.id })));
   for (const spec of CONFIRMED_COMPONENTS) {
     const list = spec.placement === 'panel' ? _data.panels : _data.accessories;

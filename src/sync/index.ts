@@ -9,6 +9,7 @@
 
 import { docs, storage, partsOfData } from '../engine-api'
 import { cachedStats, statsOfData, type DesignStats } from '../designStats'
+import { ensureAssemblyMeshes } from '../engine/assemblyNativeMesh.js'
 import { forgetOrigin, originOf } from './origin'
 import type {
   DesignParts, DocRecord, PullResponse, PushResponse, RemoteDoc, RemoteInventory,
@@ -28,18 +29,19 @@ function computeStatsOffThread(data: unknown): Promise<DesignStats | null> {
   return finish
 }
 
+function statsOnMain(data: unknown): Promise<DesignStats | null> {
+  return ensureAssemblyMeshes().then(() => statsOfData(data)).catch((error: unknown) => {
+    console.warn('[sync stats]', error)
+    return null
+  })
+}
+
 function runStatsJob(data: unknown): Promise<DesignStats | null> {
   const hit = cachedStats(data)
   if (hit) return Promise.resolve(hit)
   if (import.meta.env.MODE === 'test' || typeof Worker !== 'function') {
     return new Promise(resolve => {
-      setTimeout(() => {
-        try { resolve(statsOfData(data)) }
-        catch (error) {
-          console.warn('[sync stats]', error)
-          resolve(null)
-        }
-      }, 0)
+      setTimeout(() => { resolve(statsOnMain(data)) }, 0)
     })
   }
   return new Promise(resolve => {
@@ -47,7 +49,7 @@ function runStatsJob(data: unknown): Promise<DesignStats | null> {
       statsWorker ??= new Worker(new URL('./statsWorker.ts', import.meta.url), { type: 'module' })
     } catch (error) {
       console.warn('[sync stats]', error)
-      resolve(statsOfData(data))
+      resolve(statsOnMain(data))
       return
     }
     const worker = statsWorker
@@ -62,7 +64,7 @@ function runStatsJob(data: unknown): Promise<DesignStats | null> {
       worker.removeEventListener('error', failed)
       console.warn('[sync stats]', event.message)
       statsWorker = null
-      resolve(statsOfData(data))
+      resolve(statsOnMain(data))
     }
     worker.addEventListener('message', done)
     worker.addEventListener('error', failed)

@@ -5,6 +5,7 @@ import { buildableTubes, geometry, getTube, spacingFor, getPanel, defaultPanel, 
 import { CLASSIC_COLOR_IDS, officialColorId } from "./colors.js";
 import { connectorLabelInfo } from "./buildplan.js";
 import { computeAssemblyPlan, assemblyState } from "./assemblyPlan.js";
+import { assemblyMeshes, ensureAssemblyMeshes } from "./assemblyNativeMesh.js";
 import { infeasibleConnectors, inferConnectorType } from "./bom.js";
 import { t } from "./i18n.js";
 import { round2, panelNormal, modelMiddle, xAxisOf, yAxisOf, zAxisOf, quatFromBasis } from "./util.js";
@@ -1480,6 +1481,20 @@ export class Builder {
   // --- Aufbaumodus -------------------------------------------------------
   // Aufbauplan (neu) berechnen und beim aktuellen Schritt bleiben (geklemmt).
   enterAssembly() {
+    if (!assemblyMeshes()) {
+      if (this._meshesPending) return;
+      this._meshesPending = true;
+      void ensureAssemblyMeshes().then(() => {
+        this._meshesPending = false;
+        if (this.mode !== "assembly") return;
+        this.enterAssembly();
+        this.refresh();
+      }).catch((error) => {
+        this._meshesPending = false;
+        console.warn("[assembly]", error);
+      });
+      return;
+    }
     this.buildPlan = computeAssemblyPlan(this.model, this.model.assemblyConfig || {}, this.assemblyOrder);
     const max = Math.max(0, this.buildPlan.steps.length - 1);
     this.assemblyStep = Math.min(this.assemblyStep, max);

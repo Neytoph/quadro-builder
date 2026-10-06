@@ -3,6 +3,9 @@
 import 'fake-indexeddb/auto'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { ensureAssemblyMeshes } from '../engine/assemblyNativeMesh.js'
+
+await ensureAssemblyMeshes()
 
 const publicDir = join(process.cwd(), 'public')
 const realFetch = globalThis.fetch

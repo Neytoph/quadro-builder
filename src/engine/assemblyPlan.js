@@ -3,6 +3,7 @@ import { computeBOM, connectorsForNode, resolveNodeConnection, reinforcementRuns
 import { reinforcementPart } from './catalog.js';
 import { geometry } from './catalog.js';
 import { checkAssemblyPath, beginAssemblyCollisionPass } from './assemblyCollision.js';
+import { assemblyMeshes } from './assemblyNativeMesh.js';
 import { scheduleAssemblyAccessories, addAssemblyOperations } from './assemblyOperations.js';
 import { consolidateLayerSteps } from './assemblyLayerSteps.js';
 import { xAxisOf, yAxisOf } from './util.js';
@@ -384,6 +385,7 @@ function allocateBOM(model, bom, steps, owner, diagnostics) {
 }
 
 export function computeAssemblyPlan(model, config = model.assemblyConfig || {}, order = 'y+', internal = {}) {
+  if (!assemblyMeshes()) throw new Error('装配网格还没加载');
   beginAssemblyCollisionPass(model);
   const deferredAccessories=internal.deferredAccessories||[],deferredIds=new Set(deferredAccessories.map(item=>item.partId));
   const diagnostics = [], coord = n => n.y;
