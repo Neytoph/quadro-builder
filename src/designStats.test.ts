@@ -6,7 +6,7 @@ import { BuildModel } from './engine/model.js'
 import { parseQDF } from './engine/qdfimport.js'
 import { computeBuildPlan } from './engine/buildplan.js'
 import { computeMetrics } from './engine/safety.js'
-import { statsOfData, statsOfModel } from './designStats'
+import { cachedStats, statsOfData, statsOfModel } from './designStats'
 
 beforeAll(async () => { await loadCatalog() })
 
@@ -30,7 +30,8 @@ describe('造型的量', () => {
     expect(s.errors).toEqual([])
     // 同步送上去的是 JSON：从 JSON 量出来的一样
     expect(statsOfData(m.toJSON())).toEqual(s)
-  })
+    expect(cachedStats(m.toJSON())).toEqual(s)
+  }, 60_000)
 
   it('一根横梁飘在半空：记成没落地，错误里有 floating', () => {
     const m = new BuildModel()

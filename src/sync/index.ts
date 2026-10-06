@@ -8,7 +8,7 @@
 // 不传 baseUrl 就什么都不做——开源本地版的默认状态，行为与从前完全一致。
 
 import { docs, storage, partsOfData } from '../engine-api'
-import { statsOfData } from '../designStats'
+import { cachedStats, statsOfData, type DesignStats } from '../designStats'
 import { forgetOrigin, originOf } from './origin'
 import type {
   DesignParts, DocRecord, PullResponse, PushResponse, RemoteDoc, RemoteInventory,
@@ -17,6 +17,57 @@ import type {
 
 async function readCursor(): Promise<number> {
   return docs.readPullCheckpoint()
+}
+
+let statsWorker: Worker | null = null
+let statsJob = Promise.resolve()
+
+function computeStatsOffThread(data: unknown): Promise<DesignStats | null> {
+  const finish = statsJob.then(() => runStatsJob(data))
+  statsJob = finish.then(() => undefined, () => undefined)
+  return finish
+}
+
+function runStatsJob(data: unknown): Promise<DesignStats | null> {
+  const hit = cachedStats(data)
+  if (hit) return Promise.resolve(hit)
+  if (import.meta.env.MODE === 'test' || typeof Worker !== 'function') {
+    return new Promise(resolve => {
+      setTimeout(() => {
+        try { resolve(statsOfData(data)) }
+        catch (error) {
+          console.warn('[sync stats]', error)
+          resolve(null)
+        }
+      }, 0)
+    })
+  }
+  return new Promise(resolve => {
+    try {
+      statsWorker ??= new Worker(new URL('./statsWorker.ts', import.meta.url), { type: 'module' })
+    } catch (error) {
+      console.warn('[sync stats]', error)
+      resolve(statsOfData(data))
+      return
+    }
+    const worker = statsWorker
+    const done = (event: MessageEvent<{ stats?: DesignStats | null, error?: string }>) => {
+      worker.removeEventListener('message', done)
+      worker.removeEventListener('error', failed)
+      if (event.data?.error) console.warn('[sync stats]', event.data.error)
+      resolve(event.data?.stats ?? null)
+    }
+    const failed = (event: ErrorEvent) => {
+      worker.removeEventListener('message', done)
+      worker.removeEventListener('error', failed)
+      console.warn('[sync stats]', event.message)
+      statsWorker = null
+      resolve(statsOfData(data))
+    }
+    worker.addEventListener('message', done)
+    worker.addEventListener('error', failed)
+    worker.postMessage(data)
+  })
 }
 
 function contentJSON(data: unknown): string | undefined {
@@ -113,6 +164,34 @@ export function createSync(opts: SyncOptions = {}) {
   }
 
   /**
+   * 装配计划的步骤数不挡这一次上传。造型先记成已同步，量按同一 rev 补上。
+   * 用户又存了新版本，或这份内容已经变了，就不再写旧的步骤数。
+   */
+  function scheduleStats(id: string, data: unknown, rev: number, saveId?: string) {
+    const deliver = async () => {
+      if (stopped || storage.getAccountEpoch() !== scopeEpoch) return
+      const stats = await computeStatsOffThread(data)
+      if (!stats || stopped || storage.getAccountEpoch() !== scopeEpoch) return
+      const current = await docs.getDoc(id) as DocRecord | null
+      if (!current || current.rev !== rev) return
+      if (saveId && current.saveId !== saveId) return
+      if (contentJSON(current.data) !== contentJSON(data)) return
+      try {
+        await call(`/models/${encodeURIComponent(id)}/stats`, {
+          method: 'PUT',
+          body: JSON.stringify({ rev, stats }),
+        })
+      } catch (error) {
+        if (stopped || storage.getAccountEpoch() !== scopeEpoch) return
+        const message = error instanceof Error ? error.message : String(error)
+        if (message.includes('→ 404')) return
+        console.warn('[sync stats]', error)
+      }
+    }
+    void deliver()
+  }
+
+  /**
    * 推送本地改动。拉取会保留dirty及远端分歧，上传以存档基线为准。
    */
   async function push(): Promise<void> {
@@ -153,12 +232,13 @@ export function createSync(opts: SyncOptions = {}) {
           await docs.markDocSynced(doc.id, response.rev, stamp, undefined, doc.saveId, doc.rev)
         } else {
           const parts = partsOfData(doc.data) as DesignParts | null
-          // stats：这一版的量（../designStats.ts），服务端拿它当客观量，和 parts 一样由引擎算
+          // 步骤数来自整份装配计划，保存时先上传造型。缓存里有的量一起带上。
           // origin：这一座是从哪个方案打开的（见 ./origin.ts），第一次推上去时带上
+          const stats = cachedStats(doc.data)
           response = await call<PushResponse>(`/models/${encodeURIComponent(doc.id)}`, {
             method: 'PUT',
             body: JSON.stringify({
-              name: doc.name, data: doc.data, parts, stats: statsOfData(doc.data), baseRev: doc.rev, origin: originOf(doc.id),
+              name: doc.name, data: doc.data, parts, stats, baseRev: doc.rev, origin: originOf(doc.id),
               ...(doc.saveId ? { saveId: doc.saveId } : {}),
               ...(doc.cover ? { cover: doc.cover } : {}),
             }),
@@ -168,6 +248,7 @@ export function createSync(opts: SyncOptions = {}) {
           await docs.markDocSynced(doc.id, response.rev, stamp, response.coverApplied === false ? undefined : doc.cover, doc.saveId, doc.rev)
           if (!response.originError) forgetOrigin(doc.id)
           if (response.coverError || response.originError) emit({ type: 'error', error: new Error(response.coverError || response.originError) })
+          if (!stats) scheduleStats(doc.id, doc.data, response.rev, doc.saveId)
         }
         active()
         if (doc.saveId) receipts.set(`${doc.id}:${doc.saveId}`, { status: 'synced', id: doc.id, saveId: doc.saveId, rev: response.rev })
@@ -180,6 +261,7 @@ export function createSync(opts: SyncOptions = {}) {
           if (!doc.deletedAt && !err.remote.deletedAt && err.remote.name === doc.name && contentJSON(err.remote.data) === contentJSON(doc.data)) {
             await docs.markDocSynced(doc.id, err.remote.rev, stamp, undefined, doc.saveId, doc.rev)
             active()
+            if (!cachedStats(doc.data)) scheduleStats(doc.id, doc.data, err.remote.rev, doc.saveId)
             if (doc.saveId) receipts.set(`${doc.id}:${doc.saveId}`, { status: 'synced', id: doc.id, saveId: doc.saveId, rev: err.remote.rev })
             emit({ type: 'pushed', id: doc.id, rev: err.remote.rev, saveId: doc.saveId })
           } else await forkConflict(doc, err.remote)

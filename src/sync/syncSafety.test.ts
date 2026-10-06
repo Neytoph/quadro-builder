@@ -13,9 +13,12 @@ const remote = (id: string, rev: number, version = 'remote'): RemoteDoc => ({ id
 const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'X-Builder-User-ID': accountId } })
 function sink(handler: (url: string, init?: RequestInit) => Response | Promise<Response>): typeof fetch {
   return async (input, init) => {
-    if (String(input).endsWith('/identity')) return response({ userId: accountId })
-    if (String(input).endsWith('/inventory')) return response({ data: {}, rev: 0 })
-    return handler(String(input), init)
+    const url = String(input)
+    if (url.endsWith('/identity')) return response({ userId: accountId })
+    if (url.endsWith('/inventory')) return response({ data: {}, rev: 0 })
+    // 步骤数是造型上传之后的补写，不占模型 PUT 的次数和回执。
+    if (url.endsWith('/stats')) return new Response(null, { status: 204, headers: { 'X-Builder-User-ID': accountId } })
+    return handler(url, init)
   }
 }
 

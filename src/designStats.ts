@@ -21,6 +21,35 @@ export interface DesignStats {
 
 interface Finding { rule: string; level: string; params: { n?: number } }
 
+const statsCache = new Map<string, DesignStats>()
+const STATS_CACHE_LIMIT = 4
+
+function statsContentKey(data: unknown): string {
+  return JSON.stringify(data, (_key, value) => value && typeof value === 'object' && !Array.isArray(value)
+    ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]])) : value)
+}
+
+/** 同一份造型已经算过的量。保存先上传时用它，避免再跑一遍装配计划。 */
+export function cachedStats(data: unknown): DesignStats | null {
+  const key = statsContentKey(data)
+  const hit = statsCache.get(key)
+  if (!hit) return null
+  statsCache.delete(key)
+  statsCache.set(key, hit)
+  return hit
+}
+
+function rememberStats(data: unknown, stats: DesignStats) {
+  const key = statsContentKey(data)
+  statsCache.delete(key)
+  statsCache.set(key, stats)
+  while (statsCache.size > STATS_CACHE_LIMIT) {
+    const oldest = statsCache.keys().next().value
+    if (oldest === undefined) break
+    statsCache.delete(oldest)
+  }
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function statsOfModel(model: any): DesignStats {
   const b = model.bounds(geometry().connectorSize / 2) as { size: number[] } | null
@@ -42,5 +71,7 @@ export function statsOfModel(model: any): DesignStats {
 export function statsOfData(data: unknown): DesignStats | null {
   const model = new BuildModel()
   if (!model.loadJSON(data).ok) return null
-  return statsOfModel(model)
+  const stats = statsOfModel(model)
+  rememberStats(data, stats)
+  return stats
 }
