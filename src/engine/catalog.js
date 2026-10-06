@@ -13,7 +13,8 @@ let _data = null;
 export async function loadCatalog() {
   if (_data) return _data;
   // 目录跟着启动包走，打开时不再单独请求。每次拷一份，改色调不会写回模块里的原件。
-  _data = structuredClone(rawParts);
+  // 站点脚本在 jsdom 里跑这份加载，那里没有 structuredClone。
+  _data = JSON.parse(JSON.stringify(rawParts));
   _data.accessories.push(...ACCESSORY_PACK.map(part => ({ ...part, compat: true, qdf: part.id })));
   for (const spec of CONFIRMED_COMPONENTS) {
     const list = spec.placement === 'panel' ? _data.panels : _data.accessories;
