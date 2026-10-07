@@ -14,7 +14,7 @@ import { createStatsQueue } from './statsQueue'
 import { forgetOrigin, originOf } from './origin'
 import type {
   DesignParts, DocRecord, PullResponse, PushResponse, RemoteDoc, RemoteInventory,
-  SavedDocSyncResult, SyncEvent, SyncOptions, PendingStats,
+  SavedDocSyncResult, SyncEvent, SyncOptions, PendingStats, StatsSnapshot,
 } from './types'
 
 async function readCursor(): Promise<number> {
@@ -120,27 +120,35 @@ export function createSync(opts: SyncOptions = {}) {
    * 用户又存了新版本，或这份内容已经变了，就不再写旧的步骤数。
    */
   const statsQueue = createStatsQueue()
-  const statsDelivering = new Map<string, { rev: number; abort: AbortController }>()
+  const statsDelivering = new Map<string, { task: PendingStats; abort: AbortController; promise: Promise<boolean> }>()
+  // 每个文档仅保留最近一次真实服务端统计回执，绝不从队列为空推断成功。
+  const statsReceipts = new Map<string, string>()
+  const statsKey = (task: PendingStats) => JSON.stringify([task.rev, task.saveId, task.engineVersion, contentJSON(task.data)])
   let statsDraining = false
   function statsTask(doc: DocRecord, rev: number): PendingStats {
-    return { id: `models-stats:${doc.id}`, docId: doc.id, data: doc.data, rev, saveId: doc.saveId, engineVersion: ENGINE_VERSION }
+    return { id: `models-stats:${doc.id}`, docId: doc.id, data: structuredClone(doc.data), rev, saveId: doc.saveId, engineVersion: ENGINE_VERSION }
   }
-  const currentStatsModel = async (task: PendingStats) => {
+  const currentStatsModel = async (task: PendingStats, allowCoverPending = true) => {
     active()
     const current = await docs.getDoc(task.docId) as DocRecord | null
     active()
-    return current && (!current.dirty || current.syncedSaveId === task.saveId && Boolean(task.saveId)) && current.rev === task.rev && current.saveId === task.saveId
+    return current && !current.deletedAt && !current.legacyPending && !current.pendingRemote
+      && (!current.dirty || allowCoverPending && current.syncedSaveId === task.saveId && Boolean(task.saveId)) && current.rev === task.rev && current.saveId === task.saveId
       && contentJSON(current.data) === contentJSON(task.data)
   }
-  async function deliverStats(original: PendingStats) {
+  function launchStats(task: PendingStats) {
+    const job = { task, abort: new AbortController(), promise: Promise.resolve(false) }
+    statsDelivering.set(task.docId, job)
+    job.promise = deliverStats(task, job.abort)
+    return job
+  }
+  async function deliverStats(original: PendingStats, abort: AbortController): Promise<boolean> {
     let task = original
-    const abort = new AbortController()
-    statsDelivering.set(task.docId, { rev: task.rev, abort })
     const stopRequest = () => abort.abort()
     controller.signal.addEventListener('abort', stopRequest, { once: true })
     let timeout: ReturnType<typeof setTimeout> | undefined
     try {
-      if (!await currentStatsModel(task)) { await docs.settleStats(task); return }
+      if (!await currentStatsModel(task)) { await docs.settleStats(task); return false }
       if (task.engineVersion !== ENGINE_VERSION) {
         await docs.settleStats(task, { engineVersion: ENGINE_VERSION, stats: undefined })
         active()
@@ -150,27 +158,34 @@ export function createSync(opts: SyncOptions = {}) {
       const stats = task.stats || await statsQueue.compute(task.docId, task.data)
       active()
       if (abort.signal.aborted) throw new DOMException('stats superseded', 'AbortError')
-      if (!await currentStatsModel(task)) { await docs.settleStats(task); return }
+      if (!await currentStatsModel(task)) { await docs.settleStats(task); return false }
       rememberStats(task.data, stats)
       await docs.settleStats(task, { stats })
       active()
       timeout = setTimeout(() => abort.abort(new Error('stats upload timed out')), 15_000)
       await call(`/models/${encodeURIComponent(task.docId)}/stats`, { method: 'PUT', body: JSON.stringify({ rev: task.rev, stats }), signal: abort.signal })
       active()
+      if (abort.signal.aborted || !await currentStatsModel(task)) return false
       await docs.settleStats(task)
       active()
+      if (!await currentStatsModel(task)) return false
+      statsReceipts.delete(task.docId)
+      statsReceipts.set(task.docId, statsKey(task))
+      if (statsReceipts.size > 8) statsReceipts.delete(statsReceipts.keys().next().value!)
       emit({ type: 'stats-synced', id: task.docId, rev: task.rev })
+      return true
     } catch (error) {
-      if (stopped || storage.getAccountEpoch() !== scopeEpoch) return
-      if (error instanceof ConflictError) { await docs.settleStats(task); return }
+      if (stopped || storage.getAccountEpoch() !== scopeEpoch) return false
+      if (error instanceof ConflictError) { await docs.settleStats(task); return false }
       const message = error instanceof Error ? error.message : String(error)
       await docs.settleStats(task, { error: message, retryAt: Date.now() + 30_000 })
       emit({ type: 'stats-pending', id: task.docId, rev: task.rev, error })
       console.warn('[sync stats]', error)
+      return false
     } finally {
       if (timeout) clearTimeout(timeout)
       controller.signal.removeEventListener('abort', stopRequest)
-      statsDelivering.delete(task.docId)
+      if (statsDelivering.get(task.docId)?.abort === abort) statsDelivering.delete(task.docId)
       void drainStats()
     }
   }
@@ -183,14 +198,14 @@ export function createSync(opts: SyncOptions = {}) {
       for (const task of tasks) {
         if (statsDelivering.size >= 4) break
         if (statsDelivering.has(task.docId) || !force && (task.retryAt || 0) > Date.now()) continue
-        void deliverStats(task)
+        launchStats(task)
       }
     } catch (error) { if (!stopped && storage.getAccountEpoch() === scopeEpoch) console.warn('[sync stats queue]', error) }
     finally { statsDraining = false }
   }
   function scheduleStats(id: string, rev: number) {
     const earlier = statsDelivering.get(id)
-    if (earlier && earlier.rev !== rev) { earlier.abort.abort(); statsQueue.cancel(id) }
+    if (earlier && earlier.task.rev !== rev) { earlier.abort.abort(); statsQueue.cancel(id) }
     void drainStats()
   }
 
@@ -411,6 +426,54 @@ export function createSync(opts: SyncOptions = {}) {
     return { status: 'pending', id, saveId, error: lastError }
   }
 
+  /** 发布专用：总等待60秒，加入同版本在途任务，成功必须来自实际stats PUT回执。 */
+  async function syncDocStats(snapshot: StatsSnapshot): Promise<boolean> {
+    if (!enabled || stopped || storage.getAccountEpoch() !== scopeEpoch) return false
+    const task = statsTask(snapshot as DocRecord, snapshot.rev)
+    let finished = false
+    let timeout: ReturnType<typeof setTimeout> | undefined
+    let interrupted = () => {}
+    const deadline = new Promise<boolean>(resolve => {
+      interrupted = () => resolve(false)
+      controller.signal.addEventListener('abort', interrupted, { once: true })
+      timeout = setTimeout(interrupted, 60_000)
+    })
+    const wait = async () => {
+      active()
+      if (!await currentStatsModel(task, false)) return false
+      if (statsReceipts.get(task.docId) === statsKey(task)) return true
+      if (!(await docs.queueStats(task)).queued) return false
+      while (!finished) {
+        active()
+        if (!await currentStatsModel(task, false)) return false
+        if (statsReceipts.get(task.docId) === statsKey(task)) return true
+        const running = statsDelivering.get(task.docId)
+        if (running) {
+          if (statsKey(running.task) !== statsKey(task)) {
+            running.abort.abort()
+            statsQueue.cancel(task.docId)
+            await running.promise
+            continue
+          }
+          return await running.promise && !finished && Boolean(await currentStatsModel(task, false))
+        }
+        if (statsDelivering.size >= 4) {
+          await Promise.race([...statsDelivering.values()].map(job => job.promise))
+          continue
+        }
+        return await launchStats(task).promise && !finished && Boolean(await currentStatsModel(task, false))
+      }
+      return false
+    }
+    try { return await Promise.race([wait(), deadline]) }
+    catch { return false }
+    finally {
+      finished = true
+      if (timeout) clearTimeout(timeout)
+      controller.signal.removeEventListener('abort', interrupted)
+    }
+  }
+
   function start(): void {
     if (!enabled || stopped || timer) return
     docs.setSyncMode(true)          // 让删除留下墓碑，否则服务端的删不掉
@@ -428,5 +491,5 @@ export function createSync(opts: SyncOptions = {}) {
     docs.setSyncMode(false)
   }
 
-  return { enabled, start, stop, syncNow, syncSavedDoc }
+  return { enabled, start, stop, syncNow, syncSavedDoc, syncDocStats }
 }

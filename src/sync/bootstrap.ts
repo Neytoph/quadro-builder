@@ -1,7 +1,7 @@
 import { track } from '../analytics/track'
 import { storage } from '../engine-api'
 import { createSync, QuotaError } from './index'
-import type { SavedDocSyncResult, SyncEvent } from './types'
+import type { SavedDocSyncResult, StatsSnapshot, SyncEvent } from './types'
 
 let started = false
 let initialized = false
@@ -35,6 +35,9 @@ export function syncNow(): Promise<void> {
 }
 export function syncSavedDoc(id: string, saveId: string): Promise<SavedDocSyncResult> {
   return started && live ? live.syncSavedDoc(id, saveId) : Promise.resolve({ status: 'pending', id, saveId })
+}
+export function syncDocStats(snapshot: StatsSnapshot): Promise<boolean> {
+  return started && live ? live.syncDocStats(snapshot) : Promise.resolve(false)
 }
 export function syncConfigured(): boolean { return Boolean(import.meta.env.VITE_SYNC_BASE) }
 export function syncStarted(): boolean { return started }

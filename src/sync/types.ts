@@ -75,6 +75,9 @@ export interface PendingStats {
   error?: string
 }
 
+/** 调用者已确认的模型版本；发布不得借用其他保存的统计。 */
+export type StatsSnapshot = Pick<DocRecord, 'id' | 'rev' | 'saveId' | 'data'>
+
 export type SavedDocSyncResult =
   | { status: 'synced'; id: string; saveId: string; rev: number }
   | { status: 'conflict'; id: string; saveId: string; copyId: string }

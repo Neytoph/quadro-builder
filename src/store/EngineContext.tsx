@@ -8,6 +8,7 @@ import {
 } from '../engine-api'
 import { useI18n } from '../i18n'
 import { onSyncEvent, syncSavedDoc, syncNow, syncProbe, syncStarted } from '../sync/bootstrap'
+import { pushDocToServer, type PushDocOptions } from '../sync/docPublish'
 import { tabOpenedFrom, tabSavedAs } from '../sync/origin'
 import { pullDoc } from '../sync/docEntry'
 import { bootEntry, SESSIONLESS, VIEW_ONLY, type ResumeExport } from '../entry'
@@ -251,7 +252,7 @@ interface EngineApi {
   removeDoc: (docId: string) => Promise<void>
   renameDoc: (docId: string, name: string) => Promise<void>
   duplicateDoc: (docId: string) => Promise<void>
-  pushDoc: (docId: string) => Promise<boolean>
+  pushDoc: (docId: string, options?: PushDocOptions) => Promise<boolean>
   importFile: (file: File) => Promise<void>
   openLibraryId: (id: string) => Promise<void>
   exportQdf: () => void
@@ -1664,12 +1665,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
    *
    * 社区入口只接受指定 saveId 的模型回执；已同步模型的异步封面可继续等待。
    */
-  const pushDoc = useCallback(async (docId: string) => {
-    const doc = await docs.getDoc(docId) as AnyRec | null
-    if (!doc) return false
-    if (!doc.saveId) return Number(doc.rev) > 0 && !doc.dirty
-    return (await syncSavedDoc(docId, String(doc.saveId))).status === 'synced'
-  }, [])
+  const pushDoc = useCallback(pushDocToServer, [])
 
   const retrySave = useCallback(async (tabId: string) => {
     const tab = tabsRef.current.find(x => x.tabId === tabId)

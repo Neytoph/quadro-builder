@@ -134,6 +134,28 @@ export function pendingStats() {
     .then(rows => rows.filter(row => row.id.startsWith('models-stats:')));
 }
 
+/** 发布冷存档也需要真实统计回执；核对模型与登记待补在同一事务完成。 */
+export function queueStats(task) {
+  const result = { queued: false };
+  return dbTx([DB_STORES.docs, DB_STORES.sync], "readwrite", stores => {
+    const request = stores[DB_STORES.docs].get(task.docId);
+    request.onsuccess = () => {
+      const doc = request.result;
+      if (!doc || doc.deletedAt || doc.legacyPending || doc.pendingRemote || doc.dirty
+        || doc.rev !== task.rev || doc.saveId !== task.saveId || contentJSON(doc.data) !== contentJSON(task.data)) return;
+      const pending = stores[DB_STORES.sync].get(task.id);
+      pending.onsuccess = () => {
+        const previous = pending.result;
+        const same = previous?.rev === task.rev && previous.saveId === task.saveId
+          && previous.engineVersion === task.engineVersion && contentJSON(previous.data) === contentJSON(task.data);
+        stores[DB_STORES.sync].put(same ? { ...previous, retryAt: undefined, error: undefined } : task);
+        result.queued = true;
+      };
+    };
+    return result;
+  });
+}
+
 /** 只更新同一个统计版本；晚到的旧回执不能清掉较新待补。 */
 /** @param {object | null} [patch] */
 export function settleStats(task, patch = null) {
@@ -141,7 +163,8 @@ export function settleStats(task, patch = null) {
     const request = store.get(task.id);
     request.onsuccess = () => {
       const current = request.result;
-      if (!current || current.rev !== task.rev || current.saveId !== task.saveId || current.engineVersion !== task.engineVersion) return;
+      if (!current || current.rev !== task.rev || current.saveId !== task.saveId || current.engineVersion !== task.engineVersion
+        || contentJSON(current.data) !== contentJSON(task.data)) return;
       if (patch) store.put({ ...current, ...patch });
       else store.delete(task.id);
     };
@@ -419,21 +442,24 @@ export function saveDoc({ docId, name, data, baseRev = null, parentSaveId, baseC
  * 给这份存档记一张封面（图片的 data URL），下一次同步时跟着交上去，交成功就清掉。
  * 批量导入 .qdf 用它：「我的设计」和发到广场的方案要有这一座的画面。
  */
-export function setDocCover(docId, cover, expectUpdatedAt, expectSaveId) {
+export function setDocCover(docId, cover, expectUpdatedAt, expectSaveId, requireExactVersion = false) {
+  let applied = false;
   return dbTx(DB_STORES.docs, "readwrite", (store) => {
     const request = store.get(docId);
     request.onsuccess = () => {
       const doc = request.result;
       if (!doc || doc.deletedAt || (typeof expectSaveId === "string" ? doc.saveId !== expectSaveId : typeof expectUpdatedAt === "number" && doc.updatedAt !== expectUpdatedAt)) return;
+      if (requireExactVersion && doc.updatedAt !== expectUpdatedAt) return;
       if (isLegacyUnverified(doc)) doc.legacyPending = true;
       if (!doc.saveId && !doc.dirty) doc.saveId = id("s");
       doc.cover = cover;
       doc.updatedAt = Math.max(Date.now(), (doc.updatedAt || 0) + 1);
       doc.dirty = true;
       store.put(doc);
+      applied = true;
     };
     return request;
-  });
+  }).then(doc => requireExactVersion && !applied ? null : doc);
 }
 
 export function renameDoc(docId, name) {

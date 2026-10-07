@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useEngine } from '../store/EngineContext'
 import { useI18n, type Lang } from '../i18n'
 import { useDock } from './dock'
 import { onSyncStart, syncConfigured, syncStarted } from '../sync/bootstrap'
-import { docs } from '../engine-api'
+import { docs, storage } from '../engine-api'
 import { track } from '../analytics/track'
 import { publishEnabled, publishPage, publishStates, withdrawDoc, type PublishState } from '../publish'
 
@@ -44,6 +44,7 @@ export default function SavesPanel() {
   const plaza = publishEnabled() && syncOn
   const [states, setStates] = useState<Map<string, PublishState>>(new Map())
   const [sending, setSending] = useState('')
+  const publishing = useRef(false)
 
   const refresh = useCallback(() => {
     void api.listDocs().then(setDocs)
@@ -73,19 +74,31 @@ export default function SavesPanel() {
    * 发布页从服务器取这一份。点下去这一刻的版本就是发出去的版本。
    */
   const publish = async (docId: string, update: boolean) => {
+    if (publishing.current) return
+    publishing.current = true
+    const epoch = storage.getAccountEpoch()
     setSending(docId)
     try {
-      const doc = await docs.getDoc(docId) as { data: unknown } | null
-      if (!doc) return
+      const doc = await docs.getDoc(docId)
+      if (!doc || doc.deletedAt || storage.getAccountEpoch() !== epoch) {
+        api.notify(t('saves.publishNotYet'), 'warn')
+        return
+      }
       const thumb = await api.captureThumb({ kind: 'model', data: doc.data })
-      if (thumb) await docs.setDocCover(docId, thumb)
-      if (!await api.pushDoc(docId)) {
-        api.notify(t('saves.shareNotYet'), 'warn')
+      if (storage.getAccountEpoch() !== epoch) { api.notify(t('saves.publishNotYet'), 'warn'); return }
+      const covered = thumb ? await docs.setDocCover(docId, thumb, doc.updatedAt, doc.saveId, true) : doc
+      if (!covered || storage.getAccountEpoch() !== epoch || !await api.pushDoc(docId, {
+        requireStats: true, expectedData: doc.data, expectedUpdatedAt: covered.updatedAt, expectedSaveId: covered.saveId,
+      }) || storage.getAccountEpoch() !== epoch) {
+        api.notify(t('saves.publishNotYet'), 'warn')
         return
       }
       track('builder.design.publish', { update })
       location.href = publishPage(lang, docId)
+    } catch {
+      api.notify(t('saves.publishNotYet'), 'warn')
     } finally {
+      publishing.current = false
       setSending('')
     }
   }
