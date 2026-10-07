@@ -19,8 +19,7 @@ import { DockProvider, useDock } from './ui/dock'
 import { usePresence } from './ui/motion'
 import { bootEntry, DELIVERY_EMBED, dropParam, fullBuilderUrl, VIEW_ONLY } from './entry'
 import { SnapshotInfo } from './collab/ui/SnapshotInfo'
-import { syncNow, syncProbe } from './sync/bootstrap'
-import { pullDoc } from './sync/docEntry'
+import { syncProbe } from './sync/bootstrap'
 import { CollabProvider, useCollab } from './collab/CollabContext'
 import './collab/collab.css'
 import { JoinModal } from './collab/ui/Modals'
@@ -246,9 +245,8 @@ function DocOnEntry() {
       const signedIn = await syncProbe()
       if (signedIn === false) { location.href = loginUrl(); return }
       if (signedIn !== true) throw new Error('?doc=: sync server did not answer')
-      await syncNow()
-      if (!await pullDoc(import.meta.env.VITE_SYNC_BASE as string, id)) { notify(t('doc.notFound'), 'err'); return }
-      await openDoc(id)
+      // openDoc核对目标自身；完整同步轮次独立继续，不阻塞这座设计进入画布。
+      if (!await openDoc(id)) return
       dropParam('doc')
       completeEntry()
     })().catch(report)

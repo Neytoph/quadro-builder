@@ -1323,7 +1323,9 @@ for (const [lang, dict] of Object.entries({ de, en, zh })) {
 const translations = { de, en, zh };
 
 let _lang = (() => {
-  const stored = localStorage.getItem(LANG_KEY) || localStorage.getItem('quadro-builder-lang');
+  // Worker计算真实几何/统计时没有页面存储，仍使用其navigator语言。
+  const stored = typeof localStorage === 'undefined' ? null
+    : localStorage.getItem(LANG_KEY) || localStorage.getItem('quadro-builder-lang');
   if (stored && translations[stored]) return stored;
   const nav = (navigator.language || '').toLowerCase();
   if (nav.startsWith('de')) return 'de';
@@ -1344,8 +1346,10 @@ export function getLang() { return _lang; }
 export function setLang(lang) {
   if (!translations[lang]) return;
   _lang = lang;
-  localStorage.setItem(LANG_KEY, lang);
-  localStorage.setItem('quadro-builder-lang', lang);
+  if (typeof localStorage !== 'undefined') {
+    localStorage.setItem(LANG_KEY, lang);
+    localStorage.setItem('quadro-builder-lang', lang);
+  }
 }
 
 /** Wendet alle data-i18n / data-i18n-title-Attribute auf das Dokument an. */

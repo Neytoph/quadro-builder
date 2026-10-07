@@ -244,7 +244,7 @@ interface EngineApi {
   askName: (title: string, ok: string, value: string) => Promise<string | null>
   answerName: (name: string | null) => void
   nameAsk: { title: string; ok: string; value: string } | null
-  openDoc: (docId: string) => Promise<void>
+  openDoc: (docId: string) => Promise<boolean>
   retrySave: (tabId: string) => Promise<void>
   /** `local`：本次保存尚未全部交给服务器。 */
   listDocs: () => Promise<Array<{ id: string; name: string; updatedAt: number; local: boolean }>>
@@ -1690,7 +1690,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       try {
         if (!await pullDoc(import.meta.env.VITE_SYNC_BASE as string, docId)) {
           notify(t('sync.deletedProtected'), 'warn')
-          return
+          return false
         }
       }
       catch (error) {
@@ -1699,31 +1699,32 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       }
     }
     const doc = await docs.getDoc(docId)
-    if (!doc) return
+    if (!doc) return false
     snapshotActive()
     const existing = tabsRef.current.find(x => x.docId === docId)
     if (existing) {
       await reconcilePersonal(existing, doc as AnyRec)
       let latest = tabsRef.current.find(x => x.docId === docId)
       if (!latest && tabsRef.current.includes(existing)) latest = existing
-      if (!latest) return
+      if (!latest) return false
       activeRef.current = latest.tabId
       applyTab(latest)
       syncTabs()
-      return
+      return true
     }
     const data = normalizeModel(doc.data)
-    if (!data) { notify(t('lib.loadFailed'), 'err'); return }
+    if (!data) { notify(t('lib.loadFailed'), 'err'); return false }
     const tab = makeTab(data, String(doc.name), String(doc.id))
     const unconfirmed = personalRecordUnconfirmed(doc)
     if (!unconfirmed) Object.assign(tab, { baseRev: Number(doc.rev || 0), savedContent: modelContent(data), saveId: doc.saveId,
       saveState: savedRecordState(doc) })
     tabsRef.current = [...tabsRef.current, tab]
     if (unconfirmed) await reconcilePersonal(tab, doc as AnyRec)
-    if (!tabsRef.current.includes(tab)) return
+    if (!tabsRef.current.includes(tab)) return false
     activeRef.current = tab.tabId
     applyTab(tab)
     syncTabs()
+    return true
   }, [applyTab, notify, reconcilePersonal, snapshotActive, syncTabs, t])
 
   const openLibraryId = useCallback(async (id: string) => {
