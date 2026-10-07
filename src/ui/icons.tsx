@@ -1,4 +1,5 @@
 import { resolvePartImage } from './partImages'
+import { publicResourceUrl } from '../engine/publicResources.js'
 
 /** 16×16 图标。inner 是静态 SVG（来自 vokako 工具栏）。 */
 export function Svg16({ inner, size = 18 }: { inner: string; size?: number }) {
@@ -159,8 +160,8 @@ export function PartImg({ id, imageKey, svg, size = 18 }: { id?: string | null; 
   if (image) {
     return (
       <span className="qb-part-image shrink-0 inline-flex items-center justify-center" style={{ width: size, height: size }}>
-        <img src={`${import.meta.env.BASE_URL}${image.src}`} alt="" draggable={false}
-          srcSet={image.srcLarge ? `${import.meta.env.BASE_URL}${image.src} 1x, ${import.meta.env.BASE_URL}${image.srcLarge} 2x` : undefined}
+        <img src={publicResourceUrl(image.src)} alt="" draggable={false}
+          srcSet={image.srcLarge ? `${publicResourceUrl(image.src)} 1x, ${publicResourceUrl(image.srcLarge)} 2x` : undefined}
           loading="lazy" style={{ width: size, height: size, objectFit: 'contain', filter: 'drop-shadow(0 0 1.2px rgba(255,255,255,.95))' }} />
       </span>
     )

@@ -3,6 +3,7 @@
 // 口径全照引擎：尺寸同 model.bounds（四周各留半个接头），步数同分步手册（自下而上），
 // 站立面、跨度、围挡同交付页的 computeMetrics，错误同安全检查面板。
 import { BuildModel, computeBuildPlan, computeMetrics, computeSafety, geometry } from './engine-api'
+import { ENGINE_VERSION } from './engine/publicResources.js'
 
 export interface DesignStats {
   /** 宽、深、高，厘米 */
@@ -24,8 +25,8 @@ interface Finding { rule: string; level: string; params: { n?: number } }
 const statsCache = new Map<string, DesignStats>()
 const STATS_CACHE_LIMIT = 4
 
-function statsContentKey(data: unknown): string {
-  return JSON.stringify(data, (_key, value) => value && typeof value === 'object' && !Array.isArray(value)
+export function statsContentKey(data: unknown): string {
+  return ENGINE_VERSION + ':' + JSON.stringify(data, (_key, value) => value && typeof value === 'object' && !Array.isArray(value)
     ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]])) : value)
 }
 
@@ -39,7 +40,7 @@ export function cachedStats(data: unknown): DesignStats | null {
   return hit
 }
 
-function rememberStats(data: unknown, stats: DesignStats) {
+export function rememberStats(data: unknown, stats: DesignStats) {
   const key = statsContentKey(data)
   statsCache.delete(key)
   statsCache.set(key, stats)
@@ -69,6 +70,8 @@ export function statsOfModel(model: any): DesignStats {
 
 /** 一份造型 JSON 的量；读不进引擎返回 null（和 partsOfData 一样）。 */
 export function statsOfData(data: unknown): DesignStats | null {
+  const hit = cachedStats(data)
+  if (hit) return hit
   const model = new BuildModel()
   if (!model.loadJSON(data).ok) return null
   const stats = statsOfModel(model)

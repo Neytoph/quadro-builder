@@ -65,4 +65,26 @@ describe('?doc= 打开自己的一座', () => {
     expect(await hasLocalDoc('from-server')).toBe(true)
     expect((await docs.getDoc('from-server') as { name: string }).name).toBe('造型 from-server')
   })
+
+  it('目标读取并发去重、完成后重新核对，账户epoch切换取消旧请求（隔离夹具）', async () => {
+    storage.setAccountScope('dedupe')
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const request = vi.fn(async (_url: string, init: RequestInit) => {
+      await gate
+      if (init.signal!.aborted) throw init.signal!.reason
+      return new Response(JSON.stringify(remote('target')), { headers: { 'X-Builder-User-ID': 'dedupe' } })
+    })
+    vi.stubGlobal('fetch', request)
+    const first = pullDoc('/quadro', 'target')
+    expect(pullDoc('/quadro', 'target')).toBe(first)
+    release()
+    expect(await first).toBe(true)
+    await pullDoc('/quadro', 'target')
+    expect(request).toHaveBeenCalledTimes(2)
+    const cancelled = pullDoc('/quadro', 'target').catch(error => error)
+    storage.setAccountScope('other')
+    expect((await cancelled).message).toContain('account changed')
+    expect(await docs.getDoc('target')).toBeUndefined()
+  })
 })

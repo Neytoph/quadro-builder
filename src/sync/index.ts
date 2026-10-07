@@ -8,68 +8,17 @@
 // 不传 baseUrl 就什么都不做——开源本地版的默认状态，行为与从前完全一致。
 
 import { docs, storage, partsOfData } from '../engine-api'
-import { cachedStats, statsOfData, type DesignStats } from '../designStats'
-import { ensureAssemblyMeshes } from '../engine/assemblyNativeMesh.js'
+import { cachedStats, rememberStats } from '../designStats'
+import { ENGINE_VERSION } from '../engine/publicResources.js'
+import { createStatsQueue } from './statsQueue'
 import { forgetOrigin, originOf } from './origin'
 import type {
   DesignParts, DocRecord, PullResponse, PushResponse, RemoteDoc, RemoteInventory,
-  SavedDocSyncResult, SyncEvent, SyncOptions,
+  SavedDocSyncResult, SyncEvent, SyncOptions, PendingStats,
 } from './types'
 
 async function readCursor(): Promise<number> {
   return docs.readPullCheckpoint()
-}
-
-let statsWorker: Worker | null = null
-let statsJob = Promise.resolve()
-
-function computeStatsOffThread(data: unknown): Promise<DesignStats | null> {
-  const finish = statsJob.then(() => runStatsJob(data))
-  statsJob = finish.then(() => undefined, () => undefined)
-  return finish
-}
-
-function statsOnMain(data: unknown): Promise<DesignStats | null> {
-  return ensureAssemblyMeshes().then(() => statsOfData(data)).catch((error: unknown) => {
-    console.warn('[sync stats]', error)
-    return null
-  })
-}
-
-function runStatsJob(data: unknown): Promise<DesignStats | null> {
-  const hit = cachedStats(data)
-  if (hit) return Promise.resolve(hit)
-  if (import.meta.env.MODE === 'test' || typeof Worker !== 'function') {
-    return new Promise(resolve => {
-      setTimeout(() => { resolve(statsOnMain(data)) }, 0)
-    })
-  }
-  return new Promise(resolve => {
-    try {
-      statsWorker ??= new Worker(new URL('./statsWorker.ts', import.meta.url), { type: 'module' })
-    } catch (error) {
-      console.warn('[sync stats]', error)
-      resolve(statsOnMain(data))
-      return
-    }
-    const worker = statsWorker
-    const done = (event: MessageEvent<{ stats?: DesignStats | null, error?: string }>) => {
-      worker.removeEventListener('message', done)
-      worker.removeEventListener('error', failed)
-      if (event.data?.error) console.warn('[sync stats]', event.data.error)
-      resolve(event.data?.stats ?? null)
-    }
-    const failed = (event: ErrorEvent) => {
-      worker.removeEventListener('message', done)
-      worker.removeEventListener('error', failed)
-      console.warn('[sync stats]', event.message)
-      statsWorker = null
-      resolve(statsOnMain(data))
-    }
-    worker.addEventListener('message', done)
-    worker.addEventListener('error', failed)
-    worker.postMessage(data)
-  })
 }
 
 function contentJSON(data: unknown): string | undefined {
@@ -114,6 +63,7 @@ export function createSync(opts: SyncOptions = {}) {
   const receipts = new Map<string, SavedDocSyncResult>()
   const controller = new AbortController()
   const scopeEpoch = storage.getAccountEpoch()
+  const unwatchAccount = storage.onAccountChange(() => stop())
   function active() {
     if (stopped || storage.getAccountEpoch() !== scopeEpoch) throw new DOMException('account changed', 'AbortError')
   }
@@ -126,7 +76,7 @@ export function createSync(opts: SyncOptions = {}) {
     const res = await fetchImpl(`${baseUrl}${path}`, {
       ...init,
       credentials: 'include',           // 会话 cookie 由网关下发
-      signal: controller.signal,
+      signal: init?.signal || controller.signal,
       headers: { 'Content-Type': 'application/json', ...(init?.headers || {}), 'X-Builder-User-ID': accountId },
     })
     active()
@@ -169,28 +119,79 @@ export function createSync(opts: SyncOptions = {}) {
    * 装配计划的步骤数不挡这一次上传。造型先记成已同步，量按同一 rev 补上。
    * 用户又存了新版本，或这份内容已经变了，就不再写旧的步骤数。
    */
-  function scheduleStats(id: string, data: unknown, rev: number, saveId?: string) {
-    const deliver = async () => {
-      if (stopped || storage.getAccountEpoch() !== scopeEpoch) return
-      const stats = await computeStatsOffThread(data)
-      if (!stats || stopped || storage.getAccountEpoch() !== scopeEpoch) return
-      const current = await docs.getDoc(id) as DocRecord | null
-      if (!current || current.rev !== rev) return
-      if (saveId && current.saveId !== saveId) return
-      if (contentJSON(current.data) !== contentJSON(data)) return
-      try {
-        await call(`/models/${encodeURIComponent(id)}/stats`, {
-          method: 'PUT',
-          body: JSON.stringify({ rev, stats }),
-        })
-      } catch (error) {
-        if (stopped || storage.getAccountEpoch() !== scopeEpoch) return
-        const message = error instanceof Error ? error.message : String(error)
-        if (message.includes('→ 404')) return
-        console.warn('[sync stats]', error)
+  const statsQueue = createStatsQueue()
+  const statsDelivering = new Map<string, { rev: number; abort: AbortController }>()
+  let statsDraining = false
+  function statsTask(doc: DocRecord, rev: number): PendingStats {
+    return { id: `models-stats:${doc.id}`, docId: doc.id, data: doc.data, rev, saveId: doc.saveId, engineVersion: ENGINE_VERSION }
+  }
+  const currentStatsModel = async (task: PendingStats) => {
+    active()
+    const current = await docs.getDoc(task.docId) as DocRecord | null
+    active()
+    return current && (!current.dirty || current.syncedSaveId === task.saveId && Boolean(task.saveId)) && current.rev === task.rev && current.saveId === task.saveId
+      && contentJSON(current.data) === contentJSON(task.data)
+  }
+  async function deliverStats(original: PendingStats) {
+    let task = original
+    const abort = new AbortController()
+    statsDelivering.set(task.docId, { rev: task.rev, abort })
+    const stopRequest = () => abort.abort()
+    controller.signal.addEventListener('abort', stopRequest, { once: true })
+    let timeout: ReturnType<typeof setTimeout> | undefined
+    try {
+      if (!await currentStatsModel(task)) { await docs.settleStats(task); return }
+      if (task.engineVersion !== ENGINE_VERSION) {
+        await docs.settleStats(task, { engineVersion: ENGINE_VERSION, stats: undefined })
+        active()
+        task = { ...task, engineVersion: ENGINE_VERSION, stats: undefined }
       }
+      emit({ type: 'stats-pending', id: task.docId, rev: task.rev })
+      const stats = task.stats || await statsQueue.compute(task.docId, task.data)
+      active()
+      if (abort.signal.aborted) throw new DOMException('stats superseded', 'AbortError')
+      if (!await currentStatsModel(task)) { await docs.settleStats(task); return }
+      rememberStats(task.data, stats)
+      await docs.settleStats(task, { stats })
+      active()
+      timeout = setTimeout(() => abort.abort(new Error('stats upload timed out')), 15_000)
+      await call(`/models/${encodeURIComponent(task.docId)}/stats`, { method: 'PUT', body: JSON.stringify({ rev: task.rev, stats }), signal: abort.signal })
+      active()
+      await docs.settleStats(task)
+      active()
+      emit({ type: 'stats-synced', id: task.docId, rev: task.rev })
+    } catch (error) {
+      if (stopped || storage.getAccountEpoch() !== scopeEpoch) return
+      if (error instanceof ConflictError) { await docs.settleStats(task); return }
+      const message = error instanceof Error ? error.message : String(error)
+      await docs.settleStats(task, { error: message, retryAt: Date.now() + 30_000 })
+      emit({ type: 'stats-pending', id: task.docId, rev: task.rev, error })
+      console.warn('[sync stats]', error)
+    } finally {
+      if (timeout) clearTimeout(timeout)
+      controller.signal.removeEventListener('abort', stopRequest)
+      statsDelivering.delete(task.docId)
+      void drainStats()
     }
-    void deliver()
+  }
+  async function drainStats(force = false) {
+    if (statsDraining || stopped || storage.getAccountEpoch() !== scopeEpoch) return
+    statsDraining = true
+    try {
+      const tasks = await docs.pendingStats() as PendingStats[]
+      active()
+      for (const task of tasks) {
+        if (statsDelivering.size >= 4) break
+        if (statsDelivering.has(task.docId) || !force && (task.retryAt || 0) > Date.now()) continue
+        void deliverStats(task)
+      }
+    } catch (error) { if (!stopped && storage.getAccountEpoch() === scopeEpoch) console.warn('[sync stats queue]', error) }
+    finally { statsDraining = false }
+  }
+  function scheduleStats(id: string, rev: number) {
+    const earlier = statsDelivering.get(id)
+    if (earlier && earlier.rev !== rev) { earlier.abort.abort(); statsQueue.cancel(id) }
+    void drainStats()
   }
 
   /**
@@ -247,25 +248,25 @@ export function createSync(opts: SyncOptions = {}) {
           })
           if (!Number.isSafeInteger(response.rev) || response.rev <= doc.rev) throw new Error('invalid save receipt')
           if (response.saveId && response.saveId !== doc.saveId) throw new Error('save receipt mismatch')
-          await docs.markDocSynced(doc.id, response.rev, stamp, response.coverApplied === false ? undefined : doc.cover, doc.saveId, doc.rev)
+          await docs.markDocSynced(doc.id, response.rev, stamp, response.coverApplied === false ? undefined : doc.cover, doc.saveId, doc.rev, stats ? null : statsTask(doc, response.rev))
           if (!response.originError) forgetOrigin(doc.id)
           if (response.coverError || response.originError) emit({ type: 'error', error: new Error(response.coverError || response.originError) })
-          if (!stats) scheduleStats(doc.id, doc.data, response.rev, doc.saveId)
+          scheduleStats(doc.id, response.rev)
         }
         active()
         if (doc.saveId) receipts.set(`${doc.id}:${doc.saveId}`, { status: 'synced', id: doc.id, saveId: doc.saveId, rev: response.rev })
-        emit({ type: 'pushed', id: doc.id, rev: response.rev, saveId: doc.saveId })
+        emit({ type: 'pushed', id: doc.id, rev: response.rev, saveId: doc.saveId, statsPending: !doc.deletedAt && !cachedStats(doc.data) })
       } catch (err) {
         active()
         if (err instanceof ConflictError) {
           if (!err.remote || err.remote.id !== doc.id || !Number.isSafeInteger(err.remote.rev)) throw new Error('invalid conflict response')
           // 响应丢失后的重试：远端确实是这份完整模型才可确认。
           if (!doc.deletedAt && !err.remote.deletedAt && err.remote.name === doc.name && contentJSON(err.remote.data) === contentJSON(doc.data)) {
-            await docs.markDocSynced(doc.id, err.remote.rev, stamp, undefined, doc.saveId, doc.rev)
+            await docs.markDocSynced(doc.id, err.remote.rev, stamp, undefined, doc.saveId, doc.rev, cachedStats(doc.data) ? null : statsTask(doc, err.remote.rev))
             active()
-            if (!cachedStats(doc.data)) scheduleStats(doc.id, doc.data, err.remote.rev, doc.saveId)
+            scheduleStats(doc.id, err.remote.rev)
             if (doc.saveId) receipts.set(`${doc.id}:${doc.saveId}`, { status: 'synced', id: doc.id, saveId: doc.saveId, rev: err.remote.rev })
-            emit({ type: 'pushed', id: doc.id, rev: err.remote.rev, saveId: doc.saveId })
+            emit({ type: 'pushed', id: doc.id, rev: err.remote.rev, saveId: doc.saveId, statsPending: !cachedStats(doc.data) })
           } else await forkConflict(doc, err.remote)
           continue
         }
@@ -373,6 +374,7 @@ export function createSync(opts: SyncOptions = {}) {
       await pull()
       await pushInventory()
       await pullInventory()
+      void drainStats(true)
       emit({ type: 'idle', rev: await readCursor() })
     } catch (error) {
       lastError = error
@@ -417,8 +419,11 @@ export function createSync(opts: SyncOptions = {}) {
   }
 
   function stop(): void {
+    unwatchAccount()
     stopped = true
     controller.abort()
+    statsQueue.cancel()
+    for (const job of statsDelivering.values()) job.abort.abort()
     if (timer) { clearInterval(timer); timer = null }
     docs.setSyncMode(false)
   }

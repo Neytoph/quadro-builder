@@ -14,9 +14,17 @@ const PREFIX = "quadro.design.v1.";
 // 无同步的本地版继续使用旧库；托管版启动时必须先选择经服务器确认的账户。
 let accountScope = "local";
 let accountEpoch = 0;
+const accountListeners = new Set();
+export function onAccountChange(callback) {
+  accountListeners.add(callback);
+  return () => accountListeners.delete(callback);
+}
 export function setAccountScope(userId) {
   const next = userId == null ? "anonymous" : `user:${String(userId)}`;
-  if (next !== accountScope) { accountScope = next; accountEpoch++; }
+  if (next !== accountScope) {
+    accountScope = next; accountEpoch++;
+    for (const callback of accountListeners) callback();
+  }
 }
 export function getAccountScope() { return accountScope; }
 export function getAccountEpoch() { return accountEpoch; }

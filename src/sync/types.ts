@@ -63,6 +63,18 @@ export interface PushResponse {
   originError?: string
 }
 
+export interface PendingStats {
+  id: string
+  docId: string
+  rev: number
+  saveId?: string
+  data: unknown
+  engineVersion: string
+  retryAt?: number
+  stats?: import('../designStats').DesignStats
+  error?: string
+}
+
 export type SavedDocSyncResult =
   | { status: 'synced'; id: string; saveId: string; rev: number }
   | { status: 'conflict'; id: string; saveId: string; copyId: string }
@@ -78,10 +90,12 @@ export interface RemoteInventory {
 export type SyncEvent =
   | { type: 'start' }
   | { type: 'idle'; rev: number }
-  | { type: 'pushed'; id: string; rev: number; saveId?: string }
+  | { type: 'pushed'; id: string; rev: number; saveId?: string; statsPending?: boolean }
   | { type: 'pulled'; count: number; rev: number }
   | { type: 'conflict'; id: string; copyId: string; saveId?: string }
   | { type: 'legacy-deletion'; id: string }
+  | { type: 'stats-pending'; id: string; rev: number; error?: unknown }
+  | { type: 'stats-synced'; id: string; rev: number }
   | { type: 'inventory-pushed'; rev: number }
   | { type: 'inventory-pulled'; rev: number }
   /** 库存两端都改过。服务端那份已生效，本地那份存进了 stashKey。 */

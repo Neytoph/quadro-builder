@@ -1,4 +1,5 @@
 import { PART_IMAGE_MANIFEST } from './partImageManifest'
+import { publicResourceUrl } from '../engine/publicResources.js'
 
 type PartImage = { src: string; srcLarge?: string }
 const images: Readonly<Record<string, PartImage>> = PART_IMAGE_MANIFEST.parts
@@ -16,7 +17,7 @@ export function resolvePartImage(idOrKey?: string | null): (PartImage & { id: st
 
 export function partImageSrc(idOrKey?: string | null, large = true): string | null {
   const image = resolvePartImage(idOrKey)
-  return image ? `${import.meta.env.BASE_URL}${large && image.srcLarge ? image.srcLarge : image.src}` : null
+  return image ? publicResourceUrl(large && image.srcLarge ? image.srcLarge : image.src) : null
 }
 
 // 兼容目录组件现有调用；所有图片定位使用上述公共映射。

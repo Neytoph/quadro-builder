@@ -17,7 +17,8 @@ import { geometricPreset, jsonToFragment } from '../data/presets'
 import pyramidQdf from '../data/A0128.qdf?raw'
 import { clearSharePayload, decodeShare, peekSharePayload, shareUrl } from '../share'
 import { isUntitledName, labelOf as nameLabel } from '../names'
-import { fetchOfficialQdf, officialLibId, OFFICIAL_BY_ID, parseOfficialId } from '../data/official'
+import { fetchOfficialQdf, officialCacheVersion, cachedOfficialQdf, officialLibId, OFFICIAL_BY_ID, parseOfficialId } from '../data/official'
+import { versionPublicSource } from '../engine/publicResources.js'
 import { applyFrameHex, loadTune } from '../engine/colorTune.js'
 import { exportAssemblyPdf as runAssemblyPdf } from '../engine/assemblyManual.js'
 import { ACCESSORY_IDS } from '../engine/accessoryPack.js'
@@ -73,6 +74,7 @@ export interface SafetyResult {
 export type ThumbJob = { kind: 'official' | 'preset'; id: string } | { kind: 'model'; data: unknown }
 
 export interface TabInfo extends PersonalState {
+  statsPending?: boolean
   tabId: string
   docId: string | null
   name: string
@@ -725,8 +727,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
 
   const syncTabs = useCallback(() => {
     for (const tab of tabsRef.current) persistPersonal(tab)
-    setTabs(tabsRef.current.map(({ tabId, docId, name, dirty, planId, baseRev, savedContent, editGeneration, saveId, saveState, conflictDocId }) =>
-      ({ tabId, docId, name, dirty, planId, baseRev, savedContent, editGeneration, saveId, saveState, conflictDocId })))
+    setTabs(tabsRef.current.map(({ tabId, docId, name, dirty, planId, baseRev, savedContent, editGeneration, saveId, saveState, conflictDocId, statsPending }) =>
+      ({ tabId, docId, name, dirty, planId, baseRev, savedContent, editGeneration, saveId, saveState, conflictDocId, statsPending })))
     setActiveTabId(activeRef.current)
     persistSession()
   }, [persistSession])
@@ -888,6 +890,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       queued = queued.then(async () => {
         if (dead) return
         for (const tab of [...tabsRef.current]) await reconcileRef.current(tab)
+        const pending = await docs.pendingStats() as Array<{ docId: string; rev: number }>
+        for (const tab of tabsRef.current) tab.statsPending = pending.some(task => task.docId === tab.docId && task.rev === tab.baseRev)
         if (!dead) syncTabsRef.current()
       }).catch(error => {
         console.warn('[personal tabs]', error)
@@ -900,6 +904,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
         for (const tab of tabsRef.current) {
           if (tab.docId !== event.id || !event.saveId || tab.saveId !== event.saveId) continue
           tab.baseRev = event.rev
+          tab.statsPending = event.statsPending
           if (!tab.dirty && tab.saveState !== 'conflict') tab.saveState = 'synced'
         }
         syncTabsRef.current()
@@ -912,6 +917,13 @@ export function EngineProvider({ children }: { children: ReactNode }) {
           }
           if (!dead) syncTabsRef.current()
         }).catch(error => console.warn('[save baseline]', error))
+      }
+      if (event.type === 'stats-pending' || event.type === 'stats-synced') {
+        for (const tab of tabsRef.current) {
+          if (tab.docId === event.id && tab.baseRev === event.rev) tab.statsPending = event.type === 'stats-pending'
+        }
+        syncTabsRef.current()
+        if (event.type === 'stats-pending' && event.error) notifyRef.current(t('sync.statsPending'), 'warn')
       }
       if (event.type === 'error' || event.type === 'quota') {
         for (const tab of tabsRef.current) {
@@ -1673,9 +1685,14 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   }, [notify, syncTabs, t])
 
   const openDoc = useCallback(async (docId: string) => {
-    await syncNow()
+    await syncProbe()
     if (syncStarted()) {
-      try { await pullDoc(import.meta.env.VITE_SYNC_BASE as string, docId) }
+      try {
+        if (!await pullDoc(import.meta.env.VITE_SYNC_BASE as string, docId)) {
+          notify(t('sync.deletedProtected'), 'warn')
+          return
+        }
+      }
       catch (error) {
         console.warn('[open design]', error)
         notify(t('sync.failed'), 'warn')
@@ -1716,9 +1733,11 @@ export function EngineProvider({ children }: { children: ReactNode }) {
 
     if (official) {
       const libId = officialLibId(official)
-      const cached = await storage.libGet(libId) as { name?: string; qdf?: string | null } | null
+      const cached = await storage.libGet(libId) as { name?: string; qdf?: string | null; resourceVersion?: string; parserVersion?: string } | null
+      const version = officialCacheVersion(official)
       name = OFFICIAL_BY_ID.get(official)?.name || cached?.name || official
-      if (cached?.qdf) qdfText = cached.qdf
+      const cachedText = cachedOfficialQdf(cached, official)
+      if (cachedText) qdfText = cachedText
       else {
         notify(t('lib.loading', { name }))
         try {
@@ -1726,7 +1745,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
           const built = designEntry(libId, `${official}.qdf`, qdfText) as { name?: string; qdf?: string } | null
           if (built) {
             built.name = name
-            await storage.libPut([built])
+            await storage.libPut([{ ...built, ...version }])
           }
         } catch {
           notify(t('lib.fetchFailed', { id: official }), 'err')
@@ -2422,7 +2441,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
         data = await decodeShare(payload)
         clearSharePayload()
       } else {
-        const res = await fetch(ent.src as string, { credentials: 'include' })
+        const res = await fetch(versionPublicSource(ent.src as string), { credentials: 'include' })
         if (!res.ok) { notify(t('toast.srcFailed'), 'err'); return }
         try { data = designFromText(await res.text()) } catch { data = null }
       }

@@ -573,6 +573,17 @@ export class SceneManager {
     }
     this._buildViewCube();
     this._disposed = false;
+    this._meshRequests = new Map();
+    this._meshFineFailed = new Set();
+    this._onMeshOnline = () => {
+      if (this._disposed) return;
+      if (this._meshFineFailed.size || Object.values(MESH_FIELDS).some(field => this[field] === false)) {
+        this._dropMeshes();
+        this.onMeshesReady();
+      }
+    };
+    window.addEventListener('online', this._onMeshOnline);
+    window.addEventListener('focus', this._onMeshOnline);
     this._animate = this._animate.bind(this);
     this._animate();
   }
@@ -580,6 +591,10 @@ export class SceneManager {
   /** 不再用的画面（版本对照关掉时）：停下渲染循环，放掉渲染器和画布。 */
   dispose() {
     this._disposed = true;
+    for (const controller of this._meshRequests.values()) controller.abort();
+    this._meshRequests.clear();
+    window.removeEventListener('online', this._onMeshOnline);
+    window.removeEventListener('focus', this._onMeshOnline);
     window.removeEventListener("resize", this._onWindowResize);
     if (this._resizeObserver) this._resizeObserver.disconnect();
     this.onMeshesReady = () => {};
@@ -1250,31 +1265,38 @@ export class SceneManager {
     const feld = MESH_FIELDS[which] || "_connMeshes";
     if (this[feld] !== undefined) return this[feld];
     const fein = !!this._q().fine;
+    const controller = new AbortController();
+    this._meshRequests.set(which, controller);
     this[feld] = null;   // laeuft -> nicht noch einmal anfordern
-    const laden = which === "slides" ? loadSlideMeshes(fein)
-      : which === "tubes" ? loadTubeMeshes(fein)
-      : which === "fittings" ? loadFittingMeshes(fein)
-      : which === "surfaces" ? loadSurfaceMeshes(fein) : loadConnectorMeshes(fein);
+    let coarse = null;
+    const options = { signal: controller.signal, onCoarse: rec => {
+      if (controller.signal.aborted || this._disposed) return;
+      coarse = rec;
+      this[feld] = rec || false;
+      this.onMeshesReady();
+    } };
+    const laden = which === "slides" ? loadSlideMeshes(fein, options)
+      : which === "tubes" ? loadTubeMeshes(fein, options)
+      : which === "fittings" ? loadFittingMeshes(fein, options)
+      : which === "surfaces" ? loadSurfaceMeshes(fein, options) : loadConnectorMeshes(fein, options);
     laden.then((rec) => {
       // Hat die Stufe waehrend des Ladens gewechselt, gehoert die Antwort zur
       // falschen Aufloesung. Sie faellt weg; das Feld steht dank _dropMeshes()
       // schon wieder auf `undefined` und wird gleich neu angefordert.
-      if (!!this._q().fine !== fein) return;
+      if (controller.signal.aborted || this._disposed || !!this._q().fine !== fein) return;
+      this._meshRequests.delete(which);
+      if (fein && rec === coarse) this._meshFineFailed.add(which);
+      if (rec && rec !== coarse) this._clearMeshGeometry();
       // `false` heisst: endgueltig nichts geworden (Datei fehlt, kein Netz).
       // Damit wartet das Bild nicht weiter, sondern zeichnet seine eigenen
       // Formen -- `null` bedeutet dagegen "laeuft noch".
       this[feld] = rec || false;
-      if (this._disposed) return;
       this.onMeshesReady();
     });
     return null;
   }
 
-  /**
-   * Kleiner Ladekreisel ueber der Zeichenflaeche. Er laeuft nur, solange die
-   * Modelldateien unterwegs sind: gezeichnet wird in dieser Zeit gar nichts,
-   * damit nicht erst die Ersatzformen aufblitzen (siehe renderModel).
-   */
+  /** 所需coarse资源尚未齐全时等待；fine升级保留完整可操作的coarse画面。 */
   _setLoading(an) {
     if (!this._spinner) {
       if (!an) return;
@@ -1295,8 +1317,15 @@ export class SceneManager {
    * bei den Rutschen der groesste Posten der ganzen Szene.
    */
   _dropMeshes() {
+    for (const controller of this._meshRequests.values()) controller.abort();
+    this._meshRequests.clear();
+    this._meshFineFailed.clear();
     _maskTables = new WeakMap();
     for (const feld of Object.values(MESH_FIELDS)) this[feld] = undefined;
+    this._clearMeshGeometry();
+  }
+
+  _clearMeshGeometry() {
     if (!this._fitGeos) return;
     for (const [key, geo] of [...this._fitGeos]) {
       if (!key.startsWith("mesh:")) continue;
@@ -1304,6 +1333,11 @@ export class SceneManager {
       this._keepGeos.delete(geo);
       geo.dispose();
     }
+  }
+
+  /** 导出等待细节请求结算；编辑可在完整coarse绘制后立即操作。 */
+  meshesReady() {
+    return !this._spinner?.classList.contains('visible') && this._meshRequests.size === 0;
   }
 
   /**

@@ -14,18 +14,33 @@ export async function hasLocalDoc(id: string): Promise<boolean> {
 }
 
 /** 单文档核对最新服务端内容；不改变完整拉取的检查点。 */
-export async function pullDoc(baseUrl: string, id: string): Promise<boolean> {
+const reading = new Map<string, Promise<boolean>>()
+export function pullDoc(baseUrl: string, id: string): Promise<boolean> {
+  const key = JSON.stringify([baseUrl, storage.getAccountEpoch(), storage.getAccountScope(), id])
+  const pending = reading.get(key)
+  if (pending) return pending
+  const run = readDoc(baseUrl, id).finally(() => { if (reading.get(key) === run) reading.delete(key) })
+  reading.set(key, run)
+  return run
+}
+
+async function readDoc(baseUrl: string, id: string): Promise<boolean> {
   const epoch = storage.getAccountEpoch()
   const scope = storage.getAccountScope()
   if (!scope.startsWith('user:')) throw new Error('verified account required')
   const userId = scope.slice(5)
-  const res = await fetch(`${baseUrl}/models/${encodeURIComponent(id)}`, { credentials: 'include', cache: 'no-store', headers: { Accept: 'application/json', 'X-Builder-User-ID': userId } })
-  if (epoch !== storage.getAccountEpoch() || res.headers.get('X-Builder-User-ID') !== userId) throw new Error('account changed')
-  if (res.status === 404) return false
-  if (!res.ok) throw new Error(`GET /models/${id} → ${res.status}`)
-  const doc = await res.json() as RemoteDoc
-  if (epoch !== storage.getAccountEpoch()) throw new Error('account changed')
-  if (doc.id !== id || !Number.isSafeInteger(doc.rev)) throw new Error('invalid remote model')
-  await docs.putRemoteDoc(doc)
-  return !doc.deletedAt && doc.data !== null && doc.data !== undefined
+  const controller = new AbortController()
+  const unwatchAccount = storage.onAccountChange(() => controller.abort(new Error('account changed')))
+  const timeout = setTimeout(() => controller.abort(new Error('model read timed out')), 30_000)
+  try {
+    const res = await fetch(`${baseUrl}/models/${encodeURIComponent(id)}`, { credentials: 'include', cache: 'no-store', signal: controller.signal, headers: { Accept: 'application/json', 'X-Builder-User-ID': userId } })
+    if (epoch !== storage.getAccountEpoch() || res.headers.get('X-Builder-User-ID') !== userId) throw new Error('account changed')
+    if (res.status === 404) return false
+    if (!res.ok) throw new Error(`GET /models/${id} → ${res.status}`)
+    const doc = await res.json() as RemoteDoc
+    if (epoch !== storage.getAccountEpoch()) throw new Error('account changed')
+    if (doc.id !== id || !Number.isSafeInteger(doc.rev)) throw new Error('invalid remote model')
+    await docs.putRemoteDoc(doc)
+    return !doc.deletedAt && doc.data !== null && doc.data !== undefined
+  } finally { clearTimeout(timeout); unwatchAccount() }
 }

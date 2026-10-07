@@ -5,6 +5,7 @@ import { VitePWA } from 'vite-plugin-pwa'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { publicResources } from './scripts/publicResources'
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url))
 
@@ -38,6 +39,7 @@ function readBody(req: import('node:http').IncomingMessage, limit = 2_000_000) {
 
 export default defineConfig({
   plugins: [
+    publicResources(rootDir),
     react(),
     tailwindcss(),
     {
@@ -92,6 +94,7 @@ export default defineConfig({
       },
     },
     VitePWA({
+      injectRegister: false,
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'favicon-32.png'],
       manifest: {
@@ -109,7 +112,7 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,png,woff2,json}'],
+        globPatterns: ['assets/*.{js,css}', 'favicon*.{svg,png}'],
         maximumFileSizeToCacheInBytes: 12 * 1024 * 1024,
       },
     }),
@@ -119,5 +122,6 @@ export default defineConfig({
   },
   worker: {
     format: 'es',
+    plugins: () => [publicResources(rootDir, false)],
   },
 })

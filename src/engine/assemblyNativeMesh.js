@@ -11,6 +11,9 @@ export function ensureAssemblyMeshes() {
   pending ??= import('./assemblyNativeEnvelopes.js').then(mod => {
     meshes = mod
     return mod
+  }).catch(error => {
+    pending = null
+    throw error
   })
   return pending
 }

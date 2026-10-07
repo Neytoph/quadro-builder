@@ -129,6 +129,26 @@ export function readPullCheckpoint() {
     .then(row => row?.rev || 0);
 }
 
+export function pendingStats() {
+  return dbTx(DB_STORES.sync, "readonly", store => store.getAll())
+    .then(rows => rows.filter(row => row.id.startsWith('models-stats:')));
+}
+
+/** 只更新同一个统计版本；晚到的旧回执不能清掉较新待补。 */
+/** @param {object | null} [patch] */
+export function settleStats(task, patch = null) {
+  return dbTx(DB_STORES.sync, "readwrite", store => {
+    const request = store.get(task.id);
+    request.onsuccess = () => {
+      const current = request.result;
+      if (!current || current.rev !== task.rev || current.saveId !== task.saveId || current.engineVersion !== task.engineVersion) return;
+      if (patch) store.put({ ...current, ...patch });
+      else store.delete(task.id);
+    };
+    return request;
+  });
+}
+
 /** 响应内容及检查点一起提交；dirty 项的 pendingRemote 也先持久化。 */
 export function applyRemoteBatch(items, rev) {
   const results = [];
@@ -158,7 +178,16 @@ export function applyRemoteBatch(items, rev) {
  * Zwischenzeit weitergearbeitet (`updatedAt` weicht ab), bleibt die Marke
  * stehen -- der nächste Abgleich schickt den neueren Stand hinterher.
  */
-export function markDocSynced(docId, rev, expectUpdatedAt, sentCover, expectSaveId, sentBaseRev) {
+/**
+ * @param {string} docId
+ * @param {number} rev
+ * @param {number | undefined} [expectUpdatedAt]
+ * @param {string | undefined} [sentCover]
+ * @param {string | undefined} [expectSaveId]
+ * @param {number | undefined} [sentBaseRev]
+ * @param {object | null} [pendingStats] 独立统计待补快照，与模型回执原子落盘。
+ */
+export function markDocSynced(docId, rev, expectUpdatedAt, sentCover, expectSaveId, sentBaseRev, pendingStats = null) {
   const result = {};
   return dbTx([DB_STORES.docs, DB_STORES.sync], "readwrite", stores => {
     const store = stores[DB_STORES.docs];
@@ -167,6 +196,12 @@ export function markDocSynced(docId, rev, expectUpdatedAt, sentCover, expectSave
     request.onsuccess = () => {
       const doc = request.result;
       if (!doc) return;
+      if (pendingStats) {
+        const statsRequest = links.get(`models-stats:${docId}`);
+        statsRequest.onsuccess = () => {
+          if (!statsRequest.result || statsRequest.result.rev <= rev) links.put({ ...pendingStats, id: `models-stats:${docId}` });
+        };
+      }
       const sameSave = typeof expectSaveId === "string" ? doc.saveId === expectSaveId : typeof expectUpdatedAt !== "number" || doc.updatedAt === expectUpdatedAt;
       if (!sameSave) {
         // 同一本地分支在等待回执时又保存：只推进已确认的基线，保留新内容及dirty。

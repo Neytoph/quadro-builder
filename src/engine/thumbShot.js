@@ -10,6 +10,7 @@ function waitFrame() {
 }
 
 function sceneWaiting(scene) {
+  if (scene.meshesReady) return !scene.meshesReady();
   return !!scene._spinner?.classList.contains('visible')
 }
 

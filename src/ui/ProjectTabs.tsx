@@ -97,6 +97,7 @@ export default function ProjectTabs() {
             {state === 'synced' && <Check size={14} />}
             {!['conflict', 'failed', 'synced'].includes(state) && <CloudUpload size={14} />}
             <span className="text-[10px] max-w-24 truncate">{t(`sync.${state}`)}</span>
+            {state === 'synced' && tab.statsPending && <span className="text-[10px]" title={t('sync.statsPending')}>{t('sync.statsWaiting')}</span>}
           </button>}
           <button onClick={() => close(tab.tabId, tab.dirty)} className="qb-tab-close"
             title={t('chrome.closeTab')} aria-label={`${t('chrome.closeTab')} · ${tab.name}`}><X size={14} aria-hidden="true" /></button>
