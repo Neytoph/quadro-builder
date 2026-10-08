@@ -101,7 +101,7 @@ export default defineConfig({
       },
       transformIndexHtml(html: string) {
         if (!opsTelemetryEnabled) return html
-        return html.replace('</head>', '<script defer data-ops-telemetry src="/app/ops-client.js?v=00f8b1bbf9"></script></head>')
+        return html.replace('</head>', '<script defer data-ops-telemetry src="/app/ops-client.js?v=fc8d761a9d"></script></head>')
       },
     },
     VitePWA({
