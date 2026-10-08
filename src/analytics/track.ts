@@ -43,7 +43,6 @@ const MAX_BATCH = 20
 const TIME_TICK_MS = 5000
 const TIME_REPORT_MS = 15000
 const ACTIVE_WINDOW_MS = 30000
-const timingDocument = document as Document & { readonly prerendering?: boolean }
 // 托管页面可订阅成功动作、提交有限的入口统计；不传模型或用户输入。
 const SITE_ACTIONS = new Set(['builder.design.save', 'builder.design.saveAs', 'builder.export.manual.done'])
 const SITE_TRACK_NAMES = new Set(['builder.wechat.open', 'builder.wechat.download', 'builder.wechat.prompt'])
@@ -193,6 +192,7 @@ export function startAnalytics(): void {
   // 同一个监听函数重复注册也只运行一次；入站名称不在成功动作里，不会循环。
   window.addEventListener('quadro-builder:track', trackSiteEvent)
   if (!URL_) return
+  const timingDocument = document as Document & { readonly prerendering?: boolean }
   const owner = parentClock()
   if (owner) {
     for (const name of ['pointerdown', 'pointermove', 'keydown', 'wheel', 'touchstart', 'scroll']) {
