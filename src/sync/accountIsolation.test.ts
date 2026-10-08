@@ -11,6 +11,23 @@ const account = () => String(81000 + ++serial)
 afterEach(() => { storage.setAccountScope(null); docs.setSyncMode(false) })
 
 describe('账户存储与同步隔离（内存 IndexedDB、请求 sink，不代表真实登录验收）', () => {
+  it('库存通知覆盖账号切换、本地保存和远端拉取', () => {
+    const A = account(), B = account()
+    storage.setAccountScope(A)
+    const changes: unknown[] = []
+    const stop = storage.onInventoryChange(() => changes.push(storage.loadInventory()))
+    storage.saveInventory({ tubes: { T35: 10 } })
+    storage.setAccountScope(B)
+    storage.putRemoteInventory({ data: { connectors: { '4way': 8 } }, rev: 2, updatedAt: 3 })
+    stop()
+    storage.saveInventory({ panels: { panel_40x40: 1 } })
+    expect(changes).toEqual([
+      { tubes: { T35: 10 } },
+      null,
+      { connectors: { '4way': 8 } },
+    ])
+  })
+
   it('文档、会话、库存、Yjs 标签及旧库按账户隔离', async () => {
     await loadCatalog()
     const A = account(), B = account()

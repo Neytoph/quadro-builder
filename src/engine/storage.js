@@ -15,15 +15,24 @@ const PREFIX = "quadro.design.v1.";
 let accountScope = "local";
 let accountEpoch = 0;
 const accountListeners = new Set();
+const inventoryListeners = new Set();
 export function onAccountChange(callback) {
   accountListeners.add(callback);
   return () => accountListeners.delete(callback);
+}
+export function onInventoryChange(callback) {
+  inventoryListeners.add(callback);
+  return () => inventoryListeners.delete(callback);
+}
+function notifyInventoryChange() {
+  for (const callback of inventoryListeners) callback();
 }
 export function setAccountScope(userId) {
   const next = userId == null ? "anonymous" : `user:${String(userId)}`;
   if (next !== accountScope) {
     accountScope = next; accountEpoch++;
     for (const callback of accountListeners) callback();
+    notifyInventoryChange();
   }
 }
 export function getAccountScope() { return accountScope; }
@@ -247,12 +256,14 @@ export function saveInventory(inv, { dirty = true, rev = null } = {}) {
     dirty,
     updatedAt: Date.now(),
   });
+  notifyInventoryChange();
 }
 
 /** Serverstand uebernehmen. */
 export function putRemoteInventory(record) {
   localStorage.setItem(accountKey(INV_KEY), JSON.stringify(record.data || {}));
   saveInventoryMeta({ rev: record.rev || 0, dirty: false, updatedAt: record.updatedAt || Date.now() });
+  notifyInventoryChange();
   return record;
 }
 

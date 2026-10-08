@@ -659,6 +659,13 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const [tabs, setTabs] = useState<TabInfo[]>([])
   const [activeTabId, setActiveTabId] = useState<string | null>(null)
   const [inventory, setInventory] = useState<Inventory>(loadInv)
+  useEffect(() => {
+    const refresh = () => setInventory(loadInv())
+    const stop = storage.onInventoryChange(refresh)
+    // 身份请求可能在 React effect 挂载前完成；订阅后再读一次当前账号。
+    refresh()
+    return () => { stop() }
+  }, [])
   const [room, setRoomState] = useState<RoomSettings>(loadRoom)
   const [side, setSide] = useState<SidePanel>('bom')
   const [exportingManual, setExportingManual] = useState<{ page: number; total: number } | null>(null)
@@ -1275,13 +1282,11 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   }, [builder, bump])
 
   const setInv = useCallback((group: keyof Inventory, key: string, value: number) => {
-    setInventory(prev => {
-      const next = { ...prev, [group]: { ...prev[group] } }
-      if (value > 0) next[group][key] = value
-      else delete next[group][key]
-      storage.saveInventory(next)
-      return next
-    })
+    const current = loadInv()
+    const next = { ...current, [group]: { ...current[group] } }
+    if (value > 0) next[group][key] = value
+    else delete next[group][key]
+    storage.saveInventory(next)
   }, [])
 
   // 地址导入内部也需要空白标签页；它继续兑现针对最终入口模型的预览请求。
@@ -1942,7 +1947,6 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       const next = parseInventory(JSON.parse(await file.text()))
       if (!next) { track('builder.inventory.import', { ok: false }); notify(t('toast.invInvalid'), 'err'); return }
       storage.saveInventory(next)
-      setInventory(next)
       track('builder.inventory.import', { ok: true, rows: inventoryRows(next) })
       notify(t('toast.invImported'))
     } catch {
