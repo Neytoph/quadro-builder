@@ -177,6 +177,12 @@ export function createSync(opts: SyncOptions = {}) {
     } catch (error) {
       if (stopped || storage.getAccountEpoch() !== scopeEpoch) return false
       if (error instanceof ConflictError) { await docs.settleStats(task); return false }
+      // 同一份设计的封面或下一次保存已经推进到新版本时，旧统计任务会主动取消。
+      // 这是正常的版本替代：清掉旧任务，让新版本携带或重新计算统计，不记录失败。
+      if (abort.signal.aborted && abort.signal.reason instanceof DOMException && abort.signal.reason.name === 'AbortError') {
+        await docs.settleStats(task)
+        return false
+      }
       const message = error instanceof Error ? error.message : String(error)
       await docs.settleStats(task, { error: message, retryAt: Date.now() + 30_000 })
       emit({ type: 'stats-pending', id: task.docId, rev: task.rev, error })

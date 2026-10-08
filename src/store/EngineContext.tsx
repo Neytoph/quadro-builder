@@ -924,7 +924,6 @@ export function EngineProvider({ children }: { children: ReactNode }) {
           if (tab.docId === event.id && tab.baseRev === event.rev) tab.statsPending = event.type === 'stats-pending'
         }
         syncTabsRef.current()
-        if (event.type === 'stats-pending' && event.error) notifyRef.current(t('sync.statsPending'), 'warn')
       }
       if (event.type === 'error' || event.type === 'quota') {
         for (const tab of tabsRef.current) {

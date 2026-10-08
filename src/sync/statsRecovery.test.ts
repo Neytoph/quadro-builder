@@ -92,3 +92,38 @@ it('真实梁模型+隔离HTTP契约：统计失败保留结果和诊断，联�
   await vi.waitFor(async () => expect(await docs.pendingStats()).toHaveLength(0))
   sync.stop()
 })
+
+it('同一保存补封面推进版本时静默取消旧统计，最新版本携带统计完成同步', async () => {
+  const data = beam()
+  const saved = await docs.saveDoc({ docId: 'cover', name: '封面梁', data })
+  const events: Array<{ type: string; error?: unknown }> = []
+  let rev = 1
+  let statsCalls = 0
+  let statsStarted = () => {}
+  const firstStatsStarted = new Promise<void>(resolve => { statsStarted = resolve })
+  const sync = createSync({ baseUrl: '/quadro', accountId, onEvent: event => events.push(event), fetchImpl: async (input, init) => {
+    const url = String(input)
+    if (url.endsWith('/identity')) return response({ userId: accountId })
+    if (url.endsWith('/inventory')) return response({ data: {}, rev: 0 })
+    if (url.endsWith('/stats')) {
+      statsCalls++
+      statsStarted()
+      return await new Promise<Response>((_resolve, reject) => {
+        init!.signal!.addEventListener('abort', () => reject(init!.signal!.reason), { once: true })
+      })
+    }
+    if (init?.method === 'PUT') return response({ rev: ++rev, saveId: saved.saveId })
+    return response({ rev, items: [] })
+  } })
+  expect((await sync.syncSavedDoc(saved.id, saved.saveId)).status).toBe('synced')
+  await firstStatsStarted
+
+  await docs.setDocCover(saved.id, 'cover', undefined, saved.saveId)
+  await sync.syncNow()
+  await vi.waitFor(async () => expect(await docs.pendingStats()).toHaveLength(0))
+
+  expect(statsCalls).toBe(1)
+  expect(events.some(event => event.type === 'stats-pending' && event.error)).toBe(false)
+  expect((await docs.getDoc(saved.id))!.rev).toBe(3)
+  sync.stop()
+})
