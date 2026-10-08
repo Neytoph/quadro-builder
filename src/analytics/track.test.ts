@@ -40,6 +40,43 @@ function send(detail: unknown): void {
 }
 
 describe('托管页面行动和统计桥接', () => {
+  it('同源父页面拥有计时时，嵌入Builder仍发送动作且不重复发送时长', async () => {
+    vi.stubEnv('VITE_ANALYTICS_URL', '/events')
+    const embeddedInput = vi.fn()
+    vi.stubGlobal('parent', {
+      location: { origin: window.location.origin },
+      QHTrack: { timeVersion: 1, embeddedInput },
+    })
+    const { startAnalytics, track } = await import('./track')
+    startAnalytics()
+    track('builder.design.save')
+    window.dispatchEvent(new Event('pointermove'))
+    await vi.advanceTimersByTimeAsync(45000)
+    const events = fetchSpy.mock.calls.flatMap(call => {
+      const [, init] = call as unknown as [string, RequestInit]
+      return JSON.parse(String(init.body)).events
+    })
+    expect(events.map((event: { name: string }) => event.name)).toEqual(['builder.design.save'])
+    expect(embeddedInput).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('独立Builder第十五秒发送有效时长，程序事件不算活跃，重复初始化不加计时器', async () => {
+    vi.stubEnv('VITE_ANALYTICS_URL', '/events')
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+    const { startAnalytics } = await import('./track')
+    startAnalytics()
+    startAnalytics()
+    window.dispatchEvent(new Event('pointermove'))
+    await vi.advanceTimersByTimeAsync(15000)
+    expect(fetchSpy).toHaveBeenCalledOnce()
+    const [, init] = fetchSpy.mock.calls[0] as unknown as [string, RequestInit]
+    expect(JSON.parse(String(init.body)).events).toEqual([
+      { name: 'builder.app.time', props: { visible: 15, active: 0, visit: expect.any(String) } },
+    ])
+    expect(vi.getTimerCount()).toBe(1)
+  })
+
   it('未配置统计时仍通知三种成功动作，仅包含名称', async () => {
     const { track, startAnalytics } = await import('./track')
     const actions: unknown[] = []
