@@ -43,6 +43,7 @@ class ErrorBoundaryInner extends Component<InnerProps, InnerState> {
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error(error, info.componentStack)
+    window.dispatchEvent(new Event('qh:builder:error'))
     // 崩溃后页面已经是废的，4 秒的批量窗口多半等不到——
     // 立刻冲一次，别让最该看见的这条跟着页面一起没了。
     try {

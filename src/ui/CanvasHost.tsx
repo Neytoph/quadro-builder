@@ -11,6 +11,11 @@ export default function CanvasHost() {
   const { pane } = useDock()
 
   useEffect(() => {
+    if (ready) window.dispatchEvent(new Event('qh:builder:ready'))
+    if (error) window.dispatchEvent(new Event('qh:builder:error'))
+  }, [ready, error])
+
+  useEffect(() => {
     if (!ready) return
     const pad = canvasCorner(left, vw, { right, dockOpen: !!pane })
     setViewCubePad(pad.cubePadRight, pad.cubePadBottom, pad.cubeSize)

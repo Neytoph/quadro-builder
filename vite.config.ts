@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { publicResources } from './scripts/publicResources'
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url))
+let opsTelemetryEnabled = false
 
 function listJpgIds(dir: string) {
   try {
@@ -91,6 +92,16 @@ export default defineConfig({
       name: 'startup-priority',
       transformIndexHtml(html: string) {
         return html.replace('<script type="module"', '<script type="module" fetchpriority="high"')
+      },
+    },
+    {
+      name: 'xiaomaifang-ops-client',
+      configResolved(config) {
+        opsTelemetryEnabled = config.env.VITE_ANALYTICS_URL === '/events'
+      },
+      transformIndexHtml(html: string) {
+        if (!opsTelemetryEnabled) return html
+        return html.replace('</head>', '<script defer data-ops-telemetry src="/app/ops-client.js?v=00f8b1bbf9"></script></head>')
       },
     },
     VitePWA({
