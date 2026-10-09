@@ -235,7 +235,9 @@ const LIVE_FIELDS = {
   "open-connector2": 4, "adapter2": 4, "tube-cap2": 4,
   "multi-wheel2": 4, "floating-wheel2": 4, "hub-cap2": 4, "casters2": 4,
   "steering-lock2": 4,
-  "slide2": 4, "slide-new2": 4, "curved-slide2": 4, "slide-end2": 4,
+  "slide2": 4, "slide-new2": 4, "slide-domestic80": 4, "slide-domestic60": 4, "slide-domestic15": 4,
+  "slide-domestic-integral60": 4, "slide-domestic-integral80": 4, "slide-domestic-classic60": 4, "slide-domestic-classic80": 4,
+  "curved-slide2": 4, "curved-slide-domestic80": 4, "slide-end2": 4,
   "roof2": 4, "roof-large2": 4,
   "pool2": 4, "pool-small2": 4, "bag2": 4, "textil-round2": 5,
 };
@@ -737,8 +739,9 @@ export function parseQDF(text, opts = {}) {
       if (spec.keepRest && p.rawRest) f.rest = p.rawRest;
       fittings.push(f);
     } else if (
-      p.name === "slide2" || p.name === "slide-new2" || p.name === "slide-end2" ||
-      p.name === "curved-slide2" || p.name === "roof2"
+      p.name === "slide2" || p.name === "slide-new2" || p.name === "slide-domestic80" || p.name === "slide-domestic60" || p.name === "slide-domestic15" ||
+      p.name === "slide-domestic-integral60" || p.name === "slide-domestic-integral80" || p.name === "slide-domestic-classic60" || p.name === "slide-domestic-classic80" || p.name === "slide-end2" ||
+      p.name === "curved-slide2" || p.name === "curved-slide-domestic80" || p.name === "roof2"
     ) {
       // Rutsche/Dach: KEINE Maße im QDF, rein dekorativ. Wir merken Position +
       // volle (√-dekodierte) Quaternion. Damit baut scene.js die Slide-Geometrie
@@ -760,6 +763,7 @@ export function parseQDF(text, opts = {}) {
         x: round(p.tuple[4] / 10), y: round(p.tuple[5] / 10), z: round(p.tuple[6] / 10),
         quat: [r4(q[1]/qn), r4(q[2]/qn), r4(q[3]/qn), r4(q[0]/qn)], // Three-Reihenfolge x,y,z,w (normiert)
         kind: p.name,
+        ...(p.name === "curved-slide-domestic80" && p.rest[3] === 1 ? { bendLeft: true } : {}),
       });
     }
   }

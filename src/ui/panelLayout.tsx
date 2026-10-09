@@ -146,7 +146,10 @@ export function canvasInset(box: PanelBox) {
 }
 
 export function leftColumnWidth(box: PanelBox, vw: number) {
-  return vw <= NARROW_MAX ? Math.min(box.width, vw - PANEL_GAP * 2) : box.width
+  // Keep the three scene buttons beside the capsules, with a gap on both
+  // viewport edges and between the two columns. Do not persist this shrink.
+  if (vw <= NARROW_MAX) return Math.min(box.width, Math.max(0, vw - PANEL_GAP * 3 - SCENE_CLUSTER_W))
+  return box.width
 }
 
 /** 居中工具条会碰到左栏时，左栏立刻改到工具栏下面。 */

@@ -1,14 +1,15 @@
 // 零件图标：每种零件单独渲染成透明底 PNG，放进 public/parts/<零件 id>.png，
 // 并生成 src/ui/partImages.ts（哪些零件有图）。菜单和料表有图用图，没图退回 SVG。
 // 官方造型里出现过的零件，从 public/qdf 里挑第一件；没出现过的，现场搭个小场景。
-// 零件网格改了就重跑一遍（仓库不带 playwright，装在别处就用 PLAYWRIGHT_CORE 指过去）：
+// 零件网格改了就重跑一遍（默认用 @playwright/test，其他安装可用 PLAYWRIGHT_CORE 指过去）：
 //   pnpm dev --port 5199            # 另开一个终端；别的端口用 BASE=http://127.0.0.1:<端口>/
-//   npm i --no-save playwright-core && node scripts/shoot-part-icons.mjs
+//   node scripts/shoot-part-icons.mjs
+//   PART_IDS=slide_module,slide_domestic_classic60 BASE=http://localhost:5174/ PW_CHANNEL=chrome node scripts/shoot-part-icons.mjs
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const { chromium } = await import(process.env.PLAYWRIGHT_CORE || 'playwright-core')
+const { chromium } = await import(process.env.PLAYWRIGHT_CORE || '@playwright/test')
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const OUT = path.resolve(ROOT, process.env.OUTPUT_DIR || 'public/parts')
@@ -20,6 +21,8 @@ const OUT_SIZE = Number(process.env.OUTPUT_SIZE || 128)
 if (!Number.isInteger(OUT_SIZE) || OUT_SIZE < 128 || OUT_SIZE > 1024) throw new Error('OUTPUT_SIZE 必须为 128 到 1024 的整数')
 const SIZE = Math.max(256, OUT_SIZE * 2)
 const TUBE_FRAME = 20   // 管子取景半径（cm）：映射后最长的 75 cm 管正好撑满
+// PART_IDS=slide_module,slide_domestic_classic60 only refreshes those icons.
+const onlyIds = new Set((process.env.PART_IDS || '').split(',').filter(Boolean))
 
 const browser = await chromium.launch({ ...(process.env.PW_CHANNEL ? { channel: process.env.PW_CHANNEL } : {}), ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE } : {}) })
 const ctx = await browser.newContext({ viewport: { width: 1000, height: 800 }, locale: 'zh-CN', deviceScaleFactor: 1 })
@@ -29,6 +32,8 @@ page.on('pageerror', e => console.log('pageerror', e.message))
 await page.goto(process.env.BASE || 'http://127.0.0.1:5199/', { waitUntil: 'networkidle' })
 await page.waitForFunction(() => window.__quadroDev, null, { timeout: 30000 })
 await page.waitForTimeout(1500)
+// Capture finished geometry, independent of the editor's appearance animation.
+await page.evaluate(() => window.__quadroDev.scene.setMotion(false))
 
 // 1. 扫官方造型的料表，每种零件记第一次出现的位置
 const items = await page.evaluate(async (files) => {
@@ -78,6 +83,10 @@ const items = await page.evaluate(async (files) => {
     ['fittings', 'lattice'], ['textiles', 'textile_20x40'], ['textiles', 'textile_rainbow'], ['textiles', 'textile_bridge'], ['fittings', 'sleeve'],
     ['fittings', 'pool_liner_xs'], ['fittings', 'pool_liner_s'], ['fittings', 'balls'],
     ['fittings', 'wheel_floating'], ['fittings', 'hub_cap'], ['fittings', 'roof_large'],
+    ['slides', 'slide_integral'], ['slides', 'slide_module'], ['slides', 'slide_curved'],
+    ['slides', 'slide_domestic_classic60'], ['slides', 'slide_domestic_classic80'],
+    ['slides', 'slide_domestic_integral60'], ['slides', 'slide_domestic_integral80'], ['slides', 'slide_curved_domestic80'],
+    ['slides', 'slide_module_assembly'], ['slides', 'slide_domestic_classic60_assembly'], ['slides', 'slide_domestic_classic80_assembly'],
   ]
   for (const [group, rid] of recipes) {
     const key = `${group}:${rid}`
@@ -87,11 +96,12 @@ const items = await page.evaluate(async (files) => {
 }, qdfs)
 const names = await page.evaluate(async () => (await import('/src/names.ts')).PART_ZH)
 for (const it of items) if (names[it.rid]) it.name = names[it.rid]
-console.log('零件种类', items.length)
+const renderItems = onlyIds.size ? items.filter(it => onlyIds.has(it.rid)) : items
+console.log('零件种类', renderItems.length)
 
 // 2. 逐件渲染
 const index = []
-for (const it of items.filter(it => !requestedIds || requestedIds.includes(it.rid))) {
+for (const it of renderItems) {
   const res = await page.evaluate(async ({ it, SIZE, OUT_SIZE, TUBE_FRAME }) => { try {
     const api = await import('/src/engine-api.ts')
     const { scene, model, builder } = window.__quadroDev
@@ -155,6 +165,21 @@ for (const it of items.filter(it => !requestedIds || requestedIds.includes(it.ri
         cube(); const kind = r === 'hub_cap' ? 'hub-cap2' : 'floating-wheel2'
         const mt = m.fittingMounts(kind)[0]; if (mt) ids = one(m.addFittingAt(kind, mt, 'yellow'))
       } else if (r === 'roof_large') { cube(); const mt = (m.roofMounts('roof-large2') || [])[0]; if (mt) ids = one(m.addRoofAt(mt)) }
+      else if (it.group === 'slides') {
+        const kinds = { slide_integral: 'slide-new2', slide_module: 'slide2', slide_curved: 'curved-slide2',
+          slide_domestic_classic60: 'slide-domestic-classic60', slide_domestic_classic80: 'slide-domestic-classic80',
+          slide_domestic_integral60: 'slide-domestic-integral60', slide_domestic_integral80: 'slide-domestic-integral80', slide_curved_domestic80: 'curved-slide-domestic80' }
+        const { SLIDE_SPECS, SLIDE_HOOK_LIFT } = await import('/src/engine/model.js')
+        const kind = kinds[r.replace(/_assembly$/, '')]
+        const drop = SLIDE_SPECS[kind]?.drop || 80
+        // Match the Builder's actual slide body, oriented toward the camera.
+        const body = m.addSlide([0, drop + SLIDE_HOOK_LIFT, 0], [0, 0, 1], kind, r.includes('curved') ? 'green' : 'red')
+        ids = one(body)
+        // Classic slides are placed with their matching run-out as one choice.
+        if (body && r.endsWith('_assembly')) {
+          ids.push(...one(m.addSlideAt('slide-end2', m.slideExit(body), 'yellow')))
+        }
+      }
       data = m.toJSON(); recipeIds = ids
     } else {
     const txt = await (await fetch(`/qdf/${it.qdf}`)).text()

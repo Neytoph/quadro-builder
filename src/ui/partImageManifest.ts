@@ -354,6 +354,27 @@ export const PART_IMAGE_MANIFEST = {
       "src": "parts/slide_curved.png",
       "srcLarge": "parts/large/slide_curved.png"
     },
+    "slide_curved_domestic80": {
+      "src": "parts/slide_curved_domestic80.png"
+    },
+    "slide_domestic_classic60": {
+      "src": "parts/slide_domestic_classic60.png"
+    },
+    "slide_domestic_classic60_assembly": {
+      "src": "parts/slide_domestic_classic60_assembly.png"
+    },
+    "slide_domestic_classic80": {
+      "src": "parts/slide_domestic_classic80.png"
+    },
+    "slide_domestic_classic80_assembly": {
+      "src": "parts/slide_domestic_classic80_assembly.png"
+    },
+    "slide_domestic_integral60": {
+      "src": "parts/slide_domestic_integral60.png"
+    },
+    "slide_domestic_integral80": {
+      "src": "parts/slide_domestic_integral80.png"
+    },
     "slide_end": {
       "src": "parts/slide_end.png",
       "srcLarge": "parts/large/slide_end.png"
@@ -365,6 +386,9 @@ export const PART_IMAGE_MANIFEST = {
     "slide_module": {
       "src": "parts/slide_module.png",
       "srcLarge": "parts/large/slide_module.png"
+    },
+    "slide_module_assembly": {
+      "src": "parts/slide_module_assembly.png"
     },
     "steering_lock": {
       "src": "parts/steering_lock.png",
@@ -496,8 +520,13 @@ export const PART_IMAGE_MANIFEST = {
     "roof-large2": "roof_large",
     "lattice2": "lattice",
     "bag2": "bag",
+    "slide-domestic-integral60": "slide_domestic_integral60",
+    "slide-domestic-integral80": "slide_domestic_integral80",
+    "slide-domestic-classic60": "slide_domestic_classic60",
+    "slide-domestic-classic80": "slide_domestic_classic80",
     "slide2": "slide_module",
     "curved-slide2": "slide_curved",
+    "curved-slide-domestic80": "slide_curved_domestic80",
     "slide-end2": "slide_end",
     "00359": "acrylic_glass"
   }
