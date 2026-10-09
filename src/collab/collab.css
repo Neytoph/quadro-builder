@@ -362,7 +362,12 @@
 
 /* ── 手机：抽屉和弹层都从底下升上来 ── */
 @media (max-width: 600px) {
-  .cb-sync { bottom: auto; top: 154px; left: 8px; }
+  .cb-sync { top: auto; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); left: max(8px, env(safe-area-inset-left, 0px)); max-width: 60px; gap: 4px; padding: 3px 6px; font-size: 10px; }
+  .cb-sync::before { width: 5px; height: 5px; flex: none; }
+  .cb-sync-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  /* 和同步胶囊共用底部一行，窄屏为状态留出位置。 */
+  body:has(.cb-sync) .m-asm { left: auto; right: max(8px, env(safe-area-inset-right, 0px)); bottom: calc(12px + env(safe-area-inset-bottom, 0px)); translate: none; width: max-content; max-width: calc(100vw - max(8px, env(safe-area-inset-left, 0px)) - 60px - 8px - max(8px, env(safe-area-inset-right, 0px))); gap: 4px; padding: 4px; }
+  body:has(.cb-sync) .m-asm:not(.overflow-x-auto) > .qb-btn { min-width: 0; display: block; overflow: hidden; text-overflow: ellipsis; padding: 5px 7px; font-size: 11px; }
   .cb-roomstage svg.plan { left: 8px; right: 8px; top: 8px; bottom: auto; width: calc(100% - 16px); height: 44%; }
   .cb-roompanel { left: 0; right: 0; top: auto; bottom: 0; width: auto; border-radius: 22px 22px 0 0; max-height: 52%; overflow: auto; }
   .cb-roomtip { left: 8px; right: 8px; bottom: auto; top: calc(44% + 58px); }

@@ -149,8 +149,8 @@ export default function PlanOverlays() {
         </div>
       )}
 
-      <span className={`cb-sync qb-card ${s.conn === 'connected' ? '' : 'off'}`} data-ui="sync-state" data-conn={s.conn}>
-        {t(syncing ? 'collab.connecting' : `collab.conn.${s.conn}`)}
+      <span className={`cb-sync qb-card ${s.conn === 'connected' ? '' : 'off'}`} data-ui="sync-state" data-conn={s.conn} title={t(syncing ? 'collab.connecting' : `collab.conn.${s.conn}`)}>
+        <span className="cb-sync-label">{t(syncing ? 'collab.connecting' : `collab.conn.${s.conn}`)}</span>
       </span>
 
       {s.activity.filter(a => a.shown).slice(-1).map(a => (
