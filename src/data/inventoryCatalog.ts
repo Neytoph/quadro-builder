@@ -14,7 +14,7 @@ export type InvCatalogItem = {
 
 const TEXTIL = new Set(['textile', 'textile_20x40', 'lattice', 'textile_round', 'bag', 'roof', 'roof_large'])
 const WHEEL = new Set(['wheel', 'wheel_floating', 'hub_cap', 'caster', 'wheel_adapter', 'wheel_bearing', 'steering_lock'])
-const SLIDE = new Set(['slide_integral', 'slide_module', 'slide_curved', 'slide_end'])
+const SLIDE = new Set(['slide_integral', 'slide_domestic80', 'slide_domestic60', 'slide_domestic15', 'slide_domestic_integral60', 'slide_domestic_integral80', 'slide_domestic_classic60', 'slide_domestic_classic80', 'slide_module', 'slide_curved', 'slide_curved_domestic80', 'slide_end'])
 const SKIP_PANEL = new Set(['panel_70x120', 'pool_floor'])
 
 type Cat = { id: string; stock?: boolean; buildable?: boolean; price?: number; qdf?: string }

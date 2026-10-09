@@ -11,7 +11,7 @@ import { t } from "./i18n.js";
 import { round2, panelNormal, modelMiddle, xAxisOf, yAxisOf, zAxisOf, quatFromBasis } from "./util.js";
 import { TUBE_FITTINGS, POOL_KINDS, isHolePart, holeArmDirs, holeClampDirsAt, HOLE_MASKS,
   BOLT_PART, HINGE_PART, isBoltPart, boltArmDirs, boltDepth, hingeDir, hingeKey, splitHingeKey,
-  POOL_SETS, ARM_FITTINGS, armFittingDirsAt, fixedFittingColor, fixedTubeColor, slopeArmDirsAt } from "./model.js";
+  POOL_SETS, ARM_FITTINGS, armFittingDirsAt, fixedFittingColor, fixedTubeColor, slopeArmDirsAt, SLIDE_PARTS, SLIDE_SPECS } from "./model.js";
 import { CONNECTOR_ARM_BITS } from "./qdfimport.js";
 import { ACCESSORY_IDS, PANEL_ACCESSORY_IDS, componentFrame } from './accessoryPack.js';
 import { confirmedSpec } from './componentPack.js';
@@ -307,7 +307,22 @@ export class Builder {
       }
       const n = this.model.slideMounts(40, 2, this.slideKind).length
         + this.model.slideChainMounts(this.slideKind).length;
-      if (!n) this.onNotice(t("notice_slide_no_mount"), "info");
+      if (!n) {
+        if (this.model.slideMounts(40, 2, this.slideKind, true).some(m => m.occupied)) {
+          this.onNotice(t("notice_slide_mount_occupied"), "info");
+          return;
+        }
+        const domesticNotice = {
+          "slide-domestic80": "notice_slide_no_mount_domestic80",
+          "slide-domestic60": "notice_slide_no_mount_domestic60",
+          "slide-domestic15": "notice_slide_no_mount_domestic60",
+          "slide-domestic-integral80": "notice_slide_no_mount_domestic80",
+          "slide-domestic-classic80": "notice_slide_no_mount_domestic80",
+          "slide-domestic-integral60": "notice_slide_no_mount_domestic60",
+          "slide-domestic-classic60": "notice_slide_no_mount_domestic60",
+        }[this.slideKind];
+        this.onNotice(t(domesticNotice || "notice_slide_no_mount"), "info");
+      }
       return;
     }
     if (this.mode !== "fitting") return;
@@ -2785,8 +2800,9 @@ export class Builder {
               // sonst kaeme das Halten auf einem gewaehlten Teil nie an, weil der
               // Zug schon begonnen haette.
               this._dragKandidat = { e, pick };
-            } else if (pick.data.kind === "panel") {
-              // 选着的面板：原地点一下是翻面（见 _clickSelectRaw），挪过点击的范围才开始拖。
+            } else if (pick.data.kind === "panel"
+                || (pick.data.kind === "slide" && this.model.slides.get(pick.data.id)?.kind === "curved-slide-domestic80")) {
+              // 面板翻面 / 国产弯滑梯换向：先保留单击，挪过点击范围才开始拖。
               // 不先转视角，免得开始拖之前画面跟着晃
               this._dragKandidat = { e, pick };
               return;
@@ -3089,7 +3105,11 @@ export class Builder {
       if (kind === "panel") obj = this.panelRail ? null : p.object;
       else if (kind === "tube") obj = this._railUsable(p.data.id) ? p.object : null;
     } else if (this.mode === "slide") {
-      obj = handle();                            // nur die Feld-Handles
+      obj = handle();
+      if (!obj && !this.readOnly) {
+        const pick = this.scene.pickForDelete(x, y);
+        if (pick?.data.kind === "slide" && this.model.slides.get(pick.data.id)?.kind === "curved-slide-domestic80") obj = pick.object;
+      }
     } else if (this.mode === "fitting" && POOL_KINDS.has(this.fittingKind)) {
       obj = handle();
     } else if (this.mode === "fitting" && RAIL_FITTINGS.has(this.fittingKind)) {
@@ -3393,7 +3413,7 @@ export class Builder {
     // （见 _clickSelectRaw），不往里选。快的两下还是选整块，不冲突。
     const last = this._selectClick;
     const cur = this.selection.size === 1 ? [...this.selection][0] : null;
-    if (hits.length > 1 && cur && cur[1] !== "panel" && last
+    if (hits.length > 1 && cur && cur[1] !== "panel" && this.model.slides.get(cur[0])?.kind !== "curved-slide-domestic80" && last
         && Math.hypot(x - last.x, y - last.y) < CLICK_TOLERANCE
         && performance.now() - last.t >= SELECT_BLOCK_MS) {
       const idx = hits.findIndex((h) => h.data && h.data.id === cur[0]);
@@ -3700,16 +3720,24 @@ export class Builder {
    * Standflaeche des Kettenteils, das an diesem Ausgang beginnen wuerde --
    * waagerecht auf Hoehe des Ausgangs, in dessen Laufrichtung (lokales +Z),
    * 40 cm breit. Laengen nach den Teilen: Auslauf 47,5 cm, Modularkoerper 120 cm
-   * (Folgeteil bei +120), Bogenkoerper ein 60x60-Quadrat nach +X/+Z (Folgeteil
-   * bei (60, -80, 60)).
+   * (Folgeteil bei +120), Bogenkoerper mit dem Radius aus SLIDE_PARTS
+   * nach +X/+Z.
    */
   _slideChainFootprint(m) {
     const q = m.quat || [0, 0, 0, 1];
     const ex = xAxisOf(q), ez = zAxisOf(q);
     const kind = this.slideKind;
-    const len = kind === "slide-end2" ? 47.5 : kind === "curved-slide2" ? 60 : 120;
-    const x0 = kind === "curved-slide2" ? 0 : -20;
-    const x1 = kind === "curved-slide2" ? 60 : 20;
+    const curve = SLIDE_PARTS[kind]?.curve ? SLIDE_PARTS[kind] : null;
+    const curveLeg = curve ? Math.abs(curve.exit.off[0]) : 0;
+    const mass = SLIDE_SPECS[kind];
+    let len = mass?.bodyRun || mass?.run || 120;
+    if (curve) len = curveLeg;
+    if (kind === "slide-end2") {
+      const feeder = this.model.slides.get(m.afterId);
+      len = 47.5 * this.model.slideMeshSpec(feeder).scale[2];
+    }
+    const x0 = curve ? 0 : -20;
+    const x1 = curve ? curveLeg : 20;
     const y = m.pos[1] + 0.5;
     const at = (sx, sz) => [
       m.pos[0] + ex[0] * sx + ez[0] * sz, y + ex[1] * sx + ez[1] * sz, m.pos[2] + ex[2] * sx + ez[2] * sz,
@@ -4304,9 +4332,28 @@ export class Builder {
     return { pick, id: null };
   }
 
+  _curveFlipsOnClick(id) {
+    if (this.readOnly || this.model.slides.get(id)?.kind !== "curved-slide-domestic80" || !this.selection.has(id)) return false;
+    const gid = this.model.groupOf(id);
+    const members = gid ? this.model.groups.get(gid) : new Set([id]);
+    return this.selection.size === members.size && [...this.selection.keys()].every(key => members.has(key));
+  }
+
+  _flipDomesticCurve(id) {
+    if (this.readOnly || this.model.slides.get(id)?.kind !== "curved-slide-domestic80") return false;
+    this.recordHistory(() => this.model.flipDomesticCurve(id));
+    if (!this._warnSlideConflicts(this.model.slides.get(id))) this.onNotice(t("notice_slide_reversed"), "info");
+    this.refresh();
+    return true;
+  }
+
   _clickSlide(e) {
-    // pickHandle liefert { object, data } -- die Nutzdaten stecken in h.data.
+    // Mount handles take priority, including a run-out overlapping the outlet.
     const h = this.scene.pickHandle(e.clientX, e.clientY);
+    if (!h?.data?.slideChain && !h?.data?.slideMount) {
+      const pick = this.scene.pickForDelete(e.clientX, e.clientY);
+      if (pick?.data.kind === "slide" && this._flipDomesticCurve(pick.data.id)) return;
+    }
     // Ausgang eines gesetzten Teils: das naechste Kettenglied kommt dorthin.
     if (h && h.data && h.data.slideChain) {
       let added = null;
@@ -4320,6 +4367,10 @@ export class Builder {
     }
     if (!h || !h.data || !h.data.slideMount) return;
     const m = h.data.slideMount;
+    if (!Array.isArray(m.hook) || !Array.isArray(m.normal) || m.normal.length < 3) {
+      this.onNotice(t("notice_slide_no_mount"), "info");
+      return;
+    }
     // Richtung aus der angeklickten SEITE des Feldes: die Rutsche faellt zu der
     // Seite ab, von der aus man draufschaut. Das Feld ist eine duenne Flaeche,
     // also entscheidet die Lage der Kamera bezueglich seiner Ebene -- so laesst
@@ -4330,7 +4381,10 @@ export class Builder {
       n[0] = -n[0]; n[2] = -n[2];
     }
     let added = null;
-    this.recordHistory(() => { added = this.model.addSlide(m.hook, n, this.slideKind, this.colorFor("slide")); });
+    this.recordHistory(() => {
+      const color = this.colorFor("slide");
+      added = this.model.addSlide(m.hook, n, this.slideKind, color);
+    });
     if (added) { if (!this._warnSlideConflicts(added)) this._notePlaced(added.id, "slide"); }
     else this.onNotice(t("notice_slide_exists"), "warn");
     this.refresh();
@@ -4791,6 +4845,12 @@ export class Builder {
     // 35ern, da waere ein einzelnes Rohr nur die halbe Wahrheit.
     const ids = Array.isArray(pick.data.tubes) && pick.data.tubes.length
       ? pick.data.tubes : [id];
+    // A second click on a selected bend reverses it, including quick clicks
+    // and bends selected with their group. Other parts keep block selection.
+    if (kind === "slide" && !add && this._curveFlipsOnClick(id) && this._flipDomesticCurve(id)) {
+      this._selectClick = null;
+      return;
+    }
     if (this._isBlockClick(e, ids[0])) {
       this._selectConnectedFromPick(pick, add);
       return;

@@ -961,6 +961,54 @@
       "url": "https://quadroshop.com/products/integrated-slide"
     },
     {
+      "id": "slide_domestic80",
+      "code": "",
+      "name": "Rutsche 80×160 cm (alter Entwurf)",
+      "name_en": "Domestic slide 80×160 cm (legacy)",
+      "qdf": "slide-domestic80",
+      "note": "旧版已保存草图使用的单体规格，保留兼容；新国产规格见一体款和经典款条目"
+    },
+    {
+      "id": "slide_domestic60",
+      "code": "",
+      "name": "Rutsche 60×120 cm (alter Entwurf)",
+      "name_en": "Domestic slide 60×120 cm (legacy)",
+      "qdf": "slide-domestic60",
+      "note": "旧版已保存草图使用的单体规格，保留兼容；新国产规格见一体款和经典款条目"
+    },
+    {
+      "id": "slide_domestic_integral60",
+      "code": "",
+      "name": "Inländische Integralrutsche 60×125 cm",
+      "name_en": "Domestic integral slide 60×125 cm",
+      "qdf": "slide-domestic-integral60",
+      "note": "国产一体滑梯，高 60 cm、长 125 cm；尺寸由用户确认，厂家包括艾亚教具、趣搭、安幼、中振；售价未提供"
+    },
+    {
+      "id": "slide_domestic_integral80",
+      "code": "",
+      "name": "Inländische Integralrutsche 80×145 cm",
+      "name_en": "Domestic integral slide 80×145 cm",
+      "qdf": "slide-domestic-integral80",
+      "note": "国产一体滑梯，高 80 cm、长 145 cm；尺寸由用户确认，厂家包括艾亚教具、趣搭、安幼、中振；售价未提供"
+    },
+    {
+      "id": "slide_domestic_classic60",
+      "code": "",
+      "name": "Inländische klassische Rutsche mit Auslauf 60×120 cm",
+      "name_en": "Domestic classic slide with run-out 60×120 cm",
+      "qdf": "slide-domestic-classic60",
+      "note": "国产经典滑梯加缓冲末端后的总尺寸：高 60 cm、长 120 cm；尺寸由用户确认，厂家包括艾亚教具、趣搭、安幼、中振；售价未提供"
+    },
+    {
+      "id": "slide_domestic_classic80",
+      "code": "",
+      "name": "Inländische klassische Rutsche mit Auslauf 80×160 cm",
+      "name_en": "Domestic classic slide with run-out 80×160 cm",
+      "qdf": "slide-domestic-classic80",
+      "note": "国产经典滑梯加缓冲末端后的总尺寸：高 80 cm、长 160 cm；尺寸由用户确认，厂家包括艾亚教具、趣搭、安幼、中振；售价未提供"
+    },
+    {
       "id": "slide_module",
       "code": "",
       "name": "Modularrutschen-Körper",
@@ -979,6 +1027,14 @@
       "qdf": "curved-slide2",
       "note": "gebogene Bahn, Ausgang 90 Grad zur Laufrichtung · Preis: quadroshop.com „Bogenrutschen-Körper“, Stand 2026-08-16",
       "url": "https://quadroshop.com/products/curved-slide-body"
+    },
+    {
+      "id": "slide_curved_domestic80",
+      "code": "",
+      "name": "Bogenrutsche 80×160 cm",
+      "name_en": "Domestic curved slide 80×160 cm",
+      "qdf": "curved-slide-domestic80",
+      "note": "国产弯滑梯唯一规格；高 80 cm，入口到配套末端出口的水平直线距离为 160 cm；末端单独放置，售价未提供"
     },
     {
       "id": "slide_end",

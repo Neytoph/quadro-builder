@@ -819,7 +819,8 @@ export function buildQDF(model, opts = {}) {
     // 0 = fixiert. Daecher haengt man von Hand ein, und die Herstellersoftware
     // schreibt sie in 41 von 42 Zeilen fixiert -- Rutschen dagegen frei.
     const frei = (s.kind === "roof2" || s.kind === "roof-large2") ? 0 : 1;
-    lines.push(`${s.kind || "slide-new2"}{${tubeMat(s.color)}, ${tuple(q, s.x, s.y, s.z)}, ${frei}, 0}`);
+    // The domestic-only kind uses its variant field for left/right handedness.
+    lines.push(`${s.kind || "slide-new2"}{${tubeMat(s.color)}, ${tuple(q, s.x, s.y, s.z)}, ${frei}, ${s.kind === "curved-slide-domestic80" && s.bendLeft ? 1 : 0}}`);
     stats.slides++;
     // Fussrohr: Unter jeder Rutsche liegt in den Herstellerdateien ein 35er
     // Rohr, mittig auf dem Rutschenpunkt. Es gehoert zum Rutschenbauteil --

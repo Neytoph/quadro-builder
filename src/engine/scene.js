@@ -9,7 +9,7 @@ import { geometry, colorHex, connectorColor, getPanel } from "./catalog.js";
 import { panelNormal, modelMiddle } from "./util.js";
 import { nodeClampOffset, isHolePart, HOLE_MASKS, holeArmDirs, BLACK_FITTINGS,
   isBoltPart, boltAxis, boltShift, hingeDir, hingeKey, POOL_KINDS, fixedFittingColor,
-  ARM_FITTINGS } from "./model.js";
+  ARM_FITTINGS, SLIDE_HOOK_LIFT, SLIDE_SPECS, SLIDE_PARTS } from "./model.js";
 import { reinforcementProfiles } from "./qdfexport.js";
 import { assemblyProfilePosition, assemblyProfileFallbackVisible } from './assemblyProfilePresentation.js';
 import { loadConnectorMeshes, loadSlideMeshes, loadTubeMeshes, loadFittingMeshes,
@@ -149,14 +149,12 @@ const ROUND_COVER_LEN = 80;
 
 // Bogenrutsche, gemessen an allen zehn Vorkommen im Bestand: das Folgeteil sitzt
 // stets 60 cm voraus (lokales +X), 80 cm tiefer und 60 cm zur Seite (lokales +Z).
-const CURVED_SLIDE_DROP = new THREE.Vector3(60, -80, 60);
+const isCurvedSlidePart = (kind) => Boolean(SLIDE_PARTS[kind]?.curve);
 // Laufrichtung einer Rutsche ist ihr lokales +Z: bei 73 von 76 geraden Rutschen
 // sitzt das Endstueck auf (0, -800, 1200). Die Bogenrutsche START ET ebenso in
 // ihrem lokalen +Z und dreht auf das lokale +X -- das Folgeteil steht in allen
 // zehn Faellen mit seinem eigenen +Z genau auf dem lokalen +X des Bogens.
 const CURVED_SLIDE_ENTRY = new THREE.Vector3(0, 0, 1);
-// Gerade Rutsche: Folgeteil auf dem lokalen Versatz (0, -800, 1200) mm.
-const STRAIGHT_SLIDE_DROP = new THREE.Vector3(0, -80, 120);
 // Austrittsrichtung am Ende des Bogens: lokales +X, rund 33 Grad abwaerts --
 // dasselbe Gefaelle wie die gerade Rutsche (80 cm auf 120 cm).
 // Austrittsrichtung der Bogenrutsche: WAAGERECHT in der lokalen +X-Richtung.
@@ -168,10 +166,8 @@ const CURVED_SLIDE_EXIT = new THREE.Vector3(1, 0, 0);
 // trägt (5 cm).
 const SLIDE_END_LIFT = 2.5;
 const SLIDE_BODY_LIFT = 5;
-// Integralrutsche: fester Fall und Auslauf ab dem Einhängepunkt (Modell:
-// SLIDE_DROP + SLIDE_HOOK_LIFT und SLIDE_RUN).
-const INTEGRAL_DROP = 85;
-const INTEGRAL_RUN = 120;
+const isLinearSlidePart = (kind) => !isCurvedSlidePart(kind) && (kind === "slide2" || kind === "slide-end2" || Boolean(SLIDE_SPECS[kind]));
+// Einteilige Rutschen: Auslauf und Fallhöhe kommen aus SLIDE_SPECS.
 // Auslauf: waagerechtes Stück, dann die Lippe -- ein abgerundeter Viertelkreis,
 // der um 90 Grad nach unten kippt (nur die Rutschfläche, ohne Wangen). Zusammen
 // reichen sie 47,5 cm nach vorn, so lang ist das Teil.
@@ -2648,8 +2644,11 @@ export class SceneManager {
   // den Modelldateien bereits gerichtet, siehe tmp/extracted/README.md.)
   _slideMatFor(kind, isCurrent, colorId) {
     const COL = {
-      "slide2": 0xf23b3b, "slide-new2": 0xf23b3b,  // gerade Rutsche = rot
-      "curved-slide2": 0x2fcb5a,                    // Bogenrutsche = gruen
+      "slide2": 0xf23b3b, "slide-new2": 0xf23b3b, "slide-domestic80": 0xf23b3b,
+      "slide-domestic60": 0xf23b3b, "slide-domestic15": 0xf23b3b, // gerade Rutsche = rot
+      "slide-domestic-integral60": 0xf23b3b, "slide-domestic-integral80": 0xf23b3b,
+      "slide-domestic-classic60": 0xf23b3b, "slide-domestic-classic80": 0xf23b3b,
+      "curved-slide2": 0x2fcb5a, "curved-slide-domestic80": 0x2fcb5a, // Bogenrutsche = gruen
       "slide-end2": 0xffd21a,                       // Auslauf = gelb
       "roof2": 0x2fcb5a,                            // Dach-Tuch = gruen, durchsichtig
     };
@@ -2704,19 +2703,20 @@ export class SceneManager {
    * Punkt der RUTSCHFLÄCHE eines Teils: sein Bezugspunkt plus die Höhe, in der
    * die Bahn dort liegt. So treffen sich zwei Kettenglieder ohne Stufe.
    */
-  _slideSurfacePoint(sl) {
-    if (sl.kind === "slide-end2") return this._slideEndConnectPoint(sl);
-    const lift = (sl.kind === "slide2" || sl.kind === "curved-slide2") ? SLIDE_BODY_LIFT : 0;
+  _slideSurfacePoint(sl, model) {
+    if (sl.kind === "slide-end2") return this._slideEndConnectPoint(sl, model);
+    const lift = (sl.kind === "slide2" || Boolean(SLIDE_PARTS[sl.kind]?.chain))
+      ? SLIDE_BODY_LIFT * (SLIDE_SPECS[sl.kind]?.scale?.[1] || 1) : 0;
     return new THREE.Vector3(sl.x, sl.y + lift, sl.z);
   }
 
-  _slideEndConnectPoint(se) {
+  _slideEndConnectPoint(se, model) {
     // Anschlusspunkt = Lage aus der Datei plus die halbe Kupplungslänge: die
     // Rutschbahn des Auslaufs liegt so hoch über seinem Bezugspunkt. Die früher
     // hier stehenden 12 cm glichen aus, dass der Auslauf schräg gezeichnet
     // wurde und erst am Ende auf seine Höhe kam -- seit er flach liegt, hingen
     // Auslauf UND der Körper davor dadurch zu hoch.
-    return new THREE.Vector3(se.x, se.y + SLIDE_END_LIFT, se.z);
+    return new THREE.Vector3(se.x, se.y + SLIDE_END_LIFT * (model?.slideMeshSpec(se).scale[1] || 1), se.z);
   }
 
   // Legt einen Rutschenkoerper als EINE durchgehende U-Rinne (Boden + 2 hochgezogene
@@ -2731,8 +2731,8 @@ export class SceneManager {
   // LETZTE Querschnitt des Vorgaengerteils), damit zwei Rutschenteile am gemeinsamen
   // Punkt OHNE Spalt/Knick im Querschnitt ineinander uebergehen ("Übergänge"-Fix).
   // Rueckgabe: {W,Nrm} des LETZTEN Querschnitts, fuer das naechste Teil der Kette.
-  _addSlideAlongCurve(mat, st, id, bez, SEG, startFrame, wallOf = null) {
-    const halfW = 35 / 2, WALL = 11, DICKE = 1.2;
+  _addSlideAlongCurve(mat, st, id, bez, SEG, startFrame, wallOf = null, sectionScale = [1, 1]) {
+    const halfW = 35 / 2 * sectionScale[0], WALL = 11 * sectionScale[1], DICKE = 1.2;
     const N = SEG + 1, eps = 0.5 / SEG;
     // Je Stützstelle acht Punkte: der Querschnitt innen (Wange links oben,
     // Boden links, Boden rechts, Wange rechts oben) und derselbe Querschnitt
@@ -2810,7 +2810,9 @@ export class SceneManager {
   // Richtung zum waagerechten Einlauf, ~33° abwaerts. Damit der Auslauf knickfrei
   // an die Bogenrutsche anschliesst.
   _curvedSlideExit(sl) {
-    return CURVED_SLIDE_EXIT.clone().applyQuaternion(this._slideQuat(sl));
+    const direction = CURVED_SLIDE_EXIT.clone();
+    if (sl.bendLeft) direction.x *= -1;
+    return direction.applyQuaternion(this._slideQuat(sl));
   }
 
   /** Eigenes Quaternion eines Rutschenteils (Three-Reihenfolge), sonst Einheit. */
@@ -2826,19 +2828,16 @@ export class SceneManager {
   // +Z-Richtung abwaerts wieder herauskommt. Kubische Bézier P0 -> C1 -> C2 -> P3,
   // alle vier Punkte aus dem eigenen Quaternion des Teils.
   _addCurvedSlide(sl, model, mat, st) {
-    const P0 = this._slideSurfacePoint(sl);
+    const P0 = this._slideSurfacePoint(sl, model);
     const q = this._slideQuat(sl);
-    // Die Bogenrutsche ist ein FESTES Teil: gemessen an allen zehn Vorkommen im
-    // Bestand liegt das Folgeteil IMMER auf demselben lokalen Versatz
-    // (600, -800, 600) mm. Losgelaufen wird im lokalen +Z (Laufrichtung jeder
-    // Rutsche), gedreht wird auf das lokale +X; der Bogen macht also 90 Grad in
-    // der Draufsicht und faellt dabei 80 cm. Frueher kam die Form aus der Lage
-    // des naechsten Rutschenteils; das ging schief, sobald ein anderes Teil
-    // naeher lag.
+    // Das Original folgt dem vermessenen festen Versatz (60, -80, 60) cm;
+    // die Inlandsversion kommt aus SLIDE_PARTS. Losgelaufen wird im lokalen
+    // +Z, gedreht auf +X; die Bahn faellt 80 cm. Die feste Endlage verhindert,
+    // dass ein anderes, naeheres Rutschenteil die Form quer durchs Geruest zieht.
     // Kette: das naechste Rutschenteil setzt am Bogen an.
     let target = null, bestD = Infinity;
     for (const s2 of model.slides.values()) {
-      if (s2.kind !== "slide2" && s2.kind !== "slide-new2" && s2.kind !== "slide-end2") continue;
+      if (!isLinearSlidePart(s2.kind)) continue;
       if (s2.y > sl.y - 1) continue; // nur tiefer liegende Teile
       const d = (s2.x - sl.x) ** 2 + (s2.y - sl.y) ** 2 + (s2.z - sl.z) ** 2;
       if (d < bestD) { bestD = d; target = s2; }
@@ -2848,15 +2847,20 @@ export class SceneManager {
     // nicht da, wo es laut Versatz sitzen müsste, bleibt es beim festen
     // Endpunkt (die Form kippt dann nicht weg). Gerechnet wird ab dem
     // Bezugspunkt, P0 liegt ja schon auf der Rohroberkante.
-    let P3 = CURVED_SLIDE_DROP.clone().applyQuaternion(q)
+    const curveSpec = SLIDE_PARTS[sl.kind];
+    const curveEnd = [...(curveSpec?.exit?.off || [60, -80, 60])];
+    if (sl.bendLeft) curveEnd[0] *= -1;
+    const curveLeg = Math.max(Math.abs(curveEnd[0]), Math.abs(curveEnd[2]));
+    const handle = curveLeg * 0.55;
+    let P3 = new THREE.Vector3(...curveEnd).applyQuaternion(q)
       .add(new THREE.Vector3(sl.x, sl.y + SLIDE_END_LIFT, sl.z));
     if (target) {
-      const entry = this._slideSurfacePoint(target);
+      const entry = this._slideSurfacePoint(target, model);
       if (entry.distanceTo(P3) < 40) P3 = entry;
     }
-    const C1 = P0.clone().addScaledVector(CURVED_SLIDE_ENTRY.clone().applyQuaternion(q), 33);
+    const C1 = P0.clone().addScaledVector(CURVED_SLIDE_ENTRY.clone().applyQuaternion(q), handle);
     const exitDir = this._curvedSlideExit(sl);
-    const C2 = P3.clone().addScaledVector(exitDir, -33);
+    const C2 = P3.clone().addScaledVector(exitDir, -handle);
     // ECHTE kubische Bézier (P0,C1,C2,P3) -- vorher war C2 unbenutzt (quadratisch),
     // dadurch hatte der Bogen keine eigene Austrittsrichtung am Ende (Knick/unschoen).
     const bez = (t) => {
@@ -2868,7 +2872,8 @@ export class SceneManager {
     };
     // Bananenfoermiger, durchgehend gebogener Rinnenkoerper entlang der Bézier.
     const hint = this._slideChainNextId === sl.id ? this._slideChainFrame : null;
-    this._slideChainFrame = this._addSlideAlongCurve(mat, st, sl.id, bez, 24, hint);
+    this._slideChainFrame = this._addSlideAlongCurve(mat, st, sl.id, bez, 24, hint, null,
+      [SLIDE_SPECS[sl.kind]?.scale?.[0] || 1, SLIDE_SPECS[sl.kind]?.scale?.[1] || 1]);
     this._slideChainNextId = target ? target.id : null;
   }
 
@@ -4699,7 +4704,8 @@ export class SceneManager {
       const st = stateOf(sl.id);
       if (st === "future") continue;
       // Liegt zu dieser Art ein abgegriffenes Originalmodell vor?
-      const echtesTeil = !!(wantMeshes && this._slideMeshes && this._slideMeshes[sl.kind]);
+      const meshKind = model.slideMeshSpec(sl).mesh;
+      const echtesTeil = !!(wantMeshes && this._slideMeshes && this._slideMeshes[meshKind]);
       const base = this._slideMatFor(sl.kind, false, sl.color);
       const mat = matFor(sl.id, (suggest && suggest.has(sl.id)) ? this._suggestMaterial(base) : base);
 
@@ -4717,11 +4723,11 @@ export class SceneManager {
       // Originalmodell, sobald es geladen ist: das Teil sitzt schlicht auf seiner
       // gespeicherten Lage -- genau so zeichnet es die Herstellersoftware. Die
       // Kette darunter braucht es dann nicht mehr, jedes Stueck steht fuer sich.
-      if (echtesTeil && this._addSlideMesh(sl, mat, st)) continue;
+      if (echtesTeil && this._addSlideMesh(sl, mat, st, model)) continue;
       // Bogenrutsche: gekrümmte 90°-Form oben, fuehrt nach unten ins Folgeteil.
-      if (sl.kind === "curved-slide2") { this._addCurvedSlide(sl, model, mat, st); continue; }
+      if (isCurvedSlidePart(sl.kind)) { this._addCurvedSlide(sl, model, mat, st); continue; }
       // Gerade Rutsche: schraege Rampe von ihrer Position zum naechsten Folgeteil.
-      if (sl.kind === "slide2" || sl.kind === "slide-new2") { this._addStraightSlide(sl, model, mat, st); continue; }
+      if (sl.kind === "slide2" || Boolean(SLIDE_SPECS[sl.kind])) { this._addStraightSlide(sl, model, mat, st); continue; }
       // Rutschenauslauf: kurzes, flaches U-Rinnen-Endstueck mit offenem Auslauf.
       if (sl.kind === "slide-end2") { this._addSlideEnd(sl, model, mat, st); continue; }
       // roof2 (Dach-Tuch): als GIEBEL ueber das Dach (von den C45-Traufen die
@@ -4779,12 +4785,37 @@ export class SceneManager {
    * selbst gezeichneten Teile entfaellt hier, weil jedes Stueck seine Form
    * mitbringt. Liefert false, wenn zu dieser Art kein Modell vorliegt.
    */
-  _addSlideMesh(sl, mat, st) {
-    const rec = this._slideMeshes && this._slideMeshes[sl.kind];
+  _addSlideMesh(sl, mat, st, model) {
+    const spec = model.slideMeshSpec(sl);
+    const meshKind = spec.mesh;
+    const rec = this._slideMeshes && this._slideMeshes[meshKind];
     if (!rec) return false;
-    const mesh = new THREE.Mesh(this._meshGeometry("slide:" + sl.kind, rec), mat);
+    const source = this._meshGeometry("slide:" + meshKind, rec);
+    let geometry = source;
+    if (spec.curveRadius) {
+      // Grow the bend radius around its centreline, preserving the original
+      // cross-section. Scaling X/Z also enlarged the track and both outlets.
+      geometry = this._cachedGeo(`mesh:slide:${meshKind}:radius:${spec.curveRadius}`, () => {
+        const geo = source.clone();
+        const positions = geo.getAttribute("position");
+        const baseRadius = SLIDE_PARTS["curved-slide2"].exit.off[0];
+        const extra = spec.curveRadius - baseRadius;
+        for (let i = 0; i < positions.count; i++) {
+          const x = positions.getX(i), z = positions.getZ(i);
+          const angle = Math.max(0, Math.min(Math.PI / 2, Math.atan2(z, baseRadius - x)));
+          positions.setXYZ(i, x + extra * (1 - Math.cos(angle)), positions.getY(i), z + extra * Math.sin(angle));
+        }
+        positions.needsUpdate = true;
+        geo.computeVertexNormals();
+        geo.computeBoundingBox();
+        geo.computeBoundingSphere();
+        return geo;
+      });
+    }
+    const mesh = new THREE.Mesh(geometry, mat);
     mesh.position.set(sl.x, sl.y, sl.z);
     mesh.quaternion.copy(this._slideQuat(sl));
+    if (spec?.scale) mesh.scale.set(spec.scale[0] * (sl.bendLeft ? -1 : 1), spec.scale[1], spec.scale[2]);
     mesh.userData = { kind: "slide", id: sl.id };
     mesh.castShadow = true;
     mesh.receiveShadow = true;
@@ -4803,7 +4834,7 @@ export class SceneManager {
   // an ihr Ende -> die feste ~140cm-Form ergibt sich aus der Distanz. Ersetzt die
   // fehlplatzierte Viewer-Transformation (fester Block + rotateY45 + Offsets).
   _addStraightSlide(sl, model, mat, st) {
-    let P0 = this._slideSurfacePoint(sl);
+    let P0 = this._slideSurfacePoint(sl, model);
     // Auch die gerade Rutsche ist ein festes Teil: bei 73 von 76 Vorkommen im
     // Bestand sitzt das Folgeteil auf dem lokalen Versatz (0, -800, 1200) -- drei
     // Felder in Laufrichtung (lokales +Z), zwei Ebenen tiefer. Gesucht wird das
@@ -4813,11 +4844,13 @@ export class SceneManager {
     // Gesucht wird über die BEZUGSPUNKTE (so stehen sie in der Datei), gezeichnet
     // über die Flächenpunkte -- P0 liegt bereits auf der Rohroberkante.
     const roh = new THREE.Vector3(sl.x, sl.y, sl.z);
-    const P1exp = STRAIGHT_SLIDE_DROP.clone().applyQuaternion(this._slideQuat(sl)).add(roh);
+    const mass = SLIDE_SPECS[sl.kind] || SLIDE_SPECS["slide-new2"];
+    const bodyRun = mass.bodyRun || mass.run;
+    const P1exp = new THREE.Vector3(0, -mass.drop, bodyRun).applyQuaternion(this._slideQuat(sl)).add(roh);
     let target = null, bestD = Infinity;
     for (const s2 of model.slides.values()) {
       if (s2 === sl) continue;
-      if (s2.kind !== "slide2" && s2.kind !== "slide-new2" && s2.kind !== "slide-end2") continue;
+      if (!isLinearSlidePart(s2.kind)) continue;
       const d = Math.hypot(s2.x - P1exp.x, s2.y - P1exp.y, s2.z - P1exp.z);
       if (d < bestD) { bestD = d; target = s2; }
     }
@@ -4846,24 +4879,24 @@ export class SceneManager {
       return;
     }
     if (target) {
-      P1 = this._slideSurfacePoint(target);
-    } else if (sl.kind === "slide2" && sl.quat && sl.quat.length === 4) {
+      P1 = this._slideSurfacePoint(target, model);
+    } else if ((sl.kind === "slide2" || SLIDE_PARTS[sl.kind]?.chain) && sl.quat && sl.quat.length === 4) {
       // Modularrutschen-Körper ohne Folgeteil: er ist ein festes Teil und läuft
       // seine eigenen (0, -80, 120) ab -- der Punkt ist der EINSTIEG. Das Ende
       // liegt so hoch, wie das nächste Teil dort ansetzen würde.
       // (Die Integralrutsche unten ist etwas anderes: dort liegt der Punkt am
       // Fuß, deshalb der Suchlauf nach dem Einhängepunkt.)
-      P1 = P1exp.clone().setY(P1exp.y + SLIDE_BODY_LIFT);
+      P1 = P1exp.clone().setY(P1exp.y + SLIDE_BODY_LIFT * (mass.scale?.[1] || 1));
     } else {
       // Einzelne Rutsche ohne Folgeteil: Die QDF-Position ist dann der FUSS
       // (Auslauf am Boden), nicht der Einstieg -- alle Rutschen-Records einer
-      // solchen Datei liegen auf y = 0. Die Rutsche steigt entgegen der
-      // Laufrichtung auf Plattformhoehe an: 2 Ebenen hoch (80 cm) bei 100 cm
-      // horizontal. Frueher lief der Fallback stattdessen 130 cm nach vorn und
-      // 60 cm nach UNTEN -- die Rutsche lag dadurch flach unter dem Boden.
+      // solchen Datei liegen auf y = 0. Der Fallback verwendet Hoehe und
+      // Auslauf des gewaehlten Rutschentyps. Frueher lief er 130 cm nach vorn
+      // und 60 cm nach UNTEN -- die Rutsche lag dadurch flach unter dem Boden.
       // Geprueft an QuadroTobezimmer.qdf: Fuss (40,0,100) + Anstieg trifft
       // exakt die Kupplung (40,80,0), an der die Rutsche eingehaengt ist.
-      const SLIDE_RUN = 100, SLIDE_RISE = 80; // Rueckfall, falls nichts passt
+      const SLIDE_RISE = mass.drop;
+      const SLIDE_RUN = mass.run; // voller Auslauf des jeweiligen Rutschentyps
       const fwd = new THREE.Vector3(1, 0, 0);
       if (sl.quat && sl.quat.length === 4) fwd.applyQuaternion(new THREE.Quaternion(sl.quat[0], sl.quat[1], sl.quat[2], sl.quat[3]).normalize());
       if (fwd.lengthSq() < 0.01) fwd.set(1, 0, 0);
@@ -4880,10 +4913,10 @@ export class SceneManager {
       // Einstieg = die Kupplung, an der die Rutsche oben eingehaengt ist: erhoeht,
       // in Laufrichtung vor dem Fuss und seitlich auf der Rutschenachse. Damit
       // reicht die Rutsche bis an das Geruest, statt frei in der Luft zu enden.
-      // Von mehreren Kandidaten gewinnt der mit der rutschentypischen Neigung
-      // (~35 Grad) -- sonst wuerde die oberste Ebene gewaehlt und die Rutsche
+      // Von mehreren Kandidaten gewinnt der mit der Neigung dieses Rutschentyps
+      // -- sonst wuerde die oberste Ebene gewaehlt und die Rutsche
       // stuende viel zu steil.
-      const IDEAL_SLOPE = 35 * Math.PI / 180;
+      const IDEAL_SLOPE = Math.atan2(mass.drop, mass.run);
       let hook = null, bestSlope = Infinity;
       for (const n of model.nodes.values()) {
         const rel = new THREE.Vector3(n.x - P1.x, 0, n.z - P1.z);
@@ -4894,16 +4927,19 @@ export class SceneManager {
         const off = Math.abs(Math.atan2(n.y - P1.y, along) - IDEAL_SLOPE);
         if (off < bestSlope) { bestSlope = off; hook = { y: n.y, along }; }
       }
-      // Mit eigener Drehung ist nichts zu raten: die Integralrutsche ist ein
-      // festes Teil, ihr Einhängepunkt liegt INTEGRAL_RUN vor dem Fuß und
-      // INTEGRAL_DROP darüber. Nur ohne Drehung wird gesucht.
+      // Mit eigener Drehung ist nichts zu raten: der Einhängepunkt liegt um
+      // Auslauf und Fallhöhe vor beziehungsweise über dem Fuß.
       if (sl.quat && sl.quat.length === 4) {
         // Auf die Hauptachse einrasten: eine Rutsche läuft im Raster, und die
         // Drehungen aus den Dateien sind nicht immer ganz sauber.
         const kard = Math.abs(fwd.x) >= Math.abs(fwd.z)
           ? new THREE.Vector3(Math.sign(fwd.x) || 1, 0, 0)
           : new THREE.Vector3(0, 0, Math.sign(fwd.z) || 1);
-        P0 = new THREE.Vector3(sl.x + kard.x * INTEGRAL_RUN, sl.y + INTEGRAL_DROP, sl.z + kard.z * INTEGRAL_RUN);
+        P0 = new THREE.Vector3(
+          sl.x + kard.x * mass.run,
+          sl.y + mass.drop + SLIDE_HOOK_LIFT,
+          sl.z + kard.z * mass.run,
+        );
       } else {
         // Der Einstieg liegt auf dem Rohr an der gefundenen Kupplung -- eine
         // halbe Kupplung höher, wie der Einhängepunkt einer gesetzten Rutsche.
@@ -4936,7 +4972,8 @@ export class SceneManager {
     };
     // U-Rinne mit hohen Seitenwangen entlang der leicht gebogenen Rampe.
     const hint = this._slideChainNextId === sl.id ? this._slideChainFrame : null;
-    this._slideChainFrame = this._addSlideAlongCurve(mat, st, sl.id, bez, 9, hint);
+    this._slideChainFrame = this._addSlideAlongCurve(mat, st, sl.id, bez, 9, hint, null,
+      [mass.scale?.[0] || 1, mass.scale?.[1] || 1]);
     this._slideChainNextId = target ? target.id : null;
   }
 
@@ -4946,12 +4983,13 @@ export class SceneManager {
   // der einlaufenden Rutsche. Ersetzt das alte 35×35-Viewer-Kaestchen.
   _addSlideEnd(sl, model, mat, st) {
     // Start = GLEICHER Anschlusspunkt, an dem der Rutschenkoerper endet (kein Versatz).
-    const P0 = this._slideEndConnectPoint(sl);
+    const P0 = this._slideEndConnectPoint(sl, model);
+    const scale = model.slideMeshSpec(sl).scale;
     // Einlaufende Rutsche (naechstes Rutschenteil OBERHALB).
     let feeder = null, bestD = Infinity;
     for (const s2 of model.slides.values()) {
       if (s2 === sl) continue;
-      if (s2.kind !== "slide2" && s2.kind !== "slide-new2" && s2.kind !== "curved-slide2") continue;
+      if (!isLinearSlidePart(s2.kind) && !isCurvedSlidePart(s2.kind)) continue;
       if (s2.y < sl.y - 1) continue;
       const d = (s2.x - sl.x) ** 2 + (s2.y - sl.y) ** 2 + (s2.z - sl.z) ** 2;
       if (d < bestD) { bestD = d; feeder = s2; }
@@ -4959,7 +4997,7 @@ export class SceneManager {
     // Tangente, mit der die Rutsche hier ankommt -> KNICKFREIER Auslauf-Start:
     // Bogenrutsche = ihre feste Austrittsrichtung; gerade Rutsche = ihr Gefaelle.
     const entryT = feeder
-      ? (feeder.kind === "curved-slide2"
+      ? (isCurvedSlidePart(feeder.kind)
           ? this._curvedSlideExit(feeder, model)
           : P0.clone().sub(new THREE.Vector3(feeder.x, feeder.y, feeder.z)).normalize())
       : new THREE.Vector3(0, -1, 0);
@@ -4988,10 +5026,10 @@ export class SceneManager {
     // erst SLIDE_END_FLAT waagerecht, dann SLIDE_END_LIP schräg abwärts. Der
     // Rutschenkörper davor endet ebenfalls waagerecht, der Übergang bleibt also
     // knickfrei.
-    const front = new THREE.Vector3(P0.x + fwd.x * SLIDE_END_FLAT, P0.y, P0.z + fwd.z * SLIDE_END_FLAT);
+    const front = new THREE.Vector3(P0.x + fwd.x * SLIDE_END_FLAT * scale[2], P0.y, P0.z + fwd.z * SLIDE_END_FLAT * scale[2]);
     // Lippe: Viertelkreis um einen Punkt senkrecht unter dem Ende des flachen
     // Stücks -- die Fläche kippt auf ihrer Länge um volle 90 Grad nach unten.
-    const mitte = front.clone().addScaledVector(UP, -SLIDE_END_LIP_R);
+    const mitte = front.clone().addScaledVector(UP, -SLIDE_END_LIP_R * scale[1]);
     // Parameter-Aufteilung, nicht Längen-Aufteilung: die kurze Lippe bekommt so
     // genug Stützstellen für ihre Rundung, das flache Stück braucht kaum welche.
     const anteil = 0.55;
@@ -4999,15 +5037,15 @@ export class SceneManager {
       if (t <= anteil) return P0.clone().lerp(front, t / anteil);
       const phi = ((t - anteil) / (1 - anteil)) * Math.PI / 2;
       return mitte.clone()
-        .addScaledVector(fwd, SLIDE_END_LIP_R * Math.sin(phi))
-        .addScaledVector(UP, SLIDE_END_LIP_R * Math.cos(phi));
+        .addScaledVector(fwd, SLIDE_END_LIP_R * Math.sin(phi) * scale[2])
+        .addScaledVector(UP, SLIDE_END_LIP_R * Math.cos(phi) * scale[1]);
     };
     // Die Wangen enden mit dem flachen Stück; auf der Lippe bleibt nur die
     // Rutschfläche.
     const wallOf = (t) => (t <= anteil ? 1
       : Math.max(0, 1 - ((t - anteil) / (1 - anteil)) * 4));
     const hint = this._slideChainNextId === sl.id ? this._slideChainFrame : null;
-    this._slideChainFrame = this._addSlideAlongCurve(mat, st, sl.id, bez, 14, hint, wallOf);
+    this._slideChainFrame = this._addSlideAlongCurve(mat, st, sl.id, bez, 14, hint, wallOf, [scale[0], scale[1]]);
     this._slideChainNextId = null; // Endstück: Kette stoppt hier.
   }
 

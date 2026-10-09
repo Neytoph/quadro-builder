@@ -562,15 +562,31 @@ function cardinalName(v) {
 
 // Rutsche: Einhaengepunkt sitzt knapp ueber den unteren Kupplungen des
 // senkrechten Rohrpaars.
-const SLIDE_HOOK_LIFT = 5;                 // cm ueber der unteren Kupplung
-// Die Rutsche ist ein Fertigteil fester Groesse: im 40-cm-Raster zwei Ebenen
-// hoch und drei Felder lang -- Fall 80 cm ab der Kupplung, Auslauf 120 cm. In
-// den Herstellerdateien steht genau das: Fall 85 cm ab Einhaengepunkt (der
-// Haken sitzt 5 cm ueber der Kupplung), Auslauf 120 cm, Neigung 35,3 Grad.
-// Der Fuss muss nicht auf dem Boden landen -- er darf auch auf dem Geruest
-// aufliegen; nur unter den Boden darf er nicht.
-const SLIDE_DROP = 80;                     // cm, von der Kupplung bis zum Boden
-const SLIDE_RUN = 120;                     // cm waagerechter Auslauf
+// Classic body and run-out share one horizontal scale, so their joint and
+// proportions stay identical to the original 120 + 47.5 cm assembly.
+const domesticClassicSpec = (drop, run, legacyBodyRun) => {
+  const along = run / (120 + 47.5);
+  return { drop, run, bodyRun: 120 * along, endRun: 47.5 * along,
+    clearanceRun: run, mesh: "slide2", scale: [1, drop / 80, along], legacyBodyRun };
+};
+// Entrance-to-end horizontal chord, including the 47.5 cm run-out.
+const DOMESTIC_CURVE_RADIUS = (-47.5 + Math.sqrt(2 * 160 ** 2 - 47.5 ** 2)) / 2;
+export const SLIDE_SPECS = {
+  "slide-new2": { drop: 80, run: 120, mesh: "slide-new2", scale: [1, 1, 1] },
+  // 旧版 ID 为已保存的草图保留；新加国产规格使用 integral/classic 命名。
+  "slide-domestic80": { drop: 80, run: 160, mesh: "slide-new2", scale: [1, 1, 160 / 120] },
+  "slide-domestic60": { drop: 60, run: 120, mesh: "slide-new2", scale: [1, 0.75, 1] },
+  // Alte lokale Entwuerfe aus der zwischenzeitlichen 1,5-Raster-Version weiter
+  // lesen; sie entspricht jetzt der bestaetigten 60x120-cm-Variante.
+  "slide-domestic15": { drop: 60, run: 120, mesh: "slide-new2", scale: [1, 0.75, 1] },
+  "slide-domestic-integral60": { drop: 60, run: 125, mesh: "slide-new2", scale: [1, 0.75, 125 / 120] },
+  "slide-domestic-integral80": { drop: 80, run: 145, mesh: "slide-new2", scale: [1, 1, 145 / 120] },
+  // run 表示经典款（主体+缓冲）的总水平长度，bodyRun 是主体到缓冲的接口。
+  "slide-domestic-classic60": domesticClassicSpec(60, 120, 72.5),
+  "slide-domestic-classic80": domesticClassicSpec(80, 160, 112.5),
+  "curved-slide-domestic80": { drop: 80, run: 160, mesh: "curved-slide2", curveRadius: DOMESTIC_CURVE_RADIUS, scale: [1, 1, 1] },
+};
+export const SLIDE_HOOK_LIFT = 5;          // cm ueber der unteren Kupplung
 // Rutschenteile und wie sie zusammenhaengen -- gemessen an den 176 Vorkommen
 // in den Herstellerdateien:
 //   Modularrutschen-Koerper (slide2): das Folgeteil sitzt im lokalen System bei
@@ -578,12 +594,20 @@ const SLIDE_RUN = 120;                     // cm waagerechter Auslauf
 //   Bogenrutschen-Koerper (curved-slide2): das Folgeteil sitzt bei (60, -80, 60)
 //     und ist um 90 Grad um die Hochachse weitergedreht (9 von 9) -- der Bogen
 //     laeuft in lokaler +Z-Richtung hinein und in +X wieder heraus.
-//   Rutschenauslauf (slide-end2) und Integralrutsche (slide-new2) haben keinen
-//     Ausgang: hinter ihnen kommt nichts mehr.
+//   Rutschenauslauf (slide-end2), Integralrutsche (slide-new2) und die
+//   einteiligen Inlandsrutschen haben keinen Ausgang.
 export const SLIDE_PARTS = {
   "slide-new2":    { chain: false, exit: null },
-  "slide2":        { chain: true,  exit: { off: [0, -80, 120], turn: 0 } },
-  "curved-slide2": { chain: true,  exit: { off: [60, -80, 60], turn: 90 } },
+  "slide-domestic80": { chain: false, exit: null },
+  "slide-domestic60": { chain: false, exit: null },
+  "slide-domestic15": { chain: false, exit: null },
+  "slide-domestic-integral60": { chain: false, exit: null },
+  "slide-domestic-integral80": { chain: false, exit: null },
+  "slide-domestic-classic60": { chain: true, exit: { off: [0, -60, SLIDE_SPECS["slide-domestic-classic60"].bodyRun], turn: 0 } },
+  "slide-domestic-classic80": { chain: true, exit: { off: [0, -80, SLIDE_SPECS["slide-domestic-classic80"].bodyRun], turn: 0 } },
+  "slide2":        { chain: true, exit: { off: [0, -80, 120], turn: 0 } },
+  "curved-slide2": { chain: true, curve: true, exit: { off: [60, -80, 60], turn: 90 } },
+  "curved-slide-domestic80": { chain: true, curve: true, exit: { off: [DOMESTIC_CURVE_RADIUS, -80, DOMESTIC_CURVE_RADIUS], turn: 90 } },
   "slide-end2":    { chain: false, exit: null },
 };
 // QDF-Arten eines Baellebads: grosses und kleines Becken. Es ist EIN Anbauteil
@@ -591,7 +615,7 @@ export const SLIDE_PARTS = {
 export const POOL_KINDS = new Set(["pool2", "pool-small2"]);
 
 // Teile, die eine Kette fortsetzen duerfen (der Auslauf beendet sie).
-export const SLIDE_CHAIN_KINDS = ["slide2", "curved-slide2", "slide-end2"];
+export const SLIDE_CHAIN_KINDS = ["slide2", "slide-domestic-classic60", "slide-domestic-classic80", "curved-slide2", "curved-slide-domestic80", "slide-end2"];
 
 // Freiraum, den die Bahn braucht: naeher als das darf keine Kupplung stehen.
 const SLIDE_CLEARANCE = 18;
@@ -2587,7 +2611,7 @@ export class BuildModel {
   // Einhaengepunkt (Mitte zwischen beiden Rohren, kurz ueber den unteren
   // Kupplungen), normal die Richtung, in die die Rutsche abfaellt.
   //
-  // 滑梯落差固定约 80 cm。挂钩挂在两根竖管之间的 35 cm 横梁上——官方文件里
+  // 滑梯落差按所选型号固定。挂钩挂在两根竖管之间的 35 cm 横梁上——官方文件里
   // 全部 130 多处滑梯都是这样：横梁是平台那一层的边，两根竖管在横梁上方
   // 继续往上（护栏），滑梯从护栏之间这个空档滑出去。所以绿面标的是横梁
   // 【上方】的那个空档，空档里有板、网、布就挂不了。
@@ -2597,12 +2621,13 @@ export class BuildModel {
   //
   // 竖管到横梁就结束（两层立方框的顶面）时，滑梯也能搭在顶梁上——这时绿面
   // 是横梁下方那一格；只有上面什么都不接时才这样算，免得同一根横梁出两个面。
-  slideMounts(width = 40, tol = 2, kind = "slide-new2") {
+  slideMounts(width = 40, tol = 2, kind = "slide-new2", includeOccupied = false) {
     // Ein Koerper einer Kette endet nicht hier: hinter ihm kommt das naechste
-    // Teil, sein Fuss muss also nichts tragen. Nur die Integralrutsche braucht
+    // Teil, sein Fuss muss also nichts tragen. Einteilige Rutschen brauchen
     // Boden oder Geruest unter dem Auslauf.
     const kette = !!(SLIDE_PARTS[kind] && SLIDE_PARTS[kind].chain);
     const brauchtAuflage = !kette;
+    const mass = SLIDE_SPECS[kind] || SLIDE_SPECS["slide-new2"];
     const out = [];
     const seen = new Set();
     const groundY = this._groundLevel();
@@ -2612,7 +2637,7 @@ export class BuildModel {
     // p/q: { x, z, lowId?, highId?, low?, high?, len? } der beiden Seiten.
     const pruefe = (p, q, hookY, y0, y1) => {
       if (y1 - y0 < 10) return;
-      if (!this._slideEntryOk(p, q, hookY) || hookY - groundY < SLIDE_DROP - 1) return;
+      if (!this._slideEntryOk(p, q, hookY) || hookY - groundY < mass.drop - 1) return;
       const dx = q.x - p.x, dz = q.z - p.z;
       const d = Math.hypot(dx, dz);
       const hook = [(p.x + q.x) / 2, hookY + (kette ? 0 : SLIDE_HOOK_LIFT), (p.z + q.z) / 2];
@@ -2624,8 +2649,11 @@ export class BuildModel {
       ];
       // Platte, Netz, Tuch oder Rohr auf dem Feld: da kommt keine Rutsche durch.
       if (!this._openingFree(corners)) return;
-      // Dort haengt schon eine Rutsche (gleich welcher Art).
-      if (this._slideHooked(hook)) return;
+      // Dort haengt schon eine Rutsche (gleich welcher Art). Bei der Diagnose
+      // kann der Builder den ansonsten passenden Platz trotzdem abfragen und
+      // statt eines falschen Montagehinweises die belegte Stelle melden.
+      const occupied = this._slideHooked(hook);
+      if (occupied && !includeOccupied) return;
       const nrm = [-dz / d, 0, dx / d];
       let front = 0, back = 0;
       for (const n of this.nodes.values()) {
@@ -2633,15 +2661,15 @@ export class BuildModel {
         if (sdist > 5) front++; else if (sdist < -5) back++;
       }
       let dir = front > back ? [-nrm[0], 0, -nrm[2]] : nrm;
-      const usable = (vec) => this._slidePathFree(hook, vec)
-        && (!brauchtAuflage || this._slideFootRests(hook, vec, groundY));
+      const usable = (vec) => this._slidePathFree(hook, vec, mass)
+        && (!brauchtAuflage || this._slideFootRests(hook, vec, groundY, mass));
       if (!usable(dir)) {
         const other = [-dir[0], 0, -dir[2]];
         if (!usable(other)) return;
         dir = other;
       }
       seen.add(key);
-      out.push({ hook, normal: dir, corners });
+      out.push({ hook, normal: dir, corners, occupied });
     };
 
     // 1. Pfostenpaare: zwei senkrechte Rohre im Abstand `width`.
@@ -2666,7 +2694,7 @@ export class BuildModel {
         const p = posts[i], q = posts[j];
         const d = Math.hypot(q.x - p.x, q.z - p.z);
         if (Math.abs(d - width) > tol) continue;
-        const hakenOk = (y) => this._slideEntryOk(p, q, y) && y - groundY >= SLIDE_DROP - 1;
+        const hakenOk = (y) => this._slideEntryOk(p, q, y) && y - groundY >= mass.drop - 1;
         // Haken am unteren Ende: die Rutsche laeuft durch die Oeffnung ZWISCHEN
         // den beiden Pfosten hinaus -- der Regelfall.
         const untenGleich = Math.abs(p.low - q.low) <= 0.5;
@@ -2806,13 +2834,14 @@ export class BuildModel {
    * montieren. Die Enden bleiben ausgenommen: oben sind es die beiden Rohre,
    * an denen sie haengt, unten darf sie auf dem Geruest aufliegen.
    */
-  _slidePathFree(hook, dir) {
-    const foot = [hook[0] + dir[0] * SLIDE_RUN, hook[1] - SLIDE_DROP - SLIDE_HOOK_LIFT, hook[2] + dir[2] * SLIDE_RUN];
+  _slidePathFree(hook, dir, mass = SLIDE_SPECS["slide-new2"]) {
+    const run = mass.clearanceRun || mass.run;
+    const foot = [hook[0] + dir[0] * run, hook[1] - mass.drop - SLIDE_HOOK_LIFT, hook[2] + dir[2] * run];
     for (const n of this.nodes.values()) {
       const rel = [n.x - hook[0], n.y - hook[1], n.z - hook[2]];
       const along = rel[0] * dir[0] + rel[2] * dir[2];
-      if (along < SLIDE_CLEARANCE || along > SLIDE_RUN - SLIDE_CLEARANCE) continue;
-      const t = along / SLIDE_RUN;
+      if (along < SLIDE_CLEARANCE || along > run - SLIDE_CLEARANCE) continue;
+      const t = along / run;
       const on = [hook[0] + (foot[0] - hook[0]) * t, hook[1] + (foot[1] - hook[1]) * t, hook[2] + (foot[2] - hook[2]) * t];
       if (Math.hypot(n.x - on[0], n.y - on[1], n.z - on[2]) < SLIDE_CLEARANCE) return false;
     }
@@ -2823,8 +2852,9 @@ export class BuildModel {
    * Liegt der Auslauf auf? Entweder auf dem Boden oder auf dem Geruest -- eine
    * Rutsche, die in der Luft endet, laesst sich nicht bauen.
    */
-  _slideFootRests(hook, dir, groundY) {
-    const foot = [hook[0] + dir[0] * SLIDE_RUN, hook[1] - SLIDE_DROP - SLIDE_HOOK_LIFT, hook[2] + dir[2] * SLIDE_RUN];
+  _slideFootRests(hook, dir, groundY, mass = SLIDE_SPECS["slide-new2"]) {
+    const run = mass.clearanceRun || mass.run;
+    const foot = [hook[0] + dir[0] * run, hook[1] - mass.drop - SLIDE_HOOK_LIFT, hook[2] + dir[2] * run];
     if (foot[1] - groundY < 1) return true;                      // steht auf dem Boden
     for (const n of this.nodes.values()) {
       if (Math.hypot(n.x - foot[0], n.y - foot[1], n.z - foot[2]) <= SLIDE_SUPPORT) return true;
@@ -2842,9 +2872,67 @@ export class BuildModel {
     const spec = slide && SLIDE_PARTS[slide.kind];
     if (!spec || !spec.exit) return null;
     const q = slide.quat && slide.quat.length === 4 ? slide.quat : [0, 0, 0, 1];
-    const off = rotateVecByQuat(q, spec.exit.off);
+    const sign = slide.bendLeft && spec.curve ? -1 : 1;
+    const off = rotateVecByQuat(q, [spec.exit.off[0] * sign, spec.exit.off[1], spec.exit.off[2]]);
     const pos = [round(slide.x + off[0]), round(slide.y + off[1]), round(slide.z + off[2])];
-    return { pos, quat: turnAroundY(q, spec.exit.turn), afterId: slide.id };
+    return { pos, quat: turnAroundY(q, spec.exit.turn * sign), afterId: slide.id };
+  }
+
+  /** Toggle the domestic bend and carry its downstream chain to the new exit. */
+  flipDomesticCurve(id) {
+    const slide = this.slides.get(id);
+    if (slide?.kind !== "curved-slide-domestic80") return false;
+    const oldExit = this.slideExit(slide);
+    const descendants = [];
+    const seen = new Set([id]);
+    const exits = [oldExit];
+    for (let i = 0; i < exits.length; i++) {
+      for (const child of this.slides.values()) {
+        if (seen.has(child.id) || Math.hypot(child.x - exits[i].pos[0], child.y - exits[i].pos[1], child.z - exits[i].pos[2]) >= 1) continue;
+        seen.add(child.id);
+        descendants.push(child);
+        const exit = this.slideExit(child);
+        if (exit) exits.push(exit);
+      }
+    }
+    slide.bendLeft = !slide.bendLeft;
+    const nextExit = this.slideExit(slide);
+    const q = slide.quat || [0, 0, 0, 1];
+    const inv = [-q[0], -q[1], -q[2], q[3]];
+    const rotate = v => {
+      const local = rotateVecByQuat(inv, v);
+      return rotateVecByQuat(q, [-local[0], local[1], -local[2]]);
+    };
+    const move = p => {
+      const delta = rotate(p.map((v, i) => v - oldExit.pos[i]));
+      return delta.map((v, i) => round(v + nextExit.pos[i]));
+    };
+    for (const child of descendants) {
+      [child.x, child.y, child.z] = move([child.x, child.y, child.z]);
+      const cq = child.quat || [0, 0, 0, 1];
+      child.quat = quatFromBasis(rotate(xAxisOf(cq)), rotate(yAxisOf(cq)), rotate(zAxisOf(cq)));
+      if (child.hook) child.hook = move(child.hook);
+      if (child.foot?.p0) child.foot = { ...child.foot, p0: move(child.foot.p0), dir: rotate(child.foot.dir) };
+    }
+    return true;
+  }
+
+  /** Original mesh plus its dimensions; a run-out inherits its feeder's scale. */
+  slideMeshSpec(slide) {
+    let source = slide;
+    if (slide?.kind === "slide-end2") {
+      let best = 1;
+      for (const candidate of this.slides.values()) {
+        const exit = this.slideExit(candidate);
+        if (!exit) continue;
+        const d = Math.hypot(exit.pos[0] - slide.x, exit.pos[1] - slide.y, exit.pos[2] - slide.z);
+        if (d < best) { best = d; source = candidate; }
+      }
+    }
+    const spec = SLIDE_SPECS[source?.kind];
+    return { mesh: slide?.kind === "slide-end2" ? "slide-end2" : (spec?.mesh || slide?.kind),
+      scale: spec?.scale ? [...spec.scale] : [1, 1, 1],
+      curveRadius: slide?.kind === "slide-end2" ? null : (spec?.curveRadius || null) };
   }
 
   /**
@@ -2853,7 +2941,7 @@ export class BuildModel {
    *  - im Editor gesetzt: `hook` ist genau dieser Punkt;
    *  - Kettenteil (Modular-/Bogenrutsche, Auslauf): sein Bezugspunkt liegt
    *    bereits am oberen Ende, so fuehren es auch die Herstellerdateien;
-   *  - Integralrutsche aus einer Datei: ihr Punkt liegt am FUSS (es gibt dort
+   *  - Einteilige Rutsche aus einer Datei: ihr Punkt liegt am FUSS (es gibt dort
    *    keinen `hook`), also Fall und Auslauf zurueckrechnen. Die Laufrichtung
    *    steckt in der Drehung -- das lokale +X steht 90 Grad quer dazu.
    */
@@ -2862,14 +2950,16 @@ export class BuildModel {
     if (slide.hook && slide.hook.length === 3) {
       return { x: slide.hook[0], y: slide.hook[1], z: slide.hook[2] };
     }
-    if (slide.kind !== "slide-new2") return { x: slide.x, y: slide.y, z: slide.z };
+    if (SLIDE_PARTS[slide.kind]?.chain) return { x: slide.x, y: slide.y, z: slide.z };
+    if (!SLIDE_SPECS[slide.kind]) return { x: slide.x, y: slide.y, z: slide.z };
+    const mass = SLIDE_SPECS[slide.kind];
     const q = slide.quat && slide.quat.length === 4 ? slide.quat : [0, 0, 0, 1];
     const ax = rotateVecByQuat(q, [1, 0, 0]);
     const dir = [-ax[2], 0, ax[0]];             // Laufrichtung des Auslaufs
     return {
-      x: round(slide.x - dir[0] * SLIDE_RUN),
-      y: round(slide.y + SLIDE_DROP + SLIDE_HOOK_LIFT),
-      z: round(slide.z - dir[2] * SLIDE_RUN),
+      x: round(slide.x - dir[0] * mass.run),
+      y: round(slide.y + mass.drop + SLIDE_HOOK_LIFT),
+      z: round(slide.z - dir[2] * mass.run),
     };
   }
 
@@ -2910,6 +3000,7 @@ export class BuildModel {
   /**
    * Rutschenteil an einen Ausgang haengen (Kette). Punkt und Drehung kommen von
    * der Montagestelle -- genau so, wie die Herstellerdateien die Teile fuehren.
+   * @param {string|null} [color]
    */
   addSlideAt(kind, mount, color = null) {
     if (!SLIDE_PARTS[kind] || !mount || !mount.pos) return null;
@@ -3064,13 +3155,14 @@ export class BuildModel {
     if (!entry) return res;
     const q = slide.quat && slide.quat.length === 4 ? slide.quat : [0, 0, 0, 1];
     const start = [entry.x, entry.y, entry.z];
-    const lokal = (v) => { const o = rotateVecByQuat(q, v); return [slide.x + o[0], slide.y + o[1], slide.z + o[2]]; };
+    const lokal = (v) => { const o = rotateVecByQuat(q, [slide.bendLeft && spec.curve ? -v[0] : v[0], v[1], v[2]]); return [slide.x + o[0], slide.y + o[1], slide.z + o[2]]; };
     // Bahn als Polygonzug: gerade Teile ein Stueck, der Bogen eine Bezierkurve
     // (Einlauf lokal +Z, Auslauf lokal +X -- wie die Szene ihn zeichnet).
     let pts;
-    if (slide.kind === "curved-slide2") {
+    if (spec.curve) {
       const P0 = start, P3 = lokal(spec.exit.off);
-      const C1 = lokal([0, 0, 33]), C2 = lokal([spec.exit.off[0] - 33, spec.exit.off[1], spec.exit.off[2]]);
+      const handle = Math.max(Math.abs(spec.exit.off[0]), Math.abs(spec.exit.off[2])) * 0.55;
+      const C1 = lokal([0, 0, handle]), C2 = lokal([spec.exit.off[0] - handle, spec.exit.off[1], spec.exit.off[2]]);
       pts = [];
       for (let i = 0; i <= 8; i++) {
         const tt = i / 8, uu = 1 - tt, a = uu ** 3, b = 3 * uu * uu * tt, c = 3 * uu * tt * tt, d = tt ** 3;
@@ -3079,7 +3171,7 @@ export class BuildModel {
     } else if (spec.exit) {
       pts = [start, lokal(spec.exit.off)];
     } else if (slide.kind === "slide-end2") {
-      pts = [start, lokal([0, 0, 47.5])];
+      pts = [start, lokal([0, 0, 47.5 * this.slideMeshSpec(slide).scale[2]])];
     } else {
       pts = [start, [slide.x, slide.y, slide.z]];      // Integralrutsche: Punkt am Fuss
     }
@@ -3135,15 +3227,17 @@ export class BuildModel {
     return res;
   }
 
-  // Rutsche an einer Montagestelle einhaengen. Feste Groesse: zwei Rasterebenen
-  // Fall, drei Felder Auslauf -- der Fuss landet damit auf dem Boden.
+  /** Rutsche an einer Montagestelle einhaengen; feste Maße aus SLIDE_SPECS.
+   * @param {string|null} [color]
+   */
   addSlide(hook, normal, kind = "slide-new2", color = null) {
-    const drop = SLIDE_DROP + SLIDE_HOOK_LIFT;
-    const run = SLIDE_RUN;
+    const mass = SLIDE_SPECS[kind] || SLIDE_SPECS["slide-new2"];
+    const drop = mass.drop + SLIDE_HOOK_LIFT;
+    const run = mass.run;
     // Kettenteile (Modular-, Bogenrutschen-Koerper) fuehren ihren Punkt am
     // EINSTIEG und eine eigene Drehung -- so wie die Herstellerdateien, und nur
     // so laesst sich das naechste Teil an ihren Ausgang rechnen. Die
-    // Integralrutsche behaelt ihren Punkt am Fuss samt Einhaengepunkt.
+    // Einteilige Rutschen behalten ihren Punkt am Fuss samt Einhaengepunkt.
     const kette = SLIDE_PARTS[kind] && SLIDE_PARTS[kind].chain;
     const slide = kette
       ? {
@@ -3169,7 +3263,7 @@ export class BuildModel {
       };
     if (kette && this._slideAt([slide.x, slide.y, slide.z])) return null;
     for (const s of this.slides.values()) {
-      if (s.hook && Math.hypot(s.hook[0] - slide.hook[0], s.hook[1] - slide.hook[1], s.hook[2] - slide.hook[2]) < 1) {
+      if (s.hook && slide.hook && Math.hypot(s.hook[0] - slide.hook[0], s.hook[1] - slide.hook[1], s.hook[2] - slide.hook[2]) < 1) {
         return null; // hier haengt schon eine Rutsche
       }
     }
@@ -4833,7 +4927,7 @@ export class BuildModel {
     if (!tg.nodes.size && !tg.clamps.size && !tg.slides.size && !tg.fittings.size) return { ok: false, reason: "empty" };
     for (const id of tg.slides) {
       const sl = this.slides.get(id);
-      if (sl && sl.kind === "curved-slide2") return { ok: false, reason: "chiral" };
+      if (sl && SLIDE_PARTS[sl.kind]?.curve) return { ok: false, reason: "chiral" };
     }
     const i = axis === "z" ? 2 : 0;
     const punkte = [];
@@ -6139,6 +6233,7 @@ export class BuildModel {
         if (s.hook) o.hook = s.hook; // manuell gesetzt: Einhaengepunkt am Rohrpaar
         if (s.color) o.color = s.color; // Three-Quaternion x,y,z,w (vor Rz90)
         if (s.foot) o.foot = s.foot;   // Lage des Fussrohrs, gehoert zur Rutsche
+        if (s.bendLeft) o.bendLeft = true;
         return o;
       }),
       groups: [...this.groups.entries()].map(([id, set]) => ({ id, ids: [...set] })),
@@ -6263,8 +6358,38 @@ export class BuildModel {
     }
     for (const s of data.slides || []) {
       this.slides.set(s.id, { id: s.id, x: s.x, y: s.y, z: s.z, quat: s.quat || null, hook: s.hook || null,
-        color: s.color || null, foot: s.foot || null, kind: s.kind });
+        color: s.color || null, foot: s.foot || null, kind: s.kind, bendLeft: s.kind === "curved-slide-domestic80" && !!s.bendLeft });
       maxSeq = Math.max(maxSeq, parseSeq(s.id));
+    }
+    // Upgrade designs saved with a full-size buffer on the shorter domestic
+    // body. Move only the buffer at that old joint; keep unrelated pieces put.
+    for (const body of this.slides.values()) {
+      const spec = SLIDE_SPECS[body.kind];
+      if (spec?.legacyBodyRun == null) continue;
+      const off = rotateVecByQuat(body.quat || [0, 0, 0, 1], [0, -spec.drop, spec.legacyBodyRun]);
+      const old = [body.x + off[0], body.y + off[1], body.z + off[2]];
+      const end = [...this.slides.values()].find(s => s.kind === "slide-end2"
+        && Math.hypot(s.x - old[0], s.y - old[1], s.z - old[2]) < 0.2);
+      if (!end) continue;
+      const exit = this.slideExit(body);
+      if ([...this.slides.values()].some(s => s !== end
+        && Math.hypot(s.x - exit.pos[0], s.y - exit.pos[1], s.z - exit.pos[2]) < 0.2)) continue;
+      [end.x, end.y, end.z] = exit.pos;
+      end.quat = exit.quat;
+    }
+    // Earlier domestic bends placed their run-out at an 80 cm radius.
+    for (const body of this.slides.values()) {
+      if (body.kind !== "curved-slide-domestic80") continue;
+      const off = rotateVecByQuat(body.quat || [0, 0, 0, 1], [body.bendLeft ? -80 : 80, -80, 80]);
+      const old = [body.x + off[0], body.y + off[1], body.z + off[2]];
+      const end = [...this.slides.values()].find(s => s.kind === "slide-end2"
+        && Math.hypot(s.x - old[0], s.y - old[1], s.z - old[2]) < 0.2);
+      if (!end) continue;
+      const exit = this.slideExit(body);
+      if ([...this.slides.values()].some(s => s !== end && s !== body
+        && Math.hypot(s.x - exit.pos[0], s.y - exit.pos[1], s.z - exit.pos[2]) < 0.2)) continue;
+      [end.x, end.y, end.z] = exit.pos;
+      end.quat = exit.quat;
     }
     for (const g of data.groups || []) {
       if (!g || !g.id || !Array.isArray(g.ids)) continue;

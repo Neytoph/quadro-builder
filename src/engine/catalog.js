@@ -248,13 +248,21 @@ export function diagonalTubeId() {
   return geometry().diagonalTube || "T52";
 }
 
-// Rutschen/Dach-Art -> i18n-Schluessel. Einziger Ort, der die QDF-"kind"-Werte
-// kennt (slide2, slide-new2, ...) -> spaeter leicht erweiterbar.
+// Rutschen/Dach-Art -> i18n-Schluessel. Einziger Ort, der die gespeicherten
+// Rutschen-Arten kennt (slide2, slide-new2, ...).
 const SLIDE_KIND_KEYS = {
   "slide2": "slide_slide",            // Modularrutschen-Koerper
   "slide-new2": "slide_integral",     // Integralrutsche, steht fuer sich
+  "slide-domestic80": "slide_domestic80", // einteilige Rutsche 80x160 cm
+  "slide-domestic60": "slide_domestic60", // einteilige Rutsche 60x120 cm
+  "slide-domestic15": "slide_domestic60", // alte Entwuerfe: bestaetigte 60x120-cm-Variante
+  "slide-domestic-integral60": "slide_domestic_integral60",
+  "slide-domestic-integral80": "slide_domestic_integral80",
+  "slide-domestic-classic60": "slide_domestic_classic60",
+  "slide-domestic-classic80": "slide_domestic_classic80",
   "slide-end2": "slide_end",          // Rutschenauslauf, schliesst eine Kette ab
   "curved-slide2": "slide_curved",    // Bogenrutschen-Koerper
+  "curved-slide-domestic80": "slide_curved_domestic80", //国产弯滑梯 80x160 cm
   "roof2": "slide_roof",
 };
 

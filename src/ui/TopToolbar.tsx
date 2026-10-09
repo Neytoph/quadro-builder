@@ -14,6 +14,8 @@ import AccessoryInstallation from './AccessoryInstallation'
 import { MessageSquarePlus } from 'lucide-react'
 import { useCollab } from '../collab/CollabContext'
 import { useOverflowCompact } from './useOverflowCompact'
+import SlideMenu from './SlideMenu'
+import type { CatalogueSource } from './CatalogueSourceSwitch'
 
 export function DropItem({ on, onClick, title, img, label, compat }: {
   on: boolean
@@ -82,6 +84,7 @@ export default function TopToolbar() {
   const barRef = useRef<HTMLDivElement>(null)
   const compact = useOverflowCompact(barRef)
   const [open, setOpen] = useState<string | null>(null)
+  const [catalogueSource, setCatalogueSource] = useState<CatalogueSource>(() => api.slideKind.includes('domestic') ? 'extended' : 'official')
   const toggle = (k: string) => setOpen(o => (o === k ? null : k))
   const close = () => setOpen(null)
 
@@ -130,7 +133,7 @@ export default function TopToolbar() {
   const tubeMark = tubeCurved ? t('hint.curved') : (tubeDef ? `${tubeDef.length_cm} cm` : '')
   const panelDef = api.catalog.panels.find(p => p.id === api.panelId)
   const panelMark = activeTool === 'panels' && panelDef ? labelOf(panelDef.id, panelDef.name) : ''
-  const catalogueMenu = (tool: CatalogueTool) => <InstallationCatalogueMenu key={tool} tool={tool} entries={entries} onClose={close} />
+  const catalogueMenu = (tool: CatalogueTool) => <InstallationCatalogueMenu key={tool} tool={tool} entries={entries} source={catalogueSource} onSourceChange={setCatalogueSource} onClose={close} />
 
   const sep = <div className="qb-toolbar-divider" aria-hidden="true" />
   const plain = 'qb-tool qb-history-tool'
@@ -186,8 +189,16 @@ export default function TopToolbar() {
       <ToolDrop tool="pools" title={t('tool.pools')} open={open === 'pools'} active={activeTool === 'pools'} onClick={() => toggle('pools')} onClose={close} menu={catalogueMenu('pools')}>
         <Svg16 inner={TOOL_ICON.pool} /><span>{t('tool.pools')}</span>
       </ToolDrop>
-      <ToolDrop tool="slides" title={t('tool.slides')} open={open === 'slides'} active={activeTool === 'slides'} onClick={() => toggle('slides')} onClose={close} menu={catalogueMenu('slides')}>
-        <Svg16 inner={TOOL_ICON.slide} /><span>{t('tool.slides')}</span>
+      <ToolDrop
+        tool="slides" title={t('tool.slides')}
+        open={open === 'slides'}
+        active={api.mode === 'slide'}
+        onClick={() => toggle('slides')}
+        onClose={close}
+        menu={<SlideMenu source={catalogueSource} onSourceChange={setCatalogueSource} onClose={close} />}
+      >
+        <Svg16 inner={TOOL_ICON.slide} />
+        <span>{t('tool.slides')}</span>
       </ToolDrop>
       {sep}
       <ToolDrop tool="accessories" title={t('tool.accessories')} open={open === 'accessories'} active={activeTool === 'accessories'} onClick={() => toggle('accessories')} onClose={close} menu={catalogueMenu('accessories')}>
