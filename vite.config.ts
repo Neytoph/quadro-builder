@@ -6,6 +6,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { publicResources } from './scripts/publicResources'
+import { publicAssetFallback } from './scripts/publicAssetFallback'
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url))
 let opsTelemetryEnabled = false
@@ -41,6 +42,7 @@ function readBody(req: import('node:http').IncomingMessage, limit = 2_000_000) {
 export default defineConfig({
   plugins: [
     publicResources(rootDir),
+    publicAssetFallback(rootDir),
     react(),
     tailwindcss(),
     {
