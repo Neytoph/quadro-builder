@@ -79,11 +79,17 @@ export function publicAssetFallback(root: string): Plugin {
       const entry = entries[0].getAttribute('src')!
       const styles = Array.from(document.querySelectorAll('link[rel="stylesheet"]')).map(link => link.getAttribute('href')!)
       if (setting === '1' && (!assets[entry] || styles.some(url => !assets[url]))) throw new Error('Entry/styles absent from exact public asset release')
-      entries[0].remove()
-      for (const link of document.querySelectorAll('link[rel="stylesheet"],link[rel="modulepreload"]')) link.remove()
+      if (setting === '1') {
+        entries[0].remove()
+        for (const link of document.querySelectorAll('link[rel="stylesheet"],link[rel="modulepreload"]')) link.remove()
+      }
       const boot: AssetBoot = { protocol: 1, release: release.release, mode: release.mode, base: '/builder/', entry, styles, controllerBudgetMs: 1200 }
       const workerCode = await compile(root, 'src/publicAssets/worker.ts', { __PUBLIC_ASSET_RELEASE__: JSON.stringify(release) })
-      const bootCode = await compile(root, 'src/publicAssets/boot.ts', { __PUBLIC_ASSET_BOOT__: JSON.stringify(boot) })
+      // 显式退出恢复Vite原入口；退场worker只异步接管同scope，不阻塞应用或清存储。
+      // sw.js是安装器校验过的同字节安全别名，no-store避免旧边缘worker缓存。
+      const bootCode = setting === 'off'
+        ? '(()=>{try{if(navigator.serviceWorker)void navigator.serviceWorker.register("/builder/sw.js",{scope:"/builder/",updateViaCache:"none"}).catch(()=>console.warn("[public assets off] worker update unavailable"))}catch{console.warn("[public assets off] worker unavailable")}})();\n'
+        : await compile(root, 'src/publicAssets/boot.ts', { __PUBLIC_ASSET_BOOT__: JSON.stringify(boot) })
       const script = document.createElement('script')
       script.setAttribute('data-public-assets-boot', '1')
       script.setAttribute('data-release', release.release)
