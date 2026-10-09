@@ -42,7 +42,13 @@ export function confirmedFrame(model, part) {
   let x=unit(cSub(cor[1],cor[0])), y=unit(cSub(cor[3],cor[0]));
   if((hasInsetScrews(part) && part.params?.screwAxis!=='horizontal') || Math.abs(Math.hypot(...cSub(cor[1],cor[0]))-spec.width)>0.5) [x,y]=[y,x];
   let z=unit(cross(x,y));
-  if(Math.abs(z[1])<0.01) {const raw=unit(cross(unit(cSub(cor[1],cor[0])),unit(cSub(cor[3],cor[0]))));z=raw;y=[0,1,0];x=unit(cross(y,z));}
+  if(Math.abs(z[1])<0.01) {
+    // 竖直平面内的斜框保留实际框边；方板选更朝上的边作为高度轴。
+    if(Math.abs(spec.width-spec.height)<0.5 && !hasInsetScrews(part) && Math.abs(x[1])>Math.abs(y[1]))[x,y]=[y,x];
+    if(y[1]<0)y=y.map(v=>-v);
+    z=unit(cross(unit(cSub(cor[1],cor[0])),unit(cSub(cor[3],cor[0]))));
+    x=unit(cross(y,z));
+  }
   const sign=Math.abs(z[1])>0.999 ? (z[1]<0?-1:1) : (part.side||1);
   if(sign<0) {x=x.map(v=>-v);z=z.map(v=>-v);}
   if (![...x,...y,...z].every(Number.isFinite)) return null;
@@ -61,7 +67,7 @@ function edgeSupports(model, corners, density=0) {
       const delta=cSub(rail.p0,a),start=cDot(delta,d);
       if(Math.hypot(...cSub(delta,d.map(v=>v*start)))>0.35)continue;
       const end=start+rail.len*cDot(rail.dir,d),lo=Math.max(0,Math.min(start,end)),hi=Math.min(L,Math.max(start,end));
-      if(hi>lo)spans.push({rail,tube,lo,hi});
+      if(hi>lo+0.01)spans.push({rail,tube,lo,hi});
     }
     spans.sort((a,b)=>a.lo-b.lo);let reach=0;
     for(const s of spans){if(s.lo>reach+0.35)break;reach=Math.max(reach,s.hi);supportTubes.add(s.tube.id);}
@@ -158,7 +164,7 @@ export function ropeCandidate(model,first,second) {
   const x=unit(cSub(b,a)),z=unit(cross(x,Math.abs(x[1])>0.9?[1,0,0]:[0,1,0])),y=cross(z,x),frame={pos:center([a,b]),axes:[x,y,z],quat:quatFromBasis(x,y,z)};
   return {...asFitting(spec,{tube:first.tube,a:first.tube,b:second.tube},frame,{mounts:[first,second].map(m=>({...m,role:'knot',width:1})),supportTubes:[first.tube,second.tube]}),ropeLength:length};
 }
-function railCandidates(model,spec,{legacyInset=false}={}) {
+function railCandidates(model,spec,{legacyInset=false,deduplicate=true}={}) {
   const out=[],seen=new Set();
   for(const tube of model.tubes.values())for(const partner of model.panelPartners(tube.id,[spec.width,spec.height])) {
     const count=Math.max(1,Math.floor((partner.hi-partner.lo+0.5)/partner.len));
@@ -167,7 +173,7 @@ function railCandidates(model,spec,{legacyInset=false}={}) {
     for(let k=0;k<count;k++) {
       const probe={a:tube.id,b:partner.id,t0:partner.lo+k*partner.len,len:partner.len};
       const cor=model.panelCorners(probe);if(!cor)continue;
-      const key=cor.map(p=>p.map(v=>v.toFixed(2)).join(',')).sort().join('|');if(seen.has(key))continue;seen.add(key);
+      const key=cor.map(p=>p.map(v=>v.toFixed(2)).join(',')).sort().join('|');if(deduplicate && seen.has(key))continue;seen.add(key);
       const frame=confirmedFrame(model,{...probe,panelId:spec.id,side:1});if(!frame)continue;
       const normal=frame.axes[2];if(spec.mountType==='horizontal-frame' && Math.abs(normal[1])<0.999)continue;
       const density=spec.feature==='trampoline'?4:spec.feature==='net'?10:0;
@@ -209,7 +215,7 @@ export function confirmedCandidates(model,id,options={}) {
   const spec=confirmedSpec(id);if(!spec)return [];
   if(spec.placement==='panel') {
     const fake={...spec,placement:'fitting'};
-    const candidates=railCandidates(model,fake,options).map(p=>confirmedPanelDiagnostics(model,{a:p.a,b:p.b,t0:p.t0,len:p.len,panelId:spec.id,side:1},options));
+    const candidates=railCandidates(model,fake,{...options,deduplicate:false}).map(p=>confirmedPanelDiagnostics(model,{a:p.a,b:p.b,t0:p.t0,len:p.len,panelId:spec.id,side:1},options));
     if(INSET_PANEL_IDS.has(spec.id) && !options.legacyInset){
       const seen=new Set(candidates.map(p=>model.panelCorners(p)?.map(c=>c.map(v=>v.toFixed(2)).join(',')).sort().join('|')));
       const horizontal=options.screwAxis==='horizontal';
@@ -219,7 +225,16 @@ export function confirmedCandidates(model,id,options={}) {
         if(candidate.valid){candidates.push(candidate);seen.add(key);}
       }
     }
-    return candidates;
+    // 同一框格可能有多个承载方向；实际安装检查后才选择一个方案。
+    const faces=new Map();
+    for(const candidate of candidates){
+      const cor=model.panelCorners(candidate);if(!cor)continue;
+      const key=cor.map(p=>p.map(v=>(Math.abs(v)<.005?0:v).toFixed(2)).join(',')).sort().join('|');
+      const previous=faces.get(key);if(previous?.accepted)continue;
+      const accepted=candidate.valid && (options.isPanelCandidateValid?.(candidate) ?? true);
+      if(!previous || accepted && !previous.accepted)faces.set(key,{candidate,accepted});
+    }
+    return [...faces.values()].map(({candidate})=>candidate);
   }
   if(spec.mountType==='curved-frame')return curvedCandidates(model,spec);
   if(spec.feature==='trampoline')return trampolineCandidates(model,spec);

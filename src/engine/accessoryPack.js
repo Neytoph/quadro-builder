@@ -327,6 +327,10 @@ export function confirmedDiagnostics(model, probe) {
     part = candidate ? { ...candidate, id: probe.id, color: probe.color } : invalid('missing_support');
   }
   if (!part.valid) return part;
+  if(part.panelId){
+    const existing=model.panelAt(part.a,part.b,part.t0,part.len,probe.id);
+    if(existing)return {...part,valid:false,reason:'component_space',obstacle:{kind:'panel',id:existing.id}};
+  }
   if (occupiedMount(model, part.mounts, probe.id)) return { ...part, valid: false, reason: 'mount_occupied' };
   const obstacle = componentObstacle(model, part);
   if (obstacle) return { ...part, valid: false, reason: 'component_space', obstacle };

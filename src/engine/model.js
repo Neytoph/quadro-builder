@@ -1153,11 +1153,12 @@ export class BuildModel {
    * Liegt an dieser Stelle schon eine Platte (oder ein Netz)? Geprueft werden
    * beide Sammlungen -- gestapelt wird nichts.
    */
-  panelAt(aId, bId, t0, len) {
+  panelAt(aId, bId, t0, len, ignoreId = null) {
     const probe = this.panelCorners({ a: aId, b: bId, t0, len });
     if (!probe) return null;
     for (const map of [this.panels, this.textiles]) {
       for (const p of map.values()) {
+        if(p.id===ignoreId)continue;
         const c = this.panelCorners(p);
         if (c && this._panelsOverlap(c, probe)) return p;
       }
@@ -1339,12 +1340,14 @@ export class BuildModel {
     return f;
   }
 
-  confirmedMounts(partId,options={}) { return confirmedCandidates(this, partId,options).map(p => confirmedDiagnostics(this, p)); }
+  confirmedMounts(partId,options={}) {
+    return confirmedCandidates(this,partId,{...options,isPanelCandidateValid:probe=>confirmedDiagnostics(this,probe).valid}).map(p=>confirmedDiagnostics(this,p));
+  }
   ropeDiagnostics(first, second) { return confirmedDiagnostics(this, ropeCandidate(this, first, second)); }
   confirmedDiagnostics(probe) { return confirmedDiagnostics(this, probe); }
 
   addConfirmedComponent(probe, color) {
-    const candidate = confirmedDiagnostics(this, probe);
+    const candidate = confirmedDiagnostics(this, {...probe,id:undefined});
     if (!candidate.valid) return null;
     const record = { ...candidate, color: confirmedSpec(candidate.panelId || candidate.kind)?.fixedColor || color || probe.color || confirmedSpec(candidate.panelId || candidate.kind)?.defaultColor || null, id: this._id(candidate.panelId ? 'p' : 'f') };
     for (const key of ['valid', 'reason', 'pos', 'obstacle']) delete record[key];
