@@ -42,7 +42,8 @@ async function compile(root: string, entry: string, define: Record<string, strin
   const result = await build({ configFile: false, root, logLevel: 'silent', publicDir: false, define,
     build: { write: false, target: 'es2022', minify: true, rollupOptions: { input: path.join(root, entry),
       output: { format: 'iife', inlineDynamicImports: true } } } })
-  const outputs = Array.isArray(result) ? result.flatMap(value => value.output) : 'output' in result ? result.output : []
+  const results = Array.isArray(result) ? result : [result]
+  const outputs = results.flatMap(value => 'output' in value ? value.output : [])
   const chunk = outputs.find(value => value.type === 'chunk')
   if (!chunk || outputs.length !== 1) throw new Error('Public asset bootstrap must compile to one standalone script')
   return chunk.code
@@ -64,8 +65,11 @@ export function publicAssetFallback(root: string): Plugin {
       const previewOnly = config.env.VITE_PUBLIC_ASSET_PREVIEW === '1'
       const ipv6Origin = fallbackOrigin(config.env.VITE_PUBLIC_ASSET_IPV6_ORIGIN || 'https://v6-test.xiaomaifang.com', previewOnly)
       const assets = setting === '1' ? describeAssets(bundle, out) : {}
+      // 相同资源也可能修复SW/boot逻辑；握手版本必须覆盖这些源码，不能误认旧controller。
+      const runtimeSha256 = digest(['scripts/publicAssetFallback.ts', 'src/publicAssets/protocol.ts', 'src/publicAssets/network.ts',
+        'src/publicAssets/worker.ts', 'src/publicAssets/boot.ts'].map(file => `${file}\n${fs.readFileSync(path.join(root, file), 'utf8')}`).join('\n'))
       const data = { schemaVersion: 1 as const, mode: setting === '1' ? 'public-ipv6-fallback' as const : 'public-ipv6-off' as const,
-        base: '/builder/' as const, ipv6Origin, previewOnly, policy: { fallbackDelayMs: 1000, ipv6TimeoutMs: 4000, totalTimeoutMs: 60000 }, assets }
+        base: '/builder/' as const, ipv6Origin, previewOnly, policy: { fallbackDelayMs: 1000, ipv6TimeoutMs: 4000, totalTimeoutMs: 60000 }, runtimeSha256, assets }
       const release: AssetRelease = { ...data, release: digest(JSON.stringify(data)) }
       const page = new Window({ settings: { disableJavaScriptEvaluation: true, disableJavaScriptFileLoading: true, disableCSSFileLoading: true } })
       page.document.write(fs.readFileSync(path.join(out, 'index.html'), 'utf8'))

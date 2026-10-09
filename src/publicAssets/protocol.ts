@@ -12,6 +12,7 @@ export interface AssetRelease {
   ipv6Origin: string
   previewOnly: boolean
   policy: { fallbackDelayMs: number; ipv6TimeoutMs: number; totalTimeoutMs: number }
+  runtimeSha256: string
   assets: Record<string, PublicAsset>
 }
 

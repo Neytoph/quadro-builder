@@ -2,6 +2,21 @@ import { HELLO, READY, type AssetBoot } from './protocol'
 
 declare const __PUBLIC_ASSET_BOOT__: AssetBoot
 
+/** 与界面的语言优先级一致；引导器不引入React或整份字典，存储被禁用时仍能加载。 */
+export function bootLanguage(search: string, getItem: (key: string) => string | null, browserLanguage: string): 'zh' | 'en' | 'de' {
+  const valid = (value: string | null): value is 'zh' | 'en' | 'de' => value === 'zh' || value === 'en' || value === 'de'
+  const fromUrl = new URLSearchParams(search).get('lang')
+  if (valid(fromUrl)) return fromUrl
+  try {
+    const stored = getItem('quadro-builder-lang') || getItem('quadro.lang')
+    if (valid(stored)) return stored
+  } catch { /* 语言偏好存储不可读时按浏览器语言，不能阻止canonical入口。 */ }
+  const nav = (browserLanguage || '').toLowerCase()
+  if (nav.startsWith('zh')) return 'zh'
+  if (nav.startsWith('de')) return 'de'
+  return 'en'
+}
+
 /** 有界等待当前控制器的准确版本；迟到claim不会重启已经加载的应用。 */
 export function waitForAssetController(serviceWorker: ServiceWorkerContainer | undefined, config: AssetBoot): Promise<boolean> {
   if (!serviceWorker) return Promise.resolve(false)
@@ -44,7 +59,7 @@ export async function bootPublicAssets(config: AssetBoot, page: Window = window)
   if (state.__xmfPublicAssetsBoot) return
   state.__xmfPublicAssetsBoot = true
   const doc = page.document
-  const language = page.navigator.language.startsWith('de') ? 'de' : page.navigator.language.startsWith('zh') ? 'zh' : 'en'
+  const language = bootLanguage(page.location.search, key => page.localStorage.getItem(key), page.navigator.language)
   const errorText = { zh: '设计器加载失败。请刷新页面重试。', en: 'The designer could not load. Refresh the page to retry.',
     de: 'Der Designer konnte nicht geladen werden. Bitte die Seite zum erneuten Versuch aktualisieren.' }
   const retryText = { zh: '刷新重试', en: 'Refresh and retry', de: 'Aktualisieren und erneut versuchen' }
@@ -53,9 +68,12 @@ export async function bootPublicAssets(config: AssetBoot, page: Window = window)
     const status = doc.createElement('p')
     status.setAttribute('role', 'alert')
     status.textContent = errorText[language]
+    // 此时应用CSS本身可能下载失败，错误入口须独立可读。
+    status.style.cssText = 'margin:24px;padding:24px;background:#fff;color:#1f2430;font:16px/1.5 system-ui;border-radius:12px'
     const retry = doc.createElement('button')
     retry.type = 'button'
     retry.textContent = retryText[language]
+    retry.style.cssText = 'display:block;margin-top:16px;padding:8px 16px'
     // 仅用户明确点击后重新打开同一文档；永远不向已可能执行的入口再注入第二份模块。
     retry.onclick = () => page.location.reload()
     status.append(retry)

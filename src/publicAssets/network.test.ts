@@ -11,7 +11,8 @@ const path = '/builder/assets/entry-abcdefgh.js'
 const origin = 'https://canonical.example'
 const release: AssetRelease = { schemaVersion: 1, mode: 'public-ipv6-fallback', release: 'a'.repeat(64), base: '/builder/',
   ipv6Origin: 'https://ipv6.example', previewOnly: false,
-  policy: { fallbackDelayMs: 10, ipv6TimeoutMs: 20, totalTimeoutMs: 80 }, assets: { [path]: asset } }
+  policy: { fallbackDelayMs: 1000, ipv6TimeoutMs: 2000, totalTimeoutMs: 5000 }, runtimeSha256: 'b'.repeat(64), assets: { [path]: asset } }
+const fastRelease = { ...release, policy: { fallbackDelayMs: 10, ipv6TimeoutMs: 20, totalTimeoutMs: 80 } }
 const good = () => new Response(content, { headers: { 'Content-Type': 'application/javascript',
   'Content-Encoding': 'gzip', 'Content-Length': '7', 'Set-Cookie': 'must-not-copy=1' } })
 const request = () => new Request(origin + path)
@@ -63,8 +64,9 @@ describe('exact public resource routing', () => {
       if (failure === 'network') throw new TypeError('TLS/DNS/CORS failed')
       if (failure === '404') return new Response('missing', { status: 404 })
       if (failure === 'mime') return new Response(content, { headers: { 'Content-Type': 'text/html' } })
-      const bytes = failure === 'short' ? content.slice(0, -1) : failure === 'oversize' ? new Uint8Array(content.length + 1)
-        : new TextEncoder().encode('export const version = 2')
+      let bytes = new TextEncoder().encode('export const version = 2')
+      if (failure === 'short') bytes = content.slice(0, -1)
+      if (failure === 'oversize') bytes = new Uint8Array(content.length + 1)
       return new Response(bytes, { headers: { 'Content-Type': 'text/javascript' } })
     })
     expect(calls.map(call => call.url)).toEqual([release.ipv6Origin + path, origin + path])
@@ -75,7 +77,7 @@ describe('exact public resource routing', () => {
     let canceled = false
     let losingSignal: AbortSignal | undefined
     const calls: string[] = []
-    const result = await fetchPublicAsset(request(), asset, release, async input => {
+    const result = await fetchPublicAsset(request(), asset, fastRelease, async input => {
       const req = input as Request
       calls.push(req.url)
       if (req.url.startsWith(origin)) return good()
@@ -106,7 +108,7 @@ describe('exact public resource routing', () => {
 
   it('has a hard overall deadline even when a transport ignores abort', async () => {
     const signals: AbortSignal[] = []
-    const result = fetchPublicAsset(request(), asset, release, async input => {
+    const result = fetchPublicAsset(request(), asset, fastRelease, async input => {
       signals.push((input as Request).signal)
       return new Promise<Response>(() => {})
     })

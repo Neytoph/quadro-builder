@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { MessageChannel as NodeMessageChannel } from 'node:worker_threads'
-import { waitForAssetController } from './boot'
+import { bootLanguage, waitForAssetController } from './boot'
 import { READY, type AssetBoot } from './protocol'
 
 const config: AssetBoot = { protocol: 1, release: 'a'.repeat(64), mode: 'public-ipv6-fallback', base: '/builder/',
@@ -24,6 +24,15 @@ function container(readyRelease: string, throws = false) {
 }
 
 describe('bounded exact controller handshake', () => {
+  it('failure messages follow URL language, saved preference and normalized browser language without requiring storage', () => {
+    expect(bootLanguage('?lang=de', () => { throw new Error('URL must win') }, 'zh-CN')).toBe('de')
+    expect(bootLanguage('', key => key === 'quadro-builder-lang' ? 'en' : 'de', 'zh-CN')).toBe('en')
+    expect(bootLanguage('', key => key === 'quadro.lang' ? 'de' : null, 'zh-CN')).toBe('de')
+    expect(bootLanguage('?lang=invalid', () => { throw new DOMException('blocked', 'SecurityError') }, 'DE-de')).toBe('de')
+    expect(bootLanguage('', () => null, 'ZH-cn')).toBe('zh')
+    expect(bootLanguage('', () => null, 'fr-FR')).toBe('en')
+  })
+
   it('accepts only the correct release and registers only the fixed same-origin URL and scope', async () => {
     const sw = container(config.release)
     expect(await waitForAssetController(sw, config)).toBe(true)
