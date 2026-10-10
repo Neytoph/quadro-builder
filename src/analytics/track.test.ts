@@ -72,7 +72,7 @@ describe('托管页面行动和统计桥接', () => {
     expect(fetchSpy).toHaveBeenCalledOnce()
     const [, init] = fetchSpy.mock.calls[0] as unknown as [string, RequestInit]
     expect(JSON.parse(String(init.body)).events).toEqual([
-      { name: 'builder.app.time', props: { visible: 15, active: 0, visit: expect.any(String) } },
+      { name: 'builder.app.time', props: { visible: 15, active: 0, visit: expect.any(String), analytics_v: 2, elapsed: expect.any(Number) } },
     ])
     expect(vi.getTimerCount()).toBe(1)
   })
@@ -106,7 +106,7 @@ describe('托管页面行动和统计桥接', () => {
     const [url, init] = fetchSpy.mock.calls[0] as unknown as [string, RequestInit]
     expect(url).toBe('/events')
     expect(JSON.parse(String(init.body)).events).toEqual([
-      { name: 'builder.design.save', props: { named: true, visit: expect.any(String) } },
+      { name: 'builder.design.save', props: { named: true, visit: expect.any(String), analytics_v: 2, elapsed: expect.any(Number) } },
     ])
   })
 
@@ -120,7 +120,7 @@ describe('托管页面行动和统计桥接', () => {
     for (const name of siteNames) {
       for (const source of sources) {
         send({ name, props: { source, text: '用户输入', docId: '私人文档' }, user: '私人标识' })
-        expected.push({ name, props: { source, visit: expect.any(String) } })
+        expected.push({ name, props: { source, visit: expect.any(String), analytics_v: 2, elapsed: expect.any(Number) } })
       }
     }
     window.dispatchEvent(new Event('quadro-builder:track'))

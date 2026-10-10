@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { bumpCount, track } from '../analytics/track'
+import { bumpCount, track, entryAnalyticsObject, setAnalyticsObject } from '../analytics/track'
 import {
   BuildModel, Builder, SceneManager, loadCatalog, computeBOM, compareInventory, connectorsForNode, computeSafety,
   parseQDF, parseDesign, designEntry, buildQDF, buildableTubes, buildableCurvedTubes, buildablePanels, tubeColors, allConnectors, accessories,
@@ -387,9 +387,7 @@ function modelPartCount(model: unknown) {
   return n(rec.tubes) + n(rec.panels) + n(rec.slides) + n(rec.fittings)
 }
 
-// 「搭完一座」的门槛：最小的官方造型是 20 件管和板（不算连接件，口径同
-// modelPartCount）。用户亲手改出来的一座到了这个规模，就算搭出了一座完整的架子。
-// 后台来源看板（小麦坊 gateway/internal/store/sources.go）用同一个数判断老数据。
+// 保留历史规模事件，表示编辑后达到20件；不代表设计完成或成功保存。
 const BUILT_MIN_PARTS = 20
 
 // 选件打点。连着选同一个不重复发——工具条的下拉每打开一次就会把当前件
@@ -404,8 +402,7 @@ function pickPart(kind: string, id: string) {
 
 // 存盘时的构成快照。比"每放一根管发一条"便宜几百倍，回答的还是更该问的
 // 那个问题：什么件真的被留下了——试了又删的不算数，那才是定价和二手
-// 该看的口径。props 最多 8 个（gateway/internal/events 的 maxProps），
-// 保存时加上 named 和访问标识，正好是 8 个。
+// 该看的口径。构成字段与版本、访问、对象标识一起控制在服务端字段上限内。
 function modelShape(model: unknown) {
   const rec = (model && typeof model === 'object' ? model : {}) as AnyRec
   const n = (v: unknown) => Array.isArray(v) ? v.length : (v && typeof v === 'object' ? Object.keys(v).length : 0)
@@ -440,6 +437,25 @@ type Tab = TabInfo & {
   readOnly?: boolean
 }
 
+// 只在内存中核对修改与成功快照；模型、名称和文档ID均不发送给统计服务。
+type TabAnalytics = { baseline: string; edited: boolean; lastOutput: string; object: string }
+const tabAnalytics = new WeakMap<Tab, TabAnalytics>()
+function resetTabAnalytics(tab: Tab, data: ModelJSON, object = '') {
+  const state = { baseline: modelContent(data), edited: false, lastOutput: '', object }
+  tabAnalytics.set(tab, state)
+  return state
+}
+function outputCandidate(tab: Tab | undefined, data: ModelJSON) {
+  const state = tab && tabAnalytics.get(tab)
+  const content = modelContent(data)
+  const eligible = state && state.edited && content !== state.baseline && modelPartCount(data) > 0
+  return (kind: string) => {
+    if (!eligible || content === state.lastOutput) return
+    state.lastOutput = content
+    track('builder.design.output', { kind, object: state.object, ...modelShape(data) })
+  }
+}
+
 const EMPTY_MODEL: ModelJSON = { format: 2, nodes: [], tubes: [] }
 
 /** 让引擎按它的规矩读一遍再导出：旧格式升上来、坐标取整，写进文档的都是当前格式。 */
@@ -456,6 +472,7 @@ function normalizeModel(data: unknown): ModelJSON | null {
 function replaceTabModel(tab: Tab, json: ModelJSON) {
   writeJSON(tab.local.doc, json, SEED_ORIGIN)
   tab.local.history.clear()
+  resetTabAnalytics(tab, json)
 }
 
 /** 新标签页，文档里是 seed。只放一座的打开方式不在本机留库。 */
@@ -753,6 +770,13 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     // 每个标签页只记一次，打开官方造型、导入文件那一下不算：那是换进来的，
     // 在它上面接着改一步才算用户自己搭出来的。
     const e2 = eng.current
+    if (tab && e2 && !tab.readOnly && !loadingModel.current) {
+      const state = tabAnalytics.get(tab)
+      if (state && !state.edited && modelContent(e2.model.toJSON()) !== state.baseline) {
+        state.edited = true
+        track('builder.design.edited', { object: state.object })
+      }
+    }
     if (tab && e2 && !loadingModel.current && !builtTabs.current.has(tab.tabId)) {
       const parts = modelPartCount(e2.model.toJSON())
       if (parts >= BUILT_MIN_PARTS) {
@@ -773,6 +797,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     e.model.idTag = tab.idTag || ''
     const res = e.model.loadJSON(tab.local.history.toJSON())
     if (!res.ok) throw new Error(`tab ${tab.tabId} does not load: ${res.reason}`)
+    const analytics = tabAnalytics.get(tab) || resetTabAnalytics(tab, e.model.toJSON())
+    setAnalyticsObject(analytics.object)
     e.builder.setUiState(tab.view || {})
     e.builder.setMode((tab.view?.mode as string) || 'select')
     if (tab.view?.camera) e.scene.restoreCameraState(tab.view.camera)
@@ -1068,6 +1094,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
         scene.releaseLoadGate()
         bumpRef.current()
       } catch (err) {
+        track('builder.app.fail', { reason: 'load' })
         setError(err instanceof Error ? err.message : String(err))
       }
     })()
@@ -1465,6 +1492,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   async function saveSnapshot(tab: Tab, options: Parameters<typeof docs.saveDoc>[0]) {
     try { return await docs.saveDoc(options) }
     catch (error) {
+      track('builder.save.fail', { reason: 'local_io', object: tabAnalytics.get(tab)?.object || '' })
       console.warn('[save local]', error)
       if (tabsRef.current.includes(tab)) {
         tab.dirty = true
@@ -1505,6 +1533,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     if (!tabsRef.current.includes(tab)) return null
     if (tab.tabId === activeRef.current && e2.builder.busy()) { notify(t('sync.waiting'), 'warn'); return null }
     const data = structuredClone(exportTab(tab))
+    const output = outputCandidate(tab, data)
     const generation = tab.editGeneration || 0
     const stillCurrent = beginLocalSave(tab)
     // 没有可靠基线时只能保存成新设计，不能借存档库最新 rev 覆盖原设计。
@@ -1529,6 +1558,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     }
     syncTabs()
     track('builder.design.save', { ...modelShape(data), named: !!name })
+    output('save')
     if (attached && tab.conflictDocId) notify(t('sync.conflictProtected'), 'warn')
     else notify(t(syncStarted() ? 'sync.syncing' : 'sync.local'))
     void pushSaved(String(saved.id), String(saved.name), data, String(saved.saveId), attached ? tab : undefined)
@@ -1567,6 +1597,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       result = { status: 'pending', id: docId, saveId, error }
     }
     const binding = { docId, saveId }
+    track(result.status === 'synced' ? 'builder.sync.done' : 'builder.sync.fail', { reason: result.status, object: tab && tabAnalytics.get(tab)?.object || '' })
     if (tab && tabsRef.current.includes(tab) && samePersonalBinding(tab, binding)) {
       if (result.status === 'synced') {
         tab.baseRev = result.rev
@@ -1622,6 +1653,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     if (!tabsRef.current.includes(tab)) return
     if (tab.tabId === activeRef.current && e2.builder.busy()) { notify(t('sync.waiting'), 'warn'); return }
     const data = structuredClone(exportTab(tab))
+    const output = outputCandidate(tab, data)
     const generation = tab.editGeneration || 0
     const stillCurrent = beginLocalSave(tab)
     const saved = await saveSnapshot(tab, { docId: null, name: typed.trim() || t('tab.untitled'), data })
@@ -1642,6 +1674,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     }
     syncTabs()
     track('builder.design.saveAs', { ...modelShape(data) })
+    output('save_as')
     notify(t(syncStarted() ? 'sync.syncing' : 'sync.local'))
     void pushSaved(String(saved.id), String(saved.name), data, String(saved.saveId), attached ? tab : undefined)
     void coverSaved(String(saved.id), data, saved.updatedAt, String(saved.saveId)).catch(error => {
@@ -1784,14 +1817,17 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       active.name = name
       active.dirty = false
       replaceTabModel(active, json)
+      resetTabAnalytics(active, json, official ? 'official:' + official : '')
       applyTab(active)
     } else {
       const tab = makeTab(json, name, null)
+      resetTabAnalytics(tab, json, official ? 'official:' + official : '')
       tabsRef.current = [...tabsRef.current, tab]
       activeRef.current = tab.tabId
       applyTab(tab)
     }
     syncTabs()
+    if (official) track('builder.content.adopt', { object: 'official:' + official })
     notify(t('lib.loaded', { name }))
   }, [applyTab, notify, snapshotActive, syncTabs, t])
 
@@ -1836,6 +1872,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       // 导入失败的比例说明格式支持得够不够。只记格式，不记文件名——
       // 文件名是用户起的，属于自由文本。
       track('builder.design.import', { kind: 'unknown', ok: false })
+      track('builder.import.fail', { reason: 'format' })
       notify(t('toast.importFailed', { err: err instanceof Error ? err.message : String(err) }), 'err')
     }
   }, [bump, notify, syncTabs, t])
@@ -1844,9 +1881,13 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const e2 = eng.current
     if (!e2) return
     if (needAccount('qdf')) return
-    const out = buildQDF(e2.model, { camera: e2.scene.cameraForQdf?.() }) as { text?: string; warnings?: Array<{ code: string; partId: string; id: string }> } | string
+    let out: { text?: string; warnings?: Array<{ code: string; partId: string; id: string }> } | string
+    try {
+      out = buildQDF(e2.model, { camera: e2.scene.cameraForQdf?.() })
+      download(`${activeName()}.qdf`, typeof out === 'string' ? out : (out.text || ''), 'text/plain')
+    } catch (error) { track('builder.export.fail', { reason: 'qdf' }); throw error }
     track('builder.export.qdf')
-    download(`${activeName()}.qdf`, typeof out === 'string' ? out : (out.text || ''), 'text/plain')
+    outputCandidate(tabsRef.current.find(x => x.tabId === activeRef.current), e2.model.toJSON())('qdf')
     const warnings = typeof out === 'string' ? undefined : out.warnings
     const separator = lang === 'zh' ? '、' : ', '
     const omitted = [...new Set(warnings?.filter(w => w.code === 'omitted_accessory').map(w => nameLabel(w.partId)) || [])].join(separator)
@@ -1864,8 +1905,10 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const e2 = eng.current
     if (!e2) return
     if (needAccount('json')) return
+    try { download(`${activeName()}.json`, JSON.stringify(e2.model.toJSON(), null, 2), 'application/json') }
+    catch (error) { track('builder.export.fail', { reason: 'json' }); throw error }
     track('builder.export.json')
-    download(`${activeName()}.json`, JSON.stringify(e2.model.toJSON(), null, 2), 'application/json')
+    outputCandidate(tabsRef.current.find(x => x.tabId === activeRef.current), e2.model.toJSON())('json')
     notify(t('toast.exported'))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notify, t])
@@ -1973,6 +2016,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     e2.builder.refresh()
     if (opts?.frame !== false) e2.scene.resetCamera(e2.model, { animate: true, swoop: true })
     tab.dirty = true
+    resetTabAnalytics(tab, e2.model.toJSON())
+    setAnalyticsObject('')
     syncTabs()
     bump()
     return true
@@ -2245,6 +2290,9 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     if (needAccount('manual')) return
     const frozen = new BuildModel()
     if (!frozen.loadJSON(preview.data).ok) throw new Error('invalid assembly snapshot')
+    const manualTab = tabsRef.current.find(x => x.tabId === preview.tabId)
+    const output = outputCandidate(manualTab, preview.data)
+    const manualObject = manualTab && tabAnalytics.get(manualTab)?.object || ''
     track('builder.export.manual.go')
     exportingManualRef.current = true
     setExportingManual({ page: 0, total: 1 })
@@ -2255,6 +2303,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
         if (!cover) throw new Error('cover')
         stamp = await makeStamp('manual', cover, preview)
       } catch (err) {
+        track('builder.manual.fail', { reason: 'share_page', object: manualObject })
         console.error('Assembly manual share page failed', err)
         exportingManualRef.current = false
         setExportingManual(null)
@@ -2309,9 +2358,11 @@ export function EngineProvider({ children }: { children: ReactNode }) {
           gScrews: t('bom.screws'),
         },
       })
-      track('builder.export.manual.done')
+      track('builder.export.manual.done', { object: manualObject })
+      output('manual')
       notify(t('toast.manualSaved'))
     } catch (err) {
+      track('builder.manual.fail', { reason: (err as { code?: string })?.code === 'empty' ? 'empty' : 'render', object: manualObject })
       console.error('Assembly manual export failed', err)
       if ((err as { code?: string })?.code === 'empty') notify(t('toast.manualEmpty'), 'warn')
       else notify(t('toast.manualFailed'), 'err')
@@ -2428,26 +2479,38 @@ export function EngineProvider({ children }: { children: ReactNode }) {
         clearSharePayload()
       } else {
         const res = await fetch(versionPublicSource(ent.src as string), { credentials: 'include' })
-        if (!res.ok) { notify(t('toast.srcFailed'), 'err'); return }
+        if (!res.ok) { track('builder.app.fail', { reason: 'source_http' }); notify(t('toast.srcFailed'), 'err'); return }
         try { data = designFromText(await res.text()) } catch { data = null }
       }
-      if (!data) { notify(t('toast.shareInvalid'), 'err'); return }
+      if (!data) { track('builder.app.fail', { reason: 'source_format' }); notify(t('toast.shareInvalid'), 'err'); return }
       const e2 = eng.current
       if (!e2) return
       if (modelPartCount(e2.model.toJSON()) > 0) createEmptyTab()
       // 当前是共享方案的标签页时 applyModelJson 自己会新开一个
-      if (!applyModelJson(data, { undoable: false })) { notify(t('toast.shareInvalid'), 'err'); return }
+      if (!applyModelJson(data, { undoable: false })) { track('builder.app.fail', { reason: 'source_format' }); notify(t('toast.shareInvalid'), 'err'); return }
       const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
       if (tab && ent.name) {
         tab.name = ent.name
         syncTabs()
       }
       if (tab && ent.origin) tabOpenedFrom(tab.tabId, ent.origin)
+      if (tab) {
+        resetTabAnalytics(tab, e2.model.toJSON(), entryAnalyticsObject())
+        setAnalyticsObject(entryAnalyticsObject())
+      }
       track('builder.design.open', { from: payload ? 'share' : 'src', view: VIEW_ONLY, copy: ent.copy })
       if (ent.copy && !VIEW_ONLY) await copyToAccount()
       setEntryReady(true)
-    })().catch(err => notify(err instanceof Error ? err.message : String(err), 'err'))
+    })().catch(err => { track('builder.app.fail', { reason: 'source_load' }); notify(err instanceof Error ? err.message : String(err), 'err') })
   }, [ready, applyModelJson, copyToAccount, createEmptyTab, notify, syncTabs, t])
+
+  const analyticsReady = useRef(false)
+  useEffect(() => {
+    if (!ready || !entryReady || analyticsReady.current) return
+    analyticsReady.current = true
+    track('builder.app.ready', { reason: VIEW_ONLY ? 'read_only' : 'editable' })
+    if (!VIEW_ONLY && entryAnalyticsObject()) track('builder.content.adopt', { object: entryAnalyticsObject() })
+  }, [ready, entryReady])
 
   // 注册完从注册页回来（?export=）：确认登录上了，问一句要不要接着导出。
   // 下载要由一次点击触发，浏览器才不会拦，所以不直接开始。
