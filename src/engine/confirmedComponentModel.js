@@ -227,6 +227,8 @@ export function confirmedCandidates(model,id,options={}) {
       }
     }
     // 同一框格可能有多个承载方向；实际安装检查后才选择一个方案。
+    // 批量装配需要保留这些方向，联合选择相邻面板的固定位置。
+    if(options.deduplicate===false)return candidates;
     const faces=new Map();
     for(const candidate of candidates){
       const cor=model.panelCorners(candidate);if(!cor)continue;
