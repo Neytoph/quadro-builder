@@ -35,7 +35,7 @@ export function AssemblyStatus({ pending, error, onWhole, onRetry, onStart }: {
     ready: { title: 'assembly.ready', hint: 'assembly.readyHint', icon: <CircleCheck size={18} /> },
   }[state]
   return (
-    <div data-tour="assembly" className="m-asm qb-card assembly-status" data-state={state}>
+    <div data-tour="assembly" className="m-asm qb-card assembly-status fixed bottom-3 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 p-1.5 max-w-[calc(100vw-1rem)]" data-state={state}>
       <span className="assembly-status-icon" aria-hidden="true">
         {content.icon}
       </span>
@@ -45,11 +45,11 @@ export function AssemblyStatus({ pending, error, onWhole, onRetry, onStart }: {
       </div>
       <div className="assembly-status-actions">
         {state === 'pending' ? (
-          <button type="button" className="assembly-status-button" onClick={onWhole}>{t('assembly.whole')}</button>
+          <button type="button" className="qb-btn qb-btn-ghost qb-btn-sm assembly-status-button" onClick={onWhole}>{t('assembly.whole')}</button>
         ) : (
           <>
-            <button type="button" className="assembly-status-button assembly-status-primary" onClick={error ? onRetry : onStart}>{t(error ? 'assembly.retry' : 'assembly.start')}</button>
-            <button type="button" className="assembly-status-button assembly-status-secondary" onClick={onWhole}>{t('assembly.whole')}</button>
+            <button type="button" className="qb-btn qb-btn-ghost qb-btn-sm assembly-status-button assembly-status-secondary" onClick={onWhole}>{t('assembly.whole')}</button>
+            <button type="button" className="qb-btn qb-btn-sm assembly-status-button assembly-status-primary" onClick={error ? onRetry : onStart}>{t(error ? 'assembly.retry' : 'assembly.start')}</button>
           </>
         )}
       </div>
