@@ -313,6 +313,8 @@ function AppInner() {
       if (e.defaultPrevented || e.isComposing) return
       const el = e.target as HTMLElement | null
       const input = !!el?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')
+      // 手机顶栏菜单自行处理键盘与焦点，避免菜单操作触发画布快捷键。
+      if (el?.closest('[data-ui="mobile-topbar-dialog"]')) return
       if (componentPosition) {
         if (e.key === 'Escape') {
           e.preventDefault()
@@ -471,7 +473,7 @@ function AppInner() {
       <AccountDialog />
       <NameDialog />
       <ManualProgress />
-      {collab.mode === 'off' && !bootEntry().plan && !bootEntry().invite && !bootEntry().createShared && <Onboarding />}
+      <Onboarding autoOpen={collab.mode === 'off' && !bootEntry().plan && !bootEntry().invite && !bootEntry().createShared} />
       {collab.mode === 'plan' && <CollabCoach />}
       <ThumbCapture />
       <ImportOnEntry />

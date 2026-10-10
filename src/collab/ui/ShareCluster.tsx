@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type RefObject } from 'react'
 import { Users, UserPlus } from 'lucide-react'
 import { useI18n } from '../../i18n'
 import { useCollab } from '../CollabContext'
@@ -11,7 +11,7 @@ import { useEngine } from '../../store/EngineContext'
  * 顶栏最右边：普通设计创建共享副本，共享方案查看成员；创建人可以邀请协作。
  * 开源本地版不出现。
  */
-export default function ShareCluster() {
+export default function ShareCluster({ triggerRef }: { triggerRef?: RefObject<HTMLButtonElement | null> } = {}) {
   const collab = useCollab()
   const { t } = useI18n()
   const api = useEngine()
@@ -40,7 +40,7 @@ export default function ShareCluster() {
   if (collab.mode !== 'plan') {
     return (
       <div className="cb-cluster">
-        <button type="button" className="cb-share ghost" title={t('collab.create.action')} aria-label={t('collab.create.action')} onClick={() => show('enable')} data-ui="share-enable"><Users /><span>{t('collab.create.action')}</span></button>
+        <button ref={triggerRef} type="button" className="cb-share ghost" title={t('collab.create.action')} aria-label={t('collab.create.action')} onClick={() => show('enable')} data-ui="share-enable"><Users /><span>{t('collab.create.action')}</span></button>
         {collab.createdPlan && <button type="button" className="cb-text-action" onClick={collab.recoverCreatedPlan}>{t('collab.create.recover')}</button>}
         {open === 'enable' && <EnableShareModal onClose={closeCreate} />}
       </div>
@@ -63,7 +63,7 @@ export default function ShareCluster() {
         {members.length > 5 && <span className="cb-face more">+{members.length - 5}</span>}
       </div>
       {plan && (
-        <button type="button" className="cb-share" title={t(collab.role === 'owner' ? 'collab.create.invite' : 'collab.create.members')} aria-label={t(collab.role === 'owner' ? 'collab.create.invite' : 'collab.create.members')} onClick={() => show('share')} data-ui="plan-share">
+        <button ref={triggerRef} type="button" className="cb-share" title={t(collab.role === 'owner' ? 'collab.create.invite' : 'collab.create.members')} aria-label={t(collab.role === 'owner' ? 'collab.create.invite' : 'collab.create.members')} onClick={() => show('share')} data-ui="plan-share">
           {collab.role === 'owner' ? <UserPlus /> : <Users />}<span>{t(collab.role === 'owner' ? 'collab.create.invite' : 'collab.create.members')}</span>
         </button>
       )}

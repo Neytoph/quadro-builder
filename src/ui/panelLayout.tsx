@@ -6,6 +6,8 @@ const KEY = 'quadro.ui.layout.v3'
 export const PANEL_GAP = 12
 export const TAB_BAR_H = 44
 export const NARROW_MAX = 767
+export const MOBILE_TAB_BAR_H = 56
+export function projectBarHeight(vw: number) { return vw <= NARROW_MAX ? MOBILE_TAB_BAR_H : TAB_BAR_H }
 export const TOP_MIN = TAB_BAR_H + PANEL_GAP
 export const TOOLBAR_H = 56
 /** 工具条真实高度：内边距 + h-12 按钮 + 描边。和左侧 40px 方块对中位线时用这个。 */
@@ -165,7 +167,7 @@ export function leftStackDrop(left: PanelBox, vw: number, toolbarW: number) {
 
 /** 桌面：工具条垂直中线对齐「颜色」旁那一行；窄屏贴在标签栏下。不跟三个按钮的下落位置走。 */
 export function toolbarTop(left: PanelBox, vw: number) {
-  if (vw <= NARROW_MAX) return TOP_MIN
+  if (vw <= NARROW_MAX) return projectBarHeight(vw) + PANEL_GAP
   const sceneTop = left.top + LEFT_MOVE_HANDLE_H + LEFT_STACK_GAP
   return Math.round(sceneTop + SCENE_TOGGLE_PX / 2 - TOOLBAR_CHROME_H / 2)
 }

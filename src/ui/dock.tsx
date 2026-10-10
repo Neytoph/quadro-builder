@@ -61,7 +61,7 @@ export function DockProvider({ children }: { children: ReactNode }) {
 
   const handleEsc = useCallback(() => {
     setPane(null)
-    if (pane) document.querySelector<HTMLButtonElement>(`.qb-navigation [data-pane="${pane}"]`)?.focus()
+    if (pane) document.querySelector<HTMLButtonElement>(`.qb-project-bar [data-pane="${pane}"]`)?.focus()
   }, [pane])
 
   const value = useMemo(() => ({ pane, setPane, toggle, handleEsc, commentsTab, setCommentsTab }), [pane, toggle, handleEsc, commentsTab])
