@@ -7,6 +7,7 @@ import { confirmedSpec } from './componentPack.js';
 import { confirmedCandidates, ropeCandidate } from './confirmedComponentModel.js';
 import { insetPanelProbes } from './insetPanelMounts.js';
 import { validAssemblyConfig } from './assemblyConfig.js';
+import { validHomeContext } from '../home/context.js';
 
 // Zellweite des Rasters, mit dem die Kollisionspruefung Nachbarn sucht. Etwas
 // groesser als das laengste Rohr (75 cm + Kupplung): ein Rohr liegt damit in
@@ -668,6 +669,7 @@ export class BuildModel {
     // 点到组里任何一件整组一起选。gid -> Set<id>
     this.groups = new Map();
     this.assemblyConfig = null;
+    this.homeContext = null;
     this._seq = 1;
     // 共享方案里几个人同时加零件：每个编辑端一个标记夹在前缀和序号中间，
     // 各端新建的 id 不会撞上。标记以非数字结尾，id 末尾仍是序号。
@@ -6141,6 +6143,7 @@ export class BuildModel {
   }
 
   clear() {
+    this.homeContext = null;
     this.nodes.clear();
     this.tubes.clear();
     this.panels.clear();
@@ -6160,6 +6163,7 @@ export class BuildModel {
     return {
       format: FORMAT_VERSION,
       ...(this.assemblyConfig ? { assemblyConfig: structuredClone(this.assemblyConfig) } : {}),
+      ...(this.homeContext ? { homeContext: structuredClone(this.homeContext) } : {}),
       nodes: [...this.nodes.values()].map((n) => {
         const o = { id: n.id, x: round(n.x), y: round(n.y), z: round(n.z) };
         if (n.c45) o.c45 = true; // Knoten traegt eine 45-Grad-Winkelkupplung
@@ -6262,6 +6266,7 @@ export class BuildModel {
       return { ok: false, reason: "format" };
     }
     if (data.assemblyConfig != null && !validAssemblyConfig(data.assemblyConfig)) return { ok: false, reason: 'data' };
+    if (data.homeContext != null && !validHomeContext(data.homeContext)) return { ok: false, reason: 'data' };
     // 兼容旧 QDF 导入器保存的 id；无效卡扣引用在替换当前模型之前明确拒绝。
     const nodeIds = new Set(data.nodes.map(n => n.id));
     const tubeIds = new Set((data.tubes || []).filter(t => t.a && t.b &&
@@ -6272,6 +6277,7 @@ export class BuildModel {
     }
     this.clear();
     this.assemblyConfig = data.assemblyConfig == null ? null : structuredClone(data.assemblyConfig);
+    this.homeContext = data.homeContext == null ? null : structuredClone(data.homeContext);
     let maxSeq = 0;
     for (const n of data.nodes) {
       this.nodes.set(n.id, { id: n.id, x: n.x, y: n.y, z: n.z, c45: !!n.c45, c45body: !!n.c45body,

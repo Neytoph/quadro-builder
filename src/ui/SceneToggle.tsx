@@ -2,6 +2,7 @@ import type { CSSProperties } from 'react'
 import { useEngine } from '../store/EngineContext'
 import { useI18n } from '../i18n'
 import { canvasCorner, SCENE_CLUSTER_GAP, usePanelLayout } from './panelLayout'
+import HomeRoomPanel from './HomeRoomPanel'
 
 const TILE_EDGE = '2px solid rgba(255,255,255,0.88)'
 
@@ -25,11 +26,11 @@ export default function SceneToggle() {
   const exporting = !!api.exportingManual
 
   return (
-    <div
+    <div className="fixed z-20 pointer-events-none" style={{ left: pos.sceneLeft, top: pos.sceneTop }}><div
       data-tour="scene-buttons"
       data-ui="scene-buttons"
-      className="fixed z-20 flex flex-row pointer-events-none"
-      style={{ left: pos.sceneLeft, top: pos.sceneTop, width: clusterW, gap: SCENE_CLUSTER_GAP }}
+      className="flex flex-row pointer-events-none"
+      style={{ width: clusterW, gap: SCENE_CLUSTER_GAP }}
     >
       <button
         type="button"
@@ -89,6 +90,6 @@ export default function SceneToggle() {
           <path d="M22.4 31.7 h10.4 M22.4 35.3 h7.4" stroke="#C4B8A8" strokeWidth="1.5" strokeLinecap="round" />
         </svg>
       </button>
-    </div>
+    </div><HomeRoomPanel /></div>
   )
 }

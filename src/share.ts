@@ -1,5 +1,11 @@
 const LIMIT = 28000
 
+export function productOnly(data: unknown): unknown {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return data
+  const { homeContext: _home, ...product } = data as Record<string, unknown>
+  return product
+}
+
 function bytesToB64Url(bytes: Uint8Array): string {
   let bin = ''
   for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i])
@@ -68,9 +74,12 @@ export async function decodeShare(payload: string): Promise<unknown | null> {
 }
 
 export async function shareUrl(data: unknown): Promise<string | null> {
-  const encoded = await encodeShare(data)
+  const encoded = await encodeShare(productOnly(data))
   if (!encoded) return null
-  return `${location.origin}${location.pathname}${location.search}#s=${encoded}`
+  const query = new URLSearchParams(location.search)
+  query.delete('homeSession')
+  query.delete('homeDemo')
+  return `${location.origin}${location.pathname}${query.size ? '?' + query : ''}#s=${encoded}`
 }
 
 let bootShare: string | null | undefined

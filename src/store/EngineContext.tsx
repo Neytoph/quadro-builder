@@ -39,6 +39,7 @@ import { proposeAssemblyRepairs } from '../engine/connectionResolver.js'
 import { validAssemblyConfig } from '../engine/assemblyConfig.js'
 import { assemblyPdfStrings, assemblyStrings } from '../ui/assemblyStrings'
 import { UI_ESCAPE_EVENT } from '../ui/events'
+import { validHomeContext, placeInRoom } from '../home/context.js'
 
 // 引擎来自 Vanilla JS，这里不跟它的推断类型较劲。
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -225,6 +226,9 @@ interface EngineApi {
   frame: () => void
   toggleGrass: () => void
   grassOn: boolean
+  homeContext: AnyRec | null
+  bindHome: (record: AnyRec | null) => boolean
+  frameHome: () => void
   highlight: (kind: string, id: string, color?: string | null) => void
   /** 按零件 id 高亮一批（安全审查点行用），再点同一批取消 */
   highlightIds: (key: string, ids: string[]) => void
@@ -778,6 +782,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     if (tab.view?.camera) e.scene.restoreCameraState(tab.view.camera)
     else e.scene.resetCamera(e.model, { animate: true, swoop: true })
     e.builder.refresh()
+    e.scene.setHomeContext(e.model.homeContext)
+    if (e.model.homeContext) { e.scene.setScene(false); if (!tab.view?.camera) e.scene.frameHomeProduct() }
     switching.current = false
     bump()
   }, [bump])
@@ -1097,6 +1103,55 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const builder = e?.builder
   const model = e?.model
   const scene = e?.scene
+
+  useEffect(() => {
+    if (ready && scene && model) scene.setHomeContext(model.homeContext)
+  }, [ready, scene, model, tick])
+
+  const bindHome = useCallback((record: AnyRec | null) => {
+    const current = eng.current
+    if (!current || current.builder.busy()) return false
+    const tab = ownActiveTab()
+    if (!tab) return false
+    const bounds = current.scene.homeProductBounds()
+    if (record && !record.placement && !current.model.isEmpty() && !bounds) return false
+    const context = record ? placeInRoom(record, bounds) : null
+    if (context && record?.placement) context.placement = structuredClone(record.placement)
+    if (context && !validHomeContext(context)) return false
+    current.builder.recordHistory(() => { current.model.homeContext = context })
+    current.scene.setHomeContext(context)
+    current.scene.setScene(false)
+    if (context) current.scene.frameHomeProduct()
+    current.builder.refresh()
+    bump()
+    return true
+  }, [bump])
+
+  useEffect(() => {
+    if (!ready) return
+    const query = new URLSearchParams(location.search), key = query.get('homeSession')
+    if (!key) return
+    const raw = sessionStorage.getItem(key)
+    if (!raw) { notify(lang === 'zh' ? '房间选择已失效，请重新加载' : lang === 'de' ? 'Raumauswahl abgelaufen. Bitte erneut laden.' : 'Room selection expired. Please load again.', 'err'); return }
+    let alive = true
+    const tabId = activeRef.current
+    void (async () => {
+      try {
+        const record = JSON.parse(raw)
+        if (record.ownerID) {
+          const response = await fetch('/whoami', { credentials: 'same-origin', cache: 'no-store' })
+          if (!response.ok) throw new Error('Cannot verify room account')
+          const who = await response.json()
+          if (!who.authenticated || String(who.user_id) !== String(record.ownerID)) throw new Error('Room account changed')
+        }
+        if (!alive || activeRef.current !== tabId) return
+        if (!bindHome(record)) throw new Error('Invalid room or busy builder')
+        query.delete('homeSession'); history.replaceState(null, '', location.pathname + (query.size ? '?' + query : '') + location.hash)
+        sessionStorage.removeItem(key)
+      } catch (error) { if (alive) { console.error(error); notify(lang === 'zh' ? '房间无法加载，请确认登录账号。内容已保留' : lang === 'de' ? 'Raum nicht ladbar. Angemeldetes Konto prüfen. Inhalt bleibt erhalten.' : 'Cannot load room. Check your account. Your content is retained.', 'err') } }
+    })()
+    return () => { alive = false }
+  }, [ready, bindHome, notify, lang])
 
   const bom = useMemo(() => {
     if (!model || !ready) return null
@@ -1972,6 +2027,11 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     }
     e2.builder.refresh()
     if (opts?.frame !== false) e2.scene.resetCamera(e2.model, { animate: true, swoop: true })
+    e2.scene.setHomeContext(e2.model.homeContext)
+    if (e2.model.homeContext) {
+      e2.scene.setScene(false)
+      if (opts?.frame !== false) e2.scene.frameHomeProduct()
+    }
     tab.dirty = true
     syncTabs()
     bump()
@@ -2669,6 +2729,9 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       bump()
     },
     grassOn: !!scene?._sceneOn,
+    homeContext: model?.homeContext || null,
+    bindHome,
+    frameHome: () => scene?.frameHome(),
     highlight, highlightIds, safety, setInv, newTab, closeTab, activateTab, renameTab, setTabName, saveCurrent, saveCurrentAs, askName, answerName, nameAsk, openDoc, retrySave,
     listDocs: async () => (await docs.listDocs()).map((d: AnyRec) => ({ id: String(d.id), name: String(d.name), updatedAt: Number(d.updatedAt || 0), local: !Number(d.rev) || !!d.dirty || (!!d.saveId && d.syncedSaveId !== d.saveId) })),
     removeDoc: async (id) => { await docs.removeDoc(id); bump() },

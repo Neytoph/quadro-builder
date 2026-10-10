@@ -1,6 +1,7 @@
 // 3D-Szene + Rendering (Three.js). Kennt das Modell nur zum Zeichnen.
 
 import * as THREE from "three";
+import { createHomeEnvironment, disposeHome } from '../home/environment.js';
 import { ACCESSORY_IDS, PANEL_ACCESSORY_IDS, mountPoint, componentVolumes } from './accessoryPack.js';
 import { accessoryMeshes, panelAccessoryMeshes } from './accessoryMeshes.js';
 import { confirmedSpec } from './componentPack.js';
@@ -408,6 +409,55 @@ const LABEL_BG = {
 };
 
 export class SceneManager {
+  setHomeContext(context) {
+    const key = JSON.stringify(context);
+    if (key !== this._homeKey) {
+      this._homeFramePending = null;
+      disposeHome(this._homeGroup);
+      this._homeGroup = context ? createHomeEnvironment(context) : null;
+      if (this._homeGroup) this.scene.add(this._homeGroup);
+      this._homeKey = key;
+    }
+    if (this._homeGroup) this._homeGroup.visible = !this._sceneOn;
+    this.requestRender();
+  }
+
+  homeProductBounds() {
+    const box = new THREE.Box3(), pieceBox = new THREE.Box3(), matrix = new THREE.Matrix4();
+    for (const [key, rec] of this._indexParts(this.buildGroup.children)) {
+      const appearing = this._appearing.get(key);
+      for (const piece of rec.pieces) {
+        const geometry = piece.obj.geometry;
+        if (!geometry.boundingBox) geometry.computeBoundingBox();
+        // 镜头和房间摆放使用零件最终位置，不受入场缩放、抬高影响。
+        const original = appearing?.pieces.find(p => p.obj === piece.obj && p.index === piece.index);
+        if (original) matrix.multiplyMatrices(original.P, original.base);
+        else this._pieceWorld(piece, matrix);
+        box.union(pieceBox.copy(geometry.boundingBox).applyMatrix4(matrix));
+      }
+    }
+    return box.isEmpty() ? null : { min: box.min.toArray(), max: box.max.toArray() };
+  }
+
+  frameHome() {
+    if (!this._homeGroup) return;
+    const box = new THREE.Box3().setFromObject(this._homeGroup);
+    this._frameAlong(null, new THREE.Vector3(1, .85, 1).normalize(), { bounds: { min: box.min.toArray(), max: box.max.toArray(), size: box.getSize(new THREE.Vector3()).toArray() }, animate: true });
+  }
+  frameHomeProduct() {
+    const bounds = this.homeProductBounds();
+    if (!bounds) {
+      // 官方零件资源未加载完时，等真实几何出现再定位镜头。
+      if (this._homeGroup && this._renderModel && !this._renderModel.isEmpty()) {
+        this._homeFramePending = this._homeKey;
+        return;
+      }
+      this.frameHome();
+      return;
+    }
+    bounds.size = bounds.max.map((n, a) => n - bounds.min[a]);
+    this._frameAlong(null, new THREE.Vector3(1, .85, 1).normalize(), { bounds, margin: 1.7, animate: true });
+  }
   constructor(container) {
     this.container = container;
 
@@ -726,6 +776,7 @@ export class SceneManager {
   }
 
   _frameAlong(model, dir, opts = {}) {
+    this._homeFramePending = null;
     this._camAnim = null;
     this._camFly = null;
     this._needsRender = true;
@@ -1171,7 +1222,7 @@ export class SceneManager {
     // Rechte Taste bleibt PAN -- mit der Maus. Am Mac-Trackpad gibt es keine
     // mittlere Taste; Querverschieben laeuft ueber ⌥-Ziehen / ⇧+Zwei-Finger.
     controls.touches = { ONE: null, TWO: THREE.TOUCH.DOLLY_PAN };
-    controls.addEventListener("start", () => { this._camFly = null; });
+    controls.addEventListener("start", () => { this._camFly = null; this._homeFramePending = null; });
     controls.addEventListener("end", () => {
       if (!this.orbiting && !this.panning) this._reanchorTarget();
       this.onCameraChange();
@@ -4773,6 +4824,7 @@ export class SceneManager {
     this._applyZoomLimits(model);
 
     if (vorher) this._motionAfterRender(vorher, opts);
+    if (this._homeFramePending && this._homeFramePending === this._homeKey) this.frameHomeProduct();
 
     // Der Szenegraph ist neu -> Schattenkarte einmal nachziehen.
     this._shadowsDirty();
@@ -6856,6 +6908,7 @@ export class SceneManager {
     this._shadowsDirty();
     const v = !!on;
     this._sceneOn = v;
+    if (this._homeGroup) this._homeGroup.visible = !v;
     if (this._grassEnv)  this._grassEnv.visible  = v;
     if (this._skyMesh)   this._skyMesh.visible    = v;
     if (this._treeGroup) this._treeGroup.visible  = v;
@@ -7236,6 +7289,7 @@ export class SceneManager {
       hideLabels ? this.labelGroup : null,
       this._hoverPartGroup,
       hideRoom ? this._roomGroup : null,
+      hideRoom ? this._homeGroup : null,
     ].filter(Boolean).map((o) => [o, o.visible]);
     for (const [o] of versteckt) o.visible = false;
     let url = null;
@@ -7526,6 +7580,7 @@ export class SceneManager {
     if (this._updateTreeCamera()) this._needsRender = true;
     if (!this._needsRender) return;
     this._needsRender = false;
+    this._homeGroup?.userData.updateWalls(this.camera);
     this.renderer.render(this.scene, this.camera);
     this._renderViewCube();
   }
