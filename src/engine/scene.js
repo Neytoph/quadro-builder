@@ -441,6 +441,71 @@ export class SceneManager {
     this._applyBackground();
   }
 
+  _renderMainScene() {
+    if (!this._homeStyleOn || !this._homeGroup?.visible) {
+      this.renderer.render(this.scene, this.camera);
+      return;
+    }
+    // 房间沿用编辑器的暖色灯光；产品单独使用草地灯光，保持零件原有配色。
+    // 第一遍保留产品深度和投影，第二遍沿用同一深度，家具遮挡和摆放关系不变。
+    const renderer = this.renderer, home = this._homeGroup;
+    const background = this.scene.background, autoClear = renderer.autoClear;
+    const toneMapping = renderer.toneMapping, exposure = renderer.toneMappingExposure;
+    const shadowsDirty = renderer.shadowMap.needsUpdate;
+    const lights = [this._hemiLight, this._dirLight, this._fillLight, this._rimLight].map(light => ({
+      light, visible: light.visible, intensity: light.intensity, castShadow: light.castShadow,
+      color: light.color.clone(), groundColor: light.groundColor?.clone(),
+    }));
+    const overlays = [this.handleGroup, this.labelGroup, this._hoverPartGroup,
+      this._roomGroup, this._roomDrawGroup, this._tubePreview, this._installationGroup]
+      .filter(Boolean).map(object => [object, object.visible]);
+    const materials = new Map(), guideDepthWrites = new Map();
+    home.traverse(object => {
+      for (const material of object.material ? (Array.isArray(object.material) ? object.material : [object.material]) : []) {
+        if (material.transparent && material.depthWrite) guideDepthWrites.set(material, material.depthWrite);
+      }
+    });
+    for (const group of [this.buildGroup, this._ghostGroup]) group.traverse(object => {
+      for (const material of object.material ? (Array.isArray(object.material) ? object.material : [object.material]) : []) {
+        if (!materials.has(material)) materials.set(material, material.colorWrite);
+      }
+    });
+    try {
+      for (const material of materials.keys()) material.colorWrite = false;
+      // 半透明区域及网格只提供空间参照，不应挡住第二遍的真实产品。
+      for (const material of guideDepthWrites.keys()) material.depthWrite = false;
+      for (const [object] of overlays) object.visible = false;
+      renderer.render(this.scene, this.camera);
+      for (const [material, colorWrite] of materials) material.colorWrite = colorWrite;
+      for (const [object, visible] of overlays) object.visible = visible;
+      home.visible = false;
+      this.scene.background = null;
+      renderer.autoClear = false;
+      this._setProductLighting(true);
+      for (const { light } of lights) light.visible = true;
+      renderer.toneMapping = THREE.NoToneMapping;
+      renderer.toneMappingExposure = 1;
+      if (shadowsDirty) renderer.shadowMap.needsUpdate = true;
+      renderer.render(this.scene, this.camera);
+    } finally {
+      for (const [material, colorWrite] of materials) material.colorWrite = colorWrite;
+      for (const [material, depthWrite] of guideDepthWrites) material.depthWrite = depthWrite;
+      for (const [object, visible] of overlays) object.visible = visible;
+      for (const state of lights) {
+        state.light.visible = state.visible;
+        state.light.intensity = state.intensity;
+        state.light.castShadow = state.castShadow;
+        state.light.color.copy(state.color);
+        if (state.groundColor) state.light.groundColor.copy(state.groundColor);
+      }
+      home.visible = true;
+      this.scene.background = background;
+      renderer.autoClear = autoClear;
+      renderer.toneMapping = toneMapping;
+      renderer.toneMappingExposure = exposure;
+    }
+  }
+
   homeProductBounds() {
     const box = new THREE.Box3(), pieceBox = new THREE.Box3(), matrix = new THREE.Matrix4();
     for (const [key, rec] of this._indexParts(this.buildGroup.children)) {
@@ -6939,6 +7004,13 @@ export class SceneManager {
     if (this._skyMesh)   this._skyMesh.visible    = v;
     if (this._treeGroup) this._treeGroup.visible  = v;
     if (this._bushGroup) this._bushGroup.visible  = v; // Büsche: nur im Szene-Modus
+    this._setProductLighting(v);
+    this._applyBackground();
+    this._applyGrid();
+    this._applyHomeStyle();
+  }
+
+  _setProductLighting(v) {
     // Direktionales Licht: brennt AUCH im Normal-Modus, denn es modelliert die
     // Bauteile -- ohne es steht alles flach in einer Farbe da und Vorder- und
     // Rueckseite sind nicht auseinanderzuhalten. GEWORFENE Schatten gibt es
@@ -6957,9 +7029,6 @@ export class SceneManager {
       this._hemiLight.color.set(v ? 0xdef2ff : 0xffffff);
       this._hemiLight.groundColor.set(v ? this._lookHex(this._tune?.hemiGround || "#6A8258") : 0xc4a078);
     }
-    this._applyBackground();
-    this._applyGrid();
-    this._applyHomeStyle();
   }
 
   /**
@@ -7324,7 +7393,7 @@ export class SceneManager {
     for (const [o] of versteckt) o.visible = false;
     let url = null;
     try {
-      this.renderer.render(this.scene, this.camera);
+      this._renderMainScene();
       url = mime === "image/jpeg"
         ? this.renderer.domElement.toDataURL(mime, quality ?? 0.82)
         : this.renderer.domElement.toDataURL(mime);
@@ -7612,7 +7681,7 @@ export class SceneManager {
     if (!this._needsRender) return;
     this._needsRender = false;
     this._homeGroup?.userData.updateWalls(this.camera);
-    this.renderer.render(this.scene, this.camera);
+    this._renderMainScene();
     this._renderViewCube();
   }
 }
