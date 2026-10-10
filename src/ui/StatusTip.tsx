@@ -5,6 +5,7 @@ import { NARROW_MAX, statusTipBox, usePanelLayout } from './panelLayout'
 import { useDock } from './dock'
 import { usePresence } from './motion'
 import { componentForTool } from '../store/builderComponents'
+import { useMobileControls } from './useMobileControls'
 
 const BY_MODE: Record<string, string> = {
   select: 'tip.select',
@@ -21,6 +22,7 @@ const BY_MODE: Record<string, string> = {
 
 /** 一句话在画面上停多久。说完就收起来，不一直压着画布。 */
 const SAY_MS = 6000
+const KEYBOARD_TIPS = new Set(['tip.select', 'status.delete', 'status.clamp', 'status.assembly', 'status.paste'])
 
 /**
  * 工具提示：换工具的时候弹出一句当前工具怎么用，停几秒收起来。
@@ -31,6 +33,7 @@ const SAY_MS = 6000
  */
 export default function StatusTip({ menuOpen }: { menuOpen: boolean }) {
   const api = useEngine()
+  const mobile = useMobileControls()
   const { t } = useI18n()
   const { left, right, vw, toolbarW } = usePanelLayout()
   const narrow = vw <= NARROW_MAX
@@ -53,7 +56,7 @@ export default function StatusTip({ menuOpen }: { menuOpen: boolean }) {
   }, [text, menuOpen])
   const [shown, leaving] = usePresence(api.toast ? null : say)
 
-  if (api.installationPreview || api.canFlipAccessory || componentForTool(api)) return null
+  if ((mobile && KEYBOARD_TIPS.has(key)) || api.installationPreview || api.canFlipAccessory || componentForTool(api)) return null
 
   if (narrow && pane) return null
   if (narrow) {
