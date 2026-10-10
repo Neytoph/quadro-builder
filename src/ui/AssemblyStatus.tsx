@@ -30,9 +30,9 @@ export function AssemblyStatus({ pending, error, onWhole, onRetry, onStart }: {
   if (pending) state = 'pending'
   if (error) state = 'error'
   const content = {
-    error: { title: 'assembly.failedTitle', hint: 'assembly.failedHint', icon: <CircleAlert size={18} /> },
-    pending: { title: 'assembly.planning', hint: seconds >= 5 ? 'assembly.slowHint' : 'assembly.planningHint', icon: <span className="assembly-status-spinner" /> },
-    ready: { title: 'assembly.ready', hint: 'assembly.readyHint', icon: <CircleCheck size={18} /> },
+    error: { title: 'assembly.failedTitle', compact: 'assembly.mobileFailed', hint: 'assembly.failedHint', icon: <CircleAlert size={18} /> },
+    pending: { title: 'assembly.planning', compact: seconds >= 5 ? 'assembly.mobileSlow' : 'assembly.mobilePlanning', hint: seconds >= 5 ? 'assembly.slowHint' : 'assembly.planningHint', icon: <span className="assembly-status-spinner" /> },
+    ready: { title: 'assembly.ready', compact: 'assembly.mobileReady', hint: 'assembly.readyHint', icon: <CircleCheck size={18} /> },
   }[state]
   return (
     <div data-tour="assembly" className="m-asm qb-card assembly-status fixed bottom-3 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 p-1.5 max-w-[calc(100vw-1rem)]" data-state={state}>
@@ -40,17 +40,13 @@ export function AssemblyStatus({ pending, error, onWhole, onRetry, onStart }: {
         {content.icon}
       </span>
       <div className="assembly-status-copy" role={error ? 'alert' : 'status'} aria-live="polite" aria-atomic="true">
-        <div className="assembly-status-title">{t(content.title)}</div>
+        <div className="assembly-status-title"><span className="assembly-status-full">{t(content.title)}</span><span className="assembly-status-compact">{t(content.compact)}</span></div>
         <div className="assembly-status-hint">{t(content.hint)}</div>
       </div>
       <div className="assembly-status-actions">
-        {state === 'pending' ? (
-          <button type="button" className="qb-btn qb-btn-ghost qb-btn-sm assembly-status-button" onClick={onWhole}>{t('assembly.whole')}</button>
-        ) : (
-          <>
-            <button type="button" className="qb-btn qb-btn-ghost qb-btn-sm assembly-status-button assembly-status-secondary" onClick={onWhole}>{t('assembly.whole')}</button>
-            <button type="button" className="qb-btn qb-btn-sm assembly-status-button assembly-status-primary" onClick={error ? onRetry : onStart}>{t(error ? 'assembly.retry' : 'assembly.start')}</button>
-          </>
+        <button type="button" aria-label={t('assembly.whole')} className="qb-btn qb-btn-ghost qb-btn-sm assembly-status-button assembly-status-secondary" onClick={onWhole}><span className="assembly-status-full">{t('assembly.whole')}</span><span className="assembly-status-compact">{t('assembly.all')}</span></button>
+        {state !== 'pending' && (
+          <button type="button" aria-label={t(error ? 'assembly.retry' : 'assembly.start')} className="qb-btn qb-btn-sm assembly-status-button assembly-status-primary" onClick={error ? onRetry : onStart}><span className="assembly-status-full">{t(error ? 'assembly.retry' : 'assembly.start')}</span><span className="assembly-status-compact">{t(error ? 'assembly.mobileRetry' : 'assembly.mobileStart')}</span></button>
         )}
       </div>
     </div>

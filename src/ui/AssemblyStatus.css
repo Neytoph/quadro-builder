@@ -11,27 +11,25 @@
 .assembly-status-hint { color: #5a6270; font-size: 12px; line-height: 1.2; overflow-wrap: anywhere; }
 .assembly-status-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .assembly-status-button:focus-visible { outline: 2px solid #c2410c; outline-offset: 2px; }
+.assembly-status-compact { display: none; }
 @keyframes assembly-status-spin { to { transform: rotate(360deg); } }
 @media (max-width: 700px) {
-  .assembly-status.qb-card,
-  body:has(.cb-sync) .m-asm.assembly-status.qb-card {
-    display: grid;
-    grid-template-columns: 24px minmax(0, 1fr);
-    align-items: center;
-    gap: 8px;
-    left: 50%;
-    right: auto;
-    translate: -50% 0;
+  .assembly-status.qb-card {
+    gap: 4px;
     bottom: calc(12px + env(safe-area-inset-bottom, 0px));
-    width: min(440px, calc(100vw - 1rem));
     max-width: calc(100vw - 1rem);
-    padding: 6px;
+    padding: 4px;
   }
-  body:has(.cb-sync) .m-asm.assembly-status.qb-card { bottom: calc(62px + env(safe-area-inset-bottom, 0px)); }
-  .assembly-status-copy { padding: 2px 6px 2px 0; }
-  .assembly-status-title, .assembly-status-hint { line-height: 1.5; }
-  .assembly-status-actions { grid-column: 1 / -1; flex-wrap: wrap; }
-  .assembly-status .assembly-status-button { min-height: 44px; min-width: 44px; flex: 1; white-space: normal; }
+  .assembly-status-icon { width: 16px; height: 16px; margin-left: 2px; }
+  .assembly-status-icon svg { width: 16px; height: 16px; }
+  .assembly-status-copy { flex: 0 1 auto; }
+  .assembly-status-title { font-size: 12px; white-space: nowrap; overflow-wrap: normal; }
+  .assembly-status-hint { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .assembly-status-full { display: none; }
+  .assembly-status-compact { display: inline; }
+  .assembly-status-actions { gap: 4px; }
+  .assembly-status .assembly-status-button { position: relative; min-height: 32px; min-width: 32px; padding: 6px 8px; font-size: 12px; }
+  .assembly-status-button::after { content: ''; position: absolute; inset: -6px 0; }
 }
 @media (prefers-reduced-motion: reduce) {
   html[data-motion] .assembly-status, .assembly-status-spinner { animation: none; }
