@@ -120,7 +120,7 @@ export class Builder {
     this._assemblyRequestedKey = null;
     this._assemblyPlanKey = null;
     this.assemblyStep = 0;
-    this.assemblyOrder = "y+";   // Aufbaurichtung, siehe buildplan.BUILD_ORDERS
+    this.assemblyOrder = "y+";   // 拼装固定从下往上。
     this.manualLabels = false;   // 说明书导出：显示当前步所有接头/管标注
 
     // 编辑记录（src/collab/history.ts）：每次编辑的前后两份 JSON 交给它写进
@@ -1452,7 +1452,7 @@ export class Builder {
     if (s.clampPart) this.clampPart = s.clampPart;
     if (s.slideKind) this.slideKind = s.slideKind;
     if (s.color) this.color = s.color;
-    if (s.assemblyOrder) this.assemblyOrder = s.assemblyOrder;
+    this.assemblyOrder = "y+";
     this.assemblyStep = s.assemblyStep || 0;
     this.selection.clear();
     this.selectedNodeId = null;
@@ -1561,14 +1561,6 @@ export class Builder {
     this.assemblyError = true;
     console.warn('[assembly]', reason);
     this.refresh();
-  }
-
-  // Aufbaurichtung wechseln: Plan neu rechnen und beim ersten Schritt beginnen.
-  setAssemblyOrder(order) {
-    if (this.assemblyOrder === order) return;
-    this.assemblyOrder = order;
-    this.assemblyStep = 0;
-    if (this.mode === "assembly") { this.enterAssembly(); this.refresh(); }
   }
 
   assemblyCount() { return this.buildPlan.steps.length; }

@@ -3,7 +3,7 @@ import { bumpCount, track } from '../analytics/track'
 import {
   BuildModel, Builder, SceneManager, loadCatalog, computeBOM, compareInventory, connectorsForNode, computeSafety,
   parseQDF, parseDesign, designEntry, buildQDF, buildableTubes, buildableCurvedTubes, buildablePanels, tubeColors, allConnectors, accessories,
-  panels, geometry, RANDOM_COLOR, BUILD_ORDERS, docs, storage, setLang as setEngineLang, t as engineT,
+  panels, geometry, RANDOM_COLOR, docs, storage, setLang as setEngineLang, t as engineT,
   computeBuildPlan, partsOfModel, textilePart,
 } from '../engine-api'
 import { useI18n } from '../i18n'
@@ -179,8 +179,6 @@ interface EngineApi {
   feasible: boolean | null
   sizeCm: [number, number, number] | null
   assembly: { step: number; max: number; active: boolean; order: string; pending: boolean; error: boolean }
-  assemblyOrders: string[]
-  setAssemblyOrder: (order: string) => void
   exportInventory: () => void
   importInventory: (file: File) => Promise<void>
   canPaste: boolean
@@ -277,7 +275,6 @@ interface EngineApi {
   exportManualConfirm: boolean
   manualPreview: ManualPreview | null
   updateManualConfig: (config: AssemblyConfig) => void
-  updateManualOrder: (order: string) => void
   saveManualConfig: () => boolean
   reviewManualRepairs: (nodeIds: string[]) => void
   applyManualRepairs: () => boolean
@@ -1930,12 +1927,6 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     if (builder?.cancelPaste?.()) bump()
   }, [builder, bump])
 
-  const setAssemblyOrder = useCallback((order: string) => {
-    track('builder.assembly.order', { key: order })
-    builder?.setAssemblyOrder?.(order)
-    bump()
-  }, [builder, bump])
-
   const exportInventory = useCallback(() => {
     track('builder.inventory.export')
     download('quadro-inventory.json', JSON.stringify({ format: 'quadro.inventory.v1', inventory }, null, 2), 'application/json')
@@ -2061,7 +2052,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       model: stampModel.toJSON(),
       parts: partsOfModel(stampModel) as Record<string, Record<string, number>>,
       size: [Math.round(b.size[0]), Math.round(b.size[2]), Math.round(b.size[1])],
-      steps: preview ? createAssemblyReadingPlan(stampModel, preview.plan).steps.length : (computeBuildPlan(e2.model, e2.builder.assemblyOrder || 'y+') as { steps: unknown[] }).steps.length,
+      steps: preview ? createAssemblyReadingPlan(stampModel, preview.plan).steps.length : (computeBuildPlan(e2.model, 'y+') as { steps: unknown[] }).steps.length,
       cover,
       stats: statsOfModel(stampModel),
     })
@@ -2167,7 +2158,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   function makeManualPreview(data: ModelJSON, previous?: ManualPreview): ManualPreview {
     const frozen = new BuildModel()
     if (!frozen.loadJSON(data).ok) throw new Error('invalid assembly snapshot')
-    const order = previous?.order || eng.current?.builder.assemblyOrder || 'y+'
+    const order = 'y+'
     const plan = computeAssemblyPlan(frozen, frozen.assemblyConfig || {}, order)
     const config: AssemblyConfig = frozen.assemblyConfig || {
       version: 1,
@@ -2181,11 +2172,6 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const prev = manualPreviewRef.current
     if (!prev || !validAssemblyConfig(config)) return
     putManualPreview(makeManualPreview({ ...prev.data, assemblyConfig: structuredClone(config) }, prev))
-  }
-  function updateManualOrder(order: string) {
-    const prev = manualPreviewRef.current
-    if (!prev || !BUILD_ORDERS.includes(order)) return
-    putManualPreview(makeManualPreview(prev.data, { ...prev, order }))
   }
   function saveManualConfig() {
     const prev = manualPreviewRef.current
@@ -2631,7 +2617,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     tabs, activeTabId, bom, inventory,
     invRows: cmp.rows, feasible: cmp.feasible, sizeCm, room, setRoom, roomOverflow,
     loadPreset, placeModule, exportPng, exportBomCsv, exportBomPng, exportAssemblyPdf, confirmExportManual, cancelExportManual, exportManualConfirm, exportingManual, shareCurrent,
-    manualPreview, updateManualConfig, updateManualOrder, saveManualConfig, reviewManualRepairs, applyManualRepairs, discardManualRepairs,
+    manualPreview, updateManualConfig, saveManualConfig, reviewManualRepairs, applyManualRepairs, discardManualRepairs,
     accountAsk, answerAccount,
     assembly: {
       step: builder?.assemblyStep ?? 0,
@@ -2641,8 +2627,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       pending: !!builder?.assemblyPending,
       error: !!builder?.assemblyError,
     },
-    assemblyOrders: BUILD_ORDERS,
-    setAssemblyOrder, exportInventory, importInventory,
+    exportInventory, importInventory,
     canPaste: !!clipboard.current,
     pasting: !!builder?.pasting,
     pasteHeightCm: builder?.pasteHeightCm ?? null,
