@@ -5,6 +5,7 @@ import { BuildModel } from './model.js'
 import { parseQDF } from './qdfimport.js'
 import { getLang } from './i18n.js'
 import { computeAssemblyPlan as computeRawAssemblyPlan, assemblyState } from './assemblyPlan.js'
+import { framePanelIds, reconcileFrameModulePanels } from './assemblyOperations.js'
 
 vi.setConfig({ testTimeout: 120000 })
 const fixturePlans = new Map<string, any>()
@@ -55,6 +56,20 @@ describe('本层框架连续展示与真实下套', () => {
       }
     }
     expect(new Set(carried).size).toBeGreaterThan(1)
+  })
+
+  it('区域清单缺少板件时仍根据全部支撑管归入可移动框架', () => {
+    const model = load('qdf/C0179.qdf'), panel = model.panels.get('p395')
+    const panelOnlyModel = Object.create(model)
+    panelOnlyModel.panels = new Map([[panel.id, panel]])
+    expect(framePanelIds(panelOnlyModel, ['t232', 't233', 't234', 't235'])).toEqual(['p395'])
+
+    const module = { id: 'frame-test', tubeIds: ['t232', 't233', 't234', 't235'], panelIds: [], partIds: ['n45', 't232', 't233', 't234', 't235'], installStepId: 'step-10' }
+    const step = { id: 'step-10', panelIds: ['p395'], action: { modules: [{ id: module.id, partIds: [...module.partIds] }], inPlacePartIds: ['p395'] } }
+    reconcileFrameModulePanels(panelOnlyModel, [module], [step])
+    expect(module.partIds).toContain('p395')
+    expect(step.action.modules[0].partIds).toContain('p395')
+    expect(step.action.inPlacePartIds).not.toContain('p395')
   })
 
   it('C0179的20/80/120cm各合并为一层，39根横管和顶接头真实下套且立柱不移动', () => {

@@ -27,6 +27,32 @@ export function panelSupportTubes(model,panel){
   }
   return [...supports];
 }
+export function framePanelIds(model,tubeIds,deferredIds=new Set()){
+  const frameTubes=new Set(tubeIds);
+  return [...model.panels.values()].filter(panel=>{
+    if(isOriginalComponent(panel)||deferredIds.has(panel.id))return false;
+    const supports=panelSupportTubes(model,panel);
+    return supports.length>0&&supports.every(id=>frameTubes.has(id));
+  }).map(panel=>panel.id);
+}
+export function reconcileFrameModulePanels(model,frameModules,steps,deferredIds=new Set()){
+  for(const module of frameModules){
+    const step=steps.find(item=>item.id===module.installStepId);
+    if(!step||!module.tubeIds?.length)continue;
+    const frameTubes=new Set(module.tubeIds);
+    module.panelIds=step.panelIds.filter(id=>{
+      const panel=model.panels.get(id);
+      if(!panel||isOriginalComponent(panel)||deferredIds.has(id))return false;
+      const supports=panelSupportTubes(model,panel);
+      return supports.length>0&&supports.every(supportId=>frameTubes.has(supportId));
+    });
+    const carried=new Set(module.panelIds);
+    module.partIds=[...module.partIds.filter(id=>!model.panels.has(id)),...module.panelIds];
+    const actionModule=step.action.modules?.find(item=>item.id===module.id);
+    if(actionModule)actionModule.partIds=[...module.partIds];
+    if(step.action.inPlacePartIds)step.action.inPlacePartIds=step.action.inPlacePartIds.filter(id=>!carried.has(id));
+  }
+}
 const THREAD=new Set(['floating-wheel2','sleeve2','textil-round2','bag2','pool2','pool-small2','roof-large2']);
 const verify=(pathChecked=false,methodChecked=true,directionConsistent=true)=>({directionConsistent,pathChecked,methodChecked,physical:'unverified',load:'unverified',basis:methodChecked?'topology-and-conservative-geometry':'unresolved-installation-method'});
 const diag=(diagnostics,code,message,partIds,details)=>diagnostics.push({code,severity:'error',message,partIds,nodeIds:[],details});

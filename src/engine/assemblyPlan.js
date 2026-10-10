@@ -4,7 +4,7 @@ import { reinforcementPart } from './catalog.js';
 import { geometry } from './catalog.js';
 import { checkAssemblyPath, beginAssemblyCollisionPass } from './assemblyCollision.js';
 import { assemblyMeshes } from './assemblyNativeMesh.js';
-import { scheduleAssemblyAccessories, addAssemblyOperations, panelSupportTubes } from './assemblyOperations.js';
+import { scheduleAssemblyAccessories, addAssemblyOperations, framePanelIds, reconcileFrameModulePanels } from './assemblyOperations.js';
 import { consolidateLayerSteps } from './assemblyLayerSteps.js';
 import { xAxisOf, yAxisOf } from './util.js';
 import { C45_ARM_LEN, C45_SLEEVE_LEN } from './config.js';
@@ -475,12 +475,7 @@ export function computeAssemblyPlan(model, config = model.assemblyConfig || {}, 
     for (const tubeIds of tubeGroups) {
       const installedTubeIds = [...owner.keys()].filter(id => model.tubes.has(id)).concat(installedInLayer);
       const moduleNodes = [...new Set(tubeIds.flatMap(id => { const t = model.tubes.get(id); return [t.a, t.b]; }))];
-      const panelIds = (r.panelIds || []).filter(id => {
-        const panel = model.panels.get(id);
-        if (!panel || isOriginalComponent(panel) || deferredIds.has(id)) return false;
-        const supports = panelSupportTubes(model, panel);
-        return supports.length > 0 && supports.every(supportId => tubeIds.includes(supportId));
-      });
+      const panelIds = framePanelIds(model, tubeIds, deferredIds);
       const module = { id: `frame-${r.id}-${frameModules.length + 1}`, regionId: r.id, y, nodeIds: moduleNodes, tubeIds, panelIds, partIds: [...moduleNodes, ...tubeIds, ...panelIds], status: 'in-place', interfaceIds: [] };
       const supports = installedTubeIds.map(id => model.tubes.get(id)).filter(t => !t.arm && !t.link && moduleNodes.some(id => {
         if (t.a !== id && t.b !== id) return false;
@@ -637,17 +632,6 @@ export function computeAssemblyPlan(model, config = model.assemblyConfig || {}, 
     if (supportSteps.length && steps.indexOf(supportSteps.at(-1)) >= steps.indexOf(step) && step.action.type !== 'preassemble') diagnostics.push({ code: 'INVALID_ASSEMBLY_ORDER', severity: 'error', message: '接口支撑区域尚未完成，请调整区域顺序。', nodeIds: mark.nodeId ? [mark.nodeId] : [], partIds: [] });
   }
   scheduleAssemblyAccessories(model, steps, diagnostics, regions,deferredAccessories);
-  // A covering that is later deferred (for example, a slide entrance panel)
-  // must not remain attached to an earlier frame's temporary lift.
-  for (const module of frameModules) {
-    const step = steps.find(item => item.id === module.installStepId);
-    if (!step || !module.panelIds?.length) continue;
-    module.panelIds = module.panelIds.filter(id => step.panelIds.includes(id));
-    const carried = new Set(module.panelIds);
-    module.partIds = module.partIds.filter(id => !model.panels.has(id) || carried.has(id));
-    const actionModule = step.action.modules?.find(item => item.id === module.id);
-    if (actionModule) actionModule.partIds = [...module.partIds];
-  }
   owner.clear();
   steps.forEach((step, i) => { if (step.action.type !== 'attach') for (const id of step.partIds) owner.set(id, i); });
   const bom = computeBOM(model), ledger = allocateBOM(model, bom, steps, owner, diagnostics);
@@ -691,6 +675,7 @@ export function computeAssemblyPlan(model, config = model.assemblyConfig || {}, 
   }
   plan.adjustments=internal.history||[];
   consolidateLayerSteps(plan, rowKey);
+  reconcileFrameModulePanels(model, frameModules, plan.steps, deferredIds);
   plan.canExport = ledger.conserved && plan.verification.directionChecked && plan.verification.pathChecked && plan.verification.methodChecked && !diagnostics.some(d => d.severity === 'error');
   return plan;
 }
