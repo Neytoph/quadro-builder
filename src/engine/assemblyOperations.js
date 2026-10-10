@@ -18,6 +18,15 @@ const sub=(a,b)=>a.map((v,i)=>v-b[i]);
 const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
 const dot=(a,b)=>a.reduce((s,v,i)=>s+v*b[i],0);
 const tubeSupports=p=>[...new Set([...(Array.isArray(p.supportTubes)?p.supportTubes:[]),p.tube,p.a,p.b].filter(Boolean))];
+export function panelSupportTubes(model,panel){
+  const corners=model.panelCorners(panel);if(!corners)return tubeSupports(panel);
+  const supports=new Set(tubeSupports(panel));
+  for(const tube of model.tubes.values()){
+    if(tube.arm||tube.link||tube.bow)continue;const rail=model._rail(tube.id);if(!rail)continue;
+    if(corners.some((p,i)=>{const q=corners[(i+1)%4],d=unit(sub(q,p));if(Math.abs(dot(d,rail.dir))<.995)return false;const v=sub(rail.p0,p),along=dot(v,d);return Math.hypot(...v.map((x,k)=>x-d[k]*along))<.6&&along<Math.hypot(...sub(q,p))+.6&&along+rail.len>-.6;}))supports.add(tube.id);
+  }
+  return [...supports];
+}
 const THREAD=new Set(['floating-wheel2','sleeve2','textil-round2','bag2','pool2','pool-small2','roof-large2']);
 const verify=(pathChecked=false,methodChecked=true,directionConsistent=true)=>({directionConsistent,pathChecked,methodChecked,physical:'unverified',load:'unverified',basis:methodChecked?'topology-and-conservative-geometry':'unresolved-installation-method'});
 const diag=(diagnostics,code,message,partIds,details)=>diagnostics.push({code,severity:'error',message,partIds,nodeIds:[],details});
@@ -74,11 +83,7 @@ export function scheduleAssemblyAccessories(model,steps,diagnostics,regions=[],d
   // risers can obstruct it. Later tube actions still check against that panel.
   for(const panel of model.panels.values()){
     const corners=model.panelCorners(panel);if(!corners)continue;
-    const supports=new Set(tubeSupports(panel));
-    for(const tube of model.tubes.values()){
-      if(tube.arm||tube.link||tube.bow)continue;const rail=model._rail(tube.id);if(!rail)continue;
-      if(corners.some((p,i)=>{const q=corners[(i+1)%4],d=unit(sub(q,p));if(Math.abs(dot(d,rail.dir))<.995)return false;const v=sub(rail.p0,p),along=dot(v,d);return Math.hypot(...v.map((x,k)=>x-d[k]*along))<.6 && along<Math.hypot(...sub(q,p))+.6 && along+rail.len>-.6;}))supports.add(tube.id);
-    }
+    const supports=new Set(panelSupportTubes(model,panel));
     // Original/confirmed components retain their own final installation step
     // and component-specific fixing instructions. Still resolve every actual
     // perimeter support for the normal motion and support-pose gates below.

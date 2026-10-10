@@ -32,6 +32,31 @@ describe('本层框架连续展示与真实下套', () => {
     records.push({ file: 'C0179', steps: plan.steps.map(stepRecord), frameModules: plan.frameModules, canExport: plan.canExport, diagnostics: plan.diagnostics })
   })
 
+  it('板面随整组支撑管下套，完成态回到支撑框架上', () => {
+    const model = load('qdf/C0179.qdf'), plan = computeAssemblyPlan(model)
+    const index = plan.steps.findIndex((step: any) => step.action.layer && step.panelIds.includes('p395'))
+    expect(index).toBeGreaterThanOrEqual(0)
+    const step = plan.steps[index], module = step.action.modules.find((item: any) => item.partIds.includes('p395'))
+    expect(module, JSON.stringify(step.action.modules)).toBeTruthy()
+    expect(module.partIds).toEqual(expect.arrayContaining(['t232', 't233', 't234', 't235']))
+    const moving = assemblyState(plan, index, { action: true }), complete = assemblyState(plan, index)
+    expect(moving.transforms.get('p395')).toEqual(module.translation)
+    expect(complete.transforms.has('p395')).toBe(false)
+
+    const carried: string[] = []
+    for (const [stepIndex, layer] of plan.steps.entries()) for (const frame of layer.action.modules || []) {
+      const frameTubes = new Set(frame.partIds.filter((id: string) => model.tubes.has(id)))
+      for (const panelId of layer.panelIds || []) {
+        const supports = layer.panelSupports?.[panelId] || []
+        if (!supports.length || !supports.every((id: string) => frameTubes.has(id))) continue
+        expect(frame.partIds).toContain(panelId)
+        expect(assemblyState(plan, stepIndex, { action: true }).transforms.get(panelId)).toEqual(frame.translation)
+        carried.push(panelId)
+      }
+    }
+    expect(new Set(carried).size).toBeGreaterThan(1)
+  })
+
   it('C0179的20/80/120cm各合并为一层，39根横管和顶接头真实下套且立柱不移动', () => {
     const model = load('qdf/C0179.qdf'), before = model.toJSON(), plan = computeAssemblyPlan(model)
     expect(plan.canExport, JSON.stringify(plan.diagnostics)).toBe(true)
