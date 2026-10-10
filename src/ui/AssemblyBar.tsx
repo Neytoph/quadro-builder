@@ -24,7 +24,7 @@ export default function AssemblyBar() {
 
   if (assemblyStatus.visible) {
     return (
-      <AssemblyStatus pending={api.assembly.pending} error={api.assembly.error} onWhole={() => api.setAssembly(false)} onRetry={() => api.setAssembly(true)} onStart={assemblyStatus.start} />
+      <AssemblyStatus pending={api.assembly.pending} error={api.assembly.error} progress={api.assembly.progress} onWhole={() => api.setAssembly(false)} onRetry={() => api.setAssembly(true)} onStart={assemblyStatus.start} />
     )
   }
 

@@ -1,6 +1,7 @@
 .assembly-navigation.qb-card { width: max-content; }
-.assembly-navigation-button { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 4px; height: 32px; flex: none; padding: 0 12px; border: 0; border-radius: 999px; background: transparent; color: #1f2430; font-size: 13px; line-height: 1.4; white-space: nowrap; cursor: pointer; }
+.assembly-navigation-button { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 4px; height: 32px; flex: none; padding: 0 12px; border: 1px solid #ffd3b0; border-radius: 999px; background: #fffaf5; color: #c2410c; font-size: 13px; font-weight: 600; line-height: 1.4; white-space: nowrap; cursor: pointer; }
 .assembly-navigation-button:hover:not(:disabled) { background: #fff1e6; }
+.assembly-navigation-button:active:not(:disabled) { background: #ffe4cc; border-color: #ff8a2b; }
 .assembly-navigation-button:disabled { opacity: .3; cursor: default; }
 .assembly-navigation-button:focus-visible { outline: 2px solid #c2410c; outline-offset: 2px; }
 .assembly-navigation-count { flex: none; padding: 0 4px; font-size: 13.5px; font-weight: 700; line-height: 1.4; white-space: nowrap; }

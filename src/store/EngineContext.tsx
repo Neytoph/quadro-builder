@@ -178,7 +178,7 @@ interface EngineApi {
   invRows: InvRow[]
   feasible: boolean | null
   sizeCm: [number, number, number] | null
-  assembly: { step: number; max: number; active: boolean; order: string; pending: boolean; error: boolean }
+  assembly: { step: number; max: number; active: boolean; order: string; pending: boolean; error: boolean; progress: number }
   exportInventory: () => void
   importInventory: (file: File) => Promise<void>
   canPaste: boolean
@@ -2626,6 +2626,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       order: (builder?.assemblyOrder as string) || 'y+',
       pending: !!builder?.assemblyPending,
       error: !!builder?.assemblyError,
+      progress: builder?.assemblyProgress ?? 0,
     },
     exportInventory, importInventory,
     canPaste: !!clipboard.current,

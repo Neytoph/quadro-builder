@@ -15,6 +15,13 @@ self.addEventListener('message', event => {
 })
 
 async function compute(request) {
+  let progress = 0
+  const report = value => {
+    const next = Math.floor(value)
+    if (request.requestId !== newestRequest || next <= progress) return
+    progress = next
+    self.postMessage({ type: 'progress', requestId: request.requestId, progress })
+  }
   try {
     ready ??= Promise.all([loadCatalog(), ensureAssemblyMeshes()]).catch(error => {
       ready = null
@@ -22,11 +29,17 @@ async function compute(request) {
     })
     await ready
     if (request.requestId !== newestRequest) return
+    // 五段实际工作：资源、模型、结构、逐步动作、最终校验与交付。
+    // 百分比表示阶段完成度，不估算耗时；重算只在完成新的工作后推进。
+    report(20)
     setLang(request.lang || getLang())
     const model = new BuildModel()
     const loaded = model.loadJSON(request.model)
     if (!loaded.ok) throw new Error(`model load failed: ${loaded.reason}`)
-    const plan = computeAssemblyPlan(model, request.config || {}, request.order || 'y+')
+    report(40)
+    const plan = computeAssemblyPlan(model, request.config || {}, request.order || 'y+', {
+      onProgress: (phase, completed, total) => report(phase === 'structure' ? 60 : 60 + 20 * completed / total),
+    })
     if (request.requestId === newestRequest) self.postMessage({ type: 'result', requestId: request.requestId, plan })
   } catch (error) {
     if (request.requestId === newestRequest) {

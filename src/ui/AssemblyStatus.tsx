@@ -17,9 +17,10 @@ export function useAssemblyStatus(assembly: Assembly) {
   }
 }
 
-export function AssemblyStatus({ pending, error, onWhole, onRetry, onStart }: {
+export function AssemblyStatus({ pending, error, progress, onWhole, onRetry, onStart }: {
   pending: boolean
   error: boolean
+  progress: number
   onWhole: () => void
   onRetry: () => void
   onStart: () => void
@@ -31,12 +32,12 @@ export function AssemblyStatus({ pending, error, onWhole, onRetry, onStart }: {
   if (error) state = 'error'
   const content = {
     error: { title: 'assembly.failedTitle', compact: 'assembly.mobileFailed', hint: 'assembly.failedHint', icon: <CircleAlert size={18} /> },
-    pending: { title: 'assembly.planning', compact: seconds >= 5 ? 'assembly.mobileSlow' : 'assembly.mobilePlanning', hint: seconds >= 5 ? 'assembly.slowHint' : 'assembly.planningHint', icon: <span className="assembly-status-spinner" /> },
+    pending: { title: 'assembly.planning', compact: seconds >= 5 ? 'assembly.mobileSlow' : 'assembly.mobilePlanning', hint: seconds >= 5 ? 'assembly.slowHint' : 'assembly.planningHint', icon: <svg className="assembly-status-progress" viewBox="0 0 24 24" role="progressbar" aria-label={t('assembly.planning')} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}><title>{progress}%</title><circle className="assembly-status-progress-track" cx="12" cy="12" r="9" /><circle className="assembly-status-progress-value" cx="12" cy="12" r="9" pathLength="100" strokeDasharray="100" strokeDashoffset={100 - progress} transform="rotate(-90 12 12)" /></svg> },
     ready: { title: 'assembly.ready', compact: 'assembly.mobileReady', hint: 'assembly.readyHint', icon: <CircleCheck size={18} /> },
   }[state]
   return (
     <div data-tour="assembly" className="m-asm qb-card assembly-status fixed bottom-3 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 p-1.5 max-w-[calc(100vw-1rem)]" data-state={state}>
-      <span className="assembly-status-icon" aria-hidden="true">
+      <span className="assembly-status-icon" aria-hidden={state === 'pending' ? undefined : true}>
         {content.icon}
       </span>
       <div className="assembly-status-copy" role={error ? 'alert' : 'status'} aria-live="polite" aria-atomic="true">

@@ -193,7 +193,7 @@ function frameSequence(model,nodeIds,tubeIds,emit,diagnostics,threads=[]){
   if(nodes.length)build(nodes,tubes);
 }
 
-export function addAssemblyOperations(model,plan){
+export function addAssemblyOperations(model,plan,onProgress){
   const loaded=assemblyMeshes();if(!loaded)throw new Error('装配网格还没加载');
   const nativeEnvelopes=loaded.nativeEnvelopes;
   const {steps,diagnostics}=plan,installed=new Set(),runDone=new Set(),threadDone=new Set(),poses=new Map(),threadAssemblies=[],threadCarrierConsumed=new Set(),preparedRigid=new Set(),softLinings=[];let previous;
@@ -211,6 +211,7 @@ export function addAssemblyOperations(model,plan){
   const reinforcement=reinforcementPart(),core=createCoreChannels(model,{entryPanelContacts,linerCarrierContacts,panelLinerContacts,fittingMatingContacts,c45MatingContacts});
   const checkPath=(moving,installed,...args)=>core.check(moving,[...new Set([...installed,...preparedRigid])].filter(id=>!softLinings.some(lining=>lining.folded&&lining.id===id&&moving.every(part=>lining.carriers.includes(part)||lining.carriers.some(t=>{const tube=model.tubes.get(t);return tube.a===part||tube.b===part;})))),...args);
   const materialKeys=id=>plan.ledger.instances.filter(x=>x.partIds.includes(id)&&x.group!=='screws').map(x=>`${x.group}:${x.key}`);
+  let processedSteps=0;
   for(const step of steps){step.operations=[];const opByPart=new Map();let staging=[0,0,0];
     const region=plan.regions.find(r=>r.id===step.regionId),regional=step.action.detached ? region.detachedTranslation : [0,0,0];
     const present=new Set(installed);
@@ -382,6 +383,7 @@ export function addAssemblyOperations(model,plan){
     for(const op of step.operations){const keys=new Set([...batch,op].flatMap(o=>o.partIds.flatMap(materialKeys)));const repeatedMotion=op.translation&&batch.some(previous=>previous.translation&&previous.partIds.some(id=>op.partIds.includes(id)));if(batch.length&&(repeatedMotion||keys.size>6||batch.length>=3||op.type==='lower-frame'||op.type==='attach-module'||batch.some(o=>['lower-frame','attach-module'].includes(o.type))))flush();batch.push(op);}flush();
     // A dense moving frame may reference many material types: split focus groups without repeating consumption.
     step.detailGroups=step.detailGroups.flatMap(group=>{if(group.materialKeys.length<=6)return [group];const out=[];for(let i=0;i<group.materialKeys.length;i+=6){const keys=group.materialKeys.slice(i,i+6);out.push({...group,id:`${group.id}-${i/6+1}`,materialKeys:keys,partIds:group.partIds.filter(id=>materialKeys(id).some(k=>keys.includes(k)))});}return out;});
+    onProgress?.(++processedSteps,steps.length);
   }
   for (const p of [...model.fittings.values(),...model.slides.values()]) if(!p.appearanceVersion && !nativeEnvelopes[p.kind])diag(diagnostics,'UNKNOWN_INSTALLATION_GEOMETRY','此配件缺少可核验的几何包络，无法确认安装路径。',[p.id],{kind:p.kind});
   const completed=new Set();for(const step of steps)for(const op of step.operations){for(const id of op.dependsOn)if(!completed.has(id))diag(diagnostics,'INVALID_OPERATION_DEPENDENCY','安装动作的前置动作尚未完成。',op.partIds,{operationId:op.id,dependsOn:id});completed.add(op.id);}

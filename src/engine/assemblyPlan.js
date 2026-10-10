@@ -663,7 +663,8 @@ export function computeAssemblyPlan(model, config = model.assemblyConfig || {}, 
   }
   for (const [name] of Object.entries(MAPS)) for (const p of values(model, MAPS[name])) if (!owner.has(p.id)) diagnostics.push({ code: 'PART_UNASSIGNED', severity: 'error', message: `部件 ${p.id} 没有区域或装配步骤。`, nodeIds: MAPS[name] === 'nodes' ? [p.id] : [], partIds: [p.id] });
   const plan = { version: 2, adjustments:[], order, regions, interfaces, frameModules, fixingPoints, steps, diagnostics, bom, ledger, levels, verification: { directionChecked: false, pathChecked: false, methodChecked: false, physical: 'unverified', load: 'unverified' }, canExport: false };
-  addAssemblyOperations(model, plan);
+  internal.onProgress?.('structure');
+  addAssemblyOperations(model, plan, (completed,total) => internal.onProgress?.('operations',completed,total));
   // A blocked lowering path may be opened by installing its covering later.
   // Rebuild the actual action plan and recheck every subsequent motion; never
   // retain a geometric exemption merely because the first candidate failed.
@@ -671,7 +672,7 @@ export function computeAssemblyPlan(model, config = model.assemblyConfig || {}, 
     const candidates=frameModules.filter(module=>module.reason==='installation-path-blocked'&&model.panels.has(module.obstruction?.obstaclePartId));
     for(const diagnostic of diagnostics.filter(d=>d.code==='INSTALLATION_PATH_BLOCKED'&&d.details?.type==='lower-frame'&&model.panels.has(d.details.obstaclePartId))){const step=steps.find(step=>step.operations.some(op=>op.id===diagnostic.details.operationId));if(step)candidates.push({tubeIds:step.tubeIds,obstruction:diagnostic.details});}
     const candidate=candidates.find(module=>!deferredIds.has(module.obstruction.obstaclePartId));
-    if(candidate){const request={partId:candidate.obstruction.obstaclePartId,afterTubeIds:candidate.tubeIds,reason:'blocked-lowering-path'},history=[...(internal.history||[]),{...request,blockedBy:candidate.obstruction.obstaclePartId}];return computeAssemblyPlan(model,config,order,{attempt:(internal.attempt||0)+1,deferredAccessories:[...deferredAccessories,request],history,pathQueryCache});}
+    if(candidate){const request={partId:candidate.obstruction.obstaclePartId,afterTubeIds:candidate.tubeIds,reason:'blocked-lowering-path'},history=[...(internal.history||[]),{...request,blockedBy:candidate.obstruction.obstaclePartId}];return computeAssemblyPlan(model,config,order,{attempt:(internal.attempt||0)+1,deferredAccessories:[...deferredAccessories,request],history,pathQueryCache,onProgress:internal.onProgress});}
   }
   plan.adjustments=internal.history||[];
   consolidateLayerSteps(plan, rowKey);

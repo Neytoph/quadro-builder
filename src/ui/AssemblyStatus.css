@@ -5,14 +5,16 @@
 .assembly-status-icon { width: 18px; height: 18px; margin-left: 6px; display: grid; place-items: center; flex-shrink: 0; color: #c2410c; }
 .assembly-status[data-state=ready] .assembly-status-icon { color: #13763e; }
 .assembly-status[data-state=error] .assembly-status-icon { color: #b91c1c; }
-.assembly-status-spinner { width: 16px; height: 16px; border: 2px solid #ffd3b0; border-top-color: #c2410c; border-radius: 50%; animation: assembly-status-spin 900ms linear infinite; }
+.assembly-status[data-state=pending] .assembly-status-icon { width: 22px; height: 22px; }
+.assembly-status .assembly-status-progress { width: 22px; height: 22px; fill: none; stroke-width: 2.5; }
+.assembly-status-progress-track { stroke: #ffd3b0; }
+.assembly-status-progress-value { stroke: #ea580c; stroke-linecap: round; transition: stroke-dashoffset 180ms ease-out; }
 .assembly-status-copy { min-width: 0; flex: 1; }
 .assembly-status-title { font-size: 13px; font-weight: 700; line-height: 1.2; overflow-wrap: anywhere; }
 .assembly-status-hint { color: #5a6270; font-size: 12px; line-height: 1.2; overflow-wrap: anywhere; }
 .assembly-status-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .assembly-status-button:focus-visible { outline: 2px solid #c2410c; outline-offset: 2px; }
 .assembly-status-compact { display: none; }
-@keyframes assembly-status-spin { to { transform: rotate(360deg); } }
 @media (max-width: 700px) {
   .assembly-status.qb-card {
     gap: 4px;
@@ -32,7 +34,8 @@
   .assembly-status-button::after { content: ''; position: absolute; inset: -6px 0; }
 }
 @media (prefers-reduced-motion: reduce) {
-  html[data-motion] .assembly-status, .assembly-status-spinner { animation: none; }
+  html[data-motion] .assembly-status { animation: none; }
+  .assembly-status-progress-value { transition: none; }
   .assembly-status-button { transition: none; }
   .assembly-status-button:hover { transform: none; }
 }

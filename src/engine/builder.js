@@ -115,6 +115,7 @@ export class Builder {
     this.buildPlan = { levels: [], steps: [] };
     this.assemblyPending = false;
     this.assemblyError = false;
+    this.assemblyProgress = 0;
     this._assemblyWorker = null;
     this._assemblyRequest = 0;
     this._assemblyRequestedKey = null;
@@ -286,6 +287,7 @@ export class Builder {
       this._assemblyRequestedKey = null;
       this.assemblyPending = false;
       this.assemblyError = false;
+      this.assemblyProgress = 0;
     }
     this.mode = mode;
     if (this.panelRail) { this.panelRail = null; this.highlight = null; }
@@ -1512,6 +1514,7 @@ export class Builder {
     if (planKey === this._assemblyPlanKey) {
       this.assemblyPending = false;
       this.assemblyError = false;
+      this.assemblyProgress = 100;
       this.assemblyStep = Math.min(this.assemblyStep, Math.max(0, this.buildPlan.steps.length - 1));
       return;
     }
@@ -1520,6 +1523,7 @@ export class Builder {
     this._assemblyRequestedKey = planKey;
     this.assemblyPending = true;
     this.assemblyError = false;
+    this.assemblyProgress = 0;
     this.buildPlan = { levels: [], steps: [] };
     try {
       if (!this._assemblyWorker) {
@@ -1536,6 +1540,14 @@ export class Builder {
 
   _receiveAssemblyPlan(message) {
     if (message?.requestId !== this._assemblyRequest || this.mode !== 'assembly') return;
+    if (!this.assemblyPending) return;
+    if (message.type === 'progress') {
+      if (Number.isFinite(message.progress) && message.progress > this.assemblyProgress && message.progress < 100) {
+        this.assemblyProgress = message.progress;
+        this.onChange();
+      }
+      return;
+    }
     const planKey = this._assemblyRequestedKey;
     this._assemblyRequestedKey = null;
     this.assemblyPending = false;
@@ -1548,6 +1560,7 @@ export class Builder {
     this.buildPlan = message.plan;
     this._assemblyPlanKey = planKey;
     this.assemblyError = false;
+    this.assemblyProgress = 100;
     this.assemblyStep = Math.min(this.assemblyStep, Math.max(0, this.buildPlan.steps.length - 1));
     this.refresh();
   }
