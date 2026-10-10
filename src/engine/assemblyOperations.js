@@ -23,7 +23,7 @@ export function panelSupportTubes(model,panel){
   const supports=new Set(tubeSupports(panel));
   for(const tube of model.tubes.values()){
     if(tube.arm||tube.link||tube.bow)continue;const rail=model._rail(tube.id);if(!rail)continue;
-    if(corners.some((p,i)=>{const q=corners[(i+1)%4],d=unit(sub(q,p));if(Math.abs(dot(d,rail.dir))<.995)return false;const v=sub(rail.p0,p),along=dot(v,d);return Math.hypot(...v.map((x,k)=>x-d[k]*along))<.6&&along<Math.hypot(...sub(q,p))+.6&&along+rail.len>-.6;}))supports.add(tube.id);
+    if(corners.some((p,i)=>{const q=corners[(i+1)%4],edge=sub(q,p),edgeLength=Math.hypot(...edge),d=unit(edge);if(Math.abs(dot(d,rail.dir))<.995)return false;const v=sub(rail.p0,p),along=dot(v,d),endAlong=along+rail.len*dot(rail.dir,d),overlap=Math.min(edgeLength,Math.max(along,endAlong))-Math.max(0,Math.min(along,endAlong));return Math.hypot(...v.map((x,k)=>x-d[k]*along))<.6&&overlap>.6;}))supports.add(tube.id);
   }
   return [...supports];
 }
@@ -51,6 +51,16 @@ export function reconcileFrameModulePanels(model,frameModules,steps,deferredIds=
     const actionModule=step.action.modules?.find(item=>item.id===module.id);
     if(actionModule)actionModule.partIds=[...module.partIds];
     if(step.action.inPlacePartIds)step.action.inPlacePartIds=step.action.inPlacePartIds.filter(id=>!carried.has(id));
+  }
+  for(const step of steps){
+    if(!step.action?.layer)continue;
+    const modules=step.action.modules||[],movingTubes=new Set(modules.flatMap(module=>module.tubeIds||module.partIds.filter(id=>model.tubes.has(id))));
+    const carriedPanels=new Set(modules.flatMap(module=>module.partIds.filter(id=>model.panels.has(id)))),inPlace=new Set(step.action.inPlacePartIds||[]);
+    for(const id of step.panelIds||[]){
+      if(carriedPanels.has(id)){inPlace.delete(id);continue;}
+      const panel=model.panels.get(id);if(panel&&panelSupportTubes(model,panel).some(tubeId=>movingTubes.has(tubeId)))inPlace.add(id);
+    }
+    step.action.inPlacePartIds=[...inPlace];
   }
 }
 const THREAD=new Set(['floating-wheel2','sleeve2','textil-round2','bag2','pool2','pool-small2','roof-large2']);
