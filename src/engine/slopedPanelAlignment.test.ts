@@ -136,6 +136,18 @@ describe('倾斜方框面板沿真实框边对齐', () => {
     expect(model.addConfirmedComponent(probe, 'blue')).toBeTruthy()
   })
 
+  it('旧版斜面板缺少 side 时自动把板面放到框架上侧', () => {
+    const angle = 64 * Math.PI / 180
+    const along = [40, 0, 0], upSlope = [0, Math.cos(angle) * 40, Math.sin(angle) * 40]
+    const corners = [[0, 0, 0], along, along.map((v, i) => v + upSlope[i]), upSlope]
+    const model = new BuildModel()
+    expect(model.loadJSON({ format: 2, nodes: [], tubes: [], panels: [{ id: 'legacy-slope', a: 'rail-a', b: 'rail-b', len: 40, panelId: 'panel_40x40', appearanceVersion: 2 }] }).ok).toBe(true)
+    const part = model.panels.get('legacy-slope')!
+    expect(part.side).toBeNull()
+    model.panelCorners = () => corners
+    expect(confirmedFrame(model, part)!.axes[2][1]).toBeGreaterThan(0)
+  })
+
   it('斜板正式 QDF 输出保留真实框内旋转', () => {
     const { model, candidates } = slopedFrames('panel_40x40'), part = model.addConfirmedComponent(candidates()[0], 'green') as any
     const frame = confirmedFrame(model, part)!, output = buildQDF(model)

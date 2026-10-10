@@ -178,7 +178,7 @@ interface EngineApi {
   invRows: InvRow[]
   feasible: boolean | null
   sizeCm: [number, number, number] | null
-  assembly: { step: number; max: number; active: boolean; order: string }
+  assembly: { step: number; max: number; active: boolean; order: string; pending: boolean; error: boolean }
   assemblyOrders: string[]
   setAssemblyOrder: (order: string) => void
   exportInventory: () => void
@@ -2638,6 +2638,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       max: Math.max(0, (builder?.buildPlan?.steps?.length ?? 1) - 1),
       active: builder?.mode === 'assembly',
       order: (builder?.assemblyOrder as string) || 'y+',
+      pending: !!builder?.assemblyPending,
+      error: !!builder?.assemblyError,
     },
     assemblyOrders: BUILD_ORDERS,
     setAssemblyOrder, exportInventory, importInventory,

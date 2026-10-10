@@ -6078,7 +6078,8 @@ export class BuildModel {
    * nirgends hin und faellt weg.
    */
   _panelRecord(p) {
-    const side = p.side < 0 ? -1 : 1;
+    let side = p.side < 0 ? -1 : 1;
+    if (p.appearanceVersion === 2 && (p.side === null || p.side === undefined)) side = null;
     if (p.a && p.b) {
       const r = { id: p.id, a: p.a, b: p.b, t0: p.t0 || 0, len: p.len || 0, color: p.color, side };
       if (p.geom) r.geom = p.geom;

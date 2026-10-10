@@ -49,7 +49,8 @@ export function confirmedFrame(model, part) {
     z=unit(cross(unit(cSub(cor[1],cor[0])),unit(cSub(cor[3],cor[0]))));
     x=unit(cross(y,z));
   }
-  const sign=Math.abs(z[1])>0.999 ? (z[1]<0?-1:1) : (part.side||1);
+  let sign=z[1]<0?-1:1;
+  if(Math.abs(z[1])<=0.999&&part.side!==null&&part.side!==undefined)sign=part.side<0?-1:1;
   if(sign<0) {x=x.map(v=>-v);z=z.map(v=>-v);}
   if (![...x,...y,...z].every(Number.isFinite)) return null;
   return {pos:center(cor),axes:[x,y,z],quat:quatFromBasis(x,y,z)};

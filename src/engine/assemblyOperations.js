@@ -290,9 +290,9 @@ export function addAssemblyOperations(model,plan){
       frameSequence(model,m.nodeIds,m.tubeIds,emit,diagnostics,threadAssemblies.filter(thread=>!thread.flexible&&thread.carriers.every(id=>m.tubeIds.includes(id))));
       unfold(staging,m.tubeIds);for(const lining of softLinings.filter(l=>!l.folded&&l.carriers.every(id=>m.tubeIds.includes(id)))){m.partIds.push(lining.id);visualModule.partIds=[...m.partIds];}
       staging=[0,0,0];for(const id of m.partIds)handled.add(id);
-      const obstruction=checkPath(m.partIds,[...installed],m.installationTranslation);
-      const op=emit('lower-frame',m.partIds,copy('先拼好此局部框架，分别对齐本组立柱，沿箭头向下套入；其他独立框架按后续动作安装。','Preassemble this frame, align these uprights and lower it along the arrow. Install other separate frames in their own actions.','Diesen Rahmen vormontieren, an diesen Stützen ausrichten und entlang des Pfeils absenken. Andere Rahmen einzeln montieren.'),{consumesPartIds:[],translation:m.installationTranslation,direction:[0,-1,0],position:xyz(model.nodes.get(m.nodeIds[0])),referencePartIds:m.interfaceIds.map(id=>plan.interfaces.find(x=>x.id===id)?.supportTubeId).filter(Boolean),verification:verify(!obstruction)});
-      if(obstruction)op.verification.methodChecked=false;
+      // emit() checks this complete movement after earlier operations have
+      // updated the installed pose set; the preliminary check duplicated it.
+      emit('lower-frame',m.partIds,copy('先拼好此局部框架，分别对齐本组立柱，沿箭头向下套入；其他独立框架按后续动作安装。','Preassemble this frame, align these uprights and lower it along the arrow. Install other separate frames in their own actions.','Diesen Rahmen vormontieren, an diesen Stützen ausrichten und entlang des Pfeils absenken. Andere Rahmen einzeln montieren.'),{consumesPartIds:[],translation:m.installationTranslation,direction:[0,-1,0],position:xyz(model.nodes.get(m.nodeIds[0])),referencePartIds:m.interfaceIds.map(id=>plan.interfaces.find(x=>x.id===id)?.supportTubeId).filter(Boolean)});
     }
     const remainingTubes=physicalTubes.filter(id=>!handled.has(id));
     const freeNodes=step.nodeIds.filter(id=>!handled.has(id));
@@ -305,8 +305,10 @@ export function addAssemblyOperations(model,plan){
       for(const id of freeNodes)emit('orient-connector',[id],copy('摆正高亮连接件，保留下一动作所需插口。','Orient the highlighted connector; keep the ports for the next action open.','Markierte Kupplung ausrichten; erforderliche Anschlüsse freilassen.'),{openPorts:[id]});
       for(const id of remainingTubes){const t=model.tubes.get(id),anchors=[t.a,t.b].filter(n=>installed.has(n));
         if(anchors.length>1){diag(diagnostics,'UNVERIFIED_IN_PLACE_CLOSURE','管件两端接头已经接入主体，原位封口没有已验证的替代顺序；请先留开接头或改为预装框架。',[id,...anchors]);emit('unresolved-closure',[id],copy('两端均已连接：此原位安装方法尚未确认，调整顺序后再导出。','Both end connectors are already joined: this installation sequence is unresolved; adjust it before export.','Beide Endkupplungen sind bereits verbunden: Montagefolge ungeklärt; vor dem Export anpassen.'),{verification:verify(false,false)});continue;}
-        const anchor=anchors[0]||t.a,free=anchor===t.a?t.b:t.a,d=unit(model._tubeDirAt(t,model.nodes.get(anchor),model.nodes.get(free))),translation=d.map(v=>v*12),obstruction=checkPath([id],[...installed],translation);
-        emit('insert-tube',[id],copy(`拿取${partName(getTube(t.tubeId))}，沿箭头插入箭头所指接头，另一端保持开放。`,`Insert ${partName(getTube(t.tubeId))} into the connector indicated by the arrow; keep the other end open.`,`${partName(getTube(t.tubeId))} entlang des Pfeils in die vom Pfeil angezeigte Kupplung einsetzen; anderes Ende offen lassen.`),{referencePartIds:[anchor],translation,direction:d.map(v=>-v),position:xyz(model.nodes.get(anchor)),openPorts:[free],verification:verify(!obstruction,!obstruction)});
+        const anchor=anchors[0]||t.a,free=anchor===t.a?t.b:t.a,d=unit(model._tubeDirAt(t,model.nodes.get(anchor),model.nodes.get(free))),translation=d.map(v=>v*12);
+        // emit() performs the authoritative check with the current poses,
+        // including parts installed by earlier operations in this same step.
+        emit('insert-tube',[id],copy(`拿取${partName(getTube(t.tubeId))}，沿箭头插入箭头所指接头，另一端保持开放。`,`Insert ${partName(getTube(t.tubeId))} into the connector indicated by the arrow; keep the other end open.`,`${partName(getTube(t.tubeId))} entlang des Pfeils in die vom Pfeil angezeigte Kupplung einsetzen; anderes Ende offen lassen.`),{referencePartIds:[anchor],translation,direction:d.map(v=>-v),position:xyz(model.nodes.get(anchor)),openPorts:[free]});
 
       }
     }

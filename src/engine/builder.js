@@ -5,9 +5,8 @@ import { buildableTubes, geometry, getTube, spacingFor, getPanel, defaultPanel, 
 import { CLASSIC_COLOR_IDS, officialColorId } from "./colors.js";
 import { connectorLabelInfo } from "./buildplan.js";
 import { computeAssemblyPlan, assemblyState } from "./assemblyPlan.js";
-import { assemblyMeshes, ensureAssemblyMeshes } from "./assemblyNativeMesh.js";
 import { infeasibleConnectors, inferConnectorType } from "./bom.js";
-import { t } from "./i18n.js";
+import { getLang, t } from "./i18n.js";
 import { round2, panelNormal, modelMiddle, xAxisOf, yAxisOf, zAxisOf, quatFromBasis } from "./util.js";
 import { TUBE_FITTINGS, POOL_KINDS, isHolePart, holeArmDirs, holeClampDirsAt, HOLE_MASKS,
   BOLT_PART, HINGE_PART, isBoltPart, boltArmDirs, boltDepth, hingeDir, hingeKey, splitHingeKey,
@@ -114,6 +113,12 @@ export class Builder {
     this.highlight = null;   // reine Sicht-Hervorhebung (Bestandsliste)
 
     this.buildPlan = { levels: [], steps: [] };
+    this.assemblyPending = false;
+    this.assemblyError = false;
+    this._assemblyWorker = null;
+    this._assemblyRequest = 0;
+    this._assemblyRequestedKey = null;
+    this._assemblyPlanKey = null;
     this.assemblyStep = 0;
     this.assemblyOrder = "y+";   // Aufbaurichtung, siehe buildplan.BUILD_ORDERS
     this.manualLabels = false;   // 说明书导出：显示当前步所有接头/管标注
@@ -275,6 +280,12 @@ export class Builder {
     if (this.mode === "select" && mode !== "select" && this.selection.size) {
       const from = stepCandidatesFromSelection(this.model, this.selection);
       if (from.length) this.stepFrom = from;
+    }
+    if (mode !== "assembly" && this.mode === "assembly") {
+      this._assemblyRequest++;
+      this._assemblyRequestedKey = null;
+      this.assemblyPending = false;
+      this.assemblyError = false;
     }
     this.mode = mode;
     if (this.panelRail) { this.panelRail = null; this.highlight = null; }
@@ -1496,23 +1507,60 @@ export class Builder {
   // --- Aufbaumodus -------------------------------------------------------
   // Aufbauplan (neu) berechnen und beim aktuellen Schritt bleiben (geklemmt).
   enterAssembly() {
-    if (!assemblyMeshes()) {
-      if (this._meshesPending) return;
-      this._meshesPending = true;
-      void ensureAssemblyMeshes().then(() => {
-        this._meshesPending = false;
-        if (this.mode !== "assembly") return;
-        this.enterAssembly();
-        this.refresh();
-      }).catch((error) => {
-        this._meshesPending = false;
-        console.warn("[assembly]", error);
-      });
+    const model = this.model.toJSON();
+    const planKey = `${this.assemblyOrder}|${getLang()}|${JSON.stringify(model)}`;
+    if (planKey === this._assemblyPlanKey) {
+      this.assemblyPending = false;
+      this.assemblyError = false;
+      this.assemblyStep = Math.min(this.assemblyStep, Math.max(0, this.buildPlan.steps.length - 1));
       return;
     }
-    this.buildPlan = computeAssemblyPlan(this.model, this.model.assemblyConfig || {}, this.assemblyOrder);
-    const max = Math.max(0, this.buildPlan.steps.length - 1);
-    this.assemblyStep = Math.min(this.assemblyStep, max);
+    if (this.assemblyPending && planKey === this._assemblyRequestedKey) return;
+    const requestId = ++this._assemblyRequest;
+    this._assemblyRequestedKey = planKey;
+    this.assemblyPending = true;
+    this.assemblyError = false;
+    this.buildPlan = { levels: [], steps: [] };
+    try {
+      if (!this._assemblyWorker) {
+        const worker = new Worker(new URL('./assemblyPlan.worker.js', import.meta.url), { type: 'module' });
+        worker.addEventListener('message', event => this._receiveAssemblyPlan(event.data));
+        worker.addEventListener('error', event => this._failAssemblyPlan(this._assemblyRequest, event.message || 'worker error'));
+        this._assemblyWorker = worker;
+      }
+      this._assemblyWorker.postMessage({ type: 'compute', requestId, model, config: this.model.assemblyConfig || {}, order: this.assemblyOrder, lang: getLang() });
+    } catch (error) {
+      this._failAssemblyPlan(requestId, error?.message || error);
+    }
+  }
+
+  _receiveAssemblyPlan(message) {
+    if (message?.requestId !== this._assemblyRequest || this.mode !== 'assembly') return;
+    const planKey = this._assemblyRequestedKey;
+    this._assemblyRequestedKey = null;
+    this.assemblyPending = false;
+    if (message.type !== 'result') {
+      this.assemblyError = true;
+      console.warn('[assembly]', message.error || 'plan worker failed');
+      this.refresh();
+      return;
+    }
+    this.buildPlan = message.plan;
+    this._assemblyPlanKey = planKey;
+    this.assemblyError = false;
+    this.assemblyStep = Math.min(this.assemblyStep, Math.max(0, this.buildPlan.steps.length - 1));
+    this.refresh();
+  }
+
+  _failAssemblyPlan(requestId, reason) {
+    if (requestId !== this._assemblyRequest) return;
+    this._assemblyWorker?.terminate();
+    this._assemblyWorker = null;
+    this._assemblyRequestedKey = null;
+    this.assemblyPending = false;
+    this.assemblyError = true;
+    console.warn('[assembly]', reason);
+    this.refresh();
   }
 
   // Aufbaurichtung wechseln: Plan neu rechnen und beim ersten Schritt beginnen.

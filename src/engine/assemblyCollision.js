@@ -41,7 +41,8 @@ function connectorBasis(resolved){const frame=resolved.frame||axes(resolved.quat
 function nativeBox(p,limits) { const basis=axes(p.quat),middle=limits.map(([a,b])=>(a+b)/2);return {kind:'box',pos:xyz(p).map((v,i)=>v+basis.reduce((s,a,k)=>s+a[i]*middle[k],0)),axes:basis,half:limits.map(([a,b])=>(b-a)/2)}; }
 const envelopeCache=new WeakMap();
 const portDepthCache=new WeakMap();
-export function beginAssemblyCollisionPass(model){envelopeCache.set(model,new Map());portDepthCache.set(model,new Map());}
+const pathResultCache=new WeakMap();
+export function beginAssemblyCollisionPass(model,queryCache=new Map()){envelopeCache.set(model,new Map());portDepthCache.set(model,new Map());pathResultCache.set(model,queryCache);}
 export function partEnvelope(model,id){useMeshes();const cache=envelopeCache.get(model);if(cache?.has(id))return cache.get(id);const shapes=computeEnvelope(model,id);cache?.set(id,shapes);return shapes;}
 function computeEnvelope(model,id) {
   const radius=geometry().tubeRadius||2.45, cs=geometry().connectorSize||5;
@@ -349,6 +350,9 @@ function fileC45ContactNodes(model,id,obstacleId,start,end,obstacleOffset,contra
   return Math.abs(depth-7.5)<=.01?[{nodeId:receiver.id,depth}]:[];
 }
 export function checkAssemblyPath(model,movingIds,installedIds,start,end=[0,0,0],{allowMating=true,obstacleTranslations=new Map(),matingContacts=new Map(),c45MatingContacts=new Map(),entryPanelContacts=new Map(),panelLinerContacts=new Map(),linerCarrierContacts=new Map(),fittingMatingContacts=new Map(),movingAssemblyIds=movingIds}={}) {
+  const pathCache=pathResultCache.get(model);
+  const cacheKey=JSON.stringify([movingIds,installedIds,start,end,allowMating,[...obstacleTranslations],[...matingContacts],[...c45MatingContacts],[...entryPanelContacts],[...panelLinerContacts],[...linerCarrierContacts],[...fittingMatingContacts],movingAssemblyIds]);
+  if(pathCache?.has(cacheKey))return pathCache.get(cacheKey);
   const started=performance.now();const timing=()=>{const elapsed=performance.now()-started;if(globalThis.process?.env?.ASSEMBLY_PROFILE && elapsed>200)globalThis.process.stderr.write(JSON.stringify({elapsed:Math.round(elapsed),moving:movingIds.length,installed:installedIds.length,first:movingIds.slice(0,3),start,end})+'\n');};
   const moving=new Set(movingIds),travel=Math.hypot(...sub(start,end)),spacing=geometry().tubeRadius||2.45,count=Math.max(1,Math.ceil(travel/spacing));
   const assemblyMoving=new Set(movingAssemblyIds);
@@ -363,17 +367,23 @@ export function checkAssemblyPath(model,movingIds,installedIds,start,end=[0,0,0]
       // short intervals for all remaining pairs and for joint-contact checks.
       const exactSweep=a.kind==='triangle'&&['triangle','box'].includes(b.kind)||b.kind==='triangle'&&a.kind==='box';
       return count<=2||!exactSweep||assemblyShapesOverlap(move(a,midpoint),move(b,obstacle.offset),fullPad);
-    }).map(b=>[a,b]);});
+    }).map(b=>[a,b,shapeBounds(a),shiftBounds(shapeBounds(b),obstacle.offset)]);});
     if(!pairs.length)continue;
     const t=model.tubes.get(id),o=model.tubes.get(obstacle.id),shared=t&&o?[t.a,t.b].filter(n=>n===o.a||n===o.b):[];
     const fileContacts=allowMating?fileC45ContactNodes(model,id,obstacle.id,start,end,obstacle.offset,c45MatingContacts):[];
     for(let sample=0;sample<count;sample++){
-      const delta=start.map((v,i)=>v+(end[i]-v)*(sample+.5)/count),pad=sub(end,start).map(v=>v/count/2);
+      const delta=start.map((v,i)=>v+(end[i]-v)*(sample+.5)/count),pad=sub(end,start).map(v=>v/count/2),sampleBounds=new Map(),paddingRadius=Math.hypot(...pad)+.05;
       const adapterIds=id=>adapterMap.get(id)||[];
       const adapterContacts=model.nodes.has(id)&&o ? [o.a,o.b].filter(n=>adapterIds(id).includes(n)) : t&&model.nodes.has(obstacle.id) ? [t.a,t.b].filter(n=>adapterIds(obstacle.id).includes(n)) : [];
       const declaredContacts=[...(matingContacts.get(`${id}:${obstacle.id}`)||[]),...fileContacts.map(contact=>contact.nodeId)].filter(nodeId=>model.nodes.has(nodeId));
       const contacts=allowMating ? [...new Set([...shared,...adapterContacts,...declaredContacts,...(t&&[t.a,t.b].includes(obstacle.id)?[obstacle.id]:[]),...(o&&[o.a,o.b].includes(id)?[id]:[])])]:[];
-      for(const [a,b] of pairs){
+      for(const [a,b,movingShapeBounds,obstacleShapeBounds] of pairs){
+        let sweptBounds=sampleBounds.get(a);
+        if(!sweptBounds){sweptBounds=movingShapeBounds.map(([lo,hi],i)=>[lo+delta[i]-paddingRadius,hi+delta[i]+paddingRadius]);sampleBounds.set(a,sweptBounds);}
+        // Conservative AABB rejection avoids SAT on pairs separated at this
+        // sample. The Euclidean padding radius and margin cover every shape's
+        // swept tolerance, including pipe/pipe distance checks.
+        if(!intersects(sweptBounds,obstacleShapeBounds))continue;
         if(!assemblyShapesOverlap(move(a,delta),move(b,obstacle.offset),pad))continue;
         if(allowMating&&panelSlotContact(model,id,obstacle.id,a,delta,obstacle.offset))continue;
         if(allowMating&&sharedPanelLipContact(model,id,obstacle.id,a,b,delta,end,pad,obstacle.offset))continue;
@@ -391,9 +401,9 @@ export function checkAssemblyPath(model,movingIds,installedIds,start,end=[0,0,0]
           const trim=(shape,tube)=>{if(!['capsule','cylinder'].includes(shape.kind)||!tube)return shape;let p=[...shape.a],q=[...shape.b];const d=unit(sub(q,p));for(const n of contacts){const pos=xyz(model.nodes.get(n)),fileDepth=fileContacts.find(contact=>contact.nodeId===n)?.depth;if(Math.hypot(...sub(p,pos))<8){const depth=fileDepth??matingPortDepth(model,n,d);p=p.map((v,i)=>v+d[i]*(depth-dot(sub(p,pos),d)));}if(Math.hypot(...sub(q,pos))<8){const depth=fileDepth??matingPortDepth(model,n,d.map(v=>-v));q=q.map((v,i)=>v-d[i]*(depth+dot(sub(q,pos),d)));}}if(dot(sub(q,p),d)<=0)return null;return {...shape,a:p,b:q};};
           const ta=trim(a,t),tb=trim(b,o);if(!ta||!tb||!assemblyShapesOverlap(move(ta,delta),move(tb,obstacle.offset),pad))continue;
         }
-        timing();return {movingPartId:id,obstaclePartId:obstacle.id,movingTubeId:id,obstacleTubeId:obstacle.id,sample,pathSamples:count+1,sampleSpacing:travel/count,translation:delta,envelope:'complete-conservative',movingShape:a,obstacleShape:b};
+        const obstruction={movingPartId:id,obstaclePartId:obstacle.id,movingTubeId:id,obstacleTubeId:obstacle.id,sample,pathSamples:count+1,sampleSpacing:travel/count,translation:delta,envelope:'complete-conservative',movingShape:a,obstacleShape:b};pathCache?.set(cacheKey,obstruction);timing();return obstruction;
       }
     }
   }}
-  timing();return null;
+  pathCache?.set(cacheKey,null);timing();return null;
 }
