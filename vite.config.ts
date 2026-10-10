@@ -41,6 +41,18 @@ function readBody(req: import('node:http').IncomingMessage, limit = 2_000_000) {
 
 export default defineConfig({
   plugins: [
+    {
+      name: 'shared-home-visuals',
+      generateBundle() {
+        this.emitFile({ type: 'asset', fileName: 'home/visuals.js', source: fs.readFileSync(path.join(rootDir, 'src/home/visuals.js'), 'utf8') })
+      },
+      configureServer(server) {
+        server.middlewares.use('/home/visuals.js', (_req, res) => {
+          res.setHeader('Content-Type', 'text/javascript')
+          res.end(fs.readFileSync(path.join(rootDir, 'src/home/visuals.js'), 'utf8'))
+        })
+      },
+    },
     publicResources(rootDir),
     publicAssetFallback(rootDir),
     react(),

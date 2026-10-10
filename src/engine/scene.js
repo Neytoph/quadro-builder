@@ -2,6 +2,7 @@
 
 import * as THREE from "three";
 import { createHomeEnvironment, disposeHome } from '../home/environment.js';
+import { HOME_STYLE } from '../home/visuals.js';
 import { ACCESSORY_IDS, PANEL_ACCESSORY_IDS, mountPoint, componentVolumes } from './accessoryPack.js';
 import { accessoryMeshes, panelAccessoryMeshes } from './accessoryMeshes.js';
 import { confirmedSpec } from './componentPack.js';
@@ -417,9 +418,27 @@ export class SceneManager {
       this._homeGroup = context ? createHomeEnvironment(context) : null;
       if (this._homeGroup) this.scene.add(this._homeGroup);
       this._homeKey = key;
+      this._shadowsDirty();
     }
     if (this._homeGroup) this._homeGroup.visible = !this._sceneOn;
+    this._applyHomeStyle();
     this.requestRender();
+  }
+
+  _applyHomeStyle(updateProjection = true) {
+    const indoor = !!this._homeGroup && !this._sceneOn && !this._homeOutputHidden;
+    if (indoor !== !!this._homeStyleOn) {
+      this._homeStyleOn = indoor;
+      if (updateProjection && indoor) {
+        this._outsideProjection = this._projection;
+        this.setProjection('orthographic');
+      } else if (updateProjection) this.setProjection(this._outsideProjection || 'perspective');
+    }
+    for (const light of [this._hemiLight, this._dirLight, this._fillLight, this._rimLight]) if (light) light.visible = !indoor;
+    if (this._grid) this._grid.visible = !indoor;
+    this.renderer.toneMapping = indoor ? THREE.ACESFilmicToneMapping : THREE.NoToneMapping;
+    this.renderer.toneMappingExposure = indoor ? HOME_STYLE.exposure : 1;
+    this._applyBackground();
   }
 
   homeProductBounds() {
@@ -442,7 +461,8 @@ export class SceneManager {
   frameHome() {
     if (!this._homeGroup) return;
     const box = new THREE.Box3().setFromObject(this._homeGroup);
-    this._frameAlong(null, new THREE.Vector3(1, .85, 1).normalize(), { bounds: { min: box.min.toArray(), max: box.max.toArray(), size: box.getSize(new THREE.Vector3()).toArray() }, animate: true });
+    const direction = new THREE.Vector3(1.1, 1.05, 1.4).transformDirection(this._homeGroup.matrixWorld);
+    this._frameAlong(null, direction, { bounds: { min: box.min.toArray(), max: box.max.toArray(), size: box.getSize(new THREE.Vector3()).toArray() }, animate: true });
   }
   frameHomeProduct() {
     const bounds = this.homeProductBounds();
@@ -456,7 +476,9 @@ export class SceneManager {
       return;
     }
     bounds.size = bounds.max.map((n, a) => n - bounds.min[a]);
-    this._frameAlong(null, new THREE.Vector3(1, .85, 1).normalize(), { bounds, margin: 1.7, animate: true });
+    const direction = new THREE.Vector3(1.1, 1.05, 1.4);
+    if (this._homeGroup) direction.transformDirection(this._homeGroup.matrixWorld);
+    this._frameAlong(null, direction.normalize(), { bounds, margin: 1.7, animate: true });
   }
   constructor(container) {
     this.container = container;
@@ -1138,6 +1160,8 @@ export class SceneManager {
     this.renderer.shadowMap.autoUpdate = false;
     this.renderer.shadowMap.needsUpdate = true;
     this.renderer.shadowMap.enabled = QUALITY[this._quality].shadow > 0;
+    this.renderer.toneMapping = this._homeStyleOn ? THREE.ACESFilmicToneMapping : THREE.NoToneMapping;
+    this.renderer.toneMappingExposure = this._homeStyleOn ? HOME_STYLE.exposure : 1;
     // Die Schnittebene haengt an den MATERIALIEN des Modells, nicht am Renderer
     // -- Boden, Gras, Baeume und Himmel sollen ungeschnitten stehen bleiben.
     this.renderer.localClippingEnabled = true;
@@ -5712,6 +5736,7 @@ export class SceneManager {
       pos: this.camera.position.toArray(),
       target: this.controls.target.toArray(),
       zoom: this.camera.zoom,
+      projection: this._projection,
     };
   }
 
@@ -5719,6 +5744,7 @@ export class SceneManager {
     this._camFly = null;
     this._needsRender = true;
     if (!st || !this.controls || !Array.isArray(st.pos) || !Array.isArray(st.target)) return false;
+    if (st.projection) this.setProjection(st.projection);
     this.camera.position.fromArray(st.pos);
     this.controls.target.fromArray(st.target);
     if (typeof st.zoom === "number" && st.zoom > 0) this.camera.zoom = st.zoom;
@@ -6933,6 +6959,7 @@ export class SceneManager {
     }
     this._applyBackground();
     this._applyGrid();
+    this._applyHomeStyle();
   }
 
   /**
@@ -6966,7 +6993,7 @@ export class SceneManager {
     const horizon = this._lookHex(this._tune?.skyHorizon || SCENE_SKY_HORIZON);
     const blank = this._lookHex(this._tune?.blank || BG_LIGHT);
     this.scene.background.set(
-      this._sceneOn ? horizon : (this._dark ? BG_DARK : blank));
+      this._homeStyleOn ? HOME_STYLE.background : (this._sceneOn ? horizon : (this._dark ? BG_DARK : blank)));
     this._needsRender = true;
   }
 
@@ -7078,6 +7105,7 @@ export class SceneManager {
     const zelle = this._gridCell || GRID_CELL;
     const grid = new THREE.GridHelper(GRID_SIZE, Math.round(GRID_SIZE / zelle), major, minor);
     grid.position.y = -GROUND_DROP;
+    grid.visible = !this._homeStyleOn;
     this.scene.add(grid);
     this._grid = grid;
     this._needsRender = true;
@@ -7291,6 +7319,8 @@ export class SceneManager {
       hideRoom ? this._roomGroup : null,
       hideRoom ? this._homeGroup : null,
     ].filter(Boolean).map((o) => [o, o.visible]);
+    const hiddenHome = hideRoom && this._homeStyleOn;
+    if (hiddenHome) { this._homeOutputHidden = true; this._applyHomeStyle(false); this._shadowsDirty(); }
     for (const [o] of versteckt) o.visible = false;
     let url = null;
     try {
@@ -7300,6 +7330,7 @@ export class SceneManager {
         : this.renderer.domElement.toDataURL(mime);
     } finally {
       for (const [o, sichtbar] of versteckt) o.visible = sichtbar;
+      if (hiddenHome) { this._homeOutputHidden = false; this._applyHomeStyle(false); this._shadowsDirty(); }
       if (resized) {
         this._viewSize = null;
         this.renderer.setPixelRatio(prevPR);

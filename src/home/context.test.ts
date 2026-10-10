@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import * as Y from 'yjs'
-import { Vector3 } from 'three'
+import { Box3, HemisphereLight, LineSegments, Matrix4, Mesh, Vector3 } from 'three'
 import { loadCatalog } from '../engine/catalog.js'
 import { BuildModel } from '../engine/model.js'
 import { docFromJSON, docToJSON, type ModelJSON } from '../collab/ymodel'
@@ -53,5 +53,28 @@ describe('房间与原生模型的存档关系', () => {
   it('公开产品输出移除房间且不改动原始私有存档', () => {
     const model = { nodes: [{ id: 'n1', x: 40, y: 0, z: 80 }], homeContext: home() }
     expect(productOnly(model)).toEqual({ nodes: model.nodes }); expect(model.homeContext).toEqual(home())
+  })
+  it('旋转后的家具、搭建区与地面格子仍使用房间厘米坐标', () => {
+    const context = home(); context.placement.rotation = 90
+    context.snapshot.items.push({ id: 'cabinet', name: '柜子', type: 'cabinet', kind: 'furniture', x: 20, elevation: 15, z: 20, w: 140, h: 180, d: 45 })
+    const environment = createHomeEnvironment(context), inverse = environment.matrixWorld.clone().invert()
+    for (const item of context.snapshot.items) {
+      const object = environment.children.find(o => o.userData.homeItemId === item.id)!, box = new Box3()
+      object.traverse(o => {
+        if (!(o instanceof Mesh)) return
+        o.geometry.computeBoundingBox()
+        box.union(o.geometry.boundingBox!.clone().applyMatrix4(new Matrix4().multiplyMatrices(inverse, o.matrixWorld)))
+      })
+      const dimensions = box.getSize(new Vector3()).toArray()
+      dimensions.forEach((n, a) => expect(n).toBeCloseTo([item.w, item.h, item.d][a], 4))
+      box.min.toArray().forEach((n, a) => expect(n).toBeCloseTo([item.x, item.elevation, item.z][a], 4))
+    }
+    const grid = environment.getObjectByName('home-floor-grid') as LineSegments, points = grid.geometry.attributes.position
+    expect(points.getX(2) - points.getX(0)).toBe(25)
+    expect(environment.getWorldScale(new Vector3()).toArray()).toEqual([1, 1, 1])
+    let skyDirection: Vector3 | undefined
+    environment.traverse(o => { if (o instanceof HemisphereLight) skyDirection = o.getWorldPosition(new Vector3()) })
+    expect(skyDirection!.distanceTo(new Vector3(0, 1, 0))).toBeLessThan(1e-8)
+    disposeHome(environment)
   })
 })

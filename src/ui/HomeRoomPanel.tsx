@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useEngine } from '../store/EngineContext'
 import { useI18n } from '../i18n'
+import { HOME_STYLE } from '../home/visuals.js'
 
 type Room = { id: string; name: string; rev: number; ownerID?: number; data: { room: { w: number; h: number; d: number }; items: unknown[]; mode: string } }
 export default function HomeRoomPanel() {
@@ -47,6 +48,11 @@ export default function HomeRoomPanel() {
   const button = 'min-h-11 rounded-xl border border-orange-200 bg-[#FFFCF9] px-3 text-sm text-[#9A3412] cursor-pointer'
   return <div className="pointer-events-auto relative mt-2 max-w-[min(300px,calc(100vw-90px))] rounded-2xl border border-orange-200 bg-[#FFFCF9]/95 p-2 shadow-sm text-[#242833] max-[640px]:fixed max-[640px]:inset-x-3 max-[640px]:bottom-20 max-[640px]:mt-0 max-[640px]:max-w-none max-[640px]:max-h-[55dvh] max-[640px]:overflow-auto">
     {context ? <><div className="flex items-center justify-between gap-2"><strong className="block min-w-0 break-words px-1 text-sm">{context.name}</strong><button className={button + ' min-[641px]:hidden shrink-0'} aria-expanded={expanded} onClick={() => { setExpanded(!expanded); if (expanded) setOpen(false) }}>{expanded ? '×' : text('房间', 'Room', 'Raum')}</button></div><div className={'mt-1 flex-wrap gap-1 min-[641px]:flex ' + (expanded ? 'flex' : 'hidden')}><button className={button} onClick={() => void load()}>{text('更换房间', 'Change room', 'Raum wechseln')}</button><button className={button} onClick={edit}>{text('编辑房间', 'Edit room', 'Raum bearbeiten')}</button><button className={button} onClick={() => api.bindHome(null)}>{text('移除房间', 'Remove room', 'Raum entfernen')}</button><button className={button} onClick={api.frameHome}>{text('查看全屋', 'View room', 'Raum ansehen')}</button></div></> : <button className={button} onClick={() => void load()}>{text('加载我的家', 'Load my home', 'Mein Zuhause laden')}</button>}
+    {context && <p className={'mt-2 px-1 text-xs leading-relaxed text-[#676b73] min-[641px]:block ' + (expanded ? 'block' : 'hidden')}>
+      {text('房间宽 × 深 × 高', 'Room width × depth × height', 'Raum: Breite × Tiefe × Höhe')}<br />
+      {context.snapshot.room.w} × {context.snapshot.room.d} × {context.snapshot.room.h} cm<br />
+      {text(`地面每格 ${HOME_STYLE.gridCell} cm · 同一比例`, `${HOME_STYLE.gridCell} cm floor grid · Same scale`, `${HOME_STYLE.gridCell} cm Bodenraster · Einheitlicher Maßstab`)}
+    </p>}
     {open && <div role="dialog" aria-label={text('选择房间', 'Choose room', 'Raum wählen')} className="mt-2 max-h-[45dvh] overflow-auto border-t border-orange-100 pt-2">
       <div className="flex justify-between items-center"><strong>{text('我的家', 'My home', 'Mein Zuhause')}</strong><button className={button} aria-label={text('关闭', 'Close', 'Schließen')} onClick={() => setOpen(false)}>×</button></div>
       {loading && <p role="status">{text('正在加载…', 'Loading…', 'Wird geladen…')}</p>}
