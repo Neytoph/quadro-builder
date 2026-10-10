@@ -1,27 +1,14 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useRef } from 'react'
 import { useEngine } from '../store/EngineContext'
 import { useI18n } from '../i18n'
-import { usePresence } from './motion'
-import { Pop } from './Pop'
 import { AssemblyStatus, useAssemblyStatus } from './AssemblyStatus'
-
-const ORDER_I18N: Record<string, string> = {
-  'y+': 'assembly.orderYp',
-  'x+': 'assembly.orderXp',
-  'x-': 'assembly.orderXm',
-  'z+': 'assembly.orderZp',
-  'z-': 'assembly.orderZm',
-}
 
 const step = 'h-8 px-3 rounded-full text-[13px] text-gray-100 hover:bg-teal-100 disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer disabled:cursor-default whitespace-nowrap'
 
-/** 画布底下的拼装条：没拼装时是「逐层拼装 · N 步」和「导出安装说明书」；拼装时翻步、看全部、换方向。 */
+/** 画布底下的拼装条：没拼装时查看步骤或导出说明书，拼装时翻步或看全部。 */
 export default function AssemblyBar() {
   const api = useEngine()
   const { t } = useI18n()
-  const orderBtn = useRef<HTMLButtonElement>(null)
-  const [orderOpen, setOrderOpen] = useState(false)
-  const [orderShown, orderLeaving] = usePresence(orderOpen ? true : null)
   const assemblyStatus = useAssemblyStatus(api.assembly)
   // 步数往前翻数字往上走，往回翻往下走
   const lastStep = useRef(api.assembly.step)
@@ -56,37 +43,6 @@ export default function AssemblyBar() {
       </div>
       <button disabled={api.assembly.step >= api.assembly.max} onClick={() => api.stepAssembly(1)} className={step} title={`${t('assembly.next')} ]`}>{t('assembly.next')} ›</button>
       <button onClick={() => api.setAssembly(false)} className={step} title={t('assembly.allHint')}>{t('assembly.all')}</button>
-      <button
-        ref={orderBtn}
-        type="button"
-        id="asm-order"
-        aria-haspopup="listbox"
-        aria-expanded={orderOpen}
-        title={t('assembly.order')}
-        onClick={() => setOrderOpen(o => !o)}
-        className={`${step} bg-teal-100`}
-      >
-        {t(ORDER_I18N[api.assembly.order] || api.assembly.order)}
-        <span className="ml-1 opacity-60">▾</span>
-      </button>
-      {orderShown && (
-        <Pop anchor={orderBtn.current} leaving={orderLeaving} onClose={() => setOrderOpen(false)} align="right">
-          <div className="flex flex-col min-w-[11rem]">
-            {api.assemblyOrders.map((order, i) => (
-              <button
-                key={order}
-                style={{ '--i': i } as CSSProperties}
-                type="button"
-                onClick={() => { api.setAssemblyOrder(order); setOrderOpen(false) }}
-                className={`w-full text-left text-[13.5px] rounded-[10px] px-3 py-2 cursor-pointer whitespace-nowrap ${
-                  order === api.assembly.order ? 'bg-teal-500 text-white font-bold' : 'text-gray-100 hover:bg-teal-100'}`}
-              >
-                {t(ORDER_I18N[order] || order)}
-              </button>
-            ))}
-          </div>
-        </Pop>
-      )}
     </div>
   )
 }

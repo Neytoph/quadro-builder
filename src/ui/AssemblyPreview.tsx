@@ -265,7 +265,6 @@ export default function AssemblyPreview() {
       <aside className="assembly-preview-sidebar assembly-region-sidebar">
         <h3>{s.regions} · {ordered.length}</h3>
         <div className="assembly-preview-tools"><button className="qb-btn qb-btn-ghost qb-btn-sm" disabled={busy} onClick={auto}>{s.auto}</button><button className="qb-btn qb-btn-ghost qb-btn-sm" disabled={busy || api.readOnly || stale || !!preview.repair} onClick={() => api.saveManualConfig() ? api.notify(s.saved) : api.notify(s.failedApply, 'warn')}>{s.save}</button></div>
-        <label className="assembly-small">{s.order}<select className="w-full mt-2 rounded-lg border p-2" value={preview.order} disabled={busy} onChange={e => api.updateManualOrder(e.target.value)}>{api.assemblyOrders.map(o => <option key={o} value={o}>{t({ 'y+': 'assembly.orderYp', 'x+': 'assembly.orderXp', 'x-': 'assembly.orderXm', 'z+': 'assembly.orderZp', 'z-': 'assembly.orderZm' }[o] || o)}</option>)}</select></label>
         {ordered.map((r, i) => <article className="assembly-region" data-testid="assembly-region" key={r.id}>
           <span className="assembly-region-label">{plan.regions.find((region: E) => region.id === r.id)?.label || String.fromCharCode(65 + i)}</span>
           <input type="text" aria-label={s.name} key={`${r.id}-${r.name}`} defaultValue={r.name} disabled={busy} onBlur={e => { const name = e.target.value.trim(); if (name && name !== r.name) update({ ...config, regions: config.regions.map(x => x.id === r.id ? { ...x, name } : x) }) }} />
