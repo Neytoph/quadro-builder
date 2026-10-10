@@ -2,10 +2,12 @@ import { useI18n } from '../i18n'
 import { leftColumnWidth, leftStackDrop, PanelHandles, PANEL_GAP, TOOLBAR_CHROME_H, toolbarTop, usePanelLayout } from './panelLayout'
 import SideToolbar from './SideToolbar'
 import ShortcutHint from './ShortcutHint'
+import { useMobileControls } from './useMobileControls'
 
 /** 左侧颜色 + 快捷键同一栏：等宽、可拖宽度、箭头整行收起。 */
 export default function LeftStack() {
   const { t } = useI18n()
+  const mobile = useMobileControls()
   const { left, vw, vh, toolbarW, leftColor, leftKeys, toggleLeftColor, toggleLeftKeys } = usePanelLayout()
   const drop = leftStackDrop(left, vw, toolbarW)
   const top = drop
@@ -29,7 +31,7 @@ export default function LeftStack() {
         sizeLabel={t('hint.resize')}
       />
       <SideToolbar open={leftColor} onToggle={toggleLeftColor} />
-      <ShortcutHint open={leftKeys} onToggle={toggleLeftKeys} />
+      {!mobile && <ShortcutHint open={leftKeys} onToggle={toggleLeftKeys} />}
     </aside>
   )
 }

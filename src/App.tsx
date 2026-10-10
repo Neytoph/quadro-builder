@@ -7,6 +7,7 @@ import LeftStack from './ui/LeftStack'
 import RightDock from './ui/RightDock'
 import ProjectTabs from './ui/ProjectTabs'
 import AssemblyBar from './ui/AssemblyBar'
+import AssemblyNavigation from './ui/AssemblyNavigation'
 import AssemblyPreview from './ui/AssemblyPreview'
 import { AssemblyStatus, useAssemblyStatus } from './ui/AssemblyStatus'
 import Onboarding from './ui/Onboarding'
@@ -163,7 +164,6 @@ function ViewBar() {
   const assemblyStatus = useAssemblyStatus(api.assembly)
   if (!hasParts) return null
   const n = api.assembly.max + 1
-  const step = 'h-8 px-3 rounded-full text-[13px] text-gray-100 hover:bg-teal-100 disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer disabled:cursor-default whitespace-nowrap'
   if (!api.assembly.active) {
     return (
       <div data-tour="assembly" className="m-asm qb-card fixed bottom-3 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 p-1.5 max-w-[calc(100vw-1rem)]">
@@ -177,13 +177,7 @@ function ViewBar() {
     )
   }
   return (
-    <div data-tour="assembly" className="m-asm qb-card fixed bottom-3 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1 p-1.5 max-w-[calc(100vw-1rem)] overflow-x-auto scrollbar-none">
-      {/* 嵌在手机上的方案页里只有三百来像素宽：上一步、下一步只留箭头，字在宽屏上才露出来 */}
-      <button disabled={api.assembly.step <= 0} onClick={() => api.stepAssembly(-1)} className={step} aria-label={t('assembly.prev')}>‹<span className="hidden sm:inline"> {t('assembly.prev')}</span></button>
-      <div className="px-1 text-[13.5px] font-bold qb-num whitespace-nowrap">{t('assembly.step', { k: api.assembly.step + 1, n })}</div>
-      <button disabled={api.assembly.step >= api.assembly.max} onClick={() => api.stepAssembly(1)} className={step} aria-label={t('assembly.next')}><span className="hidden sm:inline">{t('assembly.next')} </span>›</button>
-      <button onClick={() => api.setAssembly(false)} className={step}>{t('view.whole')}</button>
-    </div>
+    <AssemblyNavigation step={api.assembly.step} total={n} onStep={api.stepAssembly} onWhole={() => api.setAssembly(false)} />
   )
 }
 
@@ -191,17 +185,14 @@ function ViewBar() {
 function ViewShell() {
   const { t } = useI18n()
   const collab = useCollab()
-  const { ready, readOnly, setViewCubeEnabled } = useEngine()
+  const { readOnly } = useEngine()
   // 交付查看没有「在 Builder 里打开」；嵌在交付页里时连分步手册和视角方块也不画
   const delivery = collab.mode === 'delivery'
   const snapshot = collab.mode === 'snapshot'
   const snapshotEmbed = snapshot && VIEW_ONLY && window.top !== window
-  useEffect(() => {
-    if (ready && (DELIVERY_EMBED || snapshotEmbed)) setViewCubeEnabled(false)
-  }, [ready, setViewCubeEnabled, snapshotEmbed])
   return (
     <div className={`app-viewport w-screen flex bg-gray-950 overflow-hidden ${snapshot && !VIEW_ONLY ? 'cb-snapshot-shell' : ''}`} data-ui={DELIVERY_EMBED ? 'delivery-embed' : undefined}>
-      <CanvasHost />
+      <CanvasHost hideViewCube={DELIVERY_EMBED || snapshotEmbed} />
       {!delivery && !snapshot && <a href={fullBuilderUrl()} target="_top" className="qb-btn qb-btn-sm fixed top-3 left-3 z-40 no-underline">{t('view.open')} ↗</a>}
       {snapshot && !VIEW_ONLY && readOnly && !collab.error && <SnapshotInfo planId={bootEntry().plan!} versionId={Number(bootEntry().version)} />}
       {snapshot && collab.error && <p role="alert" className="cb-snapshot-error cb-action-error">{collab.error}</p>}

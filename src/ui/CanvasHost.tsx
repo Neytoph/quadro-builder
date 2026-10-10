@@ -4,9 +4,11 @@ import { parseOfficialId } from '../data/official'
 import { useDock } from './dock'
 import { canvasCorner, usePanelLayout } from './panelLayout'
 import { SESSIONLESS } from '../entry'
+import { useMobileControls } from './useMobileControls'
 
-export default function CanvasHost() {
-  const { hostRef, ready, error, openLibraryId, setViewCubePad } = useEngine()
+export default function CanvasHost({ hideViewCube = false }: { hideViewCube?: boolean }) {
+  const { hostRef, ready, error, openLibraryId, setViewCubePad, setViewCubeEnabled } = useEngine()
+  const mobile = useMobileControls()
   const { left, right, vw } = usePanelLayout()
   const { pane } = useDock()
 
@@ -14,6 +16,10 @@ export default function CanvasHost() {
     if (ready) window.dispatchEvent(new Event('qh:builder:ready'))
     if (error) window.dispatchEvent(new Event('qh:builder:error'))
   }, [ready, error])
+
+  useEffect(() => {
+    if (ready) setViewCubeEnabled(!mobile && !hideViewCube)
+  }, [ready, mobile, hideViewCube, setViewCubeEnabled])
 
   useEffect(() => {
     if (!ready) return

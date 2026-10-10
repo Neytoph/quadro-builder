@@ -1,0 +1,15 @@
+.assembly-navigation.qb-card { width: max-content; }
+.assembly-navigation-button { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 4px; height: 32px; flex: none; padding: 0 12px; border: 0; border-radius: 999px; background: transparent; color: #1f2430; font-size: 13px; line-height: 1.4; white-space: nowrap; cursor: pointer; }
+.assembly-navigation-button:hover:not(:disabled) { background: #fff1e6; }
+.assembly-navigation-button:disabled { opacity: .3; cursor: default; }
+.assembly-navigation-button:focus-visible { outline: 2px solid #c2410c; outline-offset: 2px; }
+.assembly-navigation-count { flex: none; padding: 0 4px; font-size: 13.5px; font-weight: 700; line-height: 1.4; white-space: nowrap; }
+.assembly-navigation-fraction { display: none; }
+@media (max-width: 767px), (hover: none) and (pointer: coarse) {
+  .assembly-navigation.qb-card { padding: 4px; gap: 4px; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
+  .assembly-navigation-badge, .assembly-navigation-label { display: none; }
+  .assembly-navigation-fraction { display: inline; }
+  .assembly-navigation-button { min-width: 40px; padding: 0 8px; }
+  .assembly-navigation-button::after { content: ''; position: absolute; inset: -6px -2px; }
+  .assembly-navigation-count { min-width: 52px; text-align: center; }
+}
