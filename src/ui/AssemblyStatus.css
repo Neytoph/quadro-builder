@@ -1,0 +1,57 @@
+.assembly-status.qb-card {
+  position: fixed;
+  z-index: 40;
+  bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  left: 50%;
+  translate: -50% 0;
+  width: max-content;
+  max-width: min(660px, calc(100vw - 32px));
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #fff8f2;
+  border: 1px solid #e0b892;
+  box-shadow: 0 10px 28px -14px #49301f66;
+  backdrop-filter: none;
+  color: #1f2430;
+}
+.assembly-status-icon { width: 36px; height: 36px; display: grid; place-items: center; flex-shrink: 0; border-radius: 12px; color: #9a3412; background: #fff1e6; }
+.assembly-status[data-state=ready] .assembly-status-icon { color: #13763e; background: #e9f7ef; }
+.assembly-status[data-state=error] .assembly-status-icon { color: #b91c1c; background: #fef2f2; }
+.assembly-status-spinner { width: 17px; height: 17px; border: 2px solid #e5bea2; border-top-color: #c2410c; border-radius: 50%; animation: assembly-status-spin 900ms linear infinite; }
+.assembly-status-copy { min-width: 0; flex: 1; }
+.assembly-status-title { font-size: 14px; font-weight: 700; line-height: 1.5; overflow-wrap: anywhere; }
+.assembly-status-hint { margin-top: 3px; color: #5a6270; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.assembly-status-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.assembly-status-button { min-height: 44px; min-width: 44px; padding: 10px 14px; border: 1px solid #ffd3b0; border-radius: 12px; color: #9a3412; background: #fffdf9; font-family: inherit; font-size: 14px; font-weight: 500; line-height: 1.5; cursor: pointer; transition: background 180ms, box-shadow 180ms, transform 120ms; }
+.assembly-status-button:hover { background: #fff1e6; box-shadow: 0 4px 12px -8px #80512c77; }
+.assembly-status-button:active { transform: scale(.98); }
+.assembly-status-button.assembly-status-primary { border-color: #ea580c; color: #fff; background: linear-gradient(115deg, #ea580c, #ff8a2b); font-weight: 700; }
+.assembly-status-button.assembly-status-secondary { border-color: transparent; background: transparent; }
+html[data-motion] .assembly-status { animation: assembly-status-enter 220ms cubic-bezier(.22, 1, .36, 1) both; }
+@keyframes assembly-status-enter { from { opacity: 0; transform: translateY(12px); } }
+@keyframes assembly-status-spin { to { transform: rotate(360deg); } }
+@media (max-width: 700px) {
+  .assembly-status.qb-card,
+  body:has(.cb-sync) .m-asm.assembly-status.qb-card {
+    display: grid;
+    grid-template-columns: 36px minmax(0, 1fr);
+    align-items: center;
+    gap: 10px 12px;
+    left: 50%;
+    right: auto;
+    translate: -50% 0;
+    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    width: max-content;
+    max-width: calc(100vw - 24px);
+    padding: 14px;
+  }
+  body:has(.cb-sync) .m-asm.assembly-status.qb-card { bottom: calc(62px + env(safe-area-inset-bottom, 0px)); }
+  .assembly-status-actions { grid-column: 2; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .assembly-status-spinner { animation: none; }
+  .assembly-status-button { transition: none; }
+  .assembly-status-button:active { transform: none; }
+}

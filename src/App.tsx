@@ -8,7 +8,7 @@ import RightDock from './ui/RightDock'
 import ProjectTabs from './ui/ProjectTabs'
 import AssemblyBar from './ui/AssemblyBar'
 import AssemblyPreview from './ui/AssemblyPreview'
-import { useElapsedSeconds } from './ui/useElapsedSeconds'
+import { AssemblyStatus, useAssemblyStatus } from './ui/AssemblyStatus'
 import Onboarding from './ui/Onboarding'
 import ThumbCapture from './ui/ThumbCapture'
 import ErrorBoundary from './ui/ErrorBoundary'
@@ -160,7 +160,7 @@ function ViewBar() {
   const { t } = useI18n()
   const totals = api.bom?.totals
   const hasParts = !!totals && (totals.tubes + totals.connectors + totals.panels + totals.other) > 0
-  const pendingSeconds = useElapsedSeconds(api.assembly.pending)
+  const assemblyStatus = useAssemblyStatus(api.assembly)
   if (!hasParts) return null
   const n = api.assembly.max + 1
   const step = 'h-8 px-3 rounded-full text-[13px] text-gray-100 hover:bg-teal-100 disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer disabled:cursor-default whitespace-nowrap'
@@ -171,15 +171,9 @@ function ViewBar() {
       </div>
     )
   }
-  if (api.assembly.pending || api.assembly.error) {
+  if (assemblyStatus.visible) {
     return (
-      <div data-tour="assembly" className="m-asm qb-card fixed bottom-3 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 p-1.5 max-w-[calc(100vw-1rem)]">
-        {api.assembly.pending && <span className="animate-spin" aria-hidden="true">◌</span>}
-        <span role="status" aria-live="polite">{t(api.assembly.error ? 'assembly.failed' : 'assembly.planning')}</span>
-        {api.assembly.pending && <span aria-hidden="true" className="text-xs text-gray-100/60 tabular-nums">{t('assembly.elapsed', { seconds: pendingSeconds })}</span>}
-        {api.assembly.error && <button onClick={() => api.setAssembly(true)} className="qb-btn qb-btn-sm">{t('assembly.retry')}</button>}
-        <button onClick={() => api.setAssembly(false)} className={step}>{t('view.whole')}</button>
-      </div>
+      <AssemblyStatus pending={api.assembly.pending} error={api.assembly.error} onWhole={() => api.setAssembly(false)} onRetry={() => api.setAssembly(true)} onStart={assemblyStatus.start} />
     )
   }
   return (

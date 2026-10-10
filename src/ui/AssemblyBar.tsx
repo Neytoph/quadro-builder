@@ -3,7 +3,7 @@ import { useEngine } from '../store/EngineContext'
 import { useI18n } from '../i18n'
 import { usePresence } from './motion'
 import { Pop } from './Pop'
-import { useElapsedSeconds } from './useElapsedSeconds'
+import { AssemblyStatus, useAssemblyStatus } from './AssemblyStatus'
 
 const ORDER_I18N: Record<string, string> = {
   'y+': 'assembly.orderYp',
@@ -22,7 +22,7 @@ export default function AssemblyBar() {
   const orderBtn = useRef<HTMLButtonElement>(null)
   const [orderOpen, setOrderOpen] = useState(false)
   const [orderShown, orderLeaving] = usePresence(orderOpen ? true : null)
-  const pendingSeconds = useElapsedSeconds(api.assembly.pending)
+  const assemblyStatus = useAssemblyStatus(api.assembly)
   // 步数往前翻数字往上走，往回翻往下走
   const lastStep = useRef(api.assembly.step)
   const stepDir = api.assembly.step >= lastStep.current ? 'up' : 'down'
@@ -41,15 +41,9 @@ export default function AssemblyBar() {
     )
   }
 
-  if (api.assembly.pending || api.assembly.error) {
+  if (assemblyStatus.visible) {
     return (
-      <div data-tour="assembly" className="m-asm qb-card fixed bottom-3 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 p-1.5 max-w-[calc(100vw-1rem)]">
-        {api.assembly.pending && <span className="animate-spin" aria-hidden="true">◌</span>}
-        <span role="status" aria-live="polite">{t(api.assembly.error ? 'assembly.failed' : 'assembly.planning')}</span>
-        {api.assembly.pending && <span aria-hidden="true" className="text-xs text-gray-100/60 tabular-nums">{t('assembly.elapsed', { seconds: pendingSeconds })}</span>}
-        {api.assembly.error && <button onClick={() => api.setAssembly(true)} className="qb-btn qb-btn-sm">{t('assembly.retry')}</button>}
-        <button onClick={() => api.setAssembly(false)} className="qb-btn qb-btn-ghost qb-btn-sm">{t('assembly.all')}</button>
-      </div>
+      <AssemblyStatus pending={api.assembly.pending} error={api.assembly.error} onWhole={() => api.setAssembly(false)} onRetry={() => api.setAssembly(true)} onStart={assemblyStatus.start} />
     )
   }
 
