@@ -26,6 +26,9 @@ export function onSyncEvent(cb: (e: SyncEvent) => void): () => void {
 }
 let probeDone: (ok: boolean | null) => void = () => {}
 const probed = new Promise<boolean | null>(resolve => { probeDone = resolve })
+let initialIdentity: Promise<string | null> | null = null
+// 房间选择器复用启动时已发出的身份请求，不另发一次 whoami。
+export function confirmedSyncAccount(): Promise<string | null> | null { return initialIdentity }
 
 export function syncProbe(): Promise<boolean | null> {
   return import.meta.env.VITE_SYNC_BASE ? probed : Promise.resolve(null)
@@ -54,6 +57,7 @@ export function startSyncIfConfigured(onEvent?: (e: SyncEvent) => void, onUnauth
   storage.setAccountScope(null)
   let initialId: string | null = null
   const resetIdentity = () => {
+    window.dispatchEvent(new Event('quadro-account-invalidated'))
     live?.stop()
     started = false
     // 活着的旧文档保持旧命名空间；重新初始化先确认新账户，再恢复它的会话。
@@ -76,9 +80,10 @@ export function startSyncIfConfigured(onEvent?: (e: SyncEvent) => void, onUnauth
     if (typeof value.userId !== 'string' || !/^\d+$/.test(value.userId)) throw new Error('invalid stable account ID')
     return value.userId
   }
+  initialIdentity = identity()
   void (async () => {
     try {
-      initialId = await identity()
+      initialId = await initialIdentity
       if (initialId) {
         storage.setAccountScope(initialId)
         sessionStorage.removeItem('quadro.sync.gate-recheck')

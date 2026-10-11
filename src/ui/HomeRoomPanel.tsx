@@ -3,10 +3,7 @@ import { createPortal } from 'react-dom'
 import { LoaderCircle, RefreshCw } from 'lucide-react'
 import { useEngine } from '../store/EngineContext'
 import { useI18n } from '../i18n'
-
-type RoomItem = { id: string; kind: 'furniture' | 'reserved' | 'usable'; x: number; z: number; w: number; d: number }
-type RoomData = { room: { w: number; h: number; d: number }; items: RoomItem[]; mode: string }
-type Room = { id: string; name: string; rev: number; ownerID?: number; data: RoomData }
+import { readRooms, readRoom, onRoomAccountInvalidated, type RoomData, type Room } from '../home/rooms'
 
 function GrassThumb({ blank = false }: { blank?: boolean }) {
   return <svg viewBox="0 0 48 48" className={'h-full w-full ' + (blank ? 'opacity-45 grayscale' : '')} aria-hidden="true">
@@ -34,10 +31,10 @@ export default function HomeRoomPanel({ tile = 40 }: { tile?: number }) {
   const [error, setError] = useState(''), [loading, setLoading] = useState(false), [choosing, setChoosing] = useState(false)
   const [position, setPosition] = useState({ left: 12, top: 120, maxHeight: 400 })
   const root = useRef<HTMLDivElement>(null), panel = useRef<HTMLDivElement>(null), trigger = useRef<HTMLButtonElement>(null)
-  const request = useRef(0), abort = useRef<AbortController | null>(null), panelID = useId()
+  const request = useRef(0), panelID = useId()
   const context = api.homeContext
   const close = (focus = false) => {
-    request.current++; abort.current?.abort(); setOpen(false); setLoading(false); setChoosing(false)
+    request.current++; setOpen(false); setLoading(false); setChoosing(false)
     if (focus) trigger.current?.focus()
   }
   useEffect(() => {
@@ -54,43 +51,32 @@ export default function HomeRoomPanel({ tile = 40 }: { tile?: number }) {
   useEffect(() => {
     if (open && !loading) panel.current?.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus()
   }, [open, loading])
-  useEffect(() => () => { request.current++; abort.current?.abort() }, [])
-  const identity = async (signal: AbortSignal) => {
-    const response = await fetch('/whoami', { credentials: 'same-origin', cache: 'no-store', signal })
-    if (!response.ok) throw new Error(text('无法确认登录状态', 'Cannot check sign-in status', 'Anmeldestatus nicht erreichbar'))
-    const body = await response.json()
-    if (!body.authenticated) throw new Error(text('登录后可加载房间', 'Sign in to load rooms', 'Zum Laden der Räume anmelden'))
-    return body.user_id as number
-  }
+  useEffect(() => {
+    const unsubscribe = onRoomAccountInvalidated(() => { close(); setRooms([]); setError('') })
+    return () => { request.current++; unsubscribe() }
+  }, [])
   const load = async () => {
-    abort.current?.abort(); const controller = new AbortController(); abort.current = controller
     const version = ++request.current
-    setLoading(true); setError(''); setRooms([])
+    setLoading(true); setError('')
     try {
       let items: Room[]
       if (demo) items = JSON.parse(localStorage.getItem('xmf-home-demo-rooms') || '[]')
       else {
-        const owner = await identity(controller.signal)
-        const response = await fetch('/quadro/rooms?expectedUserID=' + owner, { credentials: 'same-origin', cache: 'no-store', signal: controller.signal })
-        if (!response.ok) throw new Error(text('房间加载失败，请重试', 'Cannot load rooms. Please retry.', 'Räume nicht ladbar. Bitte erneut versuchen.'))
-        const body = await response.json()
-        if (await identity(controller.signal) !== owner) throw new Error(text('账号已变化，请重新加载房间', 'Account changed. Reload rooms', 'Konto geändert. Räume erneut laden'))
-        items = body.items.map((room: Room) => ({ ...room, ownerID: owner }))
+        items = await readRooms(text, cached => { if (version === request.current) { setRooms(cached); setLoading(false) } })
       }
       if (version === request.current) setRooms(items)
-    } catch (e) { if (version === request.current && !controller.signal.aborted) setError(e instanceof Error ? e.message : String(e)) }
+    } catch (e) { if (version === request.current) setError(e instanceof Error ? e.message : String(e)) }
     finally { if (version === request.current) setLoading(false) }
   }
   const choose = async (room: Room) => {
-    abort.current?.abort(); const controller = new AbortController(); abort.current = controller
     const version = ++request.current
     setChoosing(true); setError('')
     try {
-      if (!demo && await identity(controller.signal) !== room.ownerID) throw new Error(text('账号已变化，请重新加载房间', 'Account changed. Reload rooms', 'Konto geändert. Räume erneut laden'))
+      const latest = demo ? room : await readRoom(room, text)
       if (version !== request.current) return
-      if (!api.bindHome(room, api.activeTabId)) throw new Error(text('当前造型或操作已变化，请重新选择房间', 'The active model or action changed. Select the room again.', 'Aktives Modell oder Aktion geändert. Raum erneut auswählen.'))
+      if (!api.bindHome(latest, api.activeTabId)) throw new Error(text('当前造型或操作已变化，请重新选择房间', 'The active model or action changed. Select the room again.', 'Aktives Modell oder Aktion geändert. Raum erneut auswählen.'))
       close(true)
-    } catch (e) { if (version === request.current && !controller.signal.aborted) setError(e instanceof Error ? e.message : String(e)) }
+    } catch (e) { if (version === request.current) setError(e instanceof Error ? e.message : String(e)) }
     finally { if (version === request.current) setChoosing(false) }
   }
   const switchTo = (mode: 'grass' | 'blank' | 'home') => { api.setBackground(mode); close(true) }
@@ -120,7 +106,7 @@ export default function HomeRoomPanel({ tile = 40 }: { tile?: number }) {
       }}>
       <button type="button" role="menuitemradio" aria-checked={api.background === 'grass'} aria-label={text('草地', 'Grass', 'Wiese')} title={text('草地', 'Grass', 'Wiese')} className={option(api.background === 'grass')} disabled={choosing} onClick={() => switchTo('grass')}><GrassThumb /></button>
       <button type="button" role="menuitemradio" aria-checked={api.background === 'blank'} aria-label={text('空白', 'Blank', 'Leer')} title={text('空白', 'Blank', 'Leer')} className={option(api.background === 'blank')} disabled={choosing} onClick={() => switchTo('blank')}><GrassThumb blank /></button>
-      {!loading && !error && rooms.map(room => {
+      {rooms.map(room => {
         const bound = room.id === context?.roomId, active = bound && api.background === 'home'
         return <button key={room.id} type="button" role="menuitemradio" data-room-id={room.id} aria-checked={active} aria-label={room.name} title={room.name} className={option(active)} disabled={choosing} onClick={() => bound ? switchTo('home') : void choose(room)}><RoomThumb data={bound ? context.snapshot : room.data} /></button>
       })}
