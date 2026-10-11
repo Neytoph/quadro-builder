@@ -99,6 +99,19 @@
 
 /* ── 右侧抽屉里的内容：评论和留言、版本 ── */
 .cb-pane { display: flex; flex-direction: column; min-height: 0; }
+.cb-add-pin { margin: 12px 12px 4px; min-height: 44px; justify-content: center; white-space: normal; text-align: center; }
+.cb-pin-placement { position: fixed; left: 50%; transform: translateX(-50%); z-index: 65; display: flex; align-items: center; gap: 8px; max-width: calc(100vw - 24px); width: max-content; padding: 6px 8px 6px 12px; border-radius: 16px; color: var(--cb-ink); font-size: 13px; }
+.cb-pin-placement > span { min-width: 0; }
+.cb-pin-placement > button { flex-shrink: 0; min-height: 44px; }
+.cb-mobile-discussion { position: fixed; left: 8px; right: 8px; z-index: 70; overflow-y: auto; overscroll-behavior: contain; border-radius: 18px; box-shadow: 0 8px 30px #38271a26; }
+.cb-anchored-discussion { position: fixed; left: 0; top: 0; width: 0; height: 0; z-index: 37; }
+.cb-mobile-discussion .cb-bubble, .cb-mobile-discussion .cb-bubble.left { position: static; width: 100%; margin: 0; }
+.cb-mobile-discussion .cb-bubble::before { display: none; }
+.cb-mobile-discussion .cb-bubble > .inner { border-radius: 18px; }
+.cb-mobile-discussion .cb-bh .x { min-width: 44px; min-height: 44px; }
+.cb-mobile-discussion .cb-compose { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+.cb-mobile-discussion .cb-compose textarea { font-size: 16px; }
+.cb-mobile-discussion .cb-compose button, .cb-mobile-discussion .cb-bh .act { min-height: 44px; }
 .cb-snapshot-info { padding: 16px; color: var(--cb-ink); font-size: 13px; line-height: 1.65; min-width: 0; overflow-wrap: anywhere; }
 .cb-snapshot-info h3 { font-size: 16px; font-weight: 700; }
 .cb-snapshot-info small { display: block; color: var(--cb-ink3); }

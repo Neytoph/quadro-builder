@@ -5,6 +5,9 @@ import { isDesigner, useCollab } from '../CollabContext'
 import { useDock, type CommentsTab } from '../../ui/dock'
 import { day, Face, when } from './bits'
 import { Compose, RefCard } from './Compose'
+import { MessageSquarePlus } from 'lucide-react'
+import { useEngine } from '../../store/EngineContext'
+import { NARROW_MAX, usePanelLayout } from '../../ui/panelLayout'
 
 type Filter = 'open' | 'done' | 'all'
 
@@ -15,8 +18,9 @@ type Filter = 'open' | 'done' | 'all'
  */
 export default function CommentsPane() {
   const collab = useCollab()
+  const api = useEngine()
   const { t } = useI18n()
-  const { commentsTab } = useDock()
+  const { commentsTab, setPane } = useDock()
   const [tab, setTab] = useState<CommentsTab>(commentsTab || (collab.unread.chat && !collab.unread.pins ? 'chat' : 'pins'))
   useEffect(() => { if (commentsTab) setTab(commentsTab) }, [commentsTab])
   const [filter, setFilter] = useState<Filter>('open')
@@ -50,6 +54,13 @@ export default function CommentsPane() {
 
       {tab === 'pins' && (
         <>
+          {collab.role !== 'guest' && <button type="button" className="qb-btn cb-add-pin" data-ui="add-pin" onClick={() => {
+            api.setMode('select')
+            collab.setActiveThread(null)
+            collab.setPinDraft(null)
+            setPane(null)
+            collab.setPlacingPin(true)
+          }}><MessageSquarePlus size={18} /><span>{t('collab.pin.add')}</span></button>}
           <div className="cb-filter">
             <button type="button" className={filter === 'open' ? 'on' : ''} onClick={() => setFilter('open')}>{t('collab.filter.open', { n: open.length })}</button>
             <button type="button" className={filter === 'done' ? 'on' : ''} onClick={() => setFilter('done')}>{t('collab.filter.done', { n: done.length })}</button>
@@ -73,6 +84,8 @@ export default function CommentsPane() {
 function PinItem({ th, unread }: { th: Thread; unread: number }) {
   const collab = useCollab()
   const { t, lang } = useI18n()
+  const { setPane } = useDock()
+  const { vw } = usePanelLayout()
   const first = th.posts[0]
   const gone = collab.partGone(th)
   const replies = th.posts.length - 1
@@ -84,7 +97,7 @@ function PinItem({ th, unread }: { th: Thread; unread: number }) {
   return (
     <button type="button" data-ui="pin-thread" data-thread={th.id}
       className={`cb-item ${th.resolved ? 'done' : ''} ${gone ? 'gone' : ''} ${unread ? 'unread' : ''} ${collab.activeThread === th.id ? 'on' : ''}`}
-      onClick={() => collab.focusThread(th)}>
+      onClick={() => { if (vw <= NARROW_MAX) setPane(null); collab.focusThread(th) }}>
       <span className="pn"><b>{collab.pinNumber(th)}</b></span>
       <div>
         <p>{first?.body || t('collab.pin.photoOnly')}</p>

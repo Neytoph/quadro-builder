@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useEngine } from '../store/EngineContext'
 import { useI18n } from '../i18n'
-import { TAB_BAR_H } from './panelLayout'
+import { NARROW_MAX, projectBarHeight, usePanelLayout } from './panelLayout'
 import { DOCK_PILLS, PLAN_PILLS, useDock } from './dock'
 import { useCollab } from '../collab/CollabContext'
 import ShareCluster from '../collab/ui/ShareCluster'
@@ -10,6 +10,7 @@ import { DockChevron, DockIcon } from './DockIcon'
 import { useOverflowCompact } from './useOverflowCompact'
 import { displaySaveState } from '../store/personalTabs'
 import './builderChrome.css'
+import MobileProjectBar from './MobileProjectBar'
 
 const GROUPS: (typeof DOCK_PILLS)[] = [
   DOCK_PILLS.filter(p => p.id === 'file' || p.id === 'saves'),
@@ -33,15 +34,18 @@ export default function ProjectTabs() {
   const planMode = collab.mode === 'plan'
   const { t } = useI18n()
   const { pane, toggle } = useDock()
+  const { vw } = usePanelLayout()
+  const narrow = vw <= NARROW_MAX
   const [editing, setEditing] = useState<string | null>(null)
   const tabsRef = useRef<HTMLDivElement>(null)
   const topbarRef = useRef<HTMLDivElement>(null)
   const pillsRef = useRef<HTMLDivElement>(null)
-  const compact = useOverflowCompact(pillsRef, topbarRef)
+  const shareRef = useRef<HTMLButtonElement>(null)
+  const compact = useOverflowCompact(pillsRef, topbarRef, !narrow)
   const previousPane = useRef(pane)
   useEffect(() => {
     tabsRef.current?.querySelector<HTMLElement>('[data-active="true"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
-  }, [api.activeTabId])
+  }, [api.activeTabId, narrow])
   useEffect(() => {
     if (!pane && previousPane.current && document.activeElement?.closest('[data-ui="right-dock"]')) {
       pillsRef.current?.querySelector<HTMLButtonElement>(`[data-pane="${previousPane.current}"]`)?.focus()
@@ -56,13 +60,14 @@ export default function ProjectTabs() {
 
   return (
     <div
-      ref={topbarRef} data-compact={compact}
+      ref={topbarRef} data-compact={compact} data-mobile={narrow}
       className="qb-project-bar fixed top-0 left-0 right-0 z-40"
-      style={{ height: TAB_BAR_H }}
+      style={{ height: projectBarHeight(vw) }}
     >
-      <a href="/" title={t('nav.home')} className="shrink-0 flex items-center justify-center w-8 h-8 rounded-[9px] overflow-hidden">
+      <a href="/" title={t('nav.home')} aria-label={t('nav.home')} className="qb-project-home shrink-0 flex items-center justify-center w-8 h-8 rounded-[9px] overflow-hidden">
         <img src={`${import.meta.env.BASE_URL}favicon.svg`} alt="" width={32} height={32} draggable={false} />
       </a>
+      {narrow ? <MobileProjectBar onShare={() => shareRef.current?.click()} /> : <>
       <div ref={tabsRef} className="qb-project-tabs scrollbar-none">
       {api.tabs.map(tab => {
         // 共享方案：创建人、编辑者改的是方案的名字，评论者和访客不能改
@@ -146,7 +151,8 @@ export default function ProjectTabs() {
           </div>
         ))}
       </div>
-      <ShareCluster />
+      </>}
+      <ShareCluster triggerRef={shareRef} />
       <div data-site-slot="help" hidden className="qb-host-help" />
     </div>
   )

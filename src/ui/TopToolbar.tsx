@@ -16,6 +16,7 @@ import { useCollab } from '../collab/CollabContext'
 import { useOverflowCompact } from './useOverflowCompact'
 import SlideMenu from './SlideMenu'
 import type { CatalogueSource } from './CatalogueSourceSwitch'
+import { useDock } from './dock'
 
 export function DropItem({ on, onClick, title, img, label, compat }: {
   on: boolean
@@ -75,6 +76,7 @@ function ToolDrop({
 export default function TopToolbar() {
   const api = useEngine()
   const collab = useCollab()
+  const { setPane } = useDock()
   // 共享方案的成员能放评论图钉；评论者只能用「选择」和「评论」
   const commenting = collab.mode === 'plan' && collab.role !== 'guest'
   const locked = collab.mode === 'plan' && !collab.canEdit
@@ -213,7 +215,13 @@ export default function TopToolbar() {
         {sep}
         {/* 共享方案：放一颗图钉写位置评论（快捷键 C） */}
         <button className="m-tool qb-tool" data-mode-on={collab.placingPin} aria-pressed={collab.placingPin} title={t('collab.pin.toolHint')} aria-label={t('collab.pin.toolHint')} data-ui="tool-comment" data-tour="tool-comment"
-          onClick={() => { api.setMode('select'); collab.setPinDraft(null); collab.setPlacingPin(!collab.placingPin); close() }}>
+          onClick={() => {
+            api.setMode('select')
+            collab.setPinDraft(null)
+            if (!collab.placingPin) { setPane(null); collab.setActiveThread(null) }
+            collab.setPlacingPin(!collab.placingPin)
+            close()
+          }}>
           <MessageSquarePlus size={16} strokeWidth={2} /><span>{t('collab.pin.tool')}</span>
         </button>
       </>}

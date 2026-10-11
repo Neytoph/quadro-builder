@@ -285,7 +285,7 @@ function ManualProgress() {
 function AppInner() {
   const api = useEngine()
   const collab = useCollab()
-  const { handleEsc } = useDock()
+  const { handleEsc, setPane } = useDock()
   const [componentPosition, setComponentPosition] = useState<ComponentMenuPosition | null>(null)
   const pointer = useRef<ComponentMenuPosition | null>(null)
   const closeComponents = useCallback(() => setComponentPosition(null), [])
@@ -313,6 +313,8 @@ function AppInner() {
       if (e.defaultPrevented || e.isComposing) return
       const el = e.target as HTMLElement | null
       const input = !!el?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')
+      // 手机顶栏菜单自行处理键盘与焦点，避免菜单操作触发画布快捷键。
+      if (el?.closest('[data-ui="mobile-topbar-dialog"]')) return
       if (componentPosition) {
         if (e.key === 'Escape') {
           e.preventDefault()
@@ -370,6 +372,7 @@ function AppInner() {
         e.preventDefault()
         api.setMode('select')
         collab.setPinDraft(null)
+        if (!collab.placingPin) { setPane(null); collab.setActiveThread(null) }
         collab.setPlacingPin(!collab.placingPin)
         return
       }
@@ -448,7 +451,7 @@ function AppInner() {
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [api, collab, handleEsc, componentPosition])
+  }, [api, collab, handleEsc, setPane, componentPosition])
 
   // 共享方案里只能看的人没有颜色栏；访客连工具条也没有，评论者的工具条只剩「选择」「评论」
   const viewer = collab.mode === 'plan' && !collab.canEdit
@@ -471,7 +474,7 @@ function AppInner() {
       <AccountDialog />
       <NameDialog />
       <ManualProgress />
-      {collab.mode === 'off' && !bootEntry().plan && !bootEntry().invite && !bootEntry().createShared && <Onboarding />}
+      <Onboarding autoOpen={collab.mode === 'off' && !bootEntry().plan && !bootEntry().invite && !bootEntry().createShared} />
       {collab.mode === 'plan' && <CollabCoach />}
       <ThumbCapture />
       <ImportOnEntry />

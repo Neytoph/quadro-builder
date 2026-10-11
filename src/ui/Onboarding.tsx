@@ -34,11 +34,11 @@ function markDone() {
   try { localStorage.setItem(KEY, '1') } catch { /* ignore */ }
 }
 
-export default function Onboarding() {
+export default function Onboarding({ autoOpen = true }: { autoOpen?: boolean } = {}) {
   const { t } = useI18n()
   const { setPane } = useDock()
   const { setLeftColor } = usePanelLayout()
-  const [open, setOpen] = useState(shouldOpen)
+  const [open, setOpen] = useState(() => autoOpen && shouldOpen())
   const [i, setI] = useState(0)
 
   const step = STEPS[i]

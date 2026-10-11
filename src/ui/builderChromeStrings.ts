@@ -9,6 +9,9 @@ export const builderChromeStrings = {
     'chrome.save': '保存', 'chrome.saveAs': '另存为',
     'chrome.saveShortcut': '{save}', 'chrome.saveAsShortcut': '{saveAs}',
     'chrome.expand': '展开面板', 'chrome.compact': '收起面板',
+    'chrome.currentDesign': '当前方案', 'chrome.switchDesign': '切换方案', 'chrome.renameDesign': '重命名',
+    'chrome.resources': '资源与工具', 'chrome.tutorial': '搭建教程', 'chrome.closeMenu': '关闭菜单',
+    'chrome.fileMore': '导出与更多设置',
   },
   en: {
     'tool.undo': 'Undo', 'tool.redo': 'Redo', 'chrome.tools': 'Modeling tools',
@@ -20,6 +23,9 @@ export const builderChromeStrings = {
     'chrome.save': 'Save', 'chrome.saveAs': 'Save as',
     'chrome.saveShortcut': '{save}', 'chrome.saveAsShortcut': '{saveAs}',
     'chrome.expand': 'Expand panel', 'chrome.compact': 'Collapse panel',
+    'chrome.currentDesign': 'Current design', 'chrome.switchDesign': 'Switch design', 'chrome.renameDesign': 'Rename',
+    'chrome.resources': 'Resources & tools', 'chrome.tutorial': 'Building tutorial', 'chrome.closeMenu': 'Close menu',
+    'chrome.fileMore': 'Export & more settings',
   },
   de: {
     'tool.undo': 'Zurück', 'tool.redo': 'Vorwärts', 'chrome.tools': 'Modellwerkzeuge',
@@ -31,5 +37,8 @@ export const builderChromeStrings = {
     'chrome.save': 'Speichern', 'chrome.saveAs': 'Speichern unter',
     'chrome.saveShortcut': '{save}', 'chrome.saveAsShortcut': '{saveAs}',
     'chrome.expand': 'Panel erweitern', 'chrome.compact': 'Panel verkleinern',
+    'chrome.currentDesign': 'Aktueller Entwurf', 'chrome.switchDesign': 'Entwurf wechseln', 'chrome.renameDesign': 'Umbenennen',
+    'chrome.resources': 'Ressourcen & Werkzeuge', 'chrome.tutorial': 'Bauanleitung', 'chrome.closeMenu': 'Menü schließen',
+    'chrome.fileMore': 'Export & weitere Einstellungen',
   },
 }

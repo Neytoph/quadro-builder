@@ -125,3 +125,45 @@
 @media (prefers-reduced-motion: reduce) {
   .qb-nav-button, .qb-nav-chevron { transition: none; }
 }
+
+.qb-project-bar[data-mobile=true] { gap: 2px; padding: 6px; }
+.qb-project-bar[data-mobile=true] .qb-project-home { width: 44px; height: 44px; min-width: 44px; }
+.qb-project-bar[data-mobile=true] > .cb-cluster { display: none; }
+.qb-project-bar[data-mobile=true] .qb-host-help { margin-left: 2px; }
+.qb-project-bar[data-mobile=true] .qb-host-help .qh-wg-builder { width: 44px; min-width: 44px; height: 44px; min-height: 44px; padding: 0; }
+.qb-project-bar[data-mobile=true] .qh-wg-builder > span { display: none; }
+.qb-mobile-project { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; height: 44px; padding: 0 8px; border-radius: 12px; background: #fff1e6; color: #9a3412; font-size: 14px; font-weight: 500; cursor: pointer; }
+.qb-mobile-project > svg { flex-shrink: 0; }
+.qb-mobile-project > svg:last-child { margin-left: auto; }
+.qb-mobile-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qb-mobile-divider { width: 1px; height: 22px; margin: 0 3px; background: #ecd6c2; flex-shrink: 0; }
+.qb-mobile-trigger { position: relative; display: flex; align-items: center; justify-content: center; width: 44px; min-width: 44px; height: 44px; padding: 0; flex-shrink: 0; border-radius: 12px; color: #1f2430; cursor: pointer; }
+.qb-mobile-trigger:hover, .qb-mobile-trigger[aria-expanded=true], .qb-mobile-trigger[data-active=true] { color: #9a3412; background: #fff1e6; }
+.qb-mobile-badge { position: absolute; top: 0; right: 0; min-width: 17px; padding: 0 3px; border-radius: 8px; background: #c2410c; color: white; font-size: 11px; line-height: 17px; }
+.qb-mobile-alert { position: absolute; top: 6px; right: 7px; width: 6px; height: 6px; border-radius: 50%; background: #c2410c; }
+.qb-mobile-pop { z-index: 70; background: #fffdf9; border: 1px solid #ecd6c2; border-radius: 15px; box-shadow: 0 8px 30px #38271a26; }
+.qb-mobile-menu { color: #1f2430; font-size: 14px; }
+.qb-mobile-menu-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-left: 10px; font-weight: 500; }
+.qb-mobile-dismiss { width: 44px; height: 44px; flex-shrink: 0; display: grid; place-items: center; border-radius: 10px; color: #5a6270; cursor: pointer; }
+.qb-mobile-dismiss:hover { background: #fff1e6; }
+.qb-mobile-current-name { overflow-wrap: anywhere; margin: 2px 10px 4px; font-weight: 500; }
+.qb-mobile-save-state { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 0 10px 8px; color: #5a6270; font-size: 12px; }
+.qb-mobile-save-state button { min-height: 44px; color: #9a3412; text-decoration: underline; cursor: pointer; }
+.qb-mobile-save-state[data-save-state=failed], .qb-mobile-save-state[data-save-state=conflict] { color: #b93828; }
+.qb-mobile-menu-item { width: 100%; min-width: 0; min-height: 44px; display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; text-align: left; font-size: 14px; font-weight: 500; line-height: 1.5; cursor: pointer; }
+.qb-mobile-menu-item > span { min-width: 0; overflow-wrap: anywhere; }
+.qb-mobile-menu-item > svg { width: 20px; height: 20px; stroke-width: 1.65; flex-shrink: 0; color: #9a3412; }
+.qb-mobile-menu-item > small { margin-left: auto; font-size: 12px; color: #5a6270; }
+.qb-mobile-menu-item:hover, .qb-mobile-menu-item[aria-current=page] { color: #9a3412; background: #fff1e6; }
+.qb-mobile-tab-option > span { flex: 1; }
+.qb-mobile-tools-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 4px; }
+.qb-mobile-tools-grid .qb-mobile-menu-item { min-height: 56px; }
+.qb-mobile-menu hr { height: 1px; border: 0; background: #ecd6c2; margin: 8px 10px; }
+.qb-mobile-menu-item.qb-mobile-danger, .qb-mobile-danger > svg { color: #b93828; }
+.qb-mobile-menu :focus-visible { outline: 2px solid #9a3412; outline-offset: -2px; }
+@media (max-width: 330px) {
+  .qb-mobile-divider { display: none; }
+  .qb-project-bar[data-mobile=true] { gap: 0; }
+  .qb-project-bar[data-mobile=true] .qb-host-help { margin-left: 0; }
+  .qb-mobile-project { gap: 4px; padding: 0 5px; }
+}

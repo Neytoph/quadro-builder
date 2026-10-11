@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { Eye, GitFork, MessageSquare, TriangleAlert } from 'lucide-react'
 import { useI18n } from '../../i18n'
 import { useEngine } from '../../store/EngineContext'
@@ -10,6 +11,7 @@ import type { Peer } from '../planSession'
 import { Face, partLabel, when } from './bits'
 import { Compose } from './Compose'
 import { ForkModal } from './Modals'
+import { NARROW_MAX, PANEL_GAP, projectBarHeight, TOOLBAR_CHROME_H, usePanelLayout } from '../../ui/panelLayout'
 
 type P3 = [number, number, number]
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -39,6 +41,8 @@ export default function PlanOverlays() {
   const collab = useCollab()
   const api = useEngine()
   const { t } = useI18n()
+  const { vw } = usePanelLayout()
+  const narrow = vw <= NARROW_MAX
   const items = useRef(new Map<string, { el: HTMLElement; pts: () => P3[]; box: boolean }>())
   const [fork, setFork] = useState(false)
   const s = collab.session
@@ -88,7 +92,9 @@ export default function PlanOverlays() {
     return () => window.removeEventListener(UI_ESCAPE_EVENT, off)
   }, [placingPin, pinDraft, setPlacingPin, setPinDraft])
 
-  const place = (ev: React.PointerEvent) => {
+  const place = (ev: React.MouseEvent) => {
+    ev.preventDefault()
+    ev.stopPropagation()
     const e = api.engine()
     if (!e || ev.button !== 0) return
     const hit = e.scene.pickPoint(ev.clientX, ev.clientY) as Anchor | null
@@ -115,8 +121,11 @@ export default function PlanOverlays() {
     <>
       {collab.placingPin && (
         <>
-          <div className="fixed inset-0 z-[33] cursor-crosshair" style={{ top: 44 }} data-ui="pin-placer" onPointerDown={place} />
-          <div className="qb-card fixed top-[120px] left-1/2 -translate-x-1/2 z-[36] px-4 py-1.5 text-[13px] text-gray-100 pointer-events-none whitespace-nowrap rounded-full">{t('collab.pin.placeHint')}</div>
+          <div className="fixed inset-0 z-[38] cursor-crosshair" style={{ top: projectBarHeight(vw), touchAction: 'none' }} data-ui="pin-placer" onClick={place} />
+          <div className="qb-card cb-pin-placement" style={{ top: projectBarHeight(vw) + PANEL_GAP + TOOLBAR_CHROME_H + 8 }} data-ui="pin-placement-hint">
+            <span>{t(narrow ? 'collab.pin.placeTouchHint' : 'collab.pin.placeHint')}</span>
+            <button type="button" className="qb-btn qb-btn-ghost qb-btn-sm" data-ui="cancel-pin-placement" onClick={() => collab.setPlacingPin(false)}>{t('confirm.cancel')}</button>
+          </div>
         </>
       )}
 
@@ -126,27 +135,25 @@ export default function PlanOverlays() {
       }, true)} />)}
 
       {pins.map(th => {
-        const active = collab.activeThread === th.id
+        const active = collab.activeThread === th.id && !draft && !collab.placingPin
         const gone = collab.partGone(th)
         const unread = th.posts.some(collab.isUnread)
         return (
-          <div key={`pin-${th.id}`} className="cb-at" ref={track(`pin-${th.id}`, () => [th.anchor!.point as P3])} style={active ? { zIndex: 37 } : undefined}>
+          <Fragment key={`pin-${th.id}`}><div className="cb-at" ref={track(`pin-${th.id}`, () => [th.anchor!.point as P3])} style={active ? { zIndex: 37 } : undefined}>
             {gone && <span className="cb-ghost-part" />}
             <button type="button" data-ui="pin" data-thread={th.id}
               className={`cb-pin ${active ? 'on' : ''} ${th.resolved ? 'done' : ''} ${gone ? 'gone' : ''} ${unread && !active ? 'unread' : ''}`}
               onClick={() => (active ? collab.setActiveThread(null) : collab.focusThread(th))}>
               <b>{collab.pinNumber(th)}</b>
             </button>
-            {active && <Bubble th={th} gone={gone} />}
-          </div>
+          </div>{active && <Discussion point={th.anchor!.point}><Bubble th={th} gone={gone} /></Discussion>}</Fragment>
         )
       })}
 
       {draft && (
-        <div className="cb-at" ref={track('draft', () => [draft.point])} style={{ zIndex: 37 }}>
+        <><div className="cb-at" ref={track('draft', () => [draft.point])} style={{ zIndex: 37 }}>
           <span className="cb-pin draft"><b>{pins.length + 1}</b></span>
-          <DraftBubble draft={draft} />
-        </div>
+        </div><Discussion point={draft.point}><DraftBubble draft={draft} /></Discussion></>
       )}
 
       <span className={`cb-sync qb-card ${s.conn === 'connected' ? '' : 'off'}`} data-ui="sync-state" data-conn={s.conn} title={t(syncing ? 'collab.connecting' : `collab.conn.${s.conn}`)}>
@@ -175,6 +182,52 @@ export default function PlanOverlays() {
       {fork && <ForkModal onClose={() => setFork(false)} />}
     </>
   )
+}
+
+/** 手机输入框独立挂在页面上，避开图钉投影的 transform，并跟随软键盘可视区域。 */
+function Discussion({ point, children }: { point: P3; children: ReactNode }) {
+  const { vw } = usePanelLayout()
+  const narrow = vw <= NARROW_MAX
+  const { engine } = useEngine()
+  const { t } = useI18n()
+  const ref = useRef<HTMLDivElement>(null)
+  const measure = () => {
+    const view = window.visualViewport
+    const height = view?.height ?? window.innerHeight
+    return { bottom: Math.max(0, window.innerHeight - (view?.offsetTop ?? 0) - height), height }
+  }
+  const [viewport, setViewport] = useState(measure)
+  useLayoutEffect(() => {
+    if (narrow) return
+    let frame = 0
+    const tick = () => {
+      frame = requestAnimationFrame(tick)
+      const el = ref.current, host = document.getElementById('canvas-host')
+      const projected = engine()?.scene.projectWorld([point])?.[0]
+      if (!el || !host) return
+      el.style.display = projected ? '' : 'none'
+      if (projected) {
+        const r = host.getBoundingClientRect()
+        el.style.transform = `translate(${r.left + projected.u * r.width}px, ${r.top + projected.v * r.height}px)`
+      }
+    }
+    tick()
+    return () => cancelAnimationFrame(frame)
+  }, [narrow, engine, point])
+  useEffect(() => {
+    const update = () => setViewport(measure())
+    const view = window.visualViewport
+    view?.addEventListener('resize', update)
+    view?.addEventListener('scroll', update)
+    window.addEventListener('resize', update)
+    return () => {
+      view?.removeEventListener('resize', update)
+      view?.removeEventListener('scroll', update)
+      window.removeEventListener('resize', update)
+    }
+  }, [])
+  return createPortal(<div ref={ref} className={narrow ? 'cb-mobile-discussion' : 'cb-anchored-discussion'} data-ui={narrow ? 'mobile-pin-sheet' : 'anchored-pin-discussion'} role="dialog" aria-label={t('collab.tab.pins')}
+    style={narrow ? { display: 'block', transform: 'none', bottom: viewport.bottom, maxHeight: Math.max(80, viewport.height - projectBarHeight(vw) - PANEL_GAP) } : undefined}>{children}</div>, document.body)
 }
 
 function activityText(s: { added: number; removed: number; moved: number; changed: number }, t: (k: string, v?: Record<string, string | number>) => string) {
