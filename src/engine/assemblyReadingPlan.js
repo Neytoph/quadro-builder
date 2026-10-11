@@ -90,7 +90,7 @@ function readingTitle(step, plan, copy) {
  */
 export function createAssemblyReadingPlan(model, plan, { items = [], copy = {} } = {}) {
   const physical = plan.steps || [];
-  const rows = (plan.ledger?.instances || []).filter(row => row.group !== 'screws');
+  const rows = plan.ledger?.instances || [];
   const entries = [];
   const combined = new Map();
   const claimed = new Set();

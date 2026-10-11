@@ -1,7 +1,7 @@
 import { getLang } from './i18n.js';
 
 const ENTITY_KEYS = ['nodeIds', 'tubeIds', 'panelIds', 'textileIds', 'slideIds', 'fittingIds', 'clampIds'];
-const GROUPS = ['connectors', 'tubes', 'panels', 'textiles', 'slides', 'fittings', 'screws', 'reinforcements'];
+const GROUPS = ['connectors', 'tubes', 'panels', 'textiles', 'slides', 'fittings', 'reinforcements'];
 const unique = values => [...new Set(values)];
 const copy = (zh, en, de) => getLang() === 'zh' ? zh : getLang() === 'en' ? en : de;
 

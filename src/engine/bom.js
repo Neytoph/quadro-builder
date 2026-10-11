@@ -1,6 +1,6 @@
 // Stueckliste (BOM) + Kupplungstyp-Heuristik + Bestands-/Machbarkeitscheck.
 
-import { getTube, getConnector, getPanel, colorName, partName, reinforcementPart, partForFitting, getPartById, getScrew, poolLinerFor, geometry, slideKindName, textilePart } from "./catalog.js";
+import { getTube, getConnector, getPanel, colorName, partName, reinforcementPart, partForFitting, getPartById, poolLinerFor, geometry, slideKindName, textilePart } from "./catalog.js";
 import { round2, xAxisOf, yAxisOf, zAxisOf } from "./util.js";
 import { POOL_KINDS, isHolePart, isBoltPart, BOLT_PART, HINGE_PART, ARM_FITTINGS } from "./model.js";
 import { isOriginalComponent, componentKitFields, componentPartId, componentColorName, componentOutputColor, componentFittingKey, componentSizeLabel } from './accessoryInfo.js';
@@ -512,232 +512,6 @@ export function reinforcementRuns(model) {
   return [...runs.values()];
 }
 
-// --- Schrauben ------------------------------------------------------------
-// Sie werden nur gerechnet: kein Teil im Modell, nichts zu setzen, nichts zu
-// zeichnen. Grundregel des Systems: an einer Kupplung hat ein Rohr genau EIN
-// Loch. Deshalb wird nicht addiert, sondern belegt -- jedes Rohr bringt zwei
-// PLAETZE mit (je Ende einen), Platten- und Rutschenschrauben nehmen sich
-// welche davon, und was uebrig bleibt, sind die Rohrschrauben.
-
-// So nah muss ein Knoten liegen, damit eine Schraube ihn als ihren Platz
-// nimmt: eine halbe Kupplung plus Toleranz.
-const SCREW_SLOT_EPS = 6;
-// Rutschenschrauben laufen durch das Geruest daneben -- dort darf der Knoten
-// weiter weg liegen (eine Rutschenbreite).
-const SCREW_SLIDE_EPS = 45;
-
-/**
- * Schrauben eines Modells. Liefert Zeilen wie die uebrigen Abschnitte:
- * `{ key, id, name, color, colorName, count, price, subtotal }`. `price` ist
- * der STUECKpreis (Packpreis / Packgroesse) -- gekauft werden Packungen, die
- * Liste rechnet anteilig.
- */
-export function computeScrews(model) {
-  const allocations = [];
-  const allocate = (id, partId, count, color = null, positions = [], precision = 'region-reference') => {
-    const record = { id, partId, count, color, positions, precision };
-    allocations.push(record); return record;
-  };
-  // 1. Plaetze aufspannen: je Rohrende einer. Arme und Doppelrohr-Verbindungen
-  //    sind keine Rohre und tragen keine Schrauben.
-  const slots = new Map();            // "tubeId@nodeId" -> { tube, node, frei }
-  const slotsAtNode = new Map();      // nodeId -> [slotKey]
-  for (const t of model.tubes.values()) {
-    if (t.arm || t.link) continue;
-    for (const nodeId of [t.a, t.b]) {
-      const key = t.id + "@" + nodeId;
-      slots.set(key, { tube: t, node: nodeId, free: true });
-      if (!slotsAtNode.has(nodeId)) slotsAtNode.set(nodeId, []);
-      slotsAtNode.get(nodeId).push(key);
-    }
-  }
-  const takeSlot = (key) => {
-    const slot = key && slots.get(key);
-    if (!slot || !slot.free) return false;
-    slot.free = false;
-    return true;
-  };
-  /** Freien Platz an einem Knoten belegen -- egal an welchem seiner Rohre. */
-  const takeAtNode = (nodeId) => {
-    for (const key of slotsAtNode.get(nodeId) || []) if (takeSlot(key)) return true;
-    return false;
-  };
-  /** Knoten, der einem Punkt am naechsten liegt (innerhalb `eps`). */
-  const nodeNear = (point, eps) => {
-    let best = null, bestDist = eps;
-    for (const n of model.nodes.values()) {
-      const d = Math.hypot(n.x - point[0], n.y - point[1], n.z - point[2]);
-      if (d <= bestDist) { best = n; bestDist = d; }
-    }
-    return best;
-  };
-
-  /** Richtung eines Rohrs (normiert) -- null, wenn die Knoten fehlen. */
-  const dirOf = (t) => {
-    const a = model.nodes.get(t.a), b = model.nodes.get(t.b);
-    if (!a || !b) return null;
-    const d = [b.x - a.x, b.y - a.y, b.z - a.z];
-    const len = Math.hypot(d[0], d[1], d[2]);
-    return len < 1e-6 ? null : d.map((v) => v / len);
-  };
-  /** Waagerechtes Rohr, das dem Punkt am naechsten liegt -- der Traeger. */
-  const horizontalTubeNear = (point) => {
-    let best = null, bestDist = SCREW_SLIDE_EPS;
-    for (const t of model.tubes.values()) {
-      if (t.arm || t.link) continue;
-      const d = dirOf(t);
-      if (!d || Math.abs(d[1]) > 0.2) continue;          // nicht waagerecht
-      const a = model.nodes.get(t.a), b = model.nodes.get(t.b);
-      // Abstand des Punktes von der Strecke a..b
-      const ab = [b.x - a.x, b.y - a.y, b.z - a.z];
-      const ap = [point[0] - a.x, point[1] - a.y, point[2] - a.z];
-      const lenSq = ab[0] * ab[0] + ab[1] * ab[1] + ab[2] * ab[2] || 1;
-      const tt = Math.max(0, Math.min(1, (ap[0] * ab[0] + ap[1] * ab[1] + ap[2] * ab[2]) / lenSq));
-      const dist = Math.hypot(ap[0] - ab[0] * tt, ap[1] - ab[1] * tt, ap[2] - ab[2] * tt);
-      if (dist <= bestDist) { best = t; bestDist = dist; }
-    }
-    return best;
-  };
-  /** Rohr, das von diesem Knoten nach OBEN geht -- der Pfosten daneben. */
-  const tubeUpwardFrom = (nodeId) => {
-    for (const t of model.tubes.values()) {
-      if (t.arm || t.link) continue;
-      if (t.a !== nodeId && t.b !== nodeId) continue;
-      const d = dirOf(t);
-      if (!d) continue;
-      const up = t.a === nodeId ? d[1] : -d[1];          // Richtung WEG vom Knoten
-      if (up > 0.9) return t;
-    }
-    return null;
-  };
-
-  const count = { panel: 0, acrylic: 0, conical: 0, counter: 0, slide: 0 };
-
-  // 2. Platten: vier Schrauben. Eine Platte hat ZWEI Lippen mit je zwei
-  //    Schrauben, sie wird also an einem Rohr-PAAR verschraubt -- nicht an allen
-  //    vier Kanten. Welches Paar, sagt ihre Drehung: ungedreht sind es die
-  //    beiden Tragrohre (p.a und p.b), gedreht die beiden quer dazu. Die
-  //    Schrauben laufen durch das Rohr in die Kupplung; liegt dort schon eine,
-  //    ist der Platz weg.
-  //    Die Acrylglasplatte ist eine Rahmenplatte: sie haengt wie jede Platte an
-  //    vier Plattenschrauben, und ihre Scheibe sitzt mit vier eigenen
-  //    Acrylglasschrauben im Rahmen -- die belegen keinen Platz am Rohr.
-  for (const p of model.panels.values()) {
-    if (p.poolPart) continue;                  // Baellebad ist eine Folie
-    // 原创套装使用随附固定夹或绑带，不占标准板螺丝的位置。
-    if (isOriginalComponent(p)) continue;
-    const corners = model.panelCorners(p);
-    count.panel += 4;
-    allocate('screw_panel', p.id, 4, null, corners || [], 'panel-corner-anchor');
-    const pdef = getPanel(p.panelId);
-    if (pdef && pdef.acrylic) { count.acrylic += 4; allocate('screw_acrylic', p.id, 4, null, corners || [], 'acrylic-frame-reference'); }
-    if (!corners) continue;
-    // corners: [Anfang a, Ende a, Ende b, Anfang b]
-    if (!p.turned) {
-      for (const [tubeId, punkt] of [[p.a, corners[0]], [p.a, corners[1]],
-                                     [p.b, corners[3]], [p.b, corners[2]]]) {
-        const t = model.tubes.get(tubeId);
-        if (!t) continue;
-        const node = nodeNear(punkt, SCREW_SLOT_EPS);
-        if (!node) continue;                   // Platte sitzt mitten auf dem Rohr
-        takeSlot(t.id + "@" + node.id);
-      }
-      continue;
-    }
-    // Gedreht: die Lippen liegen auf den Querrohren. Gesucht ist an jeder Ecke
-    // das Rohr, das zur GEGENUEBERLIEGENDEN Ecke derselben Kante laeuft.
-    const quer = [[corners[0], corners[3]], [corners[1], corners[2]]];
-    for (const [von, nach] of quer) {
-      const nv = nodeNear(von, SCREW_SLOT_EPS), nn = nodeNear(nach, SCREW_SLOT_EPS);
-      if (!nv || !nn) continue;
-      const t = model.tubeBetween ? model.tubeBetween(nv.id, nn.id) : null;
-      if (!t) continue;
-      takeSlot(t.id + "@" + nv.id);
-      takeSlot(t.id + "@" + nn.id);
-    }
-  }
-
-  // 3. Rutschen. Die Integralrutsche braucht keine Schraube; Kettenteile
-  //    schon: je Verbindung zwei konische Schrauben mit Gegenstueck und zwei
-  //    Rutschenschrauben, und der Einstieg haengt mit zwei konischen Schrauben
-  //    und zwei Plattenschrauben am Geruest.
-  const slides = [...(model.slides ? model.slides.values() : [])];
-  const belegt = new Set();                    // Rutschen, die an einem Ausgang haengen
-  for (const s of slides) {
-    const exit = model.slideExit(s);
-    if (!exit) continue;
-    const folge = slides.find((o) => o.id !== s.id
-      && Math.hypot(o.x - exit.pos[0], o.y - exit.pos[1], o.z - exit.pos[2]) < 5);
-    if (!folge) continue;
-    belegt.add(folge.id);
-    count.conical += 2;
-    count.counter += 2;
-    count.slide += 2;
-    allocate('screw_slide_conical', s.id, 2, null, [exit.pos], 'slide-joint-anchor');
-    allocate('screw_slide_conical_counter', s.id, 2, null, [exit.pos], 'slide-joint-anchor');
-    allocate('screw_slide', s.id, 2, null, [exit.pos], 'slide-joint-anchor');
-    const node = nodeNear(exit.pos, SCREW_SLIDE_EPS);
-    if (node) { takeAtNode(node.id); takeAtNode(node.id); }
-  }
-  for (const s of slides) {
-    // Kopf der Kette = Rutschenkoerper, der an keinem Ausgang haengt.
-    if (!model.slideExit(s) || belegt.has(s.id)) continue;
-    count.conical += 2;
-    count.panel += 2;
-    const entry = s.hook && s.hook.length === 3 ? s.hook : [s.x, s.y, s.z];
-    const conicalFixing = allocate('screw_slide_conical', s.id, 2, null, [entry], 'slide-entry-reference');
-    const panelFixing = allocate('screw_panel', s.id, 2, null, [entry], 'slide-entry-reference');
-    // Wo genau: die beiden Plattenschrauben sitzen im WAAGERECHTEN Rohr, auf
-    // dem die Rutsche aufliegt (je Ende eine), die beiden konischen in den
-    // Rohren, die von dessen Kupplungen nach OBEN gehen.
-    const einstieg = s.hook && s.hook.length === 3 ? s.hook : [s.x, s.y, s.z];
-    const traeger = horizontalTubeNear(einstieg);
-    if (!traeger) continue;
-    const anchors = [traeger.a, traeger.b].map(id => model.nodes.get(id)).filter(Boolean).map(n => [n.x, n.y, n.z]);
-    panelFixing.positions = anchors; panelFixing.precision = 'support-connector-anchor';
-    conicalFixing.positions = anchors; conicalFixing.precision = 'upright-connector-anchor';
-    takeSlot(traeger.id + "@" + traeger.a);
-    takeSlot(traeger.id + "@" + traeger.b);
-    for (const nodeId of [traeger.a, traeger.b]) {
-      const pfosten = tubeUpwardFrom(nodeId);
-      if (pfosten) takeSlot(pfosten.id + "@" + nodeId);
-    }
-  }
-
-  // 4. Rohrschrauben: was an Plaetzen uebrig ist, nach Rohrfarbe.
-  const tubeScrews = new Map();                // Farbe -> Anzahl
-  for (const slot of slots.values()) {
-    if (!slot.free) continue;
-    const color = slot.tube.color || null;
-    tubeScrews.set(color, (tubeScrews.get(color) || 0) + 1);
-    const node = model.nodes.get(slot.node);
-    allocate('screw_tube', slot.tube.id, 1, color, node ? [[node.x, node.y, node.z]] : [], 'connector-anchor');
-  }
-
-  const rows = [];
-  const push = (id, anzahl, color = null) => {
-    if (!anzahl) return;
-    const def = getScrew(id);
-    if (!def) return;
-    const stueck = round2((def.price || 0) / (def.pack || 1));
-    rows.push({
-      key: id + (color ? "|" + color : ""), id, name: partName(def),
-      color, colorName: color ? colorName(color) : null,
-      count: anzahl, pack: def.pack || 1,
-      price: stueck, subtotal: round2(stueck * anzahl),
-      allocations: allocations.filter(a => a.id === id && a.color === color),
-    });
-  };
-  for (const [color, anzahl] of [...tubeScrews.entries()]
-    .sort((a, b) => b[1] - a[1])) push("screw_tube", anzahl, color);
-  push("screw_panel", count.panel);
-  push("screw_acrylic", count.acrylic);
-  push("screw_slide_conical", count.conical);
-  push("screw_slide_conical_counter", count.counter);
-  push("screw_slide", count.slide);
-  return rows;
-}
-
 /**
  * 一个泳池要几袋海洋球（一袋 500 个）。内空 = 外框去掉内衬的缩进和皮厚，
  * 铺到池深的三分之二；一颗球直径 6 厘米，随意堆放约占 180 立方厘米。
@@ -1014,10 +788,7 @@ export function computeBOM(model) {
   // Gesamtzahl der Profile (erscheint im Summen-Footer).
   const reinfCount = profileCount;
 
-  const screwRows = computeScrews(model);
-
   const price = round2(
-    screwRows.reduce((s, r) => s + r.subtotal, 0) +
     tubes.reduce((s, r) => s + r.subtotal, 0) +
     connectors.reduce((s, r) => s + r.subtotal, 0) +
     panels.reduce((s, r) => s + r.subtotal, 0) +
@@ -1029,13 +800,11 @@ export function computeBOM(model) {
 
   return {
     tubes, connectors, panels, reinforcements, openEnds, textiles, slides, fittings,
-    screws: screwRows,
     totals: {
       tubes: tubeCount, connectors: connCount, panels: panelCount,
       reinforcements: reinfCount, textiles: textileCount, slides: slideCount,
       fittings: fittingCount, price,
-      screws: screwRows.reduce((s, r) => s + r.count, 0),
-      // Alles, was weder Rohr, Kupplung, Platte noch Schraube ist: Rutschen,
+      // Rutschen,
       // Raeder, Textilien, Anbauteile und die Verstaerkungslaeufe -- gezaehlt
       // wie in den Zeilen darueber.
       other: fittingCount + slideCount + textileCount + reinfCount,
@@ -1044,8 +813,7 @@ export function computeBOM(model) {
 }
 
 // Bestand: benoetigte Mengen je Rohrlaenge (Farbe egal) und je Kupplungstyp.
-// Teile, die NICHT ueber die Machbarkeit entscheiden. Schrauben zaehlt kaum
-// jemand (Sonderregel weiter unten), und alles aus Textilien/Netzen -- Tuch,
+// Teile, die NICHT ueber die Machbarkeit entscheiden: Textilien/Netze -- Tuch,
 // Netz, Rundwand, Spielsack, Dachtextil -- ist Zubehoer: es fehlt vielleicht,
 // aber das Modell steht trotzdem. Die Zeilen bleiben in der Liste und faerben
 // sich rot, nur der Haken bleibt gruen.
@@ -1080,11 +848,7 @@ export function neededParts(bom) {
   const reinforcements = new Map(); // id -> physische Stueckzahl (40-cm-Profile)
   for (const r of bom.reinforcements || [])
     reinforcements.set(r.id, (reinforcements.get(r.id) || 0) + (r.pieces ?? r.count));
-  // Schrauben: die Rohrschraube steht je Rohrfarbe in einer eigenen Zeile, im
-  // Bestand zaehlt die Summe je Teil.
-  const screws = new Map();
-  for (const r of bom.screws || []) screws.set(r.id, (screws.get(r.id) || 0) + r.count);
-  return { tubes, connectors, panels, reinforcements, fittings, screws };
+  return { tubes, connectors, panels, reinforcements, fittings };
 }
 
 // Vergleicht Bedarf mit Bestand. inv = { tubes:{id:n}, connectors:{type:n}, panels:{id:n} }.
@@ -1128,17 +892,6 @@ export function compareInventory(bom, inv) {
     const ok = owned >= count;
     if (!ok) feasible = false;
     rows.push({ group: "reinforcements", key: id, name: partName(def), need: count, owned, ok });
-  }
-  for (const [id, count] of need.screws || []) {
-    const def = getScrew(id) || { name: id };
-    const owned = (inv.screws && inv.screws[id]) || 0;
-    const ok = owned >= count;
-    // Sonderregel: Eine 0 heisst "noch nicht gezaehlt", nicht "fehlt". Die
-    // Zeile faerbt sich trotzdem rot -- sie ist ein Hinweis, kein Ausschluss.
-    // Ab dem ersten eingetragenen Stueck zaehlt der Bestand normal mit.
-    const soft = owned === 0;
-    if (!ok && !soft) feasible = false;
-    rows.push({ group: "screws", key: id, name: partName(def), need: count, owned, ok, soft });
   }
   return { rows, feasible };
 }

@@ -12,7 +12,7 @@ describe('配件套装清单显示数据', () => {
     })
     expect(bom.panels[0]).toMatchObject({ kitContents: '每套含四角固定件', designAssumption: true, loadVerified: false })
     expect(bom.fittings[0]).toMatchObject({ count: 2, kitContents: '每套含两个卡箍', designAssumption: true, loadVerified: false })
-    expect(bom.screws).toHaveLength(0)
+    expect(bom).not.toHaveProperty('screws')
     const csv = bomToCsv({ bom, name: '配件验收夹具', sizeCm: null, invRows: [], lang: 'zh', t: key => accessoryStrings.zh[key as keyof typeof accessoryStrings.zh] || key })
     expect(csv).toContain('每套含四角固定件')
     expect(csv).toContain('每套含两个卡箍')

@@ -39,10 +39,9 @@ function asBom(raw) {
     textiles: map(raw.textiles, 'textiles', 'id'),
     fittings: map(raw.fittings, 'fittings', 'id'),
     reinforcements: map(raw.reinforcements, 'reinforcements', 'id'),
-    screws: map(raw.screws, 'screws', 'id'),
     totals: {
       tubes: Number(totals.tubes || 0), connectors: Number(totals.connectors || 0),
-      panels: Number(totals.panels || 0), screws: Number(totals.screws || 0),
+      panels: Number(totals.panels || 0),
       other: Number(totals.other || 0), price: Number(totals.price || 0),
     },
     openEnds: 0,
@@ -53,7 +52,7 @@ function asBom(raw) {
 const TITLES = {
   'bom.tubes': '管子', 'bom.connectors': '连接件', 'bom.panels': '面板', 'bom.slides': '滑梯',
   'bom.wheels': '轮子', 'bom.textiles': '布件', 'bom.fittings': '配件',
-  'bom.reinforcements': '加固', 'bom.screws': '螺丝', 'side.size': '尺寸', 'side.price': '材料约',
+  'bom.reinforcements': '加固', 'side.size': '尺寸', 'side.price': '材料约',
   'bomx.total': '零件合计', 'bomx.design': '设计', 'bomx.date': '导出日期', 'bomx.title': '零件清单',
   'bomx.col.section': '分类', 'bomx.col.part': '零件', 'bomx.col.color': '颜色',
   'bomx.col.count': '数量', 'bomx.col.owned': '拥有', 'bomx.col.short': '还缺', 'bomx.col.subtotal': '小计',

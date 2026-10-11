@@ -56,10 +56,10 @@ describe('工厂普通方板的确认安装入口', () => {
     const restored = new BuildModel()
     expect(restored.loadJSON(model.toJSON()).ok).toBe(true)
     expect(restored.toJSON()).toEqual(model.toJSON())
-    expect(computeBOM(restored).screws.find((r: any) => r.id === 'screw_panel')?.count).toBe(4)
+    expect(computeBOM(restored)).not.toHaveProperty('screws')
     expect(computeAssemblyPlan(restored).canExport).toBe(true)
   })
-  it('真实工厂板网格、四颗板螺丝及完整装配导出保持一致', () => {
+  it('真实工厂板网格及完整装配导出保持一致', () => {
     const { model, probe } = cube()
     const panel = model.addNativePanel(probe, 'green')!
     expect(panel).toBeTruthy()
@@ -74,7 +74,7 @@ describe('工厂普通方板的确认安装入口', () => {
     const bom = computeBOM(model)
     expect(bom.panels).toHaveLength(1)
     expect(bom.panels[0].count).toBe(1)
-    expect(bom.screws.find((row: any) => row.id === 'screw_panel')?.count).toBe(4)
+    expect(bom).not.toHaveProperty('screws')
     const restored = new BuildModel(), data = model.toJSON()
     expect(restored.loadJSON(data).ok).toBe(true)
     expect(restored.toJSON()).toEqual(data)

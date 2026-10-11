@@ -215,7 +215,7 @@ export function addAssemblyOperations(model,plan,onProgress){
   const c45MatingContacts=new Map(plan.interfaces.filter(mark=>mark.directionBasis==='qdf-file-C45-mouth-and-matching-receiver-axis').map(mark=>[`${mark.nodeId}:${mark.supportTubeId}`,{cornerId:mark.nodeId,receiverNodeId:mark.mateNodeId,tubeId:mark.supportTubeId,basis:mark.directionBasis}]));
   const reinforcement=reinforcementPart(),core=createCoreChannels(model,{entryPanelContacts,linerCarrierContacts,panelLinerContacts,fittingMatingContacts,c45MatingContacts});
   const checkPath=(moving,installed,...args)=>core.check(moving,[...new Set([...installed,...preparedRigid])].filter(id=>!softLinings.some(lining=>lining.folded&&lining.id===id&&moving.every(part=>lining.carriers.includes(part)||lining.carriers.some(t=>{const tube=model.tubes.get(t);return tube.a===part||tube.b===part;})))),...args);
-  const materialKeys=id=>plan.ledger.instances.filter(x=>x.partIds.includes(id)&&x.group!=='screws').map(x=>`${x.group}:${x.key}`);
+  const materialKeys=id=>plan.ledger.instances.filter(x=>x.partIds.includes(id)).map(x=>`${x.group}:${x.key}`);
   let processedSteps=0;
   for(const step of steps){step.operations=[];const opByPart=new Map();let staging=[0,0,0];
     const region=plan.regions.find(r=>r.id===step.regionId),regional=step.action.detached ? region.detachedTranslation : [0,0,0];
@@ -408,7 +408,6 @@ export function addAssemblyOperations(model,plan,onProgress){
   // The existing BOM allocation is authoritative. Detail pages never allocate again.
   for(const op of operations)op.consumesMaterialInstanceIds=[];
   for(const instance of plan.ledger.instances){
-    if(instance.group==='screws')continue;
     const candidates=operations.filter(op=>instance.partIds.some(id=>op.consumesPartIds.includes(id)));
     const core=instance.group==='reinforcements'?operations.find(op=>op.type==='preinsert-reinforcement' && instance.partIds.some(id=>op.partIds.includes(id))):null;
     const first=core||candidates[0];

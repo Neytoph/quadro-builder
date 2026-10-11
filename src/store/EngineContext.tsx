@@ -121,8 +121,7 @@ export interface BomView {
   wheels: BomRow[]
   fittings: BomRow[]
   reinforcements: BomRow[]
-  screws: BomRow[]
-  totals: { tubes: number; connectors: number; panels: number; screws: number; other: number; price: number }
+  totals: { tubes: number; connectors: number; panels: number; other: number; price: number }
   openEnds: number
 }
 
@@ -142,7 +141,6 @@ export interface Inventory {
   panels: Record<string, number>
   reinforcements: Record<string, number>
   fittings: Record<string, number>
-  screws: Record<string, number>
 }
 
 interface EngineApi {
@@ -340,7 +338,7 @@ function cleanBomText(v: unknown): string {
 }
 
 function emptyInv(): Inventory {
-  return { tubes: {}, connectors: {}, panels: {}, reinforcements: {}, fittings: {}, screws: {} }
+  return { tubes: {}, connectors: {}, panels: {}, reinforcements: {}, fittings: {} }
 }
 
 function inventoryUsed(inv: Inventory) {
@@ -356,7 +354,7 @@ function inventoryRows(inv: Inventory) {
   return n
 }
 
-const INV_GROUPS = ['tubes', 'connectors', 'panels', 'reinforcements', 'fittings', 'screws'] as const
+const INV_GROUPS = ['tubes', 'connectors', 'panels', 'reinforcements', 'fittings'] as const
 const QDF_COLORS = new Set(['red', 'green', 'blue', 'yellow', 'black'])
 
 function parseInventory(src: unknown): Inventory | null {
@@ -371,6 +369,7 @@ function parseInventory(src: unknown): Inventory | null {
     const group = payload[g]
     if (!group || typeof group !== 'object') continue
     for (const [k, v] of Object.entries(group as Record<string, unknown>)) {
+      if (k.startsWith('screw_')) continue
       const n = Number(v)
       if (Number.isFinite(n) && n > 0) next[g][k] = n
     }
@@ -524,7 +523,7 @@ function pruneSessionTabs(tabs: Tab[]) {
 
 function loadInv(): Inventory {
   const raw = (storage.loadInventory?.() as Inventory | null) || emptyInv()
-  return { ...emptyInv(), ...raw, tubes: raw.tubes || {}, connectors: raw.connectors || {}, panels: raw.panels || {}, reinforcements: raw.reinforcements || {}, fittings: raw.fittings || {}, screws: raw.screws || {} }
+  return parseInventory(raw) || emptyInv()
 }
 
 const ROOM_KEY = 'quadro.room.v1'
@@ -624,23 +623,16 @@ export function asBom(raw: AnyRec): BomView {
     key: `reinforcements:${r.id}`, name: cleanBomText(r.name), count: Number(r.count),
     subtotal: Number(r.subtotal || 0), id: cleanBomText(r.id), kind: 'reinforcements',
   }))
-  const screws = ((raw.screws as AnyRec[]) || []).map(r => ({
-    key: `screws:${r.id}|${r.color || ''}`, name: cleanBomText(r.name), count: Number(r.count),
-    color: (r.color as string) || null, subtotal: Number(r.subtotal || 0), id: cleanBomText(r.id), kind: 'screws',
-  }))
   const sum = (rows: BomRow[]) => rows.reduce((s, r) => s + r.count, 0)
   const totals = (raw.totals as AnyRec) || {}
-  const price = Number(totals.price ?? (
-    [...tubes, ...connectors, ...panels, ...textiles, ...slides, ...wheels, ...fittings, ...reinforcements, ...screws]
-      .reduce((s, r) => s + (r.subtotal || 0), 0)
-  ))
+  const price = [...tubes, ...connectors, ...panels, ...textiles, ...slides, ...wheels, ...fittings, ...reinforcements]
+    .reduce((s, r) => s + (r.subtotal || 0), 0)
   return {
-    tubes, connectors, panels, textiles, slides, wheels, fittings, reinforcements, screws,
+    tubes, connectors, panels, textiles, slides, wheels, fittings, reinforcements,
     totals: {
       tubes: Number(totals.tubes ?? sum(tubes)),
       connectors: Number(totals.connectors ?? sum(connectors)),
       panels: Number(totals.panels ?? sum(panels)),
-      screws: Number(totals.screws ?? sum(screws)),
       other: Number(totals.other ?? (sum(textiles) + sum(slides) + sum(wheels) + sum(fittings) + sum(reinforcements))),
       price,
     },
@@ -2435,7 +2427,6 @@ export function EngineProvider({ children }: { children: ReactNode }) {
           gWheels: t('bom.wheels'),
           gFittings: t('bom.fittings'),
           gReinforcements: t('bom.reinforcements'),
-          gScrews: t('bom.screws'),
         },
       })
       track('builder.export.manual.done', { object: manualObject })

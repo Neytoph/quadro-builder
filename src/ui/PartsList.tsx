@@ -96,7 +96,6 @@ export function BomPane() {
               <Section title={t('bom.textiles')} rows={bom.textiles} onPick={r => api.highlight(r.kind, r.id || '', r.color)} />
               <Section title={t('bom.fittings')} rows={bom.fittings} onPick={r => api.highlight(r.kind, r.id || '')} />
               <Section title={t('bom.reinforcements')} rows={bom.reinforcements} onPick={r => api.highlight(r.kind, r.id || '')} />
-              <Section title={t('bom.screws')} rows={bom.screws} onPick={r => api.highlight(r.kind, r.id || '', r.color)} />
             </>
           )}
         <div className="flex gap-1.5 mt-2 pt-3 border-t border-gray-800">

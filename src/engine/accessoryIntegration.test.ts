@@ -38,7 +38,7 @@ describe('原创组件清单与导出集成', () => {
     }
     const bom = computeBOM(restored)
     expect([...bom.panels, ...bom.fittings].filter(row => row.kitContents)).toHaveLength(4)
-    expect(bom.screws.some(row => row.id === 'screw_panel')).toBe(false)
+    expect(bom).not.toHaveProperty('screws')
     const plan = computeBuildPlan(restored)
     expect(plan.steps.slice(-4).every(step => step.kind === 'accessories')).toBe(true)
     expect(plan.steps.slice(-4).flatMap(step => [...step.panelIds, ...step.fittingIds])).toHaveLength(4)
@@ -59,7 +59,7 @@ describe('原创组件清单与导出集成', () => {
     expect(computeBOM(copy).totals.panels).toBe(originalBOM.totals.panels)
   })
 
-  it('新版忙碌板随附固定夹不重复计标准板螺丝，保留旧板螺丝语义', () => {
+  it('新版忙碌板保留随附固定夹和安装步骤', () => {
     const model = officialModel()
     const panel = [...model.panels.values()][0]
     expect(panel).toBeTruthy()
@@ -68,8 +68,8 @@ describe('原创组件清单与导出集成', () => {
     const oldBOM = computeBOM(model)
     panel.appearanceVersion = 1
     const newBOM = computeBOM(model)
-    expect(newBOM.screws.find((row: { id: string }) => row.id === 'screw_panel')?.count ?? 0)
-      .toBe((oldBOM.screws.find((row: { id: string }) => row.id === 'screw_panel')?.count ?? 0) - 4)
+    expect(oldBOM).not.toHaveProperty('screws')
+    expect(newBOM).not.toHaveProperty('screws')
     expect(newBOM.panels.find((row: { panelId: string }) => row.panelId === 'panel_40x40_busy')?.kitContents).toContain('4')
     const componentSteps = computeBuildPlan(model).steps.filter((step: { kind: string }) => step.kind === 'accessories')
     expect(componentSteps).toHaveLength(1)

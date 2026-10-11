@@ -12,7 +12,7 @@ import { C45_ARM_LEN, C45_SLEEVE_LEN } from './config.js';
 import { getLang } from './i18n.js';
 import { isOriginalComponent, componentInstallCopy, componentPartId } from './accessoryInfo.js';
 
-const GROUPS = ['tubes', 'connectors', 'panels', 'textiles', 'slides', 'fittings', 'screws', 'reinforcements'];
+const GROUPS = ['tubes', 'connectors', 'panels', 'textiles', 'slides', 'fittings', 'reinforcements'];
 const MAPS = { nodeIds: 'nodes', tubeIds: 'tubes', panelIds: 'panels', textileIds: 'textiles', slideIds: 'slides', fittingIds: 'fittings', clampIds: 'clamps' };
 const EPS = 0.6;
 const emptyParts = () => Object.fromEntries(GROUPS.map(k => [k, []]));
@@ -359,7 +359,6 @@ function allocateBOM(model, bom, steps, owner, diagnostics) {
   }
   for (const tx of values(model, 'textiles')) add('textiles', textileRow(model, tx).key, [tx.id]);
   for (const sl of values(model, 'slides')) add('slides', sl.kind, [sl.id]);
-  for (const row of bom.screws) for (const a of row.allocations || []) add('screws', rowKey('screws', row), [a.partId], a.count);
   const reinforcement = reinforcementPart();
   if (reinforcement) for (const run of reinforcementRuns(model)) add('reinforcements', reinforcement.id, run.tubeIds, Math.max(1, Math.round(run.length / (reinforcement.length_cm || 80))));
   for (const group of GROUPS) for (const row of bom[group]) {
@@ -466,7 +465,7 @@ export function computeAssemblyPlan(model, config = model.assemblyConfig || {}, 
     if (lastStep.has(r.id)) dependsOn.push(lastStep.get(r.id));
     const positions = r.nodeIds.map(id => model.nodes.get(id));
     const y = positions.length ? Math.min(...positions.map(coord)) : 0;
-    const step = { id, regionId: r.id, kind: action.type === 'attach' ? 'attach' : action.type === 'preassemble' ? 'preassembly' : 'frame', title, instructions: [], level: levels.findIndex(v => Math.abs(v - y) < EPS), y, action, dependsOn: [...new Set(dependsOn)], interfaceIds: operationMarks.map(a => a.id), partIds, parts: emptyParts(), connectors: [], tubes: [], panels: [], textiles: [], slides: [], fittings: [], screws: [], reinforcements: [], openEnds: 0, ...Object.fromEntries(Object.keys(MAPS).map(k => [k, keyIds[k] || []])) };
+    const step = { id, regionId: r.id, kind: action.type === 'attach' ? 'attach' : action.type === 'preassemble' ? 'preassembly' : 'frame', title, instructions: [], level: levels.findIndex(v => Math.abs(v - y) < EPS), y, action, dependsOn: [...new Set(dependsOn)], interfaceIds: operationMarks.map(a => a.id), partIds, parts: emptyParts(), connectors: [], tubes: [], panels: [], textiles: [], slides: [], fittings: [], reinforcements: [], openEnds: 0, ...Object.fromEntries(Object.keys(MAPS).map(k => [k, keyIds[k] || []])) };
     steps.push(step); lastStep.set(r.id, id);
     if (action.type !== 'attach') for (const partId of partIds) { if (owner.has(partId)) diagnostics.push({ code: 'DUPLICATE_PART_STEP', severity: 'error', message: '同一部件被重复安装。', partIds: [partId], nodeIds: [] }); owner.set(partId, steps.length - 1); }
     return step;

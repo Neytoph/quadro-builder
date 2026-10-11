@@ -118,7 +118,7 @@ describe('确认配件的真实清单、手册和格式转换', () => {
       expect(row.kitContents).toBeTruthy()
       expect(row.loadVerified).toBe(false)
       expect(row.colorName).not.toMatch(/^#[\da-f]{6}$/i)
-      expect(bom.screws.some((p: any) => p.id === 'screw_panel')).toBe(false)
+      expect(bom).not.toHaveProperty('screws')
       for (const lang of ['zh', 'en', 'de']) {
         setLang(lang)
         const step = computeBuildPlan(reopened).steps.find((s: any) => s.kind === 'accessories')

@@ -7,7 +7,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const evidence = path.join(root, '.work/parts-image-first')
 await fs.mkdir(path.join(evidence, 'sources'), { recursive: true })
 const catalog = JSON.parse(await fs.readFile(path.join(root, 'public/data/parts.json'), 'utf8'))
-const photos = ['reinforce80', 'safety_clamp', 'acrylic_glass', 'TS7', ...catalog.screws.map(part => part.id)]
+const photos = ['reinforce80', 'safety_clamp', 'acrylic_glass', 'TS7']
 const sources = []
 for (const id of photos) {
   const part = Object.values(catalog).filter(Array.isArray).flat().find(part => part.id === id)

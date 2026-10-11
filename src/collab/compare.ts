@@ -35,7 +35,7 @@ export interface BomDiffRow {
   right: number
 }
 
-const GROUPS = ['tubes', 'connectors', 'panels', 'textiles', 'slides', 'fittings', 'reinforcements', 'screws'] as const
+const GROUPS = ['tubes', 'connectors', 'panels', 'textiles', 'slides', 'fittings', 'reinforcements'] as const
 
 type Row = Record<string, unknown>
 

@@ -458,7 +458,7 @@ export function coverItems(bom) {
       const rawKey = r.key ?? (group === 'connectors' ? r.type : `${id}|${r.color || ''}`);
       const key = group === 'connectors' ? `connectors:${id}`
         : group === 'slides' ? `slides:${id}`
-        : ['fittings', 'reinforcements', 'screws'].includes(group) ? (String(rawKey).startsWith(`${group}:`) ? rawKey : `${group}:${rawKey}`)
+        : ['fittings', 'reinforcements'].includes(group) ? (String(rawKey).startsWith(`${group}:`) ? rawKey : `${group}:${rawKey}`)
         : rawKey;
       rows.push({
         key,
@@ -473,7 +473,6 @@ export function coverItems(bom) {
       });
     }
   };
-  // The manual excludes screw statistics; the platform BOM remains compatible.
   for (const group of ['tubes', 'connectors', 'panels', 'textiles', 'slides', 'wheels', 'fittings', 'reinforcements']) take(group, bom[group]);
   return numberItems(rows);
 }

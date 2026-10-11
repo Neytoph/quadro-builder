@@ -24,7 +24,6 @@ export function bomSections(bom: BomView, t: T): BomSection[] {
     { title: t('bom.textiles'), rows: bom.textiles },
     { title: t('bom.fittings'), rows: bom.fittings },
     { title: t('bom.reinforcements'), rows: bom.reinforcements },
-    { title: t('bom.screws'), rows: bom.screws },
   ].filter(s => s.rows.length)
 }
 

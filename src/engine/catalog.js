@@ -83,7 +83,7 @@ export function getPanel(id) {
 /** Teil nach id ueber alle Rubriken -- fuer Stueckliste und Bestand. */
 export function getPartById(id) {
   const all = [...allConnectors(), ...accessories(), ...allTubes(), ...panels(),
-    ...reinforcements(), ...screws()];
+    ...reinforcements()];
   return all.find((p) => p.id === id) || null;
 }
 
@@ -148,12 +148,6 @@ export function reinforcements() {
   return catalog().reinforcements || [];
 }
 
-// Schrauben. Eigene Gruppe, weil sie NUR gerechnet werden: nichts zu setzen,
-// nichts zu zeichnen, nichts im Bestand. Der Preis gilt je Packung (`pack`).
-export function screws() {
-  return catalog().screws || [];
-}
-
 /**
  * Passende Poolfolie zu einer Baellebad-Grundflaeche. Verglichen wird mit den
  * Katalogmassen (`pool` am Teil): XS gehoert zum kleinen Becken, S/L/XXL
@@ -171,11 +165,6 @@ export function poolLinerFor(s1, s2) {
     const diff = Math.abs(a.pool.short * a.pool.long - area);
     return !best || diff < best.diff ? { def: a, diff } : best;
   }, null).def;
-}
-
-/** Schraube nach Kennung, z. B. "screw_panel". */
-export function getScrew(id) {
-  return screws().find((s) => s.id === id) || null;
 }
 
 // Standard-Verstaerkungsprofil (erstes definiertes).

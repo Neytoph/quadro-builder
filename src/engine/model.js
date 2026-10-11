@@ -1077,7 +1077,7 @@ export class BuildModel {
    * Platte um 90 Grad drehen. Sie hat zwei LIPPEN mit je zwei Schrauben; die
    * Drehung entscheidet, an welchem Rohrpaar sie verschraubt wird -- laengs der
    * Tragrohre (Vorgabe) oder quer dazu. Geometrisch deckt sie dasselbe Feld,
-   * nur die Schrauben wandern (siehe computeScrews in bom.js).
+   * die Befestigungsrichtung bleibt im Modell gespeichert.
    */
   turnPanel(id) {
     const p = this.panels.get(id);

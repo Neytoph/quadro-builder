@@ -29,7 +29,6 @@ export default function KitAdvisor() {
   const copyList = () => {
     const lines = [t('kit.listTitle'), '', t('kit.used') + ':']
     rows.forEach(([i, v]) => lines.push(`  ${skuLabel(i)} ×${v}`))
-    if (mapped.screws) lines.push(`  ${t('bom.screws')} ×${mapped.screws}`)
     if (mapped.unmapped.length) {
       lines.push('', t('kit.unmapped') + ':')
       mapped.unmapped.forEach(u => lines.push(`  ${labelOf(u.id, u.name)} ×${u.count}`))
@@ -81,16 +80,6 @@ export default function KitAdvisor() {
                 </div>
               ))}
             </div>
-            {mapped.screws > 0 && (
-              <div className="mt-2 text-gray-500">
-                {api.bom?.screws.map(row => <div key={row.key} data-ui="advisor-screw-row" data-part-id={row.id} className="qb-material-row flex items-center gap-2">
-                  <PartThumbnail id={row.id} imageKey={row.key} kind="screws" />
-                  <span className="qb-material-name flex-1 min-w-0">{labelOf(row.id || '', row.name)}</span>
-                  <span className="qb-material-count tabular-nums">×{row.count}</span>
-                </div>)}
-                <p className="text-[10px] leading-relaxed mt-1">{t('kit.screws', { n: mapped.screws })}</p>
-              </div>
-            )}
             {mapped.unmapped.length > 0 && (
               <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2">
                 <div className="text-[11px] text-amber-800 mb-1">{t('kit.unmapped')}</div>
