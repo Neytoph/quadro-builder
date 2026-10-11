@@ -1,4 +1,5 @@
 import {normalizedAssemblyQuaternion} from './assemblyAccessoryMethods.js';
+import { structuralBearingSupport } from './assemblyStructuralBearings.js';
 import { computeBOM, connectorsForNode, resolveNodeConnection, reinforcementRuns, textileRow } from './bom.js';
 import { reinforcementPart } from './catalog.js';
 import { geometry } from './catalog.js';
@@ -430,7 +431,11 @@ export function computeAssemblyPlan(model, config = model.assemblyConfig || {}, 
   }
   for (const n of model.nodes.values()) if (n.clampOn) {
     const source = regions.find(r => r.tubeIds.includes(n.clampOn.tubeId)), target = regions.find(r => r.ownedNodeIds.includes(n.id));
-    if (source && target && source.id !== target.id) interfaces.push({ id: '', sourceRegionId: source.id, targetRegionId: target.id, nodeId: n.id, position: point(n), direction: [0, -1, 0], attachment: 'tube-clamp', supportTubeId: n.clampOn.tubeId });
+    if (source && target && source.id !== target.id) {
+      const bearing=model.fittings.get(n.bearingOn),support=bearing&&structuralBearingSupport(model,bearing);
+      if(support?.valid)interfaces.push({id:'',sourceRegionId:target.id,targetRegionId:source.id,nodeId:n.id,position:point(bearing),direction:support.shaftAxis,attachment:'bearing-shaft',supportTubeId:n.clampOn.tubeId,bearingId:bearing.id});
+      else interfaces.push({ id: '', sourceRegionId: source.id, targetRegionId: target.id, nodeId: n.id, position: point(n), direction: [0, -1, 0], attachment: 'tube-clamp', supportTubeId: n.clampOn.tubeId });
+    }
   }
   const firstBody = [...regions].filter(r => r.kind === 'body').sort((a, b) => a.supportRank - b.supportRank)[0];
   for (const r of regions) if (r.kind === 'body' && r !== firstBody && !interfaces.some(m => m.targetRegionId === r.id)) {
@@ -515,7 +520,8 @@ export function computeAssemblyPlan(model, config = model.assemblyConfig || {}, 
   };
   for (const r of regions) {
     const preassemble = ['roof', 'ramp', 'slide'].includes(r.kind);
-    const marks = interfaces.filter(a => a.targetRegionId === r.id && a.attachment !== 'upper-frame'), direction = marks[0]?.direction || [0, -1, 0];
+    // 轴承接口表示支架先完成；连续轴的穿入由单根管动作验证。
+    const marks = interfaces.filter(a => a.targetRegionId === r.id && !['upper-frame','bearing-shaft'].includes(a.attachment)), direction = marks[0]?.direction || [0, -1, 0];
     const commonAxis = marks.every(m => m.direction.reduce((s, v, i) => s + v * direction[i], 0) > 0.97);
     r.installation = { direction, commonAxis, clearance: Math.max(45, width * 0.4), pathVerified: false };
     r.detachedTranslation = direction.map(v => -v * r.installation.clearance);

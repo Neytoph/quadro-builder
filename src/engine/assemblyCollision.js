@@ -14,6 +14,7 @@ function useMeshes() {
 import { componentVolumes } from './accessoryPack.js';
 import { curvePoint } from './confirmedComponentModel.js';
 import { C45_SLEEVE_LEN, C45_ARM_LEN } from './config.js';
+import { structuralBearingSupport } from './assemblyStructuralBearings.js';
 import { xAxisOf, yAxisOf, zAxisOf, panelNormal, modelMiddle } from './util.js';
 
 const xyz = p => [p.x, p.y, p.z];
@@ -308,8 +309,35 @@ function linerSleeveContact(model,id,obstacleId,a,b,delta,end,pad,obstacleOffset
 export function assemblyFittingBoreContact(model,id,obstacleId,a,b,delta,end,pad,obstacleOffset,contracts){
   const contract=contracts.get(`${id}:${obstacleId}`),fitting=model.fittings?.get(id),support=model.fittings?.get(obstacleId)||model.nodes.get(obstacleId);
   if(!contract||contract.fittingId!==id||contract.supportId!==obstacleId||!fitting||!support||a.kind!=='triangle'||b.kind!=='triangle')return false;
+  if(contract.kind==='structural-bearing-stub'){
+    const resolved=structuralBearingSupport(model,fitting),axis=resolved.mount?.direction,origin=xyz(support),relative=sub(delta,obstacleOffset);
+    if(!resolved.valid||resolved.supportIds[0]!==obstacleId||dot(axis,unit(contract.axis||[]))<.999999||Math.hypot(...sub(end,obstacleOffset))>1e-6||dot(relative,axis)<-1e-6||Math.hypot(...relative)+Math.hypot(...pad)>7.5+1e-6||Math.hypot(...relative.map((v,i)=>v-axis[i]*dot(relative,axis)))>1e-6||Math.hypot(...pad)>1e-6&&Math.abs(dot(unit(pad),axis))<.999999)return false;
+    // 工厂套筒局部 X=-7.8 的口沿落在节点 +2.2cm，外径为 5cm。
+    // 仅裁去该真实套筒口至 7.5cm 插头末端之间的有限连接区域。
+    // 接头主体、其它插口、反向及横向动作仍逐个三角面检查。
+    const radial=unit(cross(axis,Math.abs(axis[1])<.9?[0,1,0]:[1,0,0])),tangent=cross(axis,radial);
+    const planes=[{origin:origin.map((v,i)=>v+axis[i]*(2.2-1e-7)),normal:axis.map(v=>-v)},{origin:origin.map((v,i)=>v+axis[i]*(7.5+1e-7)),normal:axis}];
+    for(let k=0;k<64;k++){const angle=k*Math.PI/32,n=radial.map((v,i)=>v*Math.cos(angle)+tangent[i]*Math.sin(angle));planes.push({origin:origin.map((v,i)=>v+n[i]*2.51),normal:n});}
+    for(const plane of planes){const outside=clipPolygonPlane(b.points,plane.origin,plane.normal,true);for(let i=1;i<outside.length-1;i++){const points=[outside[0],outside[i],outside[i+1]];if(Math.hypot(...cross(sub(points[1],points[0]),sub(points[2],points[0])))<1e-9)continue;if(assemblyShapesOverlap(move(a,delta),move({kind:'triangle',points},obstacleOffset),pad))return false;}}
+    return true;
+  }
   const axis=axes(fitting.quat)[0],origin=xyz(support),radius=contract.kind==='wheel-bearing'?2.5:2.1;
   if(dot(axis,unit(contract.axis||[]))<.995)return false;
+  // 原厂脚轮和适配器共用同轴插接区，仅允许该有限圆柱内的源网格接触。
+  // 接头主体、其余插口和外侧挡物继续使用完整三角面检查。
+  if(contract.kind==='caster-adapter'||contract.kind==='node-stub'&&['adapter2','casters2'].includes(fitting.kind)) {
+    const casterAdapter=contract.kind==='caster-adapter';
+    if(casterAdapter&&(fitting.kind!=='casters2'||support.kind!=='adapter2'||dot(axes(support.quat)[0],axis)<.999999))return false;
+    if(!casterAdapter&&(!model.nodes.has(obstacleId)||!resolveNodeConnection(model,support).renderDirs.some(d=>dot(unit(d),axis)>.999999)))return false;
+    if(Math.hypot(...sub(xyz(fitting),origin))>1e-4)return false;
+    const relative=sub(delta,obstacleOffset),travel=dot(relative,axis);
+    if(Math.hypot(...sub(end,obstacleOffset))>1e-6||travel< -1e-6||Math.hypot(...relative)+Math.hypot(...pad)>8+1e-6||Math.hypot(...relative.map((v,i)=>v-axis[i]*travel))>1e-6||Math.hypot(...pad)>1e-6&&Math.abs(dot(unit(pad),axis))<.999999)return false;
+    const radial=unit(cross(axis,Math.abs(axis[1])<.9?[0,1,0]:[1,0,0])),tangent=cross(axis,radial),depth=casterAdapter?8:7.5;
+    const planes=[{origin:origin.map((v,i)=>v+axis[i]*(2.5-1e-7)),normal:axis.map(v=>-v)},{origin:origin.map((v,i)=>v+axis[i]*(depth+1e-7)),normal:axis}];
+    for(let k=0;k<64;k++){const angle=k*Math.PI/32,n=radial.map((v,i)=>v*Math.cos(angle)+tangent[i]*Math.sin(angle));planes.push({origin:origin.map((v,i)=>v+n[i]*2.51),normal:n});}
+    for(const plane of planes){const outside=clipPolygonPlane(b.points,plane.origin,plane.normal,true);for(let i=1;i<outside.length-1;i++){const points=[outside[0],outside[i],outside[i+1]];if(Math.hypot(...cross(sub(points[1],points[0]),sub(points[2],points[0])))<1e-9)continue;if(assemblyShapesOverlap(move(a,delta),move({kind:'triangle',points},obstacleOffset),pad))return false;}}
+    return true;
+  }
   if(contract.kind==='wheel-bearing'){
     const offset=sub(xyz(fitting),origin),along=dot(offset,axis);
     if(fitting.kind!=='multi-wheel2'||support.kind!=='bearing2'||dot(axes(support.quat)[0],axis)<.999999||Math.abs(along-5)>.01||Math.hypot(...offset.map((v,i)=>v-axis[i]*along))>1e-4)return false;

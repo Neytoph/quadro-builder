@@ -1348,6 +1348,20 @@ export class BuildModel {
   ropeDiagnostics(first, second) { return confirmedDiagnostics(this, ropeCandidate(this, first, second)); }
   confirmedDiagnostics(probe) { return confirmedDiagnostics(this, probe); }
 
+  // 普通方板与半高围板使用工厂原生形状；安装前仍检查四边及固定位。
+  addNativePanel(probe, color) {
+    if (!['panel_40x40', 'panel_40x20'].includes(probe?.panelId)) return null;
+    const candidate = confirmedDiagnostics(this, { ...probe, id: undefined });
+    if (!candidate.valid) return null;
+    const panel = {
+      id: this._id('p'), a: candidate.a, b: candidate.b,
+      t0: round(candidate.t0), len: round(candidate.len), panelId: candidate.panelId,
+      color: color || probe.color || null, side: candidate.side < 0 ? -1 : 1,
+    };
+    this.panels.set(panel.id, panel);
+    return panel;
+  }
+
   addConfirmedComponent(probe, color) {
     const candidate = confirmedDiagnostics(this, {...probe,id:undefined});
     if (!candidate.valid) return null;
@@ -2626,7 +2640,8 @@ export class BuildModel {
   //
   // 竖管到横梁就结束（两层立方框的顶面）时，滑梯也能搭在顶梁上——这时绿面
   // 是横梁下方那一格；只有上面什么都不接时才这样算，免得同一根横梁出两个面。
-  slideMounts(width = 40, tol = 2, kind = "slide-new2", includeOccupied = false) {
+  /** @param {number[] | null} preferredNormal */
+  slideMounts(width = 40, tol = 2, kind = "slide-new2", includeOccupied = false, preferredNormal = null) {
     // Ein Koerper einer Kette endet nicht hier: hinter ihm kommt das naechste
     // Teil, sein Fuss muss also nichts tragen. Einteilige Rutschen brauchen
     // Boden oder Geruest unter dem Auslauf.
@@ -2665,10 +2680,14 @@ export class BuildModel {
         const sdist = (n.x - hook[0]) * nrm[0] + (n.z - hook[2]) * nrm[2];
         if (sdist > 5) front++; else if (sdist < -5) back++;
       }
-      let dir = front > back ? [-nrm[0], 0, -nrm[2]] : nrm;
+      const directed = Array.isArray(preferredNormal) && preferredNormal.length === 3 && preferredNormal.every(Number.isFinite)
+        && Math.abs(preferredNormal[1]) < 0.01 && Math.abs(Math.hypot(...preferredNormal) - 1) < 0.01;
+      if (preferredNormal != null && (!directed || Math.abs(dot3(preferredNormal, nrm)) < 0.999)) return;
+      let dir = directed ? [...preferredNormal] : front > back ? [-nrm[0], 0, -nrm[2]] : nrm;
       const usable = (vec) => this._slidePathFree(hook, vec, mass)
         && (!brauchtAuflage || this._slideFootRests(hook, vec, groundY, mass));
       if (!usable(dir)) {
+        if (directed) return;
         const other = [-dir[0], 0, -dir[2]];
         if (!usable(other)) return;
         dir = other;
@@ -6202,6 +6221,8 @@ export class BuildModel {
       panels: [...this.panels.values()].map((p) => {
         const o = { id: p.id, a: p.a, b: p.b, t0: round(p.t0), len: round(p.len), panelId: p.panelId, color: p.color };
         if ((p.side || 1) < 0) o.side = -1;   // Standard ist oben/aussen
+        // 确认组件缺省方向按居中导入；显式朝外的斜坡板必须保存，避免重载后网格移位。
+        if (p.appearanceVersion === 2 && p.side === 1) o.side = 1;
         if (p.turned) o.turned = true;        // Lippen quer statt laengs (Schrauben)
         if (p.geom) o.geom = p.geom;          // eigene Lage aus der Datei
         if (p.pool) o.pool = p.pool;          // Original-Zeile des Baellebads

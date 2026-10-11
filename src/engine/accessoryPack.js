@@ -84,7 +84,7 @@ function volume(frame, lo, hi) {
 export function componentVolumes(model, part, { sweep = false } = {}) {
   // 原生抓取网格为7.5×30.2×30.2cm；保持原配件空间检查的保守4cm轴向半厚度。
   if(part.kind==='multi-wheel2'){const frame=componentFrame(model,part);return frame?[volume(frame,[-4,-15.1,-15.1],[4,15.1,15.1])]:[];}
-  if (part.appearanceVersion === 2) return confirmedVolumes(model, part);
+  if (part.appearanceVersion === 2 || !part.appearanceVersion && ['panel_40x40', 'panel_40x20'].includes(part.panelId)) return confirmedVolumes(model, part);
   const frame = componentFrame(model, part);
   if (!frame) return [];
   const kind = part.kind || part.panelId;
@@ -163,7 +163,7 @@ export function componentObstacle(model, part, { sweep = false } = {}) {
   }
   for (const other of [...model.panels.values(), ...model.textiles.values(), ...model.fittings.values()]) {
     if (other.id === part.id) continue;
-    const boxes = (ACCESSORY_IDS.has(other.kind) && (!confirmedSpec(other.kind) || other.appearanceVersion === 2)) || (other.appearanceVersion && PANEL_ACCESSORY_IDS.has(other.panelId))
+    const boxes = (ACCESSORY_IDS.has(other.kind) && (!confirmedSpec(other.kind) || other.appearanceVersion === 2)) || (other.appearanceVersion && PANEL_ACCESSORY_IDS.has(other.panelId)) || ['panel_40x40', 'panel_40x20'].includes(other.panelId)
       ? componentVolumes(model, other, { sweep: other.kind === 'swing' })
       : other.kind==='multi-wheel2' ? componentVolumes(model,other) : (other.a && other.b ? panelVolume(model, other) : [{ pos: [other.x, other.y, other.z], axes: other.quat?.every(Number.isFinite) ? [xAxisOf(other.quat), yAxisOf(other.quat), zAxisOf(other.quat)] : [[1, 0, 0], [0, 1, 0], [0, 0, 1]], half: other.kind === 'floating-wheel2' ? [7.5, 15.1, 15.1] : [3, 3, 3] }]);
     if (volumes.some(box => boxes.some(otherBox => boxesOverlap(box, otherBox)))) return { kind: other.panelId ? 'panel' : 'fitting', id: other.id };
@@ -180,7 +180,9 @@ function occupiedMount(model, mounts, ignoreId) {
   const parts = [...model.fittings.values(), ...model.panels.values()];
   for (const part of parts) {
     if (part.id === ignoreId) continue;
-    const used = Array.isArray(part.mounts) ? part.mounts.filter(m => m && typeof m === 'object') : (part.tube ? [{ tube: part.tube, t: 0.5, width: part.kind === 'sleeve' ? Infinity : 5 }] : []);
+    // 工厂普通板保留标准存档字段，固定位随当前支撑管即时计算。
+    const nativePanelMounts = ['panel_40x40', 'panel_40x20'].includes(part.panelId) && !part.appearanceVersion ? confirmedPanelDiagnostics(model, part).mounts : null;
+    const used = Array.isArray(part.mounts) ? part.mounts.filter(m => m && typeof m === 'object') : nativePanelMounts || (part.tube ? [{ tube: part.tube, t: 0.5, width: part.kind === 'sleeve' ? Infinity : 5 }] : []);
     for (const a of mounts) for (const b of used) {
       if (a.tube !== b.tube) continue;
       const t = model.tubes.get(a.tube), n = t && model.nodes.get(t.a), m = t && model.nodes.get(t.b);

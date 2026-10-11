@@ -1,4 +1,5 @@
 import {xAxisOf as rawXAxisOf,yAxisOf as rawYAxisOf,zAxisOf as rawZAxisOf} from './util.js';
+import { structuralBearingSupport } from './assemblyStructuralBearings.js';
 export const normalizedAssemblyQuaternion=q=>{const value=q||[0,0,0,1],length=Math.hypot(...value);return length?value.map(v=>v/length):[0,0,0,1];};
 const xAxisOf=q=>rawXAxisOf(normalizedAssemblyQuaternion(q)),yAxisOf=q=>rawYAxisOf(normalizedAssemblyQuaternion(q)),zAxisOf=q=>rawZAxisOf(normalizedAssemblyQuaternion(q));
 const xyz=p=>[p.x,p.y,p.z],sub=(a,b)=>a.map((v,i)=>v-b[i]),dot=(a,b)=>a.reduce((sum,v,i)=>sum+v*b[i],0),unit=d=>d.map(v=>v/(Math.hypot(...d)||1));
@@ -7,11 +8,17 @@ const sameRoofSlopes=(a,b)=>{const leaf=q=>[zAxisOf(q),yAxisOf(q).map(v=>-v)],[a
 export function nativeAccessorySupport(model,id){
   const fitting=model.fittings.get(id),slide=model.slides.get(id);
   if(fitting){
+    if(fitting.kind==='bearing-connector4')return structuralBearingSupport(model,fitting);
     const virtual=Object.assign(Object.create(Object.getPrototypeOf(model)),model,{fittings:new Map(model.fittings)});virtual.fittings.delete(id);
     const axis=xAxisOf(fitting.quat||[0,0,0,1]),point=xyz(fitting);
     let mounts=[];try{mounts=virtual.fittingMounts(fitting.kind)||[];}catch{}
     const matches=mounts.filter(m=>Math.hypot(...sub(m.pos,point))<.05&&dot(unit(m.dir),axis)>.995);
     if(matches.length===1){const match=matches[0],supports=[match.nodeId,match.tubeId].filter(Boolean);
+      if(fitting.kind==='casters2') {
+        const adapters=[...virtual.fittings.values()].filter(f=>f.kind==='adapter2'&&Math.hypot(...sub(xyz(f),point))<.05&&dot(xAxisOf(f.quat),axis)>.995);
+        if(adapters.length!==1)return {valid:false,supportIds:[],basis:'caster-requires-one-matching-adapter'};
+        supports.push(adapters[0].id);
+      }
       if(fitting.kind==='multi-wheel2')for(const bearing of virtual.fittings.values())if(bearing.kind==='bearing2'){const d=xAxisOf(bearing.quat||[0,0,0,1]);if(dot(d,axis)>.995&&Math.hypot(...sub(xyz(bearing).map((v,i)=>v+d[i]*5),point))<.05)supports.push(bearing.id);}
       return {valid:supports.length>0,supportIds:supports,basis:'existing-catalog-mount-position-and-port-axis',mount:{position:match.pos,direction:axis,catalogDirection:match.dir}};
     }

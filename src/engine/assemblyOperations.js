@@ -104,6 +104,11 @@ export function scheduleAssemblyAccessories(model,steps,diagnostics,regions=[],d
     const q=f.quat||[0,0,0,1],axis=xAxisOf(q),bearings=[...model.fittings.values()].filter(p=>p.kind==='bearing2').filter(p=>{const d=xyz(f).map((v,i)=>v-xyz(p)[i]),along=dot(d,axis);return Math.abs(along)<15&&Math.hypot(...d.map((v,i)=>v-axis[i]*along))<.6;});
     if(bearings.length!==1)diag(diagnostics,'MISSING_WHEEL_BEARING','多功能轮需要明确的轮轴承安装引用，请核对轮轴和朝向。',[f.id,...bearings.map(p=>p.id)]);else {const s=owner.get(f.id);s.bearingSupports={...s.bearingSupports,[f.id]:bearings[0].id};}
   }
+  for(const fitting of model.fittings.values())if(fitting.kind==='bearing-connector4'){
+    const support=nativeAccessorySupport(model,fitting.id),target=support.valid&&owner.get(support.supportIds[0]),carrier=support.valid&&owner.get(support.carrierId);
+    if(target&&carrier&&steps.indexOf(target)<steps.indexOf(carrier))move(fitting.id,'fittingIds',target);
+    else diag(diagnostics,'BEARING_SUPPORT_ORDER_UNRESOLVED','轴承必须先固定到已完成的支架插口，再从开放管端穿入连续轴。',[fitting.id,...support.supportIds,support.carrierId].filter(Boolean));
+  }
   for(const c of model.clamps?.values()||[]){const base=model._clampBaseTube?.(c);const cohort=model.clampCohort?.(c.id);const carriers=[base?.id,...(cohort?.tubes||[])].filter(Boolean);const candidates=physical.filter(s=>carriers.some(id=>s.tubeIds.includes(id))).sort((a,b)=>steps.indexOf(a)-steps.indexOf(b)),first=c.connectorId==='tube_clamp'?candidates.at(-1):candidates[0];if(first){move(c.id,'clampIds',first);if(c.connectorId==='tube_clamp')first.clampSupports={...first.clampSupports,[c.id]:carriers};else first.threadSupports={...first.threadSupports,[c.id]:carriers};}else diag(diagnostics,'MISSING_DOUBLE_TUBE_SUPPORT','双管连接环没有可识别的两根穿管轴。',[c.id]);}
   // Dedicated factory slides are fitted when their real entry/exit supports
   // exist, before upper guardrails can obstruct the entrance platform.
@@ -206,7 +211,7 @@ export function addAssemblyOperations(model,plan,onProgress){
   const panelLinerContacts=new Map();
   for(const step of steps)for(const [linerId,{carriers}]of Object.entries(step.flexibleLinings||{}))for(const panel of model.panels.values())for(const railId of tubeSupports(panel))if(carriers.includes(railId))panelLinerContacts.set(`${panel.id}:${linerId}`,{panelId:panel.id,linerId,railId,basis:'source-native-shared-carrier-lip'});
   const fittingMatingContacts=new Map();
-  for(const fitting of model.fittings.values())if(!THREAD.has(fitting.kind)&&!fitting.appearanceVersion){const resolved=nativeAccessorySupport(model,fitting.id);if(resolved.valid)for(const supportId of resolved.supportIds){const kind=model.nodes.has(supportId)?'node-stub':model.fittings.get(supportId)?.kind==='bearing2'?'wheel-bearing':null;if(kind)fittingMatingContacts.set(`${fitting.id}:${supportId}`,{fittingId:fitting.id,supportId,kind,axis:resolved.mount.direction,basis:resolved.basis});}}
+  for(const fitting of model.fittings.values())if(!THREAD.has(fitting.kind)&&!fitting.appearanceVersion){const resolved=nativeAccessorySupport(model,fitting.id);if(resolved.valid)for(const supportId of resolved.supportIds){const kind=fitting.kind==='bearing-connector4'?'structural-bearing-stub':model.nodes.has(supportId)?'node-stub':fitting.kind==='casters2'&&model.fittings.get(supportId)?.kind==='adapter2'?'caster-adapter':model.fittings.get(supportId)?.kind==='bearing2'?'wheel-bearing':null;if(kind)fittingMatingContacts.set(`${fitting.id}:${supportId}`,{fittingId:fitting.id,supportId,kind,axis:resolved.mount.direction,basis:resolved.basis});}}
   const c45MatingContacts=new Map(plan.interfaces.filter(mark=>mark.directionBasis==='qdf-file-C45-mouth-and-matching-receiver-axis').map(mark=>[`${mark.nodeId}:${mark.supportTubeId}`,{cornerId:mark.nodeId,receiverNodeId:mark.mateNodeId,tubeId:mark.supportTubeId,basis:mark.directionBasis}]));
   const reinforcement=reinforcementPart(),core=createCoreChannels(model,{entryPanelContacts,linerCarrierContacts,panelLinerContacts,fittingMatingContacts,c45MatingContacts});
   const checkPath=(moving,installed,...args)=>core.check(moving,[...new Set([...installed,...preparedRigid])].filter(id=>!softLinings.some(lining=>lining.folded&&lining.id===id&&moving.every(part=>lining.carriers.includes(part)||lining.carriers.some(t=>{const tube=model.tubes.get(t);return tube.a===part||tube.b===part;})))),...args);
@@ -217,6 +222,14 @@ export function addAssemblyOperations(model,plan,onProgress){
     const present=new Set(installed);
     const emit=(type,partIds,text,extra={})=>{
       if(type==='insert-tube'){
+        const bearings=[...model.fittings.values()].filter(f=>f.kind==='bearing-connector4').map(f=>({f,support:nativeAccessorySupport(model,f.id)})).filter(({support})=>support.valid&&partIds.includes(support.carrierId));
+        if(bearings.length){
+          const tube=model.tubes.get(bearings[0].support.carrierId),axis=unit(extra.translation),points=[tube.a,tube.b].map(id=>xyz(model.nodes.get(id))),near=Math.min(...points.map(p=>dot(p,axis))),far=Math.max(...bearings.map(({f})=>dot(xyz(f),axis)+2.5)),travel=Math.max(Math.hypot(...extra.translation),far-near+5);
+          const aligned=bearings.every(({f,support})=>present.has(f.id)&&Math.abs(dot(support.shaftAxis,axis))>.999999&&Math.hypot(...(poses.get(f.id)||[0,0,0]))<1e-6)&&[tube.a,tube.b].filter(id=>present.has(id)).length<2;
+          if(!aligned)diag(diagnostics,'BEARING_SHAFT_METHOD_UNRESOLVED','连续轴穿入前需要全部轴承已固定、孔轴一致，并保留开放管端。',[tube.id,...bearings.map(({f})=>f.id)]);
+          extra={...extra,translation:axis.map(v=>v*travel),direction:axis.map(v=>-v),referencePartIds:[...(extra.referencePartIds||[]),...bearings.map(({f})=>f.id)],bearingShaftMethod:{bearingIds:bearings.map(({f})=>f.id),valid:aligned,basis:'fixed-bearings-before-open-ended-continuous-shaft'}};
+          text=copy('先确认图示轴承已固定到支架，保持两孔同轴；从开放端沿箭头穿入连续轴，再连接另一端框架。','Secure the shown bearings to their supports, align their bores, and slide the continuous shaft through from its open end before joining the other frame.','Gezeigte Lager an ihren Stützen befestigen, Bohrungen axial ausrichten und durchgehendes Rohr vom offenen Ende einschieben; danach den anderen Rahmen verbinden.');
+        }
         const carried=threadAssemblies.filter(thread=>thread.verification.methodChecked&&thread.carriers.some(id=>partIds.includes(id)));
         if(carried.length){
           const carriers=[...new Set(carried.flatMap(thread=>thread.carriers))],accessories=[...new Set(carried.filter(thread=>!thread.flexible).map(thread=>thread.id))],moving=[...carriers,...accessories];
