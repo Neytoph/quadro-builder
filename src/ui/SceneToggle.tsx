@@ -1,7 +1,9 @@
 import type { CSSProperties } from 'react'
+import { EyeIcon } from '@phosphor-icons/react/dist/csr/Eye'
 import { useEngine } from '../store/EngineContext'
 import { useI18n } from '../i18n'
 import { canvasCorner, SCENE_CLUSTER_GAP, usePanelLayout } from './panelLayout'
+import HomeRoomPanel from './HomeRoomPanel'
 
 const TILE_EDGE = '2px solid rgba(255,255,255,0.88)'
 
@@ -15,41 +17,39 @@ const tileChrome = (_on: boolean, h: number): CSSProperties => ({
 
 const tileBtn = 'm-tile overflow-hidden rounded-[11px] p-0 border-0 cursor-pointer transition-[filter,opacity,box-shadow,transform] duration-200 hover:scale-[1.03] active:scale-95 flex items-center justify-center'
 
-/** 草地、框住、导出说明书：左栏右侧、与左栏顶对齐。 */
+/** 场景工具位于左侧属性栏旁，区域显示按钮排在最右侧。 */
 export default function SceneToggle() {
   const api = useEngine()
-  const { t } = useI18n()
+  const { t, lang } = useI18n()
   const { left, vw, toolbarW } = usePanelLayout()
   const pos = canvasCorner(left, vw, { toolbarW })
   const { tile, clusterW } = pos
   const exporting = !!api.exportingManual
+  const indoor = api.background === 'home' && !!api.homeContext
+  const { obstacles, usable } = api.homeZones
+  const states = [
+    { obstacles: true, usable: true, label: ['全部显示', 'Show all', 'Alles anzeigen'] },
+    { obstacles: true, usable: false, label: ['仅显示橙色区域', 'Show orange zones only', 'Nur orange Bereiche anzeigen'] },
+    { obstacles: false, usable: true, label: ['仅显示绿色区域', 'Show green zone only', 'Nur grünen Bereich anzeigen'] },
+    { obstacles: false, usable: false, label: ['全部隐藏', 'Hide all', 'Alles ausblenden'] },
+  ]
+  const index = states.findIndex(state => state.obstacles === obstacles && state.usable === usable)
+  const next = states[(index + 1) % states.length]
+  const language = { zh: 0, en: 1, de: 2 }[lang]
+  const zoneTitle = {
+    zh: `区域显示：${states[index].label[language]}；点击${next.label[language]}`,
+    de: `Bereiche: ${states[index].label[language]}. Klicken: ${next.label[language]}`,
+    en: `Zones: ${states[index].label[language]}. Click: ${next.label[language]}`,
+  }[lang]
 
   return (
-    <div
+    <div className="fixed z-20 pointer-events-none" style={{ left: pos.sceneLeft, top: pos.sceneTop }}><div
       data-tour="scene-buttons"
       data-ui="scene-buttons"
-      className="fixed z-20 flex flex-row pointer-events-none"
-      style={{ left: pos.sceneLeft, top: pos.sceneTop, width: clusterW, gap: SCENE_CLUSTER_GAP }}
+      className="flex flex-row pointer-events-none"
+      style={{ width: clusterW, gap: SCENE_CLUSTER_GAP }}
     >
-      <button
-        type="button"
-        onClick={api.toggleGrass}
-        aria-pressed={api.grassOn}
-        title={t('btn.grassTitle')}
-        className={`pointer-events-auto ${tileBtn} ${api.grassOn ? 'opacity-100' : 'opacity-45 grayscale'}`}
-        style={tileChrome(api.grassOn, tile)}
-      >
-        <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" width={tile} height={tile} aria-hidden="true">
-          <rect x="0" y="0" width="48" height="48" fill="#B8D6E0" />
-          <circle cx="38" cy="12" r="6" fill="#FFD942" />
-          <ellipse cx="14" cy="13" rx="8" ry="5" fill="rgba(255,248,240,0.7)" />
-          <path d="M0,32 Q12,27 24,32 Q36,36 48,31 L48,48 L0,48 Z" fill="#7BC86A" />
-          <rect x="21.5" y="31" width="5" height="9" rx="2" fill="#B08968" />
-          <ellipse cx="24" cy="27" rx="11" ry="9" fill="#6FC48A" />
-          <ellipse cx="16" cy="30" rx="7" ry="6" fill="#7ECBB0" />
-          <ellipse cx="32" cy="30" rx="7" ry="6" fill="#5AAA72" />
-        </svg>
-      </button>
+      <HomeRoomPanel tile={tile} />
 
       <button
         type="button"
@@ -89,6 +89,23 @@ export default function SceneToggle() {
           <path d="M22.4 31.7 h10.4 M22.4 35.3 h7.4" stroke="#C4B8A8" strokeWidth="1.5" strokeLinecap="round" />
         </svg>
       </button>
-    </div>
+      {indoor && <button
+        type="button"
+        data-ui="home-zone-toggle"
+        data-panel-chrome
+        data-zone-state={['all', 'orange', 'green', 'none'][index]}
+        aria-label={zoneTitle}
+        title={zoneTitle}
+        onClick={() => { api.setHomeZones('obstacles', next.obstacles); api.setHomeZones('usable', next.usable) }}
+        className={`pointer-events-auto ${tileBtn} bg-[#FFFDF9] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600`}
+        style={tileChrome(false, tile)}
+      >
+        <span className="relative block h-[26px] w-[26px]" aria-hidden="true">
+          <EyeIcon size={26} weight="regular" className="absolute inset-0" style={{ color: obstacles ? '#EB923E' : '#E7D5C2', clipPath: 'polygon(0 0,100% 0,0 100%)' }} />
+          <EyeIcon size={26} weight="regular" className="absolute inset-0" style={{ color: usable ? '#68A179' : '#D1DFD3', clipPath: 'polygon(100% 0,100% 100%,0 100%)' }} />
+          {!(obstacles && usable) && <span data-ui="home-zone-slash" className="absolute left-[12px] top-[-2px] h-[30px] w-[1.6px] rotate-45 rounded bg-[#A0A39B] shadow-[0_0_0_1.4px_#FFFDF9]" />}
+        </span>
+      </button>}
+    </div></div>
   )
 }

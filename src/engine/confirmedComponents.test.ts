@@ -51,6 +51,23 @@ describe('确认组件实际安装与生命周期',()=>{
 })
 
 describe('确认组件数据及装配边界',()=>{
+  it('批量装配可获取同一面板的不同承载方向，默认挂位保持按框格去重',()=>{
+    const {model}=createConfirmedComponentFixture('panel_40x40',{install:false})
+    const faceKey=(p: Parameters<BuildModel['panelCorners']>[0])=>model.panelCorners(p)!.map(c=>c.join(',')).sort().join('|')
+    const normal=model.confirmedMounts('panel_40x40'),all=model.confirmedMounts('panel_40x40',{deduplicate:false})
+    expect(new Set(normal.map(faceKey)).size).toBe(normal.length)
+    expect(new Set(all.map(faceKey))).toEqual(new Set(normal.map(faceKey)))
+    expect(all.length).toBeGreaterThan(normal.length)
+    const face=all.filter(p=>faceKey(p)===faceKey(normal[0]))
+    expect(new Set(face.map(p=>JSON.stringify(p.mounts))).size).toBeGreaterThan(1)
+    for(const mount of face){
+      const part=model.addConfirmedComponent(mount,'blue')!
+      expect(componentMountsValid(model,part)).toBe(true)
+      const reopened=new BuildModel();expect(reopened.loadJSON(model.toJSON()).ok).toBe(true)
+      expect(componentMountsValid(reopened,parts(reopened)[0])).toBe(true)
+      model.removePanel(part.id)
+    }
+  })
   it('自由blue语义色使用正式天蓝，经典绿固定件统一底板与凸点',()=>{
     const plain=createConfirmedComponentFixture('panel_40x40'),body=meshes(plain.model,plain.part).find(m=>m.name.startsWith('plate:'))!
     expect((body.material as THREE.MeshPhysicalMaterial).color.getHexString()).toBe('2b8ff0')

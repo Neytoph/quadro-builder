@@ -27,7 +27,7 @@ export const VIEW_CUBE_PX = 80
 export const VIEW_CUBE_MARGIN = 22
 export const SCENE_TOGGLE_PX = CORNER_TILE
 export const SCENE_CLUSTER_GAP = 8
-export const SCENE_CLUSTER_TILES = 3
+export const SCENE_CLUSTER_TILES = 4
 export const SCENE_CLUSTER_W = CORNER_TILE * SCENE_CLUSTER_TILES + SCENE_CLUSTER_GAP * (SCENE_CLUSTER_TILES - 1)
 export const CORNER_BOTTOM = 16
 export const CORNER_BOTTOM_NARROW = 72
@@ -148,8 +148,7 @@ export function canvasInset(box: PanelBox) {
 }
 
 export function leftColumnWidth(box: PanelBox, vw: number) {
-  // Keep the three scene buttons beside the capsules, with a gap on both
-  // viewport edges and between the two columns. Do not persist this shrink.
+  // 给室内场景的四个按钮预留宽度，保持两侧间距，不保存临时缩窄后的栏宽。
   if (vw <= NARROW_MAX) return Math.min(box.width, Math.max(0, vw - PANEL_GAP * 3 - SCENE_CLUSTER_W))
   return box.width
 }

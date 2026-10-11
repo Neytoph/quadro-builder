@@ -1,6 +1,8 @@
 // 3D-Szene + Rendering (Three.js). Kennt das Modell nur zum Zeichnen.
 
 import * as THREE from "three";
+import { createHomeEnvironment, disposeHome, setHomeZonesVisible } from '../home/environment.js';
+import { HOME_STYLE } from '../home/visuals.js';
 import { ACCESSORY_IDS, PANEL_ACCESSORY_IDS, mountPoint, componentVolumes } from './accessoryPack.js';
 import { accessoryMeshes, panelAccessoryMeshes } from './accessoryMeshes.js';
 import { confirmedSpec } from './componentPack.js';
@@ -408,6 +410,161 @@ const LABEL_BG = {
 };
 
 export class SceneManager {
+  setHomeContext(context) {
+    const key = JSON.stringify(context);
+    if (key !== this._homeKey) {
+      this._homeFramePending = null;
+      disposeHome(this._homeGroup);
+      this._homeGroup = context ? createHomeEnvironment(context) : null;
+      if (this._homeGroup) this.scene.add(this._homeGroup);
+      this._homeKey = key;
+      this._shadowsDirty();
+    }
+    this._updateHomeDisplay();
+    this._applyHomeStyle();
+    this.requestRender();
+  }
+
+  _updateHomeDisplay() {
+    if (!this._homeGroup) return;
+    this._homeGroup.visible = !this._sceneOn && !this._homeHidden;
+    setHomeZonesVisible(this._homeGroup, { usable: this._homeUsableVisible !== false, obstacles: this._homeObstaclesVisible !== false });
+  }
+
+  setHomeZones(kind, visible) {
+    if (!['obstacles', 'usable'].includes(kind)) throw new Error('Unknown home zone');
+    if (kind === 'usable') this._homeUsableVisible = !!visible;
+    else this._homeObstaclesVisible = !!visible;
+    this._updateHomeDisplay();
+    this._shadowsDirty();
+    this.requestRender();
+  }
+
+  setBackground(mode) {
+    if (!['grass', 'blank', 'home'].includes(mode)) throw new Error('Unknown background');
+    if (mode === 'home' && !this._homeGroup) return false;
+    if (mode !== 'home') this._homeFramePending = null;
+    this.setProjection('perspective');
+    this._homeHidden = mode === 'blank';
+    this.setScene(mode === 'grass');
+    this.requestRender();
+    return true;
+  }
+
+  _applyHomeStyle() {
+    const indoor = !!this._homeGroup && !this._sceneOn && !this._homeHidden && !this._homeOutputHidden;
+    this._homeStyleOn = indoor;
+    for (const light of [this._hemiLight, this._dirLight, this._fillLight, this._rimLight]) if (light) light.visible = !indoor;
+    if (this._grid) this._grid.visible = !indoor;
+    this.renderer.toneMapping = indoor ? THREE.ACESFilmicToneMapping : THREE.NoToneMapping;
+    this.renderer.toneMappingExposure = indoor ? HOME_STYLE.exposure : 1;
+    this._applyBackground();
+  }
+
+  _renderMainScene() {
+    if (!this._homeStyleOn || !this._homeGroup?.visible) {
+      this.renderer.render(this.scene, this.camera);
+      return;
+    }
+    // 房间沿用编辑器的暖色灯光；产品单独使用草地灯光，保持零件原有配色。
+    // 第一遍保留产品深度和投影，第二遍沿用同一深度，家具遮挡和摆放关系不变。
+    const renderer = this.renderer, home = this._homeGroup;
+    const background = this.scene.background, autoClear = renderer.autoClear;
+    const toneMapping = renderer.toneMapping, exposure = renderer.toneMappingExposure;
+    const shadowsDirty = renderer.shadowMap.needsUpdate;
+    const lights = [this._hemiLight, this._dirLight, this._fillLight, this._rimLight].map(light => ({
+      light, visible: light.visible, intensity: light.intensity, castShadow: light.castShadow,
+      color: light.color.clone(), groundColor: light.groundColor?.clone(),
+    }));
+    const overlays = [this.handleGroup, this.labelGroup, this._hoverPartGroup,
+      this._roomGroup, this._roomDrawGroup, this._tubePreview, this._installationGroup]
+      .filter(Boolean).map(object => [object, object.visible]);
+    const materials = new Map(), guideDepthWrites = new Map();
+    home.traverse(object => {
+      for (const material of object.material ? (Array.isArray(object.material) ? object.material : [object.material]) : []) {
+        if (material.transparent && material.depthWrite) guideDepthWrites.set(material, material.depthWrite);
+      }
+    });
+    for (const group of [this.buildGroup, this._ghostGroup]) group.traverse(object => {
+      for (const material of object.material ? (Array.isArray(object.material) ? object.material : [object.material]) : []) {
+        if (!materials.has(material)) materials.set(material, material.colorWrite);
+      }
+    });
+    try {
+      for (const material of materials.keys()) material.colorWrite = false;
+      // 半透明区域及网格只提供空间参照，不应挡住第二遍的真实产品。
+      for (const material of guideDepthWrites.keys()) material.depthWrite = false;
+      for (const [object] of overlays) object.visible = false;
+      renderer.render(this.scene, this.camera);
+      for (const [material, colorWrite] of materials) material.colorWrite = colorWrite;
+      for (const [object, visible] of overlays) object.visible = visible;
+      home.visible = false;
+      this.scene.background = null;
+      renderer.autoClear = false;
+      this._setProductLighting(true);
+      for (const { light } of lights) light.visible = true;
+      renderer.toneMapping = THREE.NoToneMapping;
+      renderer.toneMappingExposure = 1;
+      if (shadowsDirty) renderer.shadowMap.needsUpdate = true;
+      renderer.render(this.scene, this.camera);
+    } finally {
+      for (const [material, colorWrite] of materials) material.colorWrite = colorWrite;
+      for (const [material, depthWrite] of guideDepthWrites) material.depthWrite = depthWrite;
+      for (const [object, visible] of overlays) object.visible = visible;
+      for (const state of lights) {
+        state.light.visible = state.visible;
+        state.light.intensity = state.intensity;
+        state.light.castShadow = state.castShadow;
+        state.light.color.copy(state.color);
+        if (state.groundColor) state.light.groundColor.copy(state.groundColor);
+      }
+      home.visible = true;
+      this.scene.background = background;
+      renderer.autoClear = autoClear;
+      renderer.toneMapping = toneMapping;
+      renderer.toneMappingExposure = exposure;
+    }
+  }
+
+  homeProductBounds() {
+    const box = new THREE.Box3(), pieceBox = new THREE.Box3(), matrix = new THREE.Matrix4();
+    for (const [key, rec] of this._indexParts(this.buildGroup.children)) {
+      const appearing = this._appearing.get(key);
+      for (const piece of rec.pieces) {
+        const geometry = piece.obj.geometry;
+        if (!geometry.boundingBox) geometry.computeBoundingBox();
+        // 镜头和房间摆放使用零件最终位置，不受入场缩放、抬高影响。
+        const original = appearing?.pieces.find(p => p.obj === piece.obj && p.index === piece.index);
+        if (original) matrix.multiplyMatrices(original.P, original.base);
+        else this._pieceWorld(piece, matrix);
+        box.union(pieceBox.copy(geometry.boundingBox).applyMatrix4(matrix));
+      }
+    }
+    return box.isEmpty() ? null : { min: box.min.toArray(), max: box.max.toArray() };
+  }
+
+  frameHome() {
+    if (!this._homeGroup) return;
+    this.setProjection('perspective');
+    const box = new THREE.Box3().setFromObject(this._homeGroup);
+    const direction = this._defaultCameraDirection();
+    this._frameAlong(null, direction, { bounds: { min: box.min.toArray(), max: box.max.toArray(), size: box.getSize(new THREE.Vector3()).toArray() }, animate: true });
+  }
+  frameHomeProduct() {
+    this.setProjection('perspective');
+    const bounds = this.homeProductBounds();
+    if (!bounds) {
+      // 官方零件资源未加载完时，等真实几何出现再定位镜头。
+      if (this._homeGroup && this._renderModel && !this._renderModel.isEmpty()) {
+        this._homeFramePending = this._homeKey;
+        return;
+      }
+      this.frameHome();
+      return;
+    }
+    bounds.size = bounds.max.map((n, a) => n - bounds.min[a]);
+    this._frameAlong(null, this._defaultCameraDirection(), { bounds, animate: true });
+  }
   constructor(container) {
     this.container = container;
 
@@ -631,11 +788,15 @@ export class SceneManager {
    * ueber den Rand zu ragen. Ohne Modell (oder bei leerem) gelten die alten
    * festen Werte.
    */
-  resetCamera(model = null, opts = {}) {
+  _defaultCameraDirection() {
     const start = new THREE.Vector3(...this._defaultCam.pos);
     const heim = new THREE.Vector3(...this._defaultCam.target);
-    const dir = start.clone().sub(heim).normalize();
-    this._frameAlong(model, dir, opts);
+    return start.sub(heim).normalize();
+  }
+
+  resetCamera(model = null, opts = {}) {
+    this.setProjection('perspective');
+    this._frameAlong(model, this._defaultCameraDirection(), opts);
   }
 
   /**
@@ -726,6 +887,7 @@ export class SceneManager {
   }
 
   _frameAlong(model, dir, opts = {}) {
+    this._homeFramePending = null;
     this._camAnim = null;
     this._camFly = null;
     this._needsRender = true;
@@ -1087,6 +1249,8 @@ export class SceneManager {
     this.renderer.shadowMap.autoUpdate = false;
     this.renderer.shadowMap.needsUpdate = true;
     this.renderer.shadowMap.enabled = QUALITY[this._quality].shadow > 0;
+    this.renderer.toneMapping = this._homeStyleOn ? THREE.ACESFilmicToneMapping : THREE.NoToneMapping;
+    this.renderer.toneMappingExposure = this._homeStyleOn ? HOME_STYLE.exposure : 1;
     // Die Schnittebene haengt an den MATERIALIEN des Modells, nicht am Renderer
     // -- Boden, Gras, Baeume und Himmel sollen ungeschnitten stehen bleiben.
     this.renderer.localClippingEnabled = true;
@@ -1171,7 +1335,7 @@ export class SceneManager {
     // Rechte Taste bleibt PAN -- mit der Maus. Am Mac-Trackpad gibt es keine
     // mittlere Taste; Querverschieben laeuft ueber ⌥-Ziehen / ⇧+Zwei-Finger.
     controls.touches = { ONE: null, TWO: THREE.TOUCH.DOLLY_PAN };
-    controls.addEventListener("start", () => { this._camFly = null; });
+    controls.addEventListener("start", () => { this._camFly = null; this._homeFramePending = null; });
     controls.addEventListener("end", () => {
       if (!this.orbiting && !this.panning) this._reanchorTarget();
       this.onCameraChange();
@@ -4773,6 +4937,7 @@ export class SceneManager {
     this._applyZoomLimits(model);
 
     if (vorher) this._motionAfterRender(vorher, opts);
+    if (this._homeFramePending && this._homeFramePending === this._homeKey) this.frameHomeProduct();
 
     // Der Szenegraph ist neu -> Schattenkarte einmal nachziehen.
     this._shadowsDirty();
@@ -5657,9 +5822,11 @@ export class SceneManager {
   cameraState() {
     if (!this.controls) return null;
     return {
+      sceneViewVersion: 1,
       pos: this.camera.position.toArray(),
       target: this.controls.target.toArray(),
       zoom: this.camera.zoom,
+      projection: this._projection,
     };
   }
 
@@ -5667,6 +5834,7 @@ export class SceneManager {
     this._camFly = null;
     this._needsRender = true;
     if (!st || !this.controls || !Array.isArray(st.pos) || !Array.isArray(st.target)) return false;
+    if (st.projection) this.setProjection(st.projection);
     this.camera.position.fromArray(st.pos);
     this.controls.target.fromArray(st.target);
     if (typeof st.zoom === "number" && st.zoom > 0) this.camera.zoom = st.zoom;
@@ -6856,10 +7024,18 @@ export class SceneManager {
     this._shadowsDirty();
     const v = !!on;
     this._sceneOn = v;
+    this._updateHomeDisplay();
     if (this._grassEnv)  this._grassEnv.visible  = v;
     if (this._skyMesh)   this._skyMesh.visible    = v;
     if (this._treeGroup) this._treeGroup.visible  = v;
     if (this._bushGroup) this._bushGroup.visible  = v; // Büsche: nur im Szene-Modus
+    this._setProductLighting(v);
+    this._applyBackground();
+    this._applyGrid();
+    this._applyHomeStyle();
+  }
+
+  _setProductLighting(v) {
     // Direktionales Licht: brennt AUCH im Normal-Modus, denn es modelliert die
     // Bauteile -- ohne es steht alles flach in einer Farbe da und Vorder- und
     // Rueckseite sind nicht auseinanderzuhalten. GEWORFENE Schatten gibt es
@@ -6878,8 +7054,6 @@ export class SceneManager {
       this._hemiLight.color.set(v ? 0xdef2ff : 0xffffff);
       this._hemiLight.groundColor.set(v ? this._lookHex(this._tune?.hemiGround || "#6A8258") : 0xc4a078);
     }
-    this._applyBackground();
-    this._applyGrid();
   }
 
   /**
@@ -6913,7 +7087,7 @@ export class SceneManager {
     const horizon = this._lookHex(this._tune?.skyHorizon || SCENE_SKY_HORIZON);
     const blank = this._lookHex(this._tune?.blank || BG_LIGHT);
     this.scene.background.set(
-      this._sceneOn ? horizon : (this._dark ? BG_DARK : blank));
+      this._homeStyleOn ? HOME_STYLE.background : (this._sceneOn ? horizon : (this._dark ? BG_DARK : blank)));
     this._needsRender = true;
   }
 
@@ -7025,6 +7199,7 @@ export class SceneManager {
     const zelle = this._gridCell || GRID_CELL;
     const grid = new THREE.GridHelper(GRID_SIZE, Math.round(GRID_SIZE / zelle), major, minor);
     grid.position.y = -GROUND_DROP;
+    grid.visible = !this._homeStyleOn;
     this.scene.add(grid);
     this._grid = grid;
     this._needsRender = true;
@@ -7236,16 +7411,20 @@ export class SceneManager {
       hideLabels ? this.labelGroup : null,
       this._hoverPartGroup,
       hideRoom ? this._roomGroup : null,
+      hideRoom ? this._homeGroup : null,
     ].filter(Boolean).map((o) => [o, o.visible]);
+    const hiddenHome = hideRoom && this._homeStyleOn;
+    if (hiddenHome) { this._homeOutputHidden = true; this._applyHomeStyle(); this._shadowsDirty(); }
     for (const [o] of versteckt) o.visible = false;
     let url = null;
     try {
-      this.renderer.render(this.scene, this.camera);
+      this._renderMainScene();
       url = mime === "image/jpeg"
         ? this.renderer.domElement.toDataURL(mime, quality ?? 0.82)
         : this.renderer.domElement.toDataURL(mime);
     } finally {
       for (const [o, sichtbar] of versteckt) o.visible = sichtbar;
+      if (hiddenHome) { this._homeOutputHidden = false; this._applyHomeStyle(); this._shadowsDirty(); }
       if (resized) {
         this._viewSize = null;
         this.renderer.setPixelRatio(prevPR);
@@ -7526,7 +7705,8 @@ export class SceneManager {
     if (this._updateTreeCamera()) this._needsRender = true;
     if (!this._needsRender) return;
     this._needsRender = false;
-    this.renderer.render(this.scene, this.camera);
+    this._homeGroup?.userData.updateWalls(this.camera);
+    this._renderMainScene();
     this._renderViewCube();
   }
 }
