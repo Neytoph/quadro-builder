@@ -312,7 +312,9 @@ function AppInner() {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.isComposing) return
       const el = e.target as HTMLElement | null
+      if (el?.closest('[data-ui="scene-menu"], [data-ui="scene-trigger"]')) return
       const input = !!el?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')
+      if (el?.closest('dialog[open]')) return
       if (componentPosition) {
         if (e.key === 'Escape') {
           e.preventDefault()

@@ -1,7 +1,7 @@
 // 3D-Szene + Rendering (Three.js). Kennt das Modell nur zum Zeichnen.
 
 import * as THREE from "three";
-import { createHomeEnvironment, disposeHome } from '../home/environment.js';
+import { createHomeEnvironment, disposeHome, setHomeZonesVisible } from '../home/environment.js';
 import { HOME_STYLE } from '../home/visuals.js';
 import { ACCESSORY_IDS, PANEL_ACCESSORY_IDS, mountPoint, componentVolumes } from './accessoryPack.js';
 import { accessoryMeshes, panelAccessoryMeshes } from './accessoryMeshes.js';
@@ -420,20 +420,40 @@ export class SceneManager {
       this._homeKey = key;
       this._shadowsDirty();
     }
-    if (this._homeGroup) this._homeGroup.visible = !this._sceneOn;
+    this._updateHomeDisplay();
     this._applyHomeStyle();
     this.requestRender();
   }
 
-  _applyHomeStyle(updateProjection = true) {
-    const indoor = !!this._homeGroup && !this._sceneOn && !this._homeOutputHidden;
-    if (indoor !== !!this._homeStyleOn) {
-      this._homeStyleOn = indoor;
-      if (updateProjection && indoor) {
-        this._outsideProjection = this._projection;
-        this.setProjection('orthographic');
-      } else if (updateProjection) this.setProjection(this._outsideProjection || 'perspective');
-    }
+  _updateHomeDisplay() {
+    if (!this._homeGroup) return;
+    this._homeGroup.visible = !this._sceneOn && !this._homeHidden;
+    setHomeZonesVisible(this._homeGroup, { usable: this._homeUsableVisible !== false, obstacles: this._homeObstaclesVisible !== false });
+  }
+
+  setHomeZones(kind, visible) {
+    if (!['obstacles', 'usable'].includes(kind)) throw new Error('Unknown home zone');
+    if (kind === 'usable') this._homeUsableVisible = !!visible;
+    else this._homeObstaclesVisible = !!visible;
+    this._updateHomeDisplay();
+    this._shadowsDirty();
+    this.requestRender();
+  }
+
+  setBackground(mode) {
+    if (!['grass', 'blank', 'home'].includes(mode)) throw new Error('Unknown background');
+    if (mode === 'home' && !this._homeGroup) return false;
+    if (mode !== 'home') this._homeFramePending = null;
+    this.setProjection('perspective');
+    this._homeHidden = mode === 'blank';
+    this.setScene(mode === 'grass');
+    this.requestRender();
+    return true;
+  }
+
+  _applyHomeStyle() {
+    const indoor = !!this._homeGroup && !this._sceneOn && !this._homeHidden && !this._homeOutputHidden;
+    this._homeStyleOn = indoor;
     for (const light of [this._hemiLight, this._dirLight, this._fillLight, this._rimLight]) if (light) light.visible = !indoor;
     if (this._grid) this._grid.visible = !indoor;
     this.renderer.toneMapping = indoor ? THREE.ACESFilmicToneMapping : THREE.NoToneMapping;
@@ -525,11 +545,13 @@ export class SceneManager {
 
   frameHome() {
     if (!this._homeGroup) return;
+    this.setProjection('perspective');
     const box = new THREE.Box3().setFromObject(this._homeGroup);
-    const direction = new THREE.Vector3(1.1, 1.05, 1.4).transformDirection(this._homeGroup.matrixWorld);
+    const direction = this._defaultCameraDirection();
     this._frameAlong(null, direction, { bounds: { min: box.min.toArray(), max: box.max.toArray(), size: box.getSize(new THREE.Vector3()).toArray() }, animate: true });
   }
   frameHomeProduct() {
+    this.setProjection('perspective');
     const bounds = this.homeProductBounds();
     if (!bounds) {
       // 官方零件资源未加载完时，等真实几何出现再定位镜头。
@@ -541,9 +563,7 @@ export class SceneManager {
       return;
     }
     bounds.size = bounds.max.map((n, a) => n - bounds.min[a]);
-    const direction = new THREE.Vector3(1.1, 1.05, 1.4);
-    if (this._homeGroup) direction.transformDirection(this._homeGroup.matrixWorld);
-    this._frameAlong(null, direction.normalize(), { bounds, margin: 1.7, animate: true });
+    this._frameAlong(null, this._defaultCameraDirection(), { bounds, animate: true });
   }
   constructor(container) {
     this.container = container;
@@ -768,11 +788,15 @@ export class SceneManager {
    * ueber den Rand zu ragen. Ohne Modell (oder bei leerem) gelten die alten
    * festen Werte.
    */
-  resetCamera(model = null, opts = {}) {
+  _defaultCameraDirection() {
     const start = new THREE.Vector3(...this._defaultCam.pos);
     const heim = new THREE.Vector3(...this._defaultCam.target);
-    const dir = start.clone().sub(heim).normalize();
-    this._frameAlong(model, dir, opts);
+    return start.sub(heim).normalize();
+  }
+
+  resetCamera(model = null, opts = {}) {
+    this.setProjection('perspective');
+    this._frameAlong(model, this._defaultCameraDirection(), opts);
   }
 
   /**
@@ -5798,6 +5822,7 @@ export class SceneManager {
   cameraState() {
     if (!this.controls) return null;
     return {
+      sceneViewVersion: 1,
       pos: this.camera.position.toArray(),
       target: this.controls.target.toArray(),
       zoom: this.camera.zoom,
@@ -6999,7 +7024,7 @@ export class SceneManager {
     this._shadowsDirty();
     const v = !!on;
     this._sceneOn = v;
-    if (this._homeGroup) this._homeGroup.visible = !v;
+    this._updateHomeDisplay();
     if (this._grassEnv)  this._grassEnv.visible  = v;
     if (this._skyMesh)   this._skyMesh.visible    = v;
     if (this._treeGroup) this._treeGroup.visible  = v;
@@ -7389,7 +7414,7 @@ export class SceneManager {
       hideRoom ? this._homeGroup : null,
     ].filter(Boolean).map((o) => [o, o.visible]);
     const hiddenHome = hideRoom && this._homeStyleOn;
-    if (hiddenHome) { this._homeOutputHidden = true; this._applyHomeStyle(false); this._shadowsDirty(); }
+    if (hiddenHome) { this._homeOutputHidden = true; this._applyHomeStyle(); this._shadowsDirty(); }
     for (const [o] of versteckt) o.visible = false;
     let url = null;
     try {
@@ -7399,7 +7424,7 @@ export class SceneManager {
         : this.renderer.domElement.toDataURL(mime);
     } finally {
       for (const [o, sichtbar] of versteckt) o.visible = sichtbar;
-      if (hiddenHome) { this._homeOutputHidden = false; this._applyHomeStyle(false); this._shadowsDirty(); }
+      if (hiddenHome) { this._homeOutputHidden = false; this._applyHomeStyle(); this._shadowsDirty(); }
       if (resized) {
         this._viewSize = null;
         this.renderer.setPixelRatio(prevPR);

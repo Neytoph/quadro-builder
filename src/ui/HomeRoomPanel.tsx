@@ -1,66 +1,132 @@
-import { useState } from 'react'
+import { useEffect, useId, useRef, useState, type CSSProperties } from 'react'
+import { createPortal } from 'react-dom'
+import { LoaderCircle, RefreshCw } from 'lucide-react'
 import { useEngine } from '../store/EngineContext'
 import { useI18n } from '../i18n'
-import { HOME_STYLE } from '../home/visuals.js'
 
-type Room = { id: string; name: string; rev: number; ownerID?: number; data: { room: { w: number; h: number; d: number }; items: unknown[]; mode: string } }
-export default function HomeRoomPanel() {
+type RoomItem = { id: string; kind: 'furniture' | 'reserved' | 'usable'; x: number; z: number; w: number; d: number }
+type RoomData = { room: { w: number; h: number; d: number }; items: RoomItem[]; mode: string }
+type Room = { id: string; name: string; rev: number; ownerID?: number; data: RoomData }
+
+function GrassThumb({ blank = false }: { blank?: boolean }) {
+  return <svg viewBox="0 0 48 48" className={'h-full w-full ' + (blank ? 'opacity-45 grayscale' : '')} aria-hidden="true">
+    <rect width="48" height="48" fill="#B8D6E0" /><circle cx="38" cy="12" r="6" fill="#FFD942" />
+    <ellipse cx="14" cy="13" rx="8" ry="5" fill="rgba(255,248,240,0.7)" />
+    <path d="M0,32 Q12,27 24,32 Q36,36 48,31 L48,48 L0,48 Z" fill="#7BC86A" />
+    <rect x="21.5" y="31" width="5" height="9" rx="2" fill="#B08968" />
+    <ellipse cx="24" cy="27" rx="11" ry="9" fill="#6FC48A" /><ellipse cx="16" cy="30" rx="7" ry="6" fill="#7ECBB0" /><ellipse cx="32" cy="30" rx="7" ry="6" fill="#5AAA72" />
+  </svg>
+}
+
+function RoomThumb({ data }: { data: RoomData }) {
+  const room = data.room
+  return <svg viewBox={`-10 -10 ${room.w + 20} ${room.d + 20}`} className="h-full w-full" aria-hidden="true">
+    <rect width={room.w} height={room.d} fill="#FFF8EF" stroke="#D8BCA0" strokeWidth="5" />
+    {data.items.map(item => <rect key={item.id} x={item.x} y={item.z} width={item.w} height={item.d} fill={{ furniture: '#D9C3A2', usable: '#A8D9B6', reserved: '#EFC78F' }[item.kind]} stroke="#A98B6C" strokeWidth="2" />)}
+  </svg>
+}
+
+export default function HomeRoomPanel({ tile = 40 }: { tile?: number }) {
   const api = useEngine(), { lang } = useI18n()
-  const demo = new URLSearchParams(location.search).has('homeDemo')
-  const prefix = lang === 'zh' ? '' : '/' + lang
   const text = (zh: string, en: string, de: string) => lang === 'zh' ? zh : lang === 'de' ? de : en
-  const [open, setOpen] = useState(false), [rooms, setRooms] = useState<Room[]>([]), [error, setError] = useState(''), [loading, setLoading] = useState(false)
-  const [expanded, setExpanded] = useState(false)
-  const identity = async () => {
-    const response = await fetch('/whoami', { credentials: 'same-origin', cache: 'no-store' })
+  const demo = new URLSearchParams(location.search).has('homeDemo')
+  const [open, setOpen] = useState(false), [rooms, setRooms] = useState<Room[]>([])
+  const [error, setError] = useState(''), [loading, setLoading] = useState(false), [choosing, setChoosing] = useState(false)
+  const [position, setPosition] = useState({ left: 12, top: 120, maxHeight: 400 })
+  const root = useRef<HTMLDivElement>(null), panel = useRef<HTMLDivElement>(null), trigger = useRef<HTMLButtonElement>(null)
+  const request = useRef(0), abort = useRef<AbortController | null>(null), panelID = useId()
+  const context = api.homeContext
+  const close = (focus = false) => {
+    request.current++; abort.current?.abort(); setOpen(false); setLoading(false); setChoosing(false)
+    if (focus) trigger.current?.focus()
+  }
+  useEffect(() => {
+    if (!open) return
+    const measure = () => {
+      const rect = trigger.current!.getBoundingClientRect(), width = tile + 12
+      setPosition({ left: Math.max(12, Math.min(rect.left + (rect.width - width) / 2, innerWidth - width - 12)), top: rect.bottom + 8, maxHeight: Math.max(width, innerHeight - rect.bottom - 20) })
+    }
+    const outside = (event: PointerEvent) => { if (!root.current?.contains(event.target as Node) && !panel.current?.contains(event.target as Node)) close() }
+    measure()
+    window.addEventListener('resize', measure); document.addEventListener('pointerdown', outside)
+    return () => { window.removeEventListener('resize', measure); document.removeEventListener('pointerdown', outside) }
+  }, [open, tile])
+  useEffect(() => {
+    if (open && !loading) panel.current?.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus()
+  }, [open, loading])
+  useEffect(() => () => { request.current++; abort.current?.abort() }, [])
+  const identity = async (signal: AbortSignal) => {
+    const response = await fetch('/whoami', { credentials: 'same-origin', cache: 'no-store', signal })
     if (!response.ok) throw new Error(text('无法确认登录状态', 'Cannot check sign-in status', 'Anmeldestatus nicht erreichbar'))
     const body = await response.json()
-    if (!body.authenticated) throw new Error(text('登录后可加载我的家', 'Sign in to load your home', 'Zum Laden deines Zuhauses anmelden'))
+    if (!body.authenticated) throw new Error(text('登录后可加载房间', 'Sign in to load rooms', 'Zum Laden der Räume anmelden'))
     return body.user_id as number
   }
-  if (api.grassOn) return null
-  const context = api.homeContext
   const load = async () => {
-    setOpen(true); setLoading(true); setError('')
+    abort.current?.abort(); const controller = new AbortController(); abort.current = controller
+    const version = ++request.current
+    setLoading(true); setError(''); setRooms([])
     try {
-      if (demo) { setRooms(JSON.parse(localStorage.getItem('xmf-home-demo-rooms') || '[]')); return }
-      const owner = await identity()
-      const response = await fetch('/quadro/rooms?expectedUserID=' + owner, { credentials: 'same-origin', cache: 'no-store' })
-      if (!response.ok) throw new Error(response.status === 401 || response.status === 403 ? text('登录后可加载我的家', 'Sign in to load your home', 'Zum Laden deines Zuhauses anmelden') : text('房间加载失败，请重试', 'Cannot load rooms. Please retry.', 'Räume nicht ladbar. Bitte erneut versuchen.'))
-      const body = await response.json()
-      if (await identity() !== owner) throw new Error(text('账号已变化，请重新加载房间', 'Account changed. Reload rooms', 'Konto geändert. Räume erneut laden'))
-      setRooms(body.items.map((room: Room) => ({ ...room, ownerID: owner })))
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)) } finally { setLoading(false) }
+      let items: Room[]
+      if (demo) items = JSON.parse(localStorage.getItem('xmf-home-demo-rooms') || '[]')
+      else {
+        const owner = await identity(controller.signal)
+        const response = await fetch('/quadro/rooms?expectedUserID=' + owner, { credentials: 'same-origin', cache: 'no-store', signal: controller.signal })
+        if (!response.ok) throw new Error(text('房间加载失败，请重试', 'Cannot load rooms. Please retry.', 'Räume nicht ladbar. Bitte erneut versuchen.'))
+        const body = await response.json()
+        if (await identity(controller.signal) !== owner) throw new Error(text('账号已变化，请重新加载房间', 'Account changed. Reload rooms', 'Konto geändert. Räume erneut laden'))
+        items = body.items.map((room: Room) => ({ ...room, ownerID: owner }))
+      }
+      if (version === request.current) setRooms(items)
+    } catch (e) { if (version === request.current && !controller.signal.aborted) setError(e instanceof Error ? e.message : String(e)) }
+    finally { if (version === request.current) setLoading(false) }
   }
   const choose = async (room: Room) => {
-    setError('')
+    abort.current?.abort(); const controller = new AbortController(); abort.current = controller
+    const version = ++request.current
+    setChoosing(true); setError('')
     try {
-      if (!demo && await identity() !== room.ownerID) throw new Error(text('账号已变化，请重新加载房间', 'Account changed. Reload rooms', 'Konto geändert. Räume erneut laden'))
+      if (!demo && await identity(controller.signal) !== room.ownerID) throw new Error(text('账号已变化，请重新加载房间', 'Account changed. Reload rooms', 'Konto geändert. Räume erneut laden'))
+      if (version !== request.current) return
       if (!api.bindHome(room)) throw new Error(text('请先完成当前操作，再加载房间', 'Finish your current action before loading a room', 'Aktuelle Aktion vor dem Laden abschließen'))
-      setOpen(false)
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
+      close(true)
+    } catch (e) { if (version === request.current && !controller.signal.aborted) setError(e instanceof Error ? e.message : String(e)) }
+    finally { if (version === request.current) setChoosing(false) }
   }
-  const edit = () => {
-    const key = 'xmf-home-session:' + crypto.randomUUID()
-    sessionStorage.setItem(key, JSON.stringify({ id: context!.roomId, rev: context!.roomRev, name: context!.name, data: context!.snapshot, placement: context!.placement }))
-    location.href = prefix + '/home-editor.html?session=' + encodeURIComponent(key) + '&return=builder' + (demo ? '&demo=1' : '')
-  }
-  const button = 'min-h-11 rounded-xl border border-orange-200 bg-[#FFFCF9] px-3 text-sm text-[#9A3412] cursor-pointer'
-  return <div className="pointer-events-auto relative mt-2 max-w-[min(300px,calc(100vw-90px))] rounded-2xl border border-orange-200 bg-[#FFFCF9]/95 p-2 shadow-sm text-[#242833] max-[640px]:fixed max-[640px]:inset-x-3 max-[640px]:bottom-20 max-[640px]:mt-0 max-[640px]:max-w-none max-[640px]:max-h-[55dvh] max-[640px]:overflow-auto">
-    {context ? <><div className="flex items-center justify-between gap-2"><strong className="block min-w-0 break-words px-1 text-sm">{context.name}</strong><button className={button + ' min-[641px]:hidden shrink-0'} aria-expanded={expanded} onClick={() => { setExpanded(!expanded); if (expanded) setOpen(false) }}>{expanded ? '×' : text('房间', 'Room', 'Raum')}</button></div><div className={'mt-1 flex-wrap gap-1 min-[641px]:flex ' + (expanded ? 'flex' : 'hidden')}><button className={button} onClick={() => void load()}>{text('更换房间', 'Change room', 'Raum wechseln')}</button><button className={button} onClick={edit}>{text('编辑房间', 'Edit room', 'Raum bearbeiten')}</button><button className={button} onClick={() => api.bindHome(null)}>{text('移除房间', 'Remove room', 'Raum entfernen')}</button><button className={button} onClick={api.frameHome}>{text('查看全屋', 'View room', 'Raum ansehen')}</button></div></> : <button className={button} onClick={() => void load()}>{text('加载我的家', 'Load my home', 'Mein Zuhause laden')}</button>}
-    {context && <p className={'mt-2 px-1 text-xs leading-relaxed text-[#676b73] min-[641px]:block ' + (expanded ? 'block' : 'hidden')}>
-      {text('房间宽 × 深 × 高', 'Room width × depth × height', 'Raum: Breite × Tiefe × Höhe')}<br />
-      {context.snapshot.room.w} × {context.snapshot.room.d} × {context.snapshot.room.h} cm<br />
-      {text(`地面每格 ${HOME_STYLE.gridCell} cm · 同一比例`, `${HOME_STYLE.gridCell} cm floor grid · Same scale`, `${HOME_STYLE.gridCell} cm Bodenraster · Einheitlicher Maßstab`)}
-    </p>}
-    {open && <div role="dialog" aria-label={text('选择房间', 'Choose room', 'Raum wählen')} className="mt-2 max-h-[45dvh] overflow-auto border-t border-orange-100 pt-2">
-      <div className="flex justify-between items-center"><strong>{text('我的家', 'My home', 'Mein Zuhause')}</strong><button className={button} aria-label={text('关闭', 'Close', 'Schließen')} onClick={() => setOpen(false)}>×</button></div>
-      {loading && <p role="status">{text('正在加载…', 'Loading…', 'Wird geladen…')}</p>}
-      {error && <p role="alert" className="my-2 text-sm">{error}<button className={button} onClick={() => void load()}>{text('重试', 'Retry', 'Erneut versuchen')}</button></p>}
-      {!loading && !error && !rooms.length && <p className="my-3 text-sm">{text('还没有房间，添加并命名你的第一个房间。', 'Add and name your first room.', 'Ersten Raum hinzufügen und benennen.')}</p>}
-      {!loading && !error && rooms.map(room => <button key={room.id} className={button + ' my-1 w-full text-left'} onClick={() => void choose(room)}><strong className="block break-words">{room.name}</strong><small>{room.data.room.w} × {room.data.room.d} × {room.data.room.h} cm</small></button>)}
-      {demo && <p className="my-2 text-xs">{text('交互预览 · 房间保存在本机', 'UI preview · Rooms stored locally', 'UI-Vorschau · Räume lokal gespeichert')}</p>}
-      <a href={prefix + (demo ? '/home-demo.html' : '/home.html')} className="block min-h-11 py-3 text-sm text-[#9A3412]">{text('管理我的家', 'Manage my home', 'Mein Zuhause verwalten')} ↗</a>
-    </div>}
+  const switchTo = (mode: 'grass' | 'blank' | 'home') => { api.setBackground(mode); close(true) }
+  const iconButton = 'relative shrink-0 overflow-hidden rounded-[11px] p-0 cursor-pointer flex items-center justify-center bg-[#FFFDF9] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600 disabled:opacity-50 disabled:cursor-wait'
+  const option = (active: boolean) => iconButton + ' h-[var(--scene-tile)] w-[var(--scene-tile)] border-2 ' + (active ? 'border-orange-600' : 'border-white hover:border-orange-200')
+  return <div ref={root} className="relative pointer-events-auto" onKeyDown={event => {
+    event.stopPropagation()
+    if (event.key === 'Escape' && open) { event.preventDefault(); close(true) }
+    if (event.key === 'Tab' && open) close()
+  }} onKeyUp={event => event.stopPropagation()}>
+    <button ref={trigger} type="button" data-ui="scene-trigger" aria-label={text('场景', 'Scene', 'Szene')} aria-haspopup="menu" aria-expanded={open} aria-controls={panelID}
+      title={text('切换场景', 'Change scene', 'Szene wechseln')} className={iconButton + ' shadow-[0_2px_8px_rgba(0,0,0,0.28)]'}
+      style={{ width: tile, height: tile, border: '2px solid rgba(255,255,255,0.88)' }}
+      onClick={() => { if (open) close(); else { setOpen(true); void load() } }}>
+      {api.background === 'home' && context ? <RoomThumb data={context.snapshot} /> : <GrassThumb blank={api.background === 'blank'} />}
+    </button>
+    {open && createPortal(<div ref={panel} id={panelID} data-ui="scene-menu" role="menu" aria-label={text('场景', 'Scene', 'Szene')} aria-orientation="vertical"
+      className="pointer-events-auto fixed z-[60] flex flex-col items-center gap-2 overflow-y-auto overscroll-contain rounded-[14px] border border-[#ECD6C2] bg-[#FFFDF9] p-[5px] shadow-lg"
+      style={{ ...position, width: tile + 12, '--scene-tile': `${tile}px` } as CSSProperties} onKeyDown={event => {
+        if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return
+        const buttons = Array.from(panel.current!.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'))
+        const index = buttons.indexOf(document.activeElement as HTMLButtonElement)
+        let next = index + (event.key === 'ArrowDown' ? 1 : -1)
+        if (event.key === 'Home') next = 0
+        if (event.key === 'End') next = buttons.length - 1
+        event.preventDefault(); buttons[(next + buttons.length) % buttons.length]?.focus()
+      }}>
+      <button type="button" role="menuitemradio" aria-checked={api.background === 'grass'} aria-label={text('草地', 'Grass', 'Wiese')} title={text('草地', 'Grass', 'Wiese')} className={option(api.background === 'grass')} disabled={choosing} onClick={() => switchTo('grass')}><GrassThumb /></button>
+      <button type="button" role="menuitemradio" aria-checked={api.background === 'blank'} aria-label={text('空白', 'Blank', 'Leer')} title={text('空白', 'Blank', 'Leer')} className={option(api.background === 'blank')} disabled={choosing} onClick={() => switchTo('blank')}><GrassThumb blank /></button>
+      {!loading && !error && rooms.map(room => {
+        const bound = room.id === context?.roomId, active = bound && api.background === 'home'
+        return <button key={room.id} type="button" role="menuitemradio" data-room-id={room.id} aria-checked={active} aria-label={room.name} title={room.name} className={option(active)} disabled={choosing} onClick={() => bound ? switchTo('home') : void choose(room)}><RoomThumb data={bound ? context.snapshot : room.data} /></button>
+      })}
+      {!loading && context && !rooms.some(room => room.id === context.roomId) && <button type="button" role="menuitemradio" data-room-id={context.roomId} aria-checked={api.background === 'home'} aria-label={context.name} title={context.name} className={option(api.background === 'home')} disabled={choosing} onClick={() => switchTo('home')}><RoomThumb data={context.snapshot} /></button>}
+      {loading && <span role="status" aria-label={text('正在加载房间', 'Loading rooms', 'Räume werden geladen')} className="flex h-[var(--scene-tile)] w-[var(--scene-tile)] shrink-0 items-center justify-center text-[#9A3412]"><LoaderCircle size={18} className="animate-spin" /></span>}
+      {error && <><span role="alert" className="sr-only">{error}</span><button type="button" className={option(false)} aria-label={text('重新加载房间', 'Reload rooms', 'Räume erneut laden')} title={error} onClick={() => void load()}><RefreshCw size={18} /></button></>}
+    </div>, document.body)}
   </div>
 }

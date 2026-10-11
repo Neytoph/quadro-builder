@@ -6,7 +6,7 @@ import { BuildModel } from '../engine/model.js'
 import { docFromJSON, docToJSON, type ModelJSON } from '../collab/ymodel'
 import { productOnly } from '../share'
 import { placeInRoom, validHomeContext } from './context.js'
-import { createHomeEnvironment, disposeHome } from './environment.js'
+import { createHomeEnvironment, disposeHome, setHomeZonesVisible } from './environment.js'
 
 // 隔离坐标夹具，用于验证存档契约；真实模型与浏览器验收另有运行证据。
 const room = () => ({ id: 'private-room', rev: 4, name: '自定义房间', data: { mode: 'area', room: { w: 450, h: 260, d: 350 }, items: [{ id: 'green', name: '搭建区', type: 'usable', kind: 'usable', x: 135, elevation: 0, z: 85, w: 125, h: 260, d: 125 }] } })
@@ -14,6 +14,30 @@ const home = () => placeInRoom(room(), { min: [40, 0, 80], max: [85, 85, 165] })
 beforeAll(() => loadCatalog())
 
 describe('房间与原生模型的存档关系', () => {
+  it('切换辅助区域时保留柱子，坐标、房间快照与产品存档保持一致', () => {
+    const context = home(); context.placement.rotation = 90
+    context.snapshot.items.push({ id: 'column', name: '柱子', type: 'column', kind: 'furniture', x: 20, elevation: 0, z: 20, w: 40, h: 260, d: 40 })
+    context.snapshot.items.push({ id: 'clearance', name: '留空', type: 'reserved', kind: 'reserved', x: 80, elevation: 35, z: 25, w: 20, h: 80, d: 100 })
+    const model = new BuildModel(); model.addNode(40, 0, 80)
+    expect(model.loadJSON({ ...model.toJSON(), homeContext: context }).ok).toBe(true)
+    const saved = model.toJSON(), environment = createHomeEnvironment(context)
+    const objects = environment.children.filter(o => o.userData.homeItemId)
+    const matrices = objects.map(o => o.matrixWorld.toArray())
+    const shell = environment.children.find(o => !o.userData.homeItemId)!
+    setHomeZonesVisible(environment, { obstacles: false, usable: true })
+    expect(objects.filter(o => o.visible).map(o => o.userData.homeItemId)).toEqual(['green', 'column'])
+    expect(shell.visible).toBe(true)
+    setHomeZonesVisible(environment, { obstacles: true, usable: false })
+    expect(objects.filter(o => o.visible).map(o => o.userData.homeItemId)).toEqual(['column', 'clearance'])
+    setHomeZonesVisible(environment, { obstacles: false, usable: false })
+    expect(objects.filter(o => o.visible).map(o => o.userData.homeItemId)).toEqual(['column'])
+    setHomeZonesVisible(environment, { obstacles: true, usable: true })
+    expect(objects.every(o => o.visible)).toBe(true)
+    environment.updateMatrixWorld(true)
+    expect(objects.map(o => o.matrixWorld.toArray())).toEqual(matrices)
+    expect(model.toJSON()).toEqual(saved)
+    disposeHome(environment)
+  })
   it('普通模型首次按真实外轮廓居中并落地', () => {
     expect(home().placement).toEqual({ position: [225, 0, 175], pivot: [62.5, 0, 122.5], rotation: 0 })
   })

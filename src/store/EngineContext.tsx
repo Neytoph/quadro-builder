@@ -226,6 +226,10 @@ interface EngineApi {
   frame: () => void
   toggleGrass: () => void
   grassOn: boolean
+  background: 'grass' | 'blank' | 'home'
+  setBackground: (mode: 'grass' | 'blank' | 'home') => void
+  homeZones: { obstacles: boolean; usable: boolean }
+  setHomeZones: (kind: 'obstacles' | 'usable', visible: boolean) => void
   homeContext: AnyRec | null
   bindHome: (record: AnyRec | null) => boolean
   frameHome: () => void
@@ -779,11 +783,12 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     if (!res.ok) throw new Error(`tab ${tab.tabId} does not load: ${res.reason}`)
     e.builder.setUiState(tab.view || {})
     e.builder.setMode((tab.view?.mode as string) || 'select')
-    if (tab.view?.camera) e.scene.restoreCameraState(tab.view.camera)
+    const restoreCamera = tab.view?.camera && (!e.model.homeContext || tab.view.camera.sceneViewVersion === 1)
+    if (restoreCamera) e.scene.restoreCameraState(tab.view!.camera)
     else e.scene.resetCamera(e.model, { animate: true, swoop: true })
     e.builder.refresh()
     e.scene.setHomeContext(e.model.homeContext)
-    if (e.model.homeContext) { e.scene.setScene(false); if (!tab.view?.camera) e.scene.frameHomeProduct() }
+    if (e.model.homeContext) { e.scene.setBackground('home'); if (!restoreCamera) e.scene.frameHomeProduct() }
     switching.current = false
     bump()
   }, [bump])
@@ -1001,6 +1006,9 @@ export function EngineProvider({ children }: { children: ReactNode }) {
           if (!switching.current) persistSessionRef.current()
           bumpRef.current()
         }
+        scene.onCameraChange = () => {
+          if (!switching.current) persistSessionRef.current()
+        }
         builder.onPreview = () => bumpRef.current()
         builder.onHistoryChange = () => markDirtyRef.current()
         builder.onNotice = ((msg: string, kind?: string) => notifyRef.current(String(msg), kind === 'warn' ? 'warn' : 'ok')) as E
@@ -1120,7 +1128,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     if (context && !validHomeContext(context)) return false
     current.builder.recordHistory(() => { current.model.homeContext = context })
     current.scene.setHomeContext(context)
-    current.scene.setScene(false)
+    current.scene.setBackground(context ? 'home' : 'blank')
     if (context) current.scene.frameHomeProduct()
     current.builder.refresh()
     bump()
@@ -2029,7 +2037,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     if (opts?.frame !== false) e2.scene.resetCamera(e2.model, { animate: true, swoop: true })
     e2.scene.setHomeContext(e2.model.homeContext)
     if (e2.model.homeContext) {
-      e2.scene.setScene(false)
+      e2.scene.setBackground('home')
       if (opts?.frame !== false) e2.scene.frameHomeProduct()
     }
     tab.dirty = true
@@ -2724,14 +2732,18 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     toggleGrass: () => {
       const next = !scene?._sceneOn
       track('builder.scene.grass', { on: next })
-      scene?.setScene?.(next)
+      scene?.setBackground(next ? 'grass' : model?.homeContext ? 'home' : 'blank')
       try { localStorage.setItem('quadro.scene.v1', next ? '1' : '0') } catch { /* ignore */ }
       bump()
     },
     grassOn: !!scene?._sceneOn,
+    background: scene?._sceneOn ? 'grass' : model?.homeContext && !scene?._homeHidden ? 'home' : 'blank',
+    setBackground: mode => { scene?.setBackground(mode); bump() },
+    homeZones: { obstacles: scene?._homeObstaclesVisible !== false, usable: scene?._homeUsableVisible !== false },
+    setHomeZones: (kind, visible) => { scene?.setHomeZones(kind, visible); bump() },
     homeContext: model?.homeContext || null,
     bindHome,
-    frameHome: () => scene?.frameHome(),
+    frameHome: () => { scene?.setBackground('home'); scene?.frameHome(); bump() },
     highlight, highlightIds, safety, setInv, newTab, closeTab, activateTab, renameTab, setTabName, saveCurrent, saveCurrentAs, askName, answerName, nameAsk, openDoc, retrySave,
     listDocs: async () => (await docs.listDocs()).map((d: AnyRec) => ({ id: String(d.id), name: String(d.name), updatedAt: Number(d.updatedAt || 0), local: !Number(d.rev) || !!d.dirty || (!!d.saveId && d.syncedSaveId !== d.saveId) })),
     removeDoc: async (id) => { await docs.removeDoc(id); bump() },

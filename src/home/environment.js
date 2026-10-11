@@ -5,6 +5,14 @@ import { createHomeVisuals } from './visuals.js';
 
 const visuals = createHomeVisuals(THREE, RoundedBoxGeometry);
 
+export function setHomeZonesVisible(root, { obstacles = true, usable = true }) {
+  for (const object of root.children) {
+    const kind = object.userData.homeItemKind;
+    if (kind === 'usable') object.visible = usable;
+    else if (kind === 'reserved') object.visible = obstacles;
+  }
+}
+
 export function disposeHome(group) {
   if (!group) return;
   const materials = new Set();
@@ -20,7 +28,7 @@ export function createHomeEnvironment(context) {
   root.add(shell, lights);
   for (const i of items) {
     const object = i.kind === 'furniture' ? visuals.furniture(i.type, i.d > i.w) : visuals.zone(i);
-    object.name = i.name; object.userData.homeItemId = i.id;
+    object.name = i.name; object.userData.homeItemId = i.id; object.userData.homeItemKind = i.kind;
     object.position.set(i.x, i.elevation, i.z); object.scale.set(i.w, i.h, i.d); root.add(object);
   }
   const p = context.placement;
