@@ -231,7 +231,7 @@ interface EngineApi {
   homeZones: { obstacles: boolean; usable: boolean }
   setHomeZones: (kind: 'obstacles' | 'usable', visible: boolean) => void
   homeContext: AnyRec | null
-  bindHome: (record: AnyRec | null) => boolean
+  bindHome: (record: AnyRec | null, expectedTabId?: string | null) => boolean
   frameHome: () => void
   highlight: (kind: string, id: string, color?: string | null) => void
   /** 按零件 id 高亮一批（安全审查点行用），再点同一批取消 */
@@ -447,6 +447,11 @@ type Tab = TabInfo & {
 
 // 只在内存中核对修改与成功快照；模型、名称和文档ID均不发送给统计服务。
 type TabAnalytics = { baseline: string; edited: boolean; lastOutput: string; object: string }
+
+// 共享方案的私人房间只保存在本机视图中，不写入协作文档。
+function tabHomeContext(tab: Tab | undefined, modelHome: AnyRec | null): AnyRec | null {
+  return tab?.planId && tab.view && Object.hasOwn(tab.view, 'homeContext') ? tab.view.homeContext : modelHome
+}
 const tabAnalytics = new WeakMap<Tab, TabAnalytics>()
 function resetTabAnalytics(tab: Tab, data: ModelJSON, object = '') {
   const state = { baseline: modelContent(data), edited: false, lastOutput: '', object }
@@ -737,7 +742,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const active = tabsRef.current.find(x => x.tabId === activeRef.current)
     if (e && active) {
       flushModel()
-      active.view = { ...(e.builder.uiState() as AnyRec), camera: e.scene.cameraState() }
+      active.view = { ...active.view, ...(e.builder.uiState() as AnyRec), camera: e.scene.cameraState() }
     }
     return docs.saveSession({
       tabs: tabsRef.current.map(tb => ({
@@ -809,12 +814,13 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     setAnalyticsObject(analytics.object)
     e.builder.setUiState(tab.view || {})
     e.builder.setMode((tab.view?.mode as string) || 'select')
-    const restoreCamera = tab.view?.camera && (!e.model.homeContext || tab.view.camera.sceneViewVersion === 1)
+    const home = tabHomeContext(tab, e.model.homeContext)
+    const restoreCamera = tab.view?.camera && (!home || tab.view.camera.sceneViewVersion === 1)
     if (restoreCamera) e.scene.restoreCameraState(tab.view!.camera)
     else e.scene.resetCamera(e.model, { animate: true, swoop: true })
     e.builder.refresh()
-    e.scene.setHomeContext(e.model.homeContext)
-    if (e.model.homeContext) { e.scene.setBackground('home'); if (!restoreCamera) e.scene.frameHomeProduct() }
+    e.scene.setHomeContext(home)
+    if (home) { e.scene.setBackground('home'); if (!restoreCamera) e.scene.frameHomeProduct() }
     switching.current = false
     bump()
   }, [bump])
@@ -822,7 +828,9 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   /** 标签页的造型，从它的 Yjs 文档导出。当前页先把模型里没交出去的改动写进文档。 */
   const exportTab = useCallback((tab: Tab): ModelJSON => {
     if (tab.tabId === activeRef.current) flushModel()
-    return tab.local.history.toJSON()
+    const data = tab.local.history.toJSON()
+    return tab.planId && tab.view && Object.hasOwn(tab.view, 'homeContext')
+      ? { ...data, homeContext: structuredClone(tab.view.homeContext) } : data
   }, [flushModel])
 
   const snapshotActive = useCallback(() => {
@@ -830,7 +838,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
     if (!e || !tab) return
     flushModel()
-    tab.view = { ...(e.builder.uiState() as AnyRec), camera: e.scene.cameraState() }
+    tab.view = { ...tab.view, ...(e.builder.uiState() as AnyRec), camera: e.scene.cameraState() }
   }, [flushModel])
 
   const reconcilePersonalNow = useCallback(async (tab: Tab, supplied?: AnyRec | null) => {
@@ -1138,29 +1146,33 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const builder = e?.builder
   const model = e?.model
   const scene = e?.scene
+  const homeContext = tabHomeContext(tabsRef.current.find(tab => tab.tabId === activeRef.current), model?.homeContext || null)
 
   useEffect(() => {
-    if (ready && scene && model) scene.setHomeContext(model.homeContext)
-  }, [ready, scene, model, tick])
+    if (ready && scene && model) scene.setHomeContext(homeContext)
+  }, [ready, scene, model, homeContext, tick])
 
-  const bindHome = useCallback((record: AnyRec | null) => {
+  const bindHome = useCallback((record: AnyRec | null, expectedTabId?: string | null) => {
     const current = eng.current
     if (!current || current.builder.busy()) return false
-    const tab = ownActiveTab()
-    if (!tab) return false
+    const tab = tabsRef.current.find(item => item.tabId === activeRef.current)
+    if (!tab || expectedTabId && tab.tabId !== expectedTabId || tab.readOnly && !tab.planId) return false
     const bounds = current.scene.homeProductBounds()
     if (record && !record.placement && !current.model.isEmpty() && !bounds) return false
     const context = record ? placeInRoom(record, bounds) : null
     if (context && record?.placement) context.placement = structuredClone(record.placement)
     if (context && !validHomeContext(context)) return false
-    current.builder.recordHistory(() => { current.model.homeContext = context })
+    if (tab.planId) {
+      tab.view = { ...tab.view, homeContext: context }
+      persistSession()
+    } else current.builder.recordHistory(() => { current.model.homeContext = context })
     current.scene.setHomeContext(context)
     current.scene.setBackground(context ? 'home' : 'blank')
     if (context) current.scene.frameHomeProduct()
     current.builder.refresh()
     bump()
     return true
-  }, [bump])
+  }, [bump, persistSession])
 
   useEffect(() => {
     if (!ready) return
@@ -2795,16 +2807,16 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     toggleGrass: () => {
       const next = !scene?._sceneOn
       track('builder.scene.grass', { on: next })
-      scene?.setBackground(next ? 'grass' : model?.homeContext ? 'home' : 'blank')
+      scene?.setBackground(next ? 'grass' : homeContext ? 'home' : 'blank')
       try { localStorage.setItem('quadro.scene.v1', next ? '1' : '0') } catch { /* ignore */ }
       bump()
     },
     grassOn: !!scene?._sceneOn,
-    background: scene?._sceneOn ? 'grass' : model?.homeContext && !scene?._homeHidden ? 'home' : 'blank',
+    background: scene?._sceneOn ? 'grass' : homeContext && !scene?._homeHidden ? 'home' : 'blank',
     setBackground: mode => { scene?.setBackground(mode); bump() },
     homeZones: { obstacles: scene?._homeObstaclesVisible !== false, usable: scene?._homeUsableVisible !== false },
     setHomeZones: (kind, visible) => { scene?.setHomeZones(kind, visible); bump() },
-    homeContext: model?.homeContext || null,
+    homeContext,
     bindHome,
     frameHome: () => { scene?.setBackground('home'); scene?.frameHome(); bump() },
     highlight, highlightIds, safety, setInv, newTab, closeTab, activateTab, renameTab, setTabName, saveCurrent, saveCurrentAs, askName, answerName, nameAsk, openDoc, retrySave,

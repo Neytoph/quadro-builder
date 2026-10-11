@@ -88,7 +88,7 @@ export default function HomeRoomPanel({ tile = 40 }: { tile?: number }) {
     try {
       if (!demo && await identity(controller.signal) !== room.ownerID) throw new Error(text('账号已变化，请重新加载房间', 'Account changed. Reload rooms', 'Konto geändert. Räume erneut laden'))
       if (version !== request.current) return
-      if (!api.bindHome(room)) throw new Error(text('请先完成当前操作，再加载房间', 'Finish your current action before loading a room', 'Aktuelle Aktion vor dem Laden abschließen'))
+      if (!api.bindHome(room, api.activeTabId)) throw new Error(text('当前造型或操作已变化，请重新选择房间', 'The active model or action changed. Select the room again.', 'Aktives Modell oder Aktion geändert. Raum erneut auswählen.'))
       close(true)
     } catch (e) { if (version === request.current && !controller.signal.aborted) setError(e instanceof Error ? e.message : String(e)) }
     finally { if (version === request.current) setChoosing(false) }
