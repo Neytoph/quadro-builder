@@ -8,6 +8,7 @@ export function validHomeContext(c) {
   for (const i of s.items) {
     if (!i || typeof i.id !== 'string' || !i.id || i.id.length > 80 || ids.has(i.id) || typeof i.name !== 'string' || i.name.length > 160) return false;
     ids.add(i.id);
+    if (i.rotation !== undefined && ![0, 90, 180, 270].includes(i.rotation)) return false;
     if (!Object.hasOwn(counts, i.kind)) return false;
     counts[i.kind]++;
     if (i.kind === 'furniture' ? !['sofa', 'cabinet', 'bed', 'table', 'column', 'other'].includes(i.type) : i.type !== i.kind) return false;

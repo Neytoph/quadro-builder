@@ -1,9 +1,11 @@
 // 房间编辑器、AI 预览与 Builder 共用；单位为厘米，家具局部外轮廓为 [0, 1]。
 export const HOME_STYLE = Object.freeze({ background: '#FFF8F2', gridCell: 25, exposure: 1.28 });
 
+export const furnitureRotation = item => item.rotation ?? ((item.type === 'sofa' || item.type === 'cabinet') && item.d > item.w ? 90 : 0);
+
 export function createHomeVisuals(THREE, RoundedBoxGeometry) {
   const vec = (x, y, z) => new THREE.Vector3(x, y, z);
-  function furniture(type, sideways) {
+  function furniture(type, sideways, rotation = furnitureRotation({ type, d: sideways ? 2 : 1, w: 1 })) {
     const root = new THREE.Group(), shape = new THREE.Group(), materials = new Map();
     root.add(shape);
     function part(color, size, position, radius = 0) {
@@ -22,7 +24,6 @@ export function createHomeVisuals(THREE, RoundedBoxGeometry) {
         part(cushion, [.395, .16, .72], [x, .44, .59], .055);
         part('#e3ceaa', [.395, .37, .12], [x, .735, .205], .045);
       }
-      if (sideways) { shape.rotation.y = Math.PI / 2; shape.position.z = 1; }
     } else if (type === 'cabinet') {
       for (const x of [.09, .91]) for (const z of [.12, .88]) part('#795841', [.055, .07, .08], [x, .035, z]);
       part(oak, [.93, .84, .035], [.5, .535, .0175]);
@@ -46,6 +47,8 @@ export function createHomeVisuals(THREE, RoundedBoxGeometry) {
       part('#c7baaa', [1, .035, 1], [.5, .0175, .5]);
       part('#e7dfd4', [1, .025, 1], [.5, .9875, .5]);
     } else part('#b8c1b3', [1, 1, 1], [.5, .5, .5], .04);
+    shape.rotation.y = rotation * Math.PI / 180;
+    shape.position.set(rotation === 180 || rotation === 270 ? 1 : 0, 0, rotation === 90 || rotation === 180 ? 1 : 0);
     return root;
   }
 

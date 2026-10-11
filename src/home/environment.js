@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { validHomeContext } from './context.js';
-import { createHomeVisuals } from './visuals.js';
+import { createHomeVisuals, furnitureRotation } from './visuals.js';
 
 const visuals = createHomeVisuals(THREE, RoundedBoxGeometry);
 
@@ -27,7 +27,7 @@ export function createHomeEnvironment(context) {
   const shell = visuals.roomShell(r), lights = visuals.lighting();
   root.add(shell, lights);
   for (const i of items) {
-    const object = i.kind === 'furniture' ? visuals.furniture(i.type, i.d > i.w) : visuals.zone(i);
+    const object = i.kind === 'furniture' ? visuals.furniture(i.type, i.d > i.w, furnitureRotation(i)) : visuals.zone(i);
     object.name = i.name; object.userData.homeItemId = i.id; object.userData.homeItemKind = i.kind;
     object.position.set(i.x, i.elevation, i.z); object.scale.set(i.w, i.h, i.d); root.add(object);
   }
