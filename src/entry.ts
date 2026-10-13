@@ -10,6 +10,7 @@
 //	?view=1               只看模式：嵌在方案页里，只有 3D 画面和分步手册，不改、不存
 //	?export=manual|bom|bompng|shareimg|qdf|json|link   注册完回来，接着导出（link 是复制分享链接）
 //	?lang=zh|en|de        界面语言，嵌在别的页面里时跟着那一页
+//	?background=grass|home 导入造型时使用来源页选择的背景，成功导入后应用
 //
 // 共享方案（托管版设了 VITE_SYNC_BASE 才认）：
 //
@@ -59,6 +60,7 @@ export interface Entry {
   doc: string | null
   /** 新开一个空白标签页 */
   blank: boolean
+  background: 'grass' | 'home' | null
 }
 
 let entry: Entry | null = null
@@ -81,6 +83,7 @@ export function readEntry(search: string, hash: string, collab: boolean): Entry 
   const src = q.get('src')
   const cmp = (q.get('compare') || '').split(',').map(s => s.trim()).filter(Boolean)
   const room = q.get('room') || ''
+  const background = q.get('background')
   return {
     view: q.get('view') === '1',
     src: sameSite(src),
@@ -102,6 +105,7 @@ export function readEntry(search: string, hash: string, collab: boolean): Entry 
     roomBrief: collab && room.startsWith('brief:') ? room.slice('brief:'.length) : null,
     doc: collab ? q.get('doc') : null,
     blank: collab && q.get('new') === '1',
+    background: background === 'grass' || background === 'home' ? background : null,
   }
 }
 
@@ -110,7 +114,7 @@ export function bootEntry(): Entry {
   entry = readEntry(location.search, location.hash, collab)
   if (!entry.view) {
     const q = new URLSearchParams(location.search)
-    for (const k of ['src', 'origin', 'name', 'copy', 'export', 'lang', 'import']) q.delete(k)
+    for (const k of ['src', 'origin', 'name', 'copy', 'export', 'lang', 'import', 'background']) q.delete(k)
     const rest = q.toString()
     history.replaceState(null, '', `${location.pathname}${rest ? `?${rest}` : ''}${location.hash}`)
   }

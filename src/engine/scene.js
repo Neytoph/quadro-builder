@@ -19,7 +19,10 @@ import { loadConnectorMeshes, loadSlideMeshes, loadTubeMeshes, loadFittingMeshes
 import { CONNECTOR_ARM_BITS } from "./qdfimport.js";
 import { preferPanelCell } from "./pickcell.js";
 import { resolveNodeConnection, hasStandaloneFileC45 } from "./bom.js";
-import { shadeHex, hexRgba, DEFAULT_TUNE, DEFAULT_GRADE, gradeHex, displayHex } from "./colorTune.js";
+import { DEFAULT_TUNE, DEFAULT_GRADE, gradeHex, displayHex } from "./colorTune.js";
+import { createOutdoorVisuals, OUTDOOR_AREA } from './outdoor.js';
+
+const outdoor = createOutdoorVisuals(THREE);
 
 const UP = new THREE.Vector3(0, 1, 0);
 // So viel darf ein Bauteil vor einem Ankerpunkt liegen, ohne ihn zu verdecken
@@ -226,22 +229,13 @@ const GRID_CELL = 20;
 // besten so weit draussen, dass er bei einem eingepassten Modell gar nicht ins
 // Bild kommt. Baeume und Buesche stehen im Ring dahinter -- ausserhalb des
 // Rasters, damit sie nicht in ein grosses Modell hineinragen.
-const GROUND_AREA = 2600;                     // Kantenlaenge der Wiese, cm
-const GRASS_TILE = 80;                        // 大块平铺，颗粒在，纹路不抢眼
-const TREE_RING = [GRID_SIZE / 2 + 120, GROUND_AREA / 2 - 120];
-const BUSH_RING = [GRID_SIZE / 2 + 60, GROUND_AREA / 2 - 100];
+const GROUND_AREA = OUTDOOR_AREA;
 
 const GRID_LIGHT = [0xb88850, 0xd0b08a];   // 主线 / 次线：暖棕，显色底上要压得住
 const GRID_DARK = [0x3d382f, 0x2e2a23];
 
 // 风景退后：草地/树冠灰绿；天空走晴天蓝，避免阴天灰。
 const SCENE_SKY_HORIZON = 0xeaf5fd;
-const SCENE_SKY_ZENITH = 0xa7d9fb;
-const SCENE_TRUNK = 0x6b5a3e;
-const SCENE_CROWN_A = 0x649655;
-const SCENE_CROWN_B = 0x709b62;
-const SCENE_CROWN_C = 0x56804a;
-const SCENE_BUSH = 0x4a7544;
 
 // Ansichtswuerfel: Kanten hell/dunkel (die Flaechen stecken in der Textur).
 const CUBE_EDGE_LIGHT = 0x6e7884;
@@ -6611,56 +6605,13 @@ export class SceneManager {
   }
 
   _makeGrassTexture(baseHex) {
-    const S = 256;
-    const cv = document.createElement("canvas");
-    cv.width = cv.height = S;
-    const ctx = cv.getContext("2d");
-    const base = baseHex || this._tune?.grass || "#7A9B6C";
-    ctx.fillStyle = base;
-    ctx.fillRect(0, 0, S, S);
-    let seed = 42;
-    const rng = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 0x100000000; };
-    const patches = [shadeHex(base, -14), shadeHex(base, 10), shadeHex(base, -22), shadeHex(base, 6)];
-    ctx.globalAlpha = 0.26;
-    for (let i = 0; i < 32; i++) {
-      const x = rng() * S, y = rng() * S, r = 28 + rng() * 56;
-      const g = ctx.createRadialGradient(x, y, 0, x, y, r);
-      g.addColorStop(0, patches[i % patches.length]);
-      g.addColorStop(1, hexRgba(shadeHex(base, -18), 0));
-      ctx.fillStyle = g;
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.globalAlpha = 0.1;
-    for (let i = 0; i < 380; i++) {
-      const x = rng() * S, y = rng() * S;
-      ctx.fillStyle = i % 2 ? shadeHex(base, 14) : shadeHex(base, -16);
-      ctx.fillRect(x, y, 1.4, 1.4);
-    }
-    ctx.globalAlpha = 1;
-    const tex = new THREE.CanvasTexture(cv);
-    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-    tex.repeat.set(GROUND_AREA / GRASS_TILE, GROUND_AREA / GRASS_TILE);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    tex.anisotropy = 4;
-    return tex;
+    return outdoor.grassTexture(baseHex || this._tune?.grass);
   }
 
   // 草地：灰绿底 + 淡颗粒。阴影仍落在地面上。
   _buildGrass(opts = {}) {
     const area = opts.area || GROUND_AREA;
-    const env = new THREE.Group();
-    env.name = "grass-env";
-
-    const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(area, area),
-      new THREE.MeshLambertMaterial({ map: this._makeGrassTexture() })
-    );
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.y = -GROUND_DROP - 0.4;
-    ground.receiveShadow = true;
-    env.add(ground);
+    const { group: env, ground } = outdoor.grass({ area, base: this._tune?.grass });
 
     this.scene.add(env);
     this._grassGround = ground;
@@ -6763,32 +6714,8 @@ export class SceneManager {
 
   // Gradient-Himmel: große Kugel (BackSide) mit GLSL-Verlauf Horizont → Zenit.
   _buildSky() {
-    const mat = new THREE.ShaderMaterial({
-      vertexShader: `
-        varying float vY;
-        void main() {
-          vY = normalize(position).y;
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        }`,
-      fragmentShader: `
-        uniform vec3 uHorizon;
-        uniform vec3 uZenith;
-        varying float vY;
-        void main() {
-          float t = clamp(vY * 2.5 + 0.10, 0.0, 1.0);
-          gl_FragColor = vec4(mix(uHorizon, uZenith, t * t), 1.0);
-        }`,
-      uniforms: {
-        uHorizon: { value: new THREE.Color(SCENE_SKY_HORIZON) },
-        uZenith:  { value: new THREE.Color(SCENE_SKY_ZENITH) },
-      },
-      side: THREE.BackSide,
-      depthWrite: false,
-      depthTest:  false,
-    });
-    this._skyMesh = new THREE.Mesh(new THREE.SphereGeometry(4800, 16, 10), mat);
-    this._skyMesh.renderOrder = -1;
-    this._skyMat = mat;
+    this._skyMesh = outdoor.sky();
+    this._skyMat = this._skyMesh.material;
     this.scene.add(this._skyMesh);
     // Hintergrundfarbe passend zum Himmel (Szene) bzw. zum Farbschema setzen --
     // sonst blitzt bis zum ersten setScene() die falsche Farbe auf.
@@ -6800,101 +6727,21 @@ export class SceneManager {
   // hinein; seit das Raster gewachsen ist, richten sie sich nach dessen Kante.
   // Geometrien und Materialien werden einmalig geteilt; per-Baum nur Transform.
   _buildTrees() {
-    const trunkMat  = new THREE.MeshLambertMaterial({ color: SCENE_TRUNK });
-    const crownMatA = new THREE.MeshLambertMaterial({ color: SCENE_CROWN_A });
-    const crownMatB = new THREE.MeshLambertMaterial({ color: SCENE_CROWN_B });
-    const crownMatC = new THREE.MeshLambertMaterial({ color: SCENE_CROWN_C });
-    const trunkGeo  = new THREE.CylinderGeometry(8, 13, 100, 7);
-    const crownGeoA = new THREE.SphereGeometry(120, 8, 6);
-    const crownGeoB = new THREE.SphereGeometry(100, 7, 5);
-    const crownGeoC = new THREE.SphereGeometry(85,  7, 5);
-
-    const group = new THREE.Group();
-    this._treeNodes = [];
-
-    // Deterministischer LCG-RNG (reproduzierbare Positionen je Session).
-    let seed = 137;
-    const rng = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 0x100000000; };
-
-    // Die Zahl richtet sich nach dem Ring: er ist groesser als die frueheren
-    // 620-780 cm, bei 60 Stueck stuenden sie vereinzelt in der Landschaft.
-    const rand = GROUND_AREA / 2 - 10;
-    for (let i = 0; i < 72; i++) {
-      const r = TREE_RING[0] + rng() * (TREE_RING[1] - TREE_RING[0]);
-      const θ = rng() * Math.PI * 2;
-      const tx = Math.cos(θ) * r, tz = Math.sin(θ) * r;
-      if (Math.abs(tx) > rand || Math.abs(tz) > rand) continue;
-
-      const sc = 0.65 + rng() * 0.7;
-      const ox2 = (rng() - 0.5) * 56, oz2 = (rng() - 0.5) * 56;
-      const ox3 = (rng() - 0.5) * 46, oz3 = (rng() - 0.5) * 46;
-
-      const tg = new THREE.Group();
-      tg.position.set(tx, 0, tz);
-      tg.scale.setScalar(sc);
-      tg.rotation.y = rng() * Math.PI * 2;
-
-      const trunk = new THREE.Mesh(trunkGeo, trunkMat);
-      trunk.position.y = 50; trunk.castShadow = true; tg.add(trunk);
-
-      const c1 = new THREE.Mesh(crownGeoA, crownMatA);
-      c1.position.set(0, 175, 0); c1.castShadow = true; tg.add(c1);
-
-      const c2 = new THREE.Mesh(crownGeoB, crownMatB);
-      c2.position.set(ox2, 210, oz2); c2.castShadow = true; tg.add(c2);
-
-      const c3 = new THREE.Mesh(crownGeoC, crownMatC);
-      c3.position.set(ox3, 195, oz3); c3.castShadow = true; tg.add(c3);
-
-      group.add(tg);
-      this._treeNodes.push({ group: tg, x: tx, z: tz });
-    }
-
+    const { group, nodes, materials } = outdoor.trees();
+    this._treeNodes = nodes;
     this.scene.add(group);
     this._treeGroup = group;
-    this._trunkMat = trunkMat;
-    this._crownMatA = crownMatA;
-    this._crownMatB = crownMatB;
-    this._crownMatC = crownMatC;
+    [this._trunkMat, this._crownMatA, this._crownMatB, this._crownMatC] = materials;
 
     this._buildBushes();
   }
 
   _buildBushes() {
-    const bushGeo = new THREE.SphereGeometry(30, 8, 6);
-    const bushMat = new THREE.MeshLambertMaterial({ color: SCENE_BUSH });
-
-    const group = new THREE.Group();
-    this._bushNodes = [];
-
-    let seed = 138;
-    const rng = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 0x100000000; };
-
-    for (let i = 0; i < 40; i++) {
-      const r = BUSH_RING[0] + rng() * (BUSH_RING[1] - BUSH_RING[0]);
-      const θ = rng() * Math.PI * 2;
-      const tx = Math.cos(θ) * r, tz = Math.sin(θ) * r;
-      if (Math.abs(tx) > GROUND_AREA / 2 - 10 || Math.abs(tz) > GROUND_AREA / 2 - 10) continue;
-
-      const sc = 0.5 + rng() * 0.5;
-
-      const tg = new THREE.Group();
-      tg.position.set(tx, 0, tz);
-      tg.scale.setScalar(sc);
-      tg.rotation.y = rng() * Math.PI * 2;
-
-      const bush = new THREE.Mesh(bushGeo, bushMat);
-      bush.position.y = 15;
-      bush.castShadow = true;
-      tg.add(bush);
-
-      group.add(tg);
-      this._bushNodes.push({ group: tg, x: tx, z: tz });
-    }
-
+    const { group, nodes, material } = outdoor.bushes();
+    this._bushNodes = nodes;
     this.scene.add(group);
     this._bushGroup = group;
-    this._bushMat = bushMat;
+    this._bushMat = material;
   }
 
   // Bäume ausblenden, die zu nah an einem Modellknoten stehen.

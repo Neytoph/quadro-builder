@@ -2559,6 +2559,10 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       if (modelPartCount(e2.model.toJSON()) > 0) createEmptyTab()
       // 当前是共享方案的标签页时 applyModelJson 自己会新开一个
       if (!applyModelJson(data, { undoable: false })) { track('builder.app.fail', { reason: 'source_format' }); notify(t('toast.shareInvalid'), 'err'); return }
+      if (ent.background === 'grass' || (ent.background === 'home' && e2.model.homeContext)) {
+        e2.scene.setBackground(ent.background)
+        bump()
+      }
       const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
       if (tab && ent.name) {
         tab.name = ent.name
