@@ -21,10 +21,11 @@
 .cc-restore:disabled { opacity: .28; }
 .cc-filters { display: flex; align-items: center; gap: 8px; margin: 6px 0 8px; }
 .cc-configuration .cc-search { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; height: 40px; margin: 0; padding: 0 10px; border: 1px solid var(--cc-brand-line); border-radius: 9px; color: #8a8278; background: #fffaf6; }
-.cc-configuration .cc-search:focus-within { border-color: var(--cc-brand); box-shadow: 0 0 0 2px color-mix(in srgb, var(--cc-brand) 14%, transparent); }
+.cc-configuration .cc-search { transition: border-color var(--field-focus-duration), box-shadow var(--field-focus-duration); }
+.cc-configuration .cc-search:focus-within { border-color: var(--field-focus-border); box-shadow: var(--field-focus-shadow); }
 .cc-search svg { flex: none; }
 .cc-configuration .cc-search input { min-width: 0; width: 100%; height: 36px; border: 0; background: transparent; padding: 0; border-radius: 4px; font-size: 12px; }
-.cc-configuration .cc-search input:focus-visible { outline: none; }
+:root .cc-configuration .cc-search input:focus { outline: none; box-shadow: none; }
 .cc-filters select { width: 125px; max-width: 38%; height: 40px; padding: 0 8px; border-radius: 9px; border: 1px solid var(--cc-brand-line); background: #fffaf6; color: #5a6270; font: inherit; font-size: 11px; }
 .cc-catalogue-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-rows: max-content; gap: 7px; min-height: 100px; max-height: 220px; flex: 1; overflow-y: auto; padding: 2px 3px 3px; margin: 0 -3px; overscroll-behavior: contain; scrollbar-width: thin; }
 .cc-catalogue-card { display: flex; flex-direction: column; align-items: center; justify-content: flex-start; min-height: 115px; padding: 7px 8px; border: 1px solid var(--cc-brand-line); border-radius: 12px; background: #fffaf6; text-align: center; cursor: pointer; }

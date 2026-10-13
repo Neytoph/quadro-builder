@@ -97,6 +97,7 @@
 .qb-file-languages button { flex: 1; min-height: 44px; border: 1px solid #e0b892; border-radius: 10px; font-size: 13px; cursor: pointer; }
 .qb-file-languages button:hover { border-color: #ea580c; }
 :is(.qb-project-bar,.qb-top-toolbar,.qb-right-dock) :focus-visible { outline: 2px solid #9a3412; outline-offset: -2px; }
+:root .qb-project-tab input { border: 1px solid transparent; border-radius: 4px; }
 @media (max-width: 1200px) {
   .qb-nav-button { padding: 0 8px; gap: 5px; }
   .qb-nav-chevron { display: none; }
