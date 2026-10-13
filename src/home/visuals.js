@@ -1,5 +1,5 @@
 // 房间编辑器、AI 预览与 Builder 共用；单位为厘米，家具局部外轮廓为 [0, 1]。
-export const HOME_STYLE = Object.freeze({ background: '#FFF8F2', gridCell: 25, exposure: 1.28 });
+export const HOME_STYLE = Object.freeze({ background: '#FFF8F2', gridCell: 25, exposure: 1.1 });
 
 export const furnitureRotation = item => item.rotation ?? ((item.type === 'sofa' || item.type === 'cabinet') && item.d > item.w ? 90 : 0);
 
@@ -83,8 +83,8 @@ export function createHomeVisuals(THREE, RoundedBoxGeometry) {
   }
 
   function lighting() {
-    const group = new THREE.Group(), sun = new THREE.DirectionalLight('#fff0d7', 3.3);
-    group.add(new THREE.HemisphereLight('#fff7e5', '#bfc8bc', 2.4));
+    const group = new THREE.Group(), sun = new THREE.DirectionalLight('#fff0d7', 2.2);
+    group.add(new THREE.HemisphereLight('#fff7e5', '#bfc8bc', 1.6));
     sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048); sun.shadow.bias = -.0001; sun.shadow.intensity = .8;
     group.add(sun, sun.target); group.userData.sun = sun; return group;
   }

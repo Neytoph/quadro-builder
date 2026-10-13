@@ -462,68 +462,9 @@ export class SceneManager {
   }
 
   _renderMainScene() {
-    if (!this._homeStyleOn || !this._homeGroup?.visible) {
-      this.renderer.render(this.scene, this.camera);
-      return;
-    }
-    // 房间沿用编辑器的暖色灯光；产品单独使用草地灯光，保持零件原有配色。
-    // 第一遍保留产品深度和投影，第二遍沿用同一深度，家具遮挡和摆放关系不变。
-    const renderer = this.renderer, home = this._homeGroup;
-    const background = this.scene.background, autoClear = renderer.autoClear;
-    const toneMapping = renderer.toneMapping, exposure = renderer.toneMappingExposure;
-    const shadowsDirty = renderer.shadowMap.needsUpdate;
-    const lights = [this._hemiLight, this._dirLight, this._fillLight, this._rimLight].map(light => ({
-      light, visible: light.visible, intensity: light.intensity, castShadow: light.castShadow,
-      color: light.color.clone(), groundColor: light.groundColor?.clone(),
-    }));
-    const overlays = [this.handleGroup, this.labelGroup, this._hoverPartGroup,
-      this._roomGroup, this._roomDrawGroup, this._tubePreview, this._installationGroup]
-      .filter(Boolean).map(object => [object, object.visible]);
-    const materials = new Map(), guideDepthWrites = new Map();
-    home.traverse(object => {
-      for (const material of object.material ? (Array.isArray(object.material) ? object.material : [object.material]) : []) {
-        if (material.transparent && material.depthWrite) guideDepthWrites.set(material, material.depthWrite);
-      }
-    });
-    for (const group of [this.buildGroup, this._ghostGroup]) group.traverse(object => {
-      for (const material of object.material ? (Array.isArray(object.material) ? object.material : [object.material]) : []) {
-        if (!materials.has(material)) materials.set(material, material.colorWrite);
-      }
-    });
-    try {
-      for (const material of materials.keys()) material.colorWrite = false;
-      // 半透明区域及网格只提供空间参照，不应挡住第二遍的真实产品。
-      for (const material of guideDepthWrites.keys()) material.depthWrite = false;
-      for (const [object] of overlays) object.visible = false;
-      renderer.render(this.scene, this.camera);
-      for (const [material, colorWrite] of materials) material.colorWrite = colorWrite;
-      for (const [object, visible] of overlays) object.visible = visible;
-      home.visible = false;
-      this.scene.background = null;
-      renderer.autoClear = false;
-      this._setProductLighting(true);
-      for (const { light } of lights) light.visible = true;
-      renderer.toneMapping = THREE.NoToneMapping;
-      renderer.toneMappingExposure = 1;
-      if (shadowsDirty) renderer.shadowMap.needsUpdate = true;
-      renderer.render(this.scene, this.camera);
-    } finally {
-      for (const [material, colorWrite] of materials) material.colorWrite = colorWrite;
-      for (const [material, depthWrite] of guideDepthWrites) material.depthWrite = depthWrite;
-      for (const [object, visible] of overlays) object.visible = visible;
-      for (const state of lights) {
-        state.light.visible = state.visible;
-        state.light.intensity = state.intensity;
-        state.light.castShadow = state.castShadow;
-        state.light.color.copy(state.color);
-        if (state.groundColor) state.light.groundColor.copy(state.groundColor);
-      }
-      home.visible = true;
-      this.scene.background = background;
-      renderer.autoClear = autoClear;
-      renderer.toneMapping = toneMapping;
-      renderer.toneMappingExposure = exposure;
-    }
+    // 模型、家具和地面共用当前场景的灯光、色调映射与阴影。
+    // 室内使用房间灯光；切换背景及隐藏房间导出由 _applyHomeStyle 统一处理。
+    this.renderer.render(this.scene, this.camera);
   }
 
   homeProductBounds() {
