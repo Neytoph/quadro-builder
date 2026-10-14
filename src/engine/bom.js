@@ -317,15 +317,23 @@ export function inferConnectorType(model, node) {
   return resolveNodeConnection(model, node).type;
 }
 
+function physicalDirs(node, dirs) {
+  const out = dirs.slice();
+  for (const arm of node.arms || []) {
+    if (!out.some((d) => d.reduce((sum, v, i) => sum + v * arm[i], 0) > 0.95)) out.push(arm);
+  }
+  return out;
+}
+
 function legacyConnectorType(model, node) {
   if (node.part) return node.part;
+  if (node.preferType && !node.c45body) return node.preferType;
   const dirs = neighborDirs(model, node);
-  if (dirs.length === 0) return null;
   // Die Winkelkupplung sitzt auf ihrem eigenen Knoten (dem Adapter-Koerper).
   // Die Kupplung, die sie TRAEGT, heisst weiter nach ihren eigenen Armen -- der
   // Stutzen unter der Huelse ist einer davon.
   if (node.c45body) return "diagonal";
-  return connectorTypeForDirs(dirs);
+  return connectorTypeForDirs(physicalDirs(node, dirs));
 }
 
 // Liefert ALLE an einem Knoten verbauten Kupplungen als Liste von Typen.
@@ -367,7 +375,7 @@ function legacyConnectorsForNode(model, node) {
     return [node.part, t && t !== "end" ? t : "straight"];
   }
   const dirs = neighborDirs(model, node);
-  if (dirs.length === 0) return node.preferType ? [node.preferType] : [];
+  if (dirs.length === 0 && !node.arms?.length) return node.preferType ? [node.preferType] : [];
   // Adapter-Koerper (c45body): genau HIER sitzt die 45-Grad-Winkelkupplung --
   // sie steckt mit ihrer Huelse auf dem Rohrende der Basiskupplung und nimmt
   // mit dem 45-Grad-Arm die Schraege auf. Es gibt sie nur einarmig, also immer
@@ -390,8 +398,8 @@ function legacyConnectorsForNode(model, node) {
   }
   if (!node.c45) {
     const pref = getConnector(node.preferType);
-    if (pref && (pref.arms || 0) > dirs.length) return [node.preferType];
-    const t = connectorTypeForDirs(dirs);
+    if (pref) return [node.preferType];
+    const t = connectorTypeForDirs(physicalDirs(node, dirs));
     return t && t !== "end" ? [t] : [];
   }
   const axis = [], diag = [];
@@ -455,8 +463,8 @@ export function resolveNodeConnection(model, nodeOrId) {
   let types = node.unused ? [] : legacyConnectorsForNode(model, node);
   let type = node.unused ? null : legacyConnectorType(model, node);
   // 重复端口不能凭 degree 增加一个不存在的连接件臂。
-  if (ordinary && nonAxis.length === 0 && unique.length) {
-    const geometric = connectorTypeForDirs(unique);
+  if (ordinary && nonAxis.length === 0 && (unique.length || preferredPattern || savedArms?.length)) {
+    const geometric = connectorTypeForDirs(physicalDirs(node, worldDirs));
     type = preferredPattern ? node.preferType : geometric;
     types = type === 'end' ? [] : [type];
   }

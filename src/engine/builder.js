@@ -5,7 +5,7 @@ import { buildableTubes, geometry, getTube, spacingFor, getPanel, defaultPanel, 
 import { CLASSIC_COLOR_IDS, officialColorId } from "./colors.js";
 import { connectorLabelInfo } from "./buildplan.js";
 import { computeAssemblyPlan, assemblyState } from "./assemblyPlan.js";
-import { infeasibleConnectors, inferConnectorType } from "./bom.js";
+import { infeasibleConnectors, inferConnectorType, resolveNodeConnection } from "./bom.js";
 import { getLang, t } from "./i18n.js";
 import { round2, panelNormal, modelMiddle, xAxisOf, yAxisOf, zAxisOf, quatFromBasis } from "./util.js";
 import { TUBE_FITTINGS, POOL_KINDS, isHolePart, holeArmDirs, holeClampDirsAt, HOLE_MASKS,
@@ -726,6 +726,11 @@ export class Builder {
   rotateSelectionBy(steps = 1) {
     if (this._paste) return this._rotatePaste(steps);
     if (this.mode !== "select" || !this.selection.size) return false;
+    if (this.selection.size === 1) {
+      const [id, kind] = [...this.selection][0];
+      const node = kind === "node" ? this.model.nodes.get(id) : null;
+      if (node && !node.part && !node.c45body && !node.bearingOn && !node.stub) return this._rotateConnector(node, steps);
+    }
     const driver = this._selectedClampDriver();
     if (driver) {
       let ok = false;
@@ -1908,6 +1913,59 @@ export class Builder {
       }
     }
     return out;
+  }
+
+  // 单个普通接头只换插口方向，管子、节点和已有连接都保持原位。
+  _rotateConnector(node, steps) {
+    if (this.readOnly || !Number.isInteger(steps)) return false;
+    const connection = resolveNodeConnection(this.model, node);
+    const typeId = node.preferType || connection.type;
+    const mask = CONN_TYPE_MASK[typeId];
+    if (!mask || !steps) return false;
+    const current = node.quat || (connection.frame ? quatFromBasis(...connection.frame) : [0, 0, 0, 1]);
+    const currentAxes = [xAxisOf(current), yAxisOf(current), zAxisOf(current)];
+    const cardinal = currentAxes.every((axis) => Math.max(...axis.map(Math.abs)) > 0.999);
+    const frame = cardinal ? [0, 0, 0, 1] : current;
+    const axes = [xAxisOf(frame), yAxisOf(frame), zAxisOf(frame)];
+    const local = (d) => axes.map((axis) => axis.reduce((sum, v, i) => sum + v * d[i], 0));
+    let occupied = 0;
+    // 复用真实端口解析，包括弯管切线、附件和文件中的45°套筒。
+    for (const dir of connection.worldDirs) {
+      const bit = this._axisBit(...local(dir));
+      if (!bit) { this.onNotice(t("notice_rotate_connector"), "warn"); return false; }
+      occupied |= bit;
+    }
+    const orients = this._connectorOrients(mask, occupied);
+    if (!orients.length) { this.onNotice(t("notice_rotate_connector"), "warn"); return false; }
+    const armMask = (q) => {
+      const basis = [xAxisOf(q), yAxisOf(q), zAxisOf(q)];
+      let bits = 0;
+      for (const [bit, d] of CONNECTOR_ARM_BITS) {
+        if (!(mask & bit)) continue;
+        const v = basis[d[0] ? 0 : d[1] ? 1 : 2];
+        const sign = d[0] || d[1] || d[2];
+        bits |= this._axisBit(...v.map((value) => value * sign));
+      }
+      return bits;
+    };
+    const currentLocal = cardinal ? current : [0, 0, 0, 1];
+    const index = orients.findIndex((q) => armMask(q) === armMask(currentLocal));
+    const next = orients[((Math.max(0, index) + steps) % orients.length + orients.length) % orients.length];
+    if (orients.length === 1 && index === 0) {
+      this.scene?.finishPartMotion?.(node.id);
+      this.refresh();
+      return true;
+    }
+    const world = (v) => [0, 1, 2].map((i) => axes.reduce((sum, axis, j) => sum + axis[i] * v[j], 0));
+    this.recordHistory(() => {
+      node.preferType = typeId;
+      node.quat = quatFromBasis(world(xAxisOf(next)), world(yAxisOf(next)), world(zAxisOf(next)));
+      delete node.arms;
+      delete node.armDirs;
+    });
+    this.scene?.finishPartMotion?.(node.id);
+    this.refresh();
+    return true;
   }
 
   _nodeAcceptsConnector(node, typeId) {
