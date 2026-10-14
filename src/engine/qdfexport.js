@@ -29,6 +29,7 @@ import { QDF_FITTING_KINDS, QDF_SLIDE_KINDS } from './qdfimport.js';
 import { officialColorId } from "./colors.js";
 import { panelNormal, modelMiddle } from "./util.js";
 import { isHolePart, HOLE_MASKS, BLACK_FITTINGS, isBoltPart, boltAxis, boltDepth, hingeDir, fixedFittingColor } from "./model.js";
+import { connectorFrameOf } from './bom.js';
 
 const NON_QDF_ACCESSORY_IDS = new Set(ACCESSORY_PACK.map(part => part.id));
 
@@ -480,9 +481,13 @@ export function buildQDF(model, opts = {}) {
     // Eine gedrehte Kupplung (aus dem Import) behaelt ihre Lage. Die Arm-Maske
     // zaehlt die LOKALEN Wuerfelachsen -- bei einer gedrehten Kupplung sind das
     // nicht die Weltachsen, sonst bekaeme sie gar keine Arme zugeordnet.
-    const quat = n.quat && n.quat.length === 4
-      ? [n.quat[3], n.quat[0], n.quat[1], n.quat[2]]      // Three (x,y,z,w) -> Datei (w,x,y,z)
-      : null;
+    let quat = null;
+    if (n.quat && n.quat.length === 4) {
+      quat = [n.quat[3], n.quat[0], n.quat[1], n.quat[2]]; // Three (x,y,z,w) -> Datei (w,x,y,z)
+    } else {
+      const frame = connectorFrameOf(model, n);
+      if (frame) quat = quatFromAxes(...frame);
+    }
     const toLocal = (d) => (quat ? rotateByQuat(conjugate(quat), d) : d);
 
     let mask = 0;
