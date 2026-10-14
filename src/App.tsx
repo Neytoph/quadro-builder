@@ -16,7 +16,7 @@ import ErrorBoundary from './ui/ErrorBoundary'
 import SceneToggle from './ui/SceneToggle'
 // 调色台代码保留在 src/ui/ColorTune.tsx，面板先不挂上。
 import { PanelLayoutProvider } from './ui/panelLayout'
-import { UI_CATALOGUE_EVENT, UI_ESCAPE_EVENT } from './ui/events'
+import { UI_ESCAPE_EVENT } from './ui/events'
 import { DockProvider, useDock } from './ui/dock'
 import { usePresence } from './ui/motion'
 import { bootEntry, DELIVERY_EMBED, dropParam, fullBuilderUrl, VIEW_ONLY } from './entry'
@@ -31,7 +31,7 @@ import CompareView from './collab/ui/CompareView'
 import BatchImport from './collab/ui/BatchImport'
 import RoomEditor from './collab/ui/RoomEditor'
 import CustomComponentsMenu, { CUSTOM_COMPONENTS_EVENT, type ComponentMenuPosition } from './ui/CustomComponentsMenu'
-import { FULL_PANEL, NUMBER_TUBES, toolForKey } from './store/toolMemory'
+import { NUMBER_TUBES } from './store/toolMemory'
 
 function Toast() {
   const { toast: live, dismissToast } = useEngine()
@@ -286,7 +286,7 @@ function ManualProgress() {
 function AppInner() {
   const api = useEngine()
   const collab = useCollab()
-  const { handleEsc } = useDock()
+  const { handleEsc, setPane } = useDock()
   const [componentPosition, setComponentPosition] = useState<ComponentMenuPosition | null>(null)
   const pointer = useRef<ComponentMenuPosition | null>(null)
   const closeComponents = useCallback(() => setComponentPosition(null), [])
@@ -370,9 +370,8 @@ function AppInner() {
       if (meta && (e.key === 'a' || e.key === 'A')) { e.preventDefault(); api.selectAll(); return }
       if (meta && (e.key === 'g' || e.key === 'G')) { e.preventDefault(); e.shiftKey ? api.ungroup() : api.group(); return }
       if (meta) return
-      const tool = toolForKey(e)
       const toggleTool = e.code === 'Space' && !e.shiftKey
-      if (tool || toggleTool || e.key === '2' || NUMBER_TUBES[e.key]) {
+      if (toggleTool || NUMBER_TUBES[e.key]) {
         if (toggleTool && el?.closest('button, a, summary, [role="button"], [role="menuitem"]')) return
         if (!api.ready || api.readOnly || api.pasting || api.engine()?.builder.busy()) return
         e.preventDefault()
@@ -380,11 +379,16 @@ function AppInner() {
         window.dispatchEvent(new Event(UI_ESCAPE_EVENT))
         collab.setPlacingPin(false)
         if (toggleTool) api.toggleLastTool()
-        else if (tool === 'reinforce') api.activateTool(tool)
-        else if (tool) window.dispatchEvent(new CustomEvent(UI_CATALOGUE_EVENT, { detail: tool }))
-        else if (e.key === '2') api.setPanel(FULL_PANEL)
         else api.setTube(NUMBER_TUBES[e.key])
         document.getElementById('canvas-host')?.focus({ preventScroll: true })
+        return
+      }
+      if ((e.key === 'c' || e.key === 'C') && collab.mode === 'plan' && collab.role !== 'guest') {
+        e.preventDefault()
+        api.setMode('select')
+        collab.setPinDraft(null)
+        if (!collab.placingPin) { setPane(null); collab.setActiveThread(null) }
+        collab.setPlacingPin(!collab.placingPin)
         return
       }
       if ((e.key === 'm' || e.key === 'M') && (api.selectionCount || api.pasting)) {
@@ -426,6 +430,16 @@ function AppInner() {
         else { if (api.mode !== 'add' && !api.readOnly) api.setMode('add'); api.buildStep(dir) }
         return
       }
+      if (e.key === 'q' || e.key === 'Q') {
+        if (api.readOnly) return
+        if (api.selectionCount || api.pasting) { e.preventDefault(); api.rotate(-1) }
+        return
+      }
+      if (e.key === 'e' || e.key === 'E') {
+        if (api.readOnly) return
+        if (api.selectionCount || api.pasting) { e.preventDefault(); api.rotate(1) }
+        return
+      }
       if (e.key === 'a' || e.key === 'A') {
         e.preventDefault()
         api.setAssembly(!api.assembly.active)
@@ -450,10 +464,16 @@ function AppInner() {
         api.setMode('select')
         document.getElementById('canvas-host')?.focus({ preventScroll: true })
       }
+      else if (e.key === 'r' || e.key === 'R' || e.key === 'v' || e.key === 'V') {
+        if (!api.ready || api.readOnly || api.pasting || api.engine()?.builder.busy()) return
+        e.preventDefault()
+        if (e.key === 'r' || e.key === 'R') api.setMode('slide')
+        else api.startReinforce()
+      }
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [api, collab, handleEsc, componentPosition])
+  }, [api, collab, handleEsc, setPane, componentPosition])
 
   // 共享方案里只能看的人没有颜色栏；访客连工具条也没有，评论者的工具条只剩「选择」「评论」
   const viewer = collab.mode === 'plan' && !collab.canEdit

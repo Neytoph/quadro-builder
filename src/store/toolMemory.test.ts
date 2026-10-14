@@ -1,11 +1,11 @@
 import { beforeAll, expect, it } from 'vitest'
 import { accessories, allConnectors, buildableCurvedTubes, buildablePanels, buildableTubes, loadCatalog } from '../engine/catalog.js'
 import { installationChoices } from './installationCatalogue'
-import { captureTool, FULL_PANEL, NUMBER_TUBES, ToolMemory, toolForKey, type ToolState } from './toolMemory'
+import { captureTool, ToolMemory, type ToolState } from './toolMemory'
 import type { useEngine } from './EngineContext'
 
 beforeAll(async () => { await loadCatalog() })
-const state = (changes: Partial<ToolState> = {}): ToolState => ({ mode: 'select', panelId: FULL_PANEL, tubeId: 'T35', slideKind: 'slide-new2',
+const state = (changes: Partial<ToolState> = {}): ToolState => ({ mode: 'select', panelId: 'panel_40x40', tubeId: 'T35', slideKind: 'slide-new2',
   clampPart: 'double_tube', placingConnector: null, fittingKind: 'multi-wheel2', fittingPart: null, poolLinerId: null,
   pasting: false, color: 'red', insetScrewAxis: 'horizontal', ...changes })
 const entries = () => installationChoices({ catalog: { tubes: buildableTubes(), curved: buildableCurvedTubes(), panels: buildablePanels(),
@@ -32,15 +32,7 @@ it('各模型和各分类记录独立，退出临时模式后仍能返回上次�
   expect(memory.get('B')).toMatchObject({ tool: 'slides', partId: 'slide-domestic-classic80' })
   const copy = memory.get('A')!
   copy.partId = 'changed'
-  expect(memory.get('A')?.partId).toBe(FULL_PANEL)
+  expect(memory.get('A')?.partId).toBe('panel_40x40')
   memory.retain(['A'])
   expect(memory.get('B')).toBeUndefined()
-})
-
-it('左手物理按键完整且数字2只选择整格面板', () => {
-  expect(['Q', 'W', 'E', 'R', 'T', 'Z', 'X', 'C', 'V'].map(key => toolForKey({ code: `Key${key}`, shiftKey: false })))
-    .toEqual(['tubes', 'panels', 'connectors', 'wheels', 'textiles', 'pools', 'slides', 'accessories', 'reinforce'])
-  expect(toolForKey({ code: 'KeyC', shiftKey: true })).toBeUndefined()
-  expect(NUMBER_TUBES['2']).toBeUndefined()
-  expect(FULL_PANEL).toBe('panel_40x40')
 })
