@@ -3664,6 +3664,8 @@ export class BuildModel {
       while (stack.length) {
         const id = stack.pop();
         for (const t of this.tubes.values()) {
+          // 双管夹的连接桥是铰接约束，不能把底框并入活动刚体。
+          if (t.link) continue;
           const other = t.a === id ? t.b : t.b === id ? t.a : null;
           if (other == null || baseNodes.has(other)) continue;
           if (!second.has(t.id)) { second.add(t.id); grow = true; }
