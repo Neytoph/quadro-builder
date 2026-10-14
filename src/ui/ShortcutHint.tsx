@@ -145,7 +145,7 @@ export default function ShortcutHint({ open, onToggle }: { open: boolean; onTogg
         {/* 换了工具，这一组快捷键整组换掉，一行行重新进来 */}
         <div key={mode + (api.placingConnector ? ':conn' : '')} className="m-rows flex flex-col gap-1">
           {rows.map((row, i) => (
-            <div key={row.chord + row.action} className="flex items-start gap-2" style={{ '--i': i } as CSSProperties}>
+            <div key={row.chord + row.action} className="flex flex-wrap items-start gap-x-2 gap-y-0.5" style={{ '--i': i } as CSSProperties}>
               <Kbd text={row.chord} />
               <span className="text-[11px] text-gray-300 leading-snug pt-px">{row.action}</span>
             </div>

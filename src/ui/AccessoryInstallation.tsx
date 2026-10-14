@@ -32,6 +32,8 @@ export default function AccessoryInstallation({ menuOpen }: { menuOpen: boolean 
           <span className="mr-1 text-[11px] text-gray-300">{t('accessory.fixingEdges')}</span>
           {(['vertical', 'horizontal'] as const).map(axis => <button type="button" key={axis} className={`qb-btn qb-btn-sm ${api.insetScrewAxis === axis ? '' : 'qb-btn-ghost'}`} data-ui="inset-screw-axis" data-axis={axis} aria-pressed={api.insetScrewAxis === axis} disabled={api.readOnly} onClick={() => api.setInsetScrewAxis(axis)}>{t(`accessory.fixing.${axis}`)}</button>)}
         </div>}
+        {part.mountLayout === 'opposite-transparent-screws' && <p className="mt-1 text-[11px] text-gray-300">{t('accessory.fixingHelp')}</p>}
+        {part.placement === 'panel' && part.id !== 'panel_40x40_pocket' && <p className="mt-1 text-[11px] text-gray-300">{t('accessory.panelFlipHint')}</p>}
         {part.fixedColor && <p className="mt-1 text-[11px] text-gray-300">{t('accessory.fixedColor', { color: colorLabel(part.fixedColor) })}</p>}
         {(part.assumption || part.id === 'steering_wheel' || part.id === 'panel_40x40_busy' || part.id === 'panel_40x40_pocket' || preview?.assumption) && <p className="mt-1 text-[11px] text-[#9a5b16]">{t('accessory.assumption')}</p>}
       </>}

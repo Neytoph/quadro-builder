@@ -4,7 +4,7 @@ import { componentFrame } from './accessoryPack.js';
 export function panelInstallationFacing(model, part, camera) {
   if (part.kind || !part.mounts?.length) return { part, conflict: null };
   const frame = componentFrame(model, part);
-  if (!frame || Math.abs(frame.axes[2][1]) > .999) return { part, conflict: null };
+  if (!frame) return { part, conflict: null };
   const towardCamera = frame.axes[2].reduce((sum, v, i) => sum + v * (camera[i] - frame.pos[i]), 0);
   if (Math.abs(towardCamera) < .001) return { part, conflict: null };
   const opposite = model.panelAccessoryDiagnostics({ ...part, side: -(part.side || 1) });

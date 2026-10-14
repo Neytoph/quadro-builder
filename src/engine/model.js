@@ -2,7 +2,7 @@
 // Bewusst ohne Three.js-Abhaengigkeit, damit es testbar und Backend-tauglich bleibt.
 
 import { MERGE_EPS, FORMAT_VERSION, DIAGONAL_SNAP_TOL, DIRECTIONS, DIAGONAL_DIRECTIONS, DIR_ALIGN_TOL, ARM_ALIGN_TOL, CONN_TYPE_MASK, anchorGap } from "./config.js";
-import { ACCESSORY_IDS, PANEL_ACCESSORY_IDS, accessoryMount, accessoryDiagnostics, panelAccessoryDiagnostics, componentMountsValid, confirmedDiagnostics } from './accessoryPack.js';
+import { ACCESSORY_IDS, PANEL_ACCESSORY_IDS, accessoryMount, accessoryDiagnostics, panelAccessoryDiagnostics, componentMountsValid, componentVolumes, confirmedDiagnostics, nativeWheelComponentObstacle } from './accessoryPack.js';
 import { confirmedSpec } from './componentPack.js';
 import { confirmedCandidates, ropeCandidate } from './confirmedComponentModel.js';
 import { insetPanelProbes } from './insetPanelMounts.js';
@@ -1112,6 +1112,7 @@ export class BuildModel {
   turnPanel(id) {
     const p = this.panels.get(id);
     if (!p) return false;
+    if (PANEL_ACCESSORY_IDS.has(p.panelId) && !['panel_40x40', 'panel_40x20', 'panel_30x30', 'hole_panel_40x40'].includes(p.panelId)) return false;
     p.turned = !p.turned;
     // Eine eingelesene Platte behaelt ihre Lage aus der Datei -- die Drehung um
     // die Normale gehoert dann mitgedreht, sonst schriebe der Export weiter die
@@ -1265,15 +1266,27 @@ export class BuildModel {
     return panel;
   }
 
+  // 翻面检查共用于模型与点击入口，失败时保留当前板件。
+  panelFlipDiagnostics(id) {
+    const part = this.panels.get(id) || this.textiles.get(id);
+    if (!part) return { valid: false, reason: 'missing_support' };
+    if (part.appearanceVersion && part.panelId === 'panel_40x40_pocket') return { valid: false, reason: 'pocket_facing' };
+    const flipped = { ...part, side: -(part.side || 1) };
+    if (part.appearanceVersion && PANEL_ACCESSORY_IDS.has(part.panelId)) {
+      const diagnostic = this.panelAccessoryDiagnostics(flipped);
+      if (!diagnostic.valid) return diagnostic;
+      if (componentVolumes(this, flipped).some(box => box.pos[1] - box.axes.reduce((sum, axis, i) => sum + Math.abs(axis[1]) * box.half[i], 0) < -0.01)) {
+        return { ...diagnostic, valid: false, reason: 'ground_clearance' };
+      }
+    }
+    return { ...flipped, valid: true, reason: null };
+  }
+
   /** Platte auf die andere Seite der Rohre legen. Liefert die neue Seite. */
   flipPanelSide(id) {
     const p = this.panels.get(id) || this.textiles.get(id);
     if (!p) return null;
-    if (p.appearanceVersion && p.panelId === 'panel_40x40_pocket') return null;
-    if (p.appearanceVersion && PANEL_ACCESSORY_IDS.has(p.panelId)) {
-      const flipped = { ...p, side: -(p.side || 1) };
-      if (!this.panelAccessoryDiagnostics(flipped).valid) return null;
-    }
+    if (!this.panelFlipDiagnostics(id).valid) return null;
     p.side = (p.side || 1) < 0 ? 1 : -1;
     // Die eigene Lage aus der Datei kennt die alte Seite -- ab jetzt rechnet
     // sich die Platte wieder aus ihrem Rohrpaar.
@@ -1331,6 +1344,13 @@ export class BuildModel {
 
   panelAccessoryDiagnostics(probe, opts = {}) { return panelAccessoryDiagnostics(this, probe, opts); }
 
+  _panelMountCandidate(probe) {
+    const candidate = this.panelAccessoryDiagnostics(probe);
+    if (candidate.valid || !candidate.mounts?.length) return candidate;
+    const opposite = this.panelAccessoryDiagnostics({ ...probe, side: -(probe.side || 1) });
+    return opposite.valid ? opposite : candidate;
+  }
+
   addPanelAccessory(probe,color) {
     const candidate=this.panelAccessoryDiagnostics(probe);
     if(!candidate.valid || !isSoftPart(this,candidate) && this.panelAt(candidate.a,candidate.b,candidate.t0,candidate.len))return null;
@@ -1348,14 +1368,13 @@ export class BuildModel {
         const probe = { a: tube.id, b: partner.id, t0: partner.lo + k * 40, len: 40, panelId, side: 1,params:{screwAxis} };
         const key = this.panelCorners(probe)?.map(c => c.map(round).join(',')).sort().join('|');
         if (!key || seen.has(key)) continue;
-        seen.add(key);
-        const mount = this.panelAccessoryDiagnostics(probe);
-        if (mount.valid) mounts.push(mount);
+        const mount = this._panelMountCandidate(probe);
+        if (mount.valid) { mounts.push(mount); seen.add(key); }
       }
     }
     if(panelId==='panel_40x40_busy')for(const probe of insetPanelProbes(this,40,40)){
       const key=this.panelCorners(probe)?.map(c=>c.map(round).join(',')).sort().join('|');if(!key || seen.has(key))continue;
-      const mount=this.panelAccessoryDiagnostics({...probe,panelId,side:1,params:{screwAxis}});if(mount.valid){mounts.push(mount);seen.add(key);}
+      const mount=this._panelMountCandidate({...probe,panelId,side:1,params:{screwAxis}});if(mount.valid){mounts.push(mount);seen.add(key);}
     }
     return mounts;
   }
@@ -1370,7 +1389,8 @@ export class BuildModel {
   }
 
   confirmedMounts(partId,options={}) {
-    return confirmedCandidates(this,partId,{...options,isPanelCandidateValid:probe=>confirmedDiagnostics(this,probe).valid}).map(p=>confirmedDiagnostics(this,p));
+    return confirmedCandidates(this,partId,{...options,isPanelCandidateValid:probe=>this._panelMountCandidate(probe).valid})
+      .map(p=>p.panelId ? this._panelMountCandidate(p) : confirmedDiagnostics(this,p));
   }
   ropeDiagnostics(first, second) { return confirmedDiagnostics(this, ropeCandidate(this, first, second)); }
   confirmedDiagnostics(probe) { return confirmedDiagnostics(this, probe); }
@@ -1688,7 +1708,7 @@ export class BuildModel {
    * Liefert je Stelle { pos:[x,y,z], dir:[x,y,z], nodeId?, tubeId? }.
    */
   fittingMounts(kind, cs = 5) {
-    if (kind === "multi-wheel2") return this._wheelMounts();
+    if (kind === "multi-wheel2") return this._wheelMounts().filter(m => !this._nativeWheelComponentBlocked(kind, m.pos, m.quat || quatFromXAxis(m.dir)));
     if (kind === "hub-cap2" || kind === "tube-cap2") return this._wheelCapMounts();
     if (kind === "textil-round2") return this._roundCoverMounts();
     const spec = FITTING_MOUNTS[kind];
@@ -1723,7 +1743,13 @@ export class BuildModel {
     const pos = [a.x + u[0] * s, a.y + u[1] * s, a.z + u[2] * s];
     // Stoesst es an ein anderes Teil auf demselben Rohr?
     if (this._fittingBlocked(kind, pos, u, half)) return null;
+    if (this._nativeWheelComponentBlocked(kind, pos, quatFromXAxis(u))) return null;
     return { pos, dir: u, tubeId };
+  }
+
+  _nativeWheelComponentBlocked(kind, pos, quat) {
+    if (kind !== 'multi-wheel2') return false;
+    return !!nativeWheelComponentObstacle(this, { kind, x: pos[0], y: pos[1], z: pos[2], quat });
   }
 
   /**
@@ -2704,8 +2730,10 @@ export class BuildModel {
     }
     const half = (FITTING_WIDTH[kind] || 0) / 2;
     if (half && this._fittingBlocked(kind, mount.pos, mount.dir || [1, 0, 0], half)) return null;
+    const quat = mount.quat || quatFromXAxis(mount.dir);
+    if (this._nativeWheelComponentBlocked(kind, mount.pos, quat)) return null;
     const f = this.addFitting(kind, mount.pos[0], mount.pos[1], mount.pos[2],
-      { quat: mount.quat || quatFromXAxis(mount.dir), color: color || null });
+      { quat, color: color || null });
     // Eine Laufrolle sitzt immer auf ihrem Adapter -- der kommt deshalb im
     // selben Zug mit. In der Stueckliste bleiben es zwei Teile.
     if (f && kind === "casters2") {
@@ -5107,17 +5135,12 @@ export class BuildModel {
       return quatFromBasis(ex, ey, ez).map((v) => Math.round(v * 1e4) / 1e4);
     };
 
-    // 板和布在承重管上的起点：管的方向翻过来之后，从另一头量
+    // 承载管的两端一起镜像，沿同一端点保存的 t0 和固定点参数保持不变。
     for (const list of [this.panels, this.textiles]) {
       for (const p of list.values()) {
         if (p.appearanceVersion && (p.panelId === 'panel_40x40_busy' || p.appearanceVersion === 2) && (Array.isArray(p.supportTubes) ? p.supportTubes : [p.a, p.b]).every(id => {
           const carrier = this.tubes.get(id); return carrier && tg.nodes.has(carrier.a) && tg.nodes.has(carrier.b);
         })) p.side = -(p.side || 1);
-        const t = this.tubes.get(p.a);
-        if (!t || !tg.nodes.has(t.a) || !tg.nodes.has(t.b)) continue;
-        const ra = this._rail(p.a);
-        if (!ra || Math.abs(ra.dir[i]) < 0.5) continue;
-        p.t0 = round(ra.len - (p.t0 + p.len));
       }
     }
 
