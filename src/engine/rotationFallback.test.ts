@@ -49,6 +49,72 @@ function flap(twoSides = false) {
 }
 
 describe('受阻后反向旋转', () => {
+  it('夹子遇地面换向后连续沿新方向转，不在两个姿态间往返', () => {
+    const { model, clamp, foot } = flap()
+    expect(model.rotateClamp(clamp.id, Math.asin(40 / 45))).toBe(true)
+    const builder = editor(model, new Map([[clamp.id, 'clamp']]))
+    builder._queueSelectFlip(clamp.id, { clientX: 20, clientY: 20 }, 'clamp')
+    builder._runSelectFlip()
+    const firstHeight = model.nodes.get(foot.a)!.y
+    builder._queueSelectFlip(clamp.id, { clientX: 20, clientY: 20 }, 'clamp')
+    builder._runSelectFlip()
+    const secondHeight = model.nodes.get(foot.a)!.y
+    expect(secondHeight).toBeGreaterThan(firstHeight)
+    builder._queueSelectFlip(clamp.id, { clientX: 20, clientY: 20 }, 'clamp')
+    builder._runSelectFlip()
+    expect(model.nodes.get(foot.a)!.y).toBeGreaterThan(secondHeight)
+  })
+
+  it('弯管遇地面换向后继续经过另一侧，再遇地面时才换回来', () => {
+    const model = new BuildModel()
+    const a = model.addNode(0, 0, 0)
+    const bow = model.extendBow(a.id, [1, 0, 0], [0, 0, 1], 'TC1', 'blue', 40)!.tube!
+    const builder = editor(model, new Map([[bow.id, 'tube']]))
+    const before = model.toJSON()
+    for (const expected of [[40, 40, 0], [40, 0, -40], [40, 40, 0], [40, 0, 40]]) {
+      expect(builder._turnBow(bow)).toBe(true)
+      const end = model.nodes.get(bow.b)!
+      expect([end.x, end.y, end.z]).toEqual(expected)
+    }
+    for (let i = 0; i < 4; i++) builder.history.undo()
+    expect(model.toJSON()).toEqual(before)
+  })
+
+  it('管端45°接头换向后下一次继续同方向，其他接头仍用自己的方向', () => {
+    const model = new BuildModel()
+    const a = model.addNode(0, 0, 0), b = model.addNode(40, 0, 0)
+    model.addTube(a.id, b.id, 'T35', 'blue', 35)
+    const { body, base } = model.addC45OnTube(a.id, [-Math.SQRT1_2, 0, -Math.SQRT1_2], C45_SLEEVE_LEN, C45_ARM_LEN)!
+    const otherBase = model.addNode(200, 40, 0)
+    const other = model.addC45Adapter(otherBase.id, [1, 0, 0], [-Math.SQRT1_2, Math.SQRT1_2, 0], C45_SLEEVE_LEN, C45_ARM_LEN)!.body!
+    const builder = editor(model, new Map([[body!.id, 'node']]))
+    expect(builder._turnC45(body!.id)).toBe(true)
+    const expected = new BuildModel()
+    expect(expected.loadJSON(model.toJSON()).ok).toBe(true)
+    expect(expected.rotateC45Sleeve(body!.id, -1)).toBe(true)
+    expect(expected.rotateC45(other.id, 1)).toBe(true)
+    expect(builder._turnC45(body!.id)).toBe(true)
+    expect(builder._turnC45(other.id)).toBe(true)
+    expect(model.nodes.get(body!.id)!.c45axis).toEqual(expected.nodes.get(body!.id)!.c45axis)
+    expect([base!.x, base!.y, base!.z]).toEqual([expected.nodes.get(base!.id)!.x, expected.nodes.get(base!.id)!.y, expected.nodes.get(base!.id)!.z])
+    expect([other.x, other.y, other.z]).toEqual([expected.nodes.get(other.id)!.x, expected.nodes.get(other.id)!.y, expected.nodes.get(other.id)!.z])
+  })
+
+  it('主动按相反Q/E方向重新指定方向，不沿用先前的自动换向', () => {
+    const { model, clamp } = flap()
+    expect(model.rotateClamp(clamp.id, Math.asin(40 / 45))).toBe(true)
+    const builder = editor(model, new Map([[clamp.id, 'clamp']]))
+    expect(builder.rotateSelectionBy(1)).toBe(true)
+    const expected = new BuildModel()
+    expect(expected.loadJSON(model.toJSON()).ok).toBe(true)
+    expect(expected.rotateClamp(clamp.id, -Math.PI / 2)).toBe(true)
+    expect(builder.rotateSelectionBy(-1)).toBe(true)
+    expect(model.toJSON()).toEqual(expected.toJSON())
+    expect(expected.rotateClamp(clamp.id, Math.PI / 2)).toBe(true)
+    expect(builder.rotateSelectionBy(1)).toBe(true)
+    expect(model.toJSON()).toEqual(expected.toJSON())
+  })
+
   it('选择模式的地面坡板能反向抬起，并只产生一次可撤销操作', () => {
     const { model, clamp, foot } = flap()
     expect(model.rotateClamp(clamp.id, Math.asin(40 / 45))).toBe(true)
@@ -92,6 +158,20 @@ describe('受阻后反向旋转', () => {
     expect(builder.rotateSelectionBy(1)).toBe(true)
     expect([model.nodes.get(a.id)!.x, model.nodes.get(a.id)!.z]).toEqual([0, 40])
     expect([model.nodes.get(p.id)!.x, model.nodes.get(p.id)!.z]).toEqual([10, 40])
+  })
+
+  it('选区碰撞换向后即使障碍移除，也继续沿新方向旋转', () => {
+    const model = new BuildModel()
+    const a = model.addNode(0, 20, 0), b = model.addNode(40, 20, 0), c = model.addNode(40, 20, 40)
+    const first = model.addTube(a.id, b.id, 'T35', 'blue', 35)!
+    const second = model.addTube(b.id, c.id, 'T35', 'blue', 35)!
+    const p = model.addNode(10, 20, 40), q = model.addNode(30, 20, 40)
+    const obstacle = model.addTube(p.id, q.id, 'T15', 'red', 15)!
+    const builder = editor(model, new Map([[first.id, 'tube'], [second.id, 'tube']]))
+    expect(builder.rotateSelectionBy(1)).toBe(true)
+    model.removeTube(obstacle.id)
+    expect(builder.rotateSelectionBy(1)).toBe(true)
+    expect([model.nodes.get(a.id)!.x, model.nodes.get(a.id)!.z]).toEqual([40, 40])
   })
 
   it('弯管前方受阻时反向 90 度，不跳到 180 度的另一侧', () => {
