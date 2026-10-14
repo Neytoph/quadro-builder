@@ -7,6 +7,7 @@ import { useDock } from './dock'
 import { formatKitPrice } from '../money'
 import { track } from '../analytics/track'
 import PartThumbnail from './PartThumbnail'
+import ReplenishmentList from './ReplenishmentList'
 
 function advisorPartName(part: AdvisorPart) {
   const name = labelOf(part.id, part.name)
@@ -24,7 +25,7 @@ export default function KitAdvisor() {
   const missing = useMemo(() => shortages(mapped.used, stock.owned, mapped.parts), [mapped.used, stock.owned, mapped.parts])
   const rows = usedRows(mapped.used)
   const cheapest = buildable.find(k => k.price != null)
-  const hasStock = api.feasible != null
+  const empty = tab === 'inv' ? !api.invRows.some(row => row.need > 0) : mapped.total === 0
 
   const copyList = () => {
     const lines = [t('kit.listTitle'), '', t('kit.used') + ':']
@@ -60,7 +61,7 @@ export default function KitAdvisor() {
         </div>
       </div>
 
-      {mapped.total === 0 ? (
+      {empty ? (
         <div className="p-4 text-sm text-gray-400">{t('kit.empty')}</div>
       ) : tab === 'buy' ? (
         <div className="p-3 space-y-4">
@@ -116,26 +117,7 @@ export default function KitAdvisor() {
         </div>
       ) : (
         <div className="p-3 space-y-4">
-          {!hasStock ? (
-            <div className="text-sm text-gray-400">{t('kit.noStock')}</div>
-          ) : missing.length === 0 ? (
-            <div className="text-sm text-emerald-600">{t('kit.stockOk')}</div>
-          ) : (
-            <div>
-              <div className="text-sm text-amber-700 mb-2">{t('kit.stockShort')}</div>
-              <div className="space-y-1">
-                {missing.map(m => (
-                  <div key={m.index} data-ui="advisor-shortage-group" data-sku-index={m.index}>
-                    <div className="flex justify-between gap-2 text-[10px] text-gray-500 mt-2"><span>{m.parts.length === 1 ? advisorPartName(m.parts[0]) : m.name}</span><span className="qb-material-count text-amber-700 tabular-nums">−{m.short}</span></div>
-                    {m.parts.map(part => <div key={part.key} data-ui="advisor-shortage-row" data-part-id={part.id} className="qb-material-row flex items-center gap-2">
-                      <PartThumbnail id={part.id} imageKey={part.key} />
-                      <span className="qb-material-name text-gray-400 min-w-0 flex-1">{advisorPartName(part)}<span className="block text-[10px] text-gray-500 mt-0.5">{t('side.need')} {part.count}</span></span>
-                    </div>)}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          <ReplenishmentList />
           <button onClick={() => setPane('bom')} className="w-full bg-gray-800 hover:bg-gray-700 text-sm rounded-lg py-2.5 cursor-pointer">{t('kit.continue')}</button>
         </div>
       )}

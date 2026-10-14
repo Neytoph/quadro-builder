@@ -45,9 +45,9 @@ function colorWord(color?: string | null) {
   return colorLabel(color)
 }
 
-function csvCell(v: string | number) {
+export function csvCell(v: string | number) {
   const s = String(v ?? '')
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
 }
 
 export interface BomExportInput {
