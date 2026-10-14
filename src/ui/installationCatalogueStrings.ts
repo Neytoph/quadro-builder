@@ -1,5 +1,6 @@
 export const installationCatalogueStrings = {
   zh: {
+    all: '全部',
     '管上或轴承': '管上 / 轴承',
     newBadge: '新', newComponent: '新组件',
     source: '配件来源', official: 'QUADRO', extended: '国产', methods: '全部安装方法', empty: '没有符合的组件',
@@ -7,6 +8,7 @@ export const installationCatalogueStrings = {
     '外侧固定': '外侧固定', '角部固定': '角部固定', '对边螺丝': '对边螺丝', '吊挂': '吊挂', '夹装': '夹装', '穿管': '穿管', '平铺': '平铺', '承托': '承托', '跨框固定': '跨框固定', '穿接': '穿接', '封口': '封口', '套管': '套管', '悬挂': '悬挂', '张紧': '张紧', '轴端安装': '轴端', '节点安装': '节点', '适配连接': '适配连接', '挂接': '挂接', '连接': '连接', '铺设': '铺设', '填充': '填充', '两端连接': '两端连接', '节点连接': '节点连接',
   },
   en: {
+    all: 'All',
     '管上或轴承': 'Tube or bearing',
     newBadge: 'New', newComponent: 'New component',
     source: 'Component source', official: 'QUADRO', extended: 'Domestic', methods: 'All mounting methods', empty: 'No matching components',
@@ -14,6 +16,7 @@ export const installationCatalogueStrings = {
     '外侧固定': 'Outer fixing', '角部固定': 'Corner fixing', '对边螺丝': 'Opposite screws', '吊挂': 'Hanging', '夹装': 'Clamped', '穿管': 'Through tube', '平铺': 'Laid flat', '承托': 'Supported', '跨框固定': 'Across frame', '穿接': 'Threaded', '封口': 'End cap', '套管': 'Sleeved', '悬挂': 'Suspended', '张紧': 'Tensioned', '轴端安装': 'Axle end', '节点安装': 'At node', '适配连接': 'Adapter', '挂接': 'Hooked', '连接': 'Connected', '铺设': 'Lined', '填充': 'Filled', '两端连接': 'Both ends', '节点连接': 'Node connection',
   },
   de: {
+    all: 'Alle',
     '管上或轴承': 'Rohr oder Radlager',
     newBadge: 'Neu', newComponent: 'Neues Bauteil',
     source: 'Bauteilherkunft', official: 'QUADRO', extended: 'Inländisch', methods: 'Alle Montagearten', empty: 'Keine passenden Bauteile',

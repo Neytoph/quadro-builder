@@ -43,6 +43,9 @@ export default defineConfig({
   plugins: [
     {
       name: 'shared-home-visuals',
+      buildStart() {
+        this.emitFile({ type: 'chunk', fileName: 'home/outdoor.js', id: path.join(rootDir, 'src/engine/outdoor.js'), preserveSignature: 'strict' })
+      },
       generateBundle() {
         this.emitFile({ type: 'asset', fileName: 'home/visuals.js', source: fs.readFileSync(path.join(rootDir, 'src/home/visuals.js'), 'utf8') })
       },
@@ -50,6 +53,10 @@ export default defineConfig({
         server.middlewares.use('/home/visuals.js', (_req, res) => {
           res.setHeader('Content-Type', 'text/javascript')
           res.end(fs.readFileSync(path.join(rootDir, 'src/home/visuals.js'), 'utf8'))
+        })
+        server.middlewares.use('/home/outdoor.js', (_req, res) => {
+          res.setHeader('Content-Type', 'text/javascript')
+          res.end('export {createOutdoorVisuals, OUTDOOR_AREA} from "/src/engine/outdoor.js";')
         })
       },
     },

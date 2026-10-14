@@ -2,6 +2,15 @@ import { describe, expect, it } from 'vitest'
 import { dropParam, readEntry } from './entry'
 import { appendTab } from './store/tabs'
 
+describe('来源页指定预览背景', () => {
+  it('草地和家中场景跟随导入入口，非法值不改变偏好', () => {
+    expect(readEntry('?background=grass', '#s=payload', true).background).toBe('grass')
+    expect(readEntry('?background=home', '#s=payload', true).background).toBe('home')
+    expect(readEntry('?background=blank', '#s=payload', true).background).toBeNull()
+    expect(readEntry('', '', true).background).toBeNull()
+  })
+})
+
 describe('固定版本查看入口', () => {
   it('版本必须绑定方案，开源版本不启用', () => {
     expect(readEntry('?plan=p1&version=17', '', true).version).toBe('17')

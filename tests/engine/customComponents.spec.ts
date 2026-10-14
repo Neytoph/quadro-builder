@@ -244,7 +244,7 @@ test('组件预览切换新标签不会把旧模型写进新页', async ({ page 
   await extendTo(page, 7)
   await page.keyboard.up('4')
   expect(await page.evaluate(() => window.__quadroDev.builder.pasting)).toBe(true)
-  await page.getByRole('button', { name: '+', exact: true }).click()
+  await page.getByRole('button', { name: '新建', exact: true }).click()
   await expect.poll(() => page.evaluate(() => window.__quadroDev.builder.pasting)).toBe(false)
   expect(await page.evaluate(() => window.__quadroDev.model.tubes.size)).toBe(0)
   await page.keyboard.press('Escape')

@@ -1,0 +1,255 @@
+import { expect, test, type Page } from '@playwright/test'
+
+async function boot(page: Page) {
+  await page.addInitScript(() => {
+    localStorage.setItem('quadro.builder.onboarded.v2', '1')
+    localStorage.setItem('quadro-builder-lang', 'zh')
+  })
+  await page.goto('/', { waitUntil: 'domcontentloaded' })
+  await expect(page.locator('#canvas-host')).toHaveAttribute('data-ready', 'true', { timeout: 30_000 })
+  await page.locator('#canvas-host').focus()
+}
+async function key(page: Page, key: string) {
+  await page.locator('#canvas-host').focus()
+  await page.keyboard.press(key)
+}
+async function state(page: Page) {
+  return page.evaluate(() => {
+    const { builder: b, model } = window.__quadroDev
+    return { mode: b.mode, tube: b.tubeId, panel: b.panelId, slide: b.slideKind, fitting: b.fittingKind,
+      part: b.fittingPart, connector: b.placeConnectorId, color: b.color, axis: b.insetScrewAxis,
+      tubes: model.tubes.size, nodes: model.nodes.size, pasting: b.pasting }
+  })
+}
+async function choose(page: Page, tool: string, id: string) {
+  await page.locator(`[data-ui="catalogue-tool-${tool}"]`).click()
+  await page.locator(`[data-ui="catalogue-item"][data-part-id="${id}"]`).click()
+  await expect(page.locator('[data-ui="installation-catalogue"]')).toHaveCount(0)
+}
+
+test('左手工具键、整格面板和空格记忆接入真实引擎', async ({ page }) => {
+  await boot(page)
+  await key(page, '2')
+  expect(await state(page)).toMatchObject({ mode: 'panel', panel: 'panel_40x40' })
+  await key(page, 'Escape')
+  await key(page, 'Space')
+  expect(await state(page)).toMatchObject({ mode: 'panel', panel: 'panel_40x40' })
+  await key(page, 'Space')
+  expect(await state(page)).toMatchObject({ mode: 'select' })
+  await choose(page, 'tubes', 'T25')
+  await key(page, 'Escape')
+  await key(page, 'Space')
+  expect(await state(page)).toMatchObject({ mode: 'add', tube: 'T25' })
+  const beforeMenus = await state(page)
+  for (const [pressed, tool] of [['w', 'panels'], ['q', 'tubes'], ['e', 'connectors'], ['r', 'wheels'],
+    ['t', 'textiles'], ['z', 'pools'], ['x', 'slides'], ['c', 'accessories']]) {
+    await key(page, pressed)
+    await expect(page.locator(`[data-ui="catalogue-tool-${tool}"]`)).toHaveAttribute('aria-expanded', 'true')
+    await expect(page.locator('[data-ui="installation-catalogue"]')).toBeVisible()
+    expect(await state(page)).toEqual(beforeMenus)
+  }
+  // 同一快捷键重复按下仍定位并保持展开，真正选择配件后才改变工具。
+  await key(page, 'c')
+  await expect(page.locator('[data-ui="catalogue-tool-accessories"]')).toHaveAttribute('aria-expanded', 'true')
+  await page.locator('[data-ui="catalogue-item"][data-part-id="swing"]').click()
+  expect((await state(page)).mode).toBe('fitting')
+  await key(page, 'v')
+  expect((await state(page)).mode).toBe('reinforce')
+  await expect(page.locator('[data-ui="tool-select"] kbd')).toHaveText('Esc')
+  await expect(page.locator('[data-tour="toolbar"] small')).toHaveCount(0)
+  const slide = page.locator('[data-ui="catalogue-tool-slides"]')
+  await slide.hover()
+  await expect(slide).toHaveCSS('box-shadow', 'none')
+  await expect(slide).toHaveCSS('transform', 'none')
+  await page.mouse.down()
+  await expect(slide).toHaveCSS('transform', 'none')
+  await page.mouse.up()
+  await expect(slide).toHaveCSS('box-shadow', 'none')
+  await key(page, 'Escape')
+  await key(page, 'Space')
+  expect((await state(page)).mode).toBe('reinforce')
+  await key(page, 's')
+  await key(page, 'Space')
+  expect(await state(page)).toMatchObject({ mode: 'reinforce' })
+  await page.keyboard.down('Space')
+  expect((await state(page)).mode).toBe('select')
+  await page.keyboard.down('Space')
+  expect((await state(page)).mode).toBe('select')
+  await page.keyboard.up('Space')
+  await page.keyboard.press('Space')
+  expect((await state(page)).mode).toBe('reinforce')
+})
+
+test('连接件、国产滑梯和跨分类面板能准确恢复，模型无额外修改', async ({ page }) => {
+  await boot(page)
+  await choose(page, 'connectors', '3way')
+  // 空模型第一次选择连接件会按现有逻辑落下原点；再次选择才进入接头替换模式。
+  await choose(page, 'connectors', '3way')
+  const before = await state(page)
+  await key(page, 'Escape')
+  expect((await state(page)).connector).toBeNull()
+  await key(page, 'Space')
+  expect(await state(page)).toMatchObject({ mode: 'add', connector: '3way', nodes: before.nodes, tubes: before.tubes })
+  await choose(page, 'slides', 'curved-slide-domestic80')
+  await key(page, 'Escape')
+  await key(page, 'x')
+  expect((await state(page)).mode).toBe('select')
+  await expect(page.locator('[data-ui="catalogue-tool-slides"]')).toHaveAttribute('aria-expanded', 'true')
+  await page.locator('[data-ui="catalogue-item"][data-part-id="curved-slide-domestic80"]').click()
+  expect(await state(page)).toMatchObject({ mode: 'slide', slide: 'curved-slide-domestic80' })
+  await choose(page, 'textiles', 'panel_40x40_pocket')
+  await key(page, 's')
+  await key(page, 'Space')
+  expect(await state(page)).toMatchObject({ mode: 'panel', panel: 'panel_40x40_pocket' })
+})
+
+test('全部配件连续可达，隐藏来源分类与新标识，滚动不会改变搭建配件', async ({ page }) => {
+  await boot(page)
+  await key(page, '3')
+  const before = await state(page)
+  await page.locator('[data-ui="catalogue-tool-tubes"]').click()
+  expect(await page.locator('[data-catalogue-section]').count()).toBe(8)
+  const ids = await page.locator('[data-ui="catalogue-item"]').evaluateAll(elements => elements.map(el => el.getAttribute('data-part-id')))
+  expect(ids.length).toBe(96)
+  expect(new Set(ids).size).toBe(ids.length)
+  await expect(page.locator('[data-ui="catalogue-source"], [data-ui="catalogue-new"], .ic-origin')).toHaveCount(0)
+  await expect(page.locator('[data-ui="catalogue-item"][title*="QUADRO"], [data-ui="catalogue-item"][title*="国产"], [data-ui="catalogue-item"][aria-label^="新组件"]')).toHaveCount(0)
+  const scroll = page.locator('[data-ui="catalogue-scroll"]')
+  await scroll.evaluate(el => { el.scrollTop = el.scrollHeight })
+  await expect(page.locator('[data-ui="catalogue-tool-accessories"]')).toHaveAttribute('data-open', 'true')
+  expect(await state(page)).toEqual(before)
+  await page.locator('[data-ui="catalogue-tool-tubes"]').click()
+  await expect.poll(() => scroll.evaluate(el => el.scrollTop)).toBe(0)
+  expect(await page.locator('[data-ui="catalogue-item"]').count()).toBe(96)
+  await expect.poll(() => page.locator('.ic-popover').evaluate(el => el.getAnimations({ subtree: true }).some(animation => animation.playState === 'running'))).toBe(false)
+  await page.screenshot({ path: '.work/desktop-catalogue.png' })
+})
+
+test('手机四列小图标、面板固定及工具栏自动横移；三语提示无过期快捷键', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await boot(page)
+  await page.locator('[data-ui="catalogue-tool-tubes"]').click()
+  await expect(page.locator('[data-ui="catalogue-source"], [data-ui="catalogue-new"], .ic-origin')).toHaveCount(0)
+  await expect(page.locator('[data-tour="toolbar"] kbd')).toHaveCount(0)
+  await expect(page.locator('[data-ui="shortcut-hint"]')).toHaveCount(0)
+  await expect(page.locator('.ic-section-title kbd').first()).toBeHidden()
+  const menu = page.locator('.ic-popover'), scroller = page.locator('[data-ui="catalogue-scroll"]')
+  await expect.poll(() => menu.evaluate(el => el.getAnimations().some(animation => animation.playState === 'running'))).toBe(false)
+  const before = await menu.boundingBox()
+  expect(await page.locator('.ic-grid').first().evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ').length)).toBe(4)
+  await expect(page.locator('.ic-part .qb-part-image').first()).toHaveCSS('width', '48px')
+  expect(await scroller.evaluate(el => {
+    const bounds = el.getBoundingClientRect()
+    return [...el.querySelectorAll('.ic-part')].filter(card => {
+      const rect = card.getBoundingClientRect()
+      return rect.top >= bounds.top && rect.bottom <= bounds.bottom
+    }).length
+  })).toBeGreaterThanOrEqual(8)
+  await scroller.evaluate(el => { el.scrollTop = el.scrollHeight })
+  await expect(page.locator('[data-ui="catalogue-tool-accessories"]')).toHaveAttribute('data-open', 'true')
+  await expect.poll(() => page.locator('[data-tour="toolbar"]').evaluate(el => el.scrollLeft)).toBeGreaterThan(0)
+  expect((await menu.boundingBox())!.x).toBe(before!.x)
+  expect((await menu.boundingBox())!.y).toBe(before!.y)
+  expect(before!.height).toBeLessThan(380)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await page.screenshot({ path: '.work/mobile-catalogue.png' })
+  await key(page, 'Escape')
+  for (const lang of ['zh', 'en', 'de']) {
+    await page.evaluate(lang => localStorage.setItem('quadro-builder-lang', lang), lang)
+    await page.reload()
+    await expect(page.locator('#canvas-host')).toHaveAttribute('data-ready', 'true')
+    await key(page, '2')
+    expect(await state(page)).toMatchObject({ mode: 'panel', panel: 'panel_40x40' })
+    await expect(page.locator('[data-tour="toolbar"] kbd')).toHaveCount(0)
+    expect(await page.locator('[title*="Q 逆"], [title*="Q CCW"], [title*="(C)"]').count()).toBe(0)
+  }
+})
+
+test('攀爬网重复安装保留真实诊断和网体预览，不叠加安装圆点', async ({ page }) => {
+  await boot(page)
+  const actual = await page.evaluate(async () => {
+    const { createConfirmedComponentFixture } = await import('/src/engine/confirmedComponentExample.js')
+    const fixture = createConfirmedComponentFixture('lattice')
+    const { model, builder, scene } = window.__quadroDev
+    model.loadJSON(fixture.model.toJSON())
+    builder.setMode('select')
+    builder.refresh()
+    scene.resetCamera(model, { animate: false })
+    const before = JSON.stringify(model.toJSON())
+    const duplicate = model.confirmedDiagnostics({ ...fixture.part, id: undefined })
+    builder._previewInstallation(duplicate, 'lattice')
+    const group = scene._installationGroup
+    return { valid: builder.installationPreview.valid, reason: duplicate.reason,
+      mounts: duplicate.mounts.length, meshes: group.children.length,
+      dots: group.children.filter(mesh => mesh.geometry?.type === 'SphereGeometry' && mesh.geometry.parameters.radius === 1.6).length,
+      changed: JSON.stringify(model.toJSON()) !== before }
+  })
+  expect(actual).toMatchObject({ valid: false, reason: 'mount_occupied', dots: 0, changed: false })
+  expect(actual.mounts).toBeGreaterThan(4)
+  expect(actual.meshes).toBeGreaterThan(0)
+  await page.screenshot({ path: '.work/net-installation-preview.png' })
+  await key(page, 'Escape')
+  expect(await page.evaluate(() => window.__quadroDev.scene._installationGroup)).toBeNull()
+  expect(await page.evaluate(() => window.__quadroDev.model.fittings.size)).toBe(1)
+})
+
+test('两个模型直接切换同类布件，具体变体不会覆盖彼此的工具记忆', async ({ page }) => {
+  await boot(page)
+  await choose(page, 'textiles', 'textile_rainbow')
+  await page.getByRole('button', { name: '新建', exact: true }).click()
+  await choose(page, 'textiles', 'textile_long')
+  expect((await state(page)).part).toBe('textile_long')
+  await page.locator('.qb-project-tab').first().locator('.qb-project-name').click()
+  expect((await state(page)).part).toBe('textile_rainbow')
+  await key(page, 's')
+  await key(page, 'Space')
+  expect((await state(page)).part).toBe('textile_rainbow')
+  await page.locator('.qb-project-tab').last().locator('.qb-project-name').click()
+  expect((await state(page)).part).toBe('textile_long')
+})
+
+test('跨模型记忆、配色与安装方向、输入和临时粘贴保护', async ({ page }) => {
+  await boot(page)
+  await choose(page, 'textiles', 'panel_40x40_pocket')
+  await page.evaluate(() => { const b = window.__quadroDev.builder; b.setColor('blue'); b.setInsetScrewAxis('horizontal'); b.refresh() })
+  await key(page, 's')
+  await page.getByRole('button', { name: '新建', exact: true }).click()
+  await key(page, '3')
+  await key(page, 's')
+  await page.locator('.qb-project-tab').first().locator('.qb-project-name').click()
+  await key(page, 'Space')
+  expect(await state(page)).toMatchObject({ mode: 'panel', panel: 'panel_40x40_pocket', color: 'blue', axis: 'horizontal' })
+  await page.locator('.qb-project-tab').last().locator('.qb-project-name').click()
+  await key(page, 'Space')
+  expect(await state(page)).toMatchObject({ mode: 'add', tube: 'T35' })
+
+  await page.getByRole('button', { name: '模型库', exact: true }).click()
+  const input = page.locator('input:visible').first()
+  await input.fill('qwert zxcv 2')
+  await input.press('Space')
+  expect(await input.inputValue()).toBe('qwert zxcv 2 ')
+  expect(await state(page)).toMatchObject({ mode: 'add', tube: 'T35' })
+  await key(page, 'Escape')
+
+  await page.getByRole('button', { name: '模型库', exact: true }).click()
+  await page.getByRole('button', { name: '起步造型', exact: true }).click()
+  await page.getByTitle('立方框 · 1×1×1', { exact: true }).click()
+  expect((await state(page)).pasting).toBe(true)
+  const pasting = await state(page)
+  for (const pressed of ['q', 'e', 'r', '2', 'Space']) await key(page, pressed)
+  expect(await state(page)).toEqual(pasting)
+  await expect(page.locator('[data-ui="installation-catalogue"]')).toHaveCount(0)
+  await page.mouse.click(750, 470)
+  await key(page, 'Escape')
+  await page.keyboard.press('ControlOrMeta+a')
+  const colors = await page.evaluate(() => [...window.__quadroDev.model.tubes.values()].map(tube => tube.color))
+  await key(page, 'q')
+  expect(await page.evaluate(() => [...window.__quadroDev.model.tubes.values()].map(tube => tube.color))).toEqual(colors)
+  await key(page, 's')
+  await key(page, 'Escape')
+  await page.evaluate(() => { const b = window.__quadroDev.builder; b.setReadOnly(true); b.refresh() })
+  const readOnly = await state(page)
+  for (const pressed of ['q', 'e', 'r', '2', 'Space']) await key(page, pressed)
+  expect(await state(page)).toEqual(readOnly)
+  await expect(page.locator('[data-ui="installation-catalogue"]')).toHaveCount(0)
+})

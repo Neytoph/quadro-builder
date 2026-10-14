@@ -42,14 +42,21 @@
 .qb-project-bar[data-compact=true] .qb-host-help .qh-wg-builder { padding: 0; width: 44px; }
 .qb-project-bar[data-compact=true] .qh-wg-builder > span { display: none; }
 .qb-top-toolbar { background: #fffdf9f5; border-color: #e0b892; border-radius: 16px; }
-.qb-top-toolbar .qb-tool { min-width: 54px; border-radius: 10px; font-size: 12px; gap: 3px; }
+.qb-top-toolbar .qb-tool { min-width: 62px; border: 1px solid transparent; border-radius: 8px; font-size: 12px; gap: 5px; }
 .qb-top-toolbar .qb-tool:disabled { opacity: .35; cursor: default; }
-.qb-top-toolbar .qb-history-tool { color: #5a6270; }
-.qb-top-toolbar .qb-tool > svg { color: #000; }
+.qb-top-toolbar .qb-history-tool { min-width: 44px; color: #5a6270; }
+.qb-top-toolbar .qb-tool > svg { color: currentColor; }
 .qb-top-toolbar[data-compact=true] .qb-tool { width: 44px; min-width: 44px; padding: 0; }
 .qb-top-toolbar[data-compact=true] .qb-tool > :is(span,small) { display: none; }
 .qb-toolbar-divider { width: 1px; background: #ecd6c2; margin: 8px 3px; flex-shrink: 0; align-self: stretch; }
-.qb-top-toolbar .m-tool-ind { border-radius: 10px; background: linear-gradient(115deg,#ea580c,#ff8a2b); }
+.qb-top-toolbar .qb-tool-key { position:absolute; top:3px; right:4px; padding:0; border:0; color:#8c8075; background:none; font-family:inherit; font-size:9px; font-weight:400; line-height:12px; pointer-events:none; }
+html .qb-top-toolbar .qb-tool, html[data-motion] .qb-top-toolbar .qb-tool:active { transform:none; box-shadow:none; transition:color .15s, background-color .15s, border-color .15s; }
+html .qb-top-toolbar .qb-tool:hover { background:#fff1e6; }
+html .qb-top-toolbar .qb-tool[data-mode-on=true] { color:#9a3412; background:#ffead8; font-weight:600; }
+html .qb-top-toolbar .qb-tool[data-mode-on=true][data-tone=red] { color:#be123c; background:#fff1f2; }
+html .qb-top-toolbar .qb-tool[data-open=true] { color:#9a3412; background:#fff1e6; border-color:#efc5a4; }
+html[data-motion] .qb-top-toolbar .qb-tool > svg { animation:none; }
+.qb-top-toolbar .qb-tool:is([data-mode-on=true],[data-open=true]) .qb-tool-key { color:#9a3412; }
 .qb-right-dock { overflow: hidden; background: #fffdf9f5; border: 1px solid #e0b892; box-shadow: 0 16px 48px #38271a26; }
 .qb-dock-header { background: #fffdf9; flex-shrink: 0; z-index: 10; border-bottom: 1px solid #ecd6c2; }
 .qb-dock-heading { display: flex; align-items: center; gap: 10px; padding: 12px 14px; }
@@ -97,6 +104,7 @@
 .qb-file-languages button { flex: 1; min-height: 44px; border: 1px solid #e0b892; border-radius: 10px; font-size: 13px; cursor: pointer; }
 .qb-file-languages button:hover { border-color: #ea580c; }
 :is(.qb-project-bar,.qb-top-toolbar,.qb-right-dock) :focus-visible { outline: 2px solid #9a3412; outline-offset: -2px; }
+:root .qb-project-tab input { border: 1px solid transparent; border-radius: 4px; }
 @media (max-width: 1200px) {
   .qb-nav-button { padding: 0 8px; gap: 5px; }
   .qb-nav-chevron { display: none; }

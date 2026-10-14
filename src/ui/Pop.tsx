@@ -6,13 +6,14 @@ import { UI_ESCAPE_EVENT } from './events'
  * 挂在某个按钮底下的浮层：工具下拉、文件菜单、装配顺序。
  * 贴着锚点摆，超出窗口就往回挪；点外面或按 Esc 关掉。
  */
-export function Pop({ anchor, leaving, onClose, align = 'left', width, className = '', children }: {
+export function Pop({ anchor, leaving, onClose, align = 'left', width, className = '', belowOnly = false, children }: {
   anchor: HTMLElement | null
   leaving: boolean
   onClose?: () => void
   align?: 'left' | 'right' | 'center'
   width?: number
   className?: string
+  belowOnly?: boolean
   children: ReactNode
 }) {
   const ref = useRef<HTMLDivElement>(null)
@@ -30,7 +31,7 @@ export function Pop({ anchor, leaving, onClose, align = 'left', width, className
       const want = align === 'right' ? r.right - w : align === 'center' ? r.left + r.width / 2 - w / 2 : r.left
       const left = Math.min(Math.max(8, want), window.innerWidth - w - 8)
       const h = el.offsetHeight || 200
-      const top = r.bottom + 6 + h > window.innerHeight - 8 && r.top - h - 6 >= 8
+      const top = !belowOnly && r.bottom + 6 + h > window.innerHeight - 8 && r.top - h - 6 >= 8
         ? r.top - h - 6
         : r.bottom + 6
       setPos({ top, left })
@@ -43,7 +44,7 @@ export function Pop({ anchor, leaving, onClose, align = 'left', width, className
       ro.disconnect()
       window.removeEventListener('resize', place)
     }
-  }, [anchor, align])
+  }, [anchor, align, belowOnly])
   useEffect(() => {
     if (!onClose) return
     const onDown = (e: PointerEvent) => {

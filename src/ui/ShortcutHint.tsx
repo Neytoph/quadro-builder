@@ -3,7 +3,7 @@ import { useI18n } from '../i18n'
 import type { CSSProperties } from 'react'
 import { FoldHeader } from './panelLayout'
 import { Collapse } from './MotionBits'
-import { customComponentStrings } from './customComponentStrings'
+import { NUMBER_TUBES } from '../store/toolMemory'
 
 type Row = { chord: string; action: string }
 
@@ -16,7 +16,6 @@ function rowsFor(
   if (pasting) {
     return [
       { chord: '↑ ↓', action: t('keys.lift') },
-      { chord: 'Q / E', action: t('keys.rotate') },
       { chord: 'M / ⇧M', action: t('keys.mirror') },
       { chord: t('keys.click'), action: t('keys.drop') },
       { chord: 'Esc', action: t('keys.escCancel') },
@@ -33,12 +32,12 @@ function rowsFor(
     case 'delete':
       return [
         { chord: t('keys.click'), action: t('keys.clickDelete') },
-        { chord: 'Esc / D / S', action: t('keys.escSelect') },
+        { chord: 'Esc / D', action: t('keys.escSelect') },
         { chord: t('keys.chord.undo'), action: t('keys.undo') },
       ]
     case 'add':
       return [
-        { chord: '1 – 3', action: t('keys.tubeLen') },
+        { chord: Object.keys(NUMBER_TUBES).join(' / '), action: t('keys.tubeLen') },
         { chord: '↑ ↓ ← →', action: t('keys.buildDir') },
         { chord: 'Esc', action: t('keys.escSelect') },
         { chord: 'D', action: t('keys.deleteMode') },
@@ -72,7 +71,6 @@ function rowsFor(
         { chord: t('keys.chord.selectAll'), action: t('keys.selectAll') },
         { chord: t('keys.chord.copyPaste'), action: t('keys.copyPaste') },
         { chord: t('keys.chord.delete'), action: t('keys.deleteSel') },
-        { chord: 'Q / E', action: t('keys.rotate') },
         { chord: 'M / ⇧M', action: t('keys.mirror') },
         { chord: `${t('keys.chord.group')} / ${t('keys.chord.ungroup')}`, action: t('keys.group') },
         { chord: t('keys.chord.again'), action: t('keys.clickAgain') },
@@ -112,13 +110,15 @@ function Kbd({ text }: { text: string }) {
 
 export default function ShortcutHint({ open, onToggle }: { open: boolean; onToggle: () => void }) {
   const api = useEngine()
-  const { t, lang } = useI18n()
+  const { t } = useI18n()
   const mode = api.pasting ? 'paste' : api.mode
   const titleKey = api.pasting
     ? 'lib.placing'
     : (MODE_TITLE[api.placingConnector ? 'fitting' : api.mode] || 'tool.select')
   const rows = rowsFor(t, api.mode, api.pasting, !!api.placingConnector)
-  if (!api.readOnly) rows.push({ chord: lang === 'zh' ? '按住 4' : lang === 'de' ? '4 halten' : 'Hold 4', action: customComponentStrings[lang].title })
+  if (!api.readOnly && !api.pasting) {
+    rows.unshift({ chord: t('keys.space'), action: t('keys.toggleTool') }, { chord: '2', action: t('keys.fullPanel') })
+  }
   const cameraLines = t('hint.camera').split('\n').filter(Boolean)
 
   return (
