@@ -3,8 +3,7 @@ import { useI18n } from '../i18n'
 import type { CSSProperties } from 'react'
 import { FoldHeader } from './panelLayout'
 import { Collapse } from './MotionBits'
-import { customComponentStrings } from './customComponentStrings'
-import { CATALOGUE_TOOLS, NUMBER_TUBES, TOOL_KEYS, TOOL_LABELS } from '../store/toolMemory'
+import { NUMBER_TUBES } from '../store/toolMemory'
 
 type Row = { chord: string; action: string }
 
@@ -111,7 +110,7 @@ function Kbd({ text }: { text: string }) {
 
 export default function ShortcutHint({ open, onToggle }: { open: boolean; onToggle: () => void }) {
   const api = useEngine()
-  const { t, lang } = useI18n()
+  const { t } = useI18n()
   const mode = api.pasting ? 'paste' : api.mode
   const titleKey = api.pasting
     ? 'lib.placing'
@@ -119,12 +118,7 @@ export default function ShortcutHint({ open, onToggle }: { open: boolean; onTogg
   const rows = rowsFor(t, api.mode, api.pasting, !!api.placingConnector)
   if (!api.readOnly && !api.pasting) {
     rows.unshift({ chord: t('keys.space'), action: t('keys.toggleTool') }, { chord: '2', action: t('keys.fullPanel') })
-    if (api.mode === 'select') {
-      rows.push(...CATALOGUE_TOOLS.map(tool => ({ chord: TOOL_KEYS[tool], action: t('keys.openCatalogue', { tool: t(TOOL_LABELS[tool]) }) })))
-      rows.push({ chord: TOOL_KEYS.reinforce, action: t(TOOL_LABELS.reinforce) })
-    }
   }
-  if (!api.readOnly) rows.push({ chord: lang === 'zh' ? '按住 4' : lang === 'de' ? '4 halten' : 'Hold 4', action: customComponentStrings[lang].title })
   const cameraLines = t('hint.camera').split('\n').filter(Boolean)
 
   return (
