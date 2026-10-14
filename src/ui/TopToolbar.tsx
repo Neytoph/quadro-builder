@@ -3,10 +3,10 @@ import { useEngine } from '../store/EngineContext'
 import { useI18n } from '../i18n'
 import { labelOf } from '../names'
 import { CONN_CAT_ICON, Svg16, TOOL_ICON, tubeIcon } from './icons'
-import { UI_CATALOGUE_EVENT, UI_ESCAPE_EVENT } from './events'
+import { UI_ESCAPE_EVENT } from './events'
 import { NARROW_MAX, toolbarTop, usePanelLayout } from './panelLayout'
 import { installationChoices, installationActive, type CatalogueTool } from '../store/installationCatalogue'
-import { CATALOGUE_TOOLS, TOOL_KEYS, TOOL_LABELS } from '../store/toolMemory'
+import { CATALOGUE_TOOLS, TOOL_LABELS } from '../store/toolMemory'
 import InstallationCatalogueMenu from './InstallationCatalogueMenu'
 import { MOTION, usePresence } from './motion'
 import { Pop } from './Pop'
@@ -64,18 +64,6 @@ export default function TopToolbar() {
     window.addEventListener(UI_ESCAPE_EVENT, close)
     return () => window.removeEventListener(UI_ESCAPE_EVENT, close)
   }, [close])
-  useEffect(() => {
-    const reveal = (event: Event) => {
-      if (!(event instanceof CustomEvent) || !api.ready || api.readOnly || api.pasting || api.engine()?.builder.busy()) return
-      const tool = CATALOGUE_TOOLS.find(candidate => candidate === event.detail)
-      if (!tool) return
-      setRequestId(id => id + 1)
-      setBrowsing(tool)
-      setOpen(tool)
-    }
-    window.addEventListener(UI_CATALOGUE_EVENT, reveal)
-    return () => window.removeEventListener(UI_CATALOGUE_EVENT, reveal)
-  }, [api])
   useEffect(close, [api.activeTabId, api.readOnly, close])
 
   const entries = api.catalog.tubes.length ? installationChoices(api, t) : []
@@ -121,13 +109,13 @@ export default function TopToolbar() {
             let mark = ''
             if (tool === 'tubes') mark = tubeMark
             if (tool === 'panels') mark = panelMark
-            const title = [t(TOOL_LABELS[tool]), mark, !narrow && TOOL_KEYS[tool]].filter(Boolean).join(' · ')
+            const title = [t(TOOL_LABELS[tool]), mark].filter(Boolean).join(' · ')
             return <button key={tool} type="button" title={title} aria-label={title} data-tour={tool === 'tubes' ? 'tool-tubes' : undefined} data-mode-on={activeTool === tool} data-open={!!open && browsing === tool} aria-expanded={!!open && browsing === tool} aria-pressed={activeTool === tool} data-ui={`catalogue-tool-${tool}`} className="m-tool qb-tool" onClick={() => toggle(tool)}>
-                {tool === 'accessories' ? <Shapes size={18} strokeWidth={1.7} /> : <Svg16 inner={icons[tool]} />}<span>{t(TOOL_LABELS[tool])}</span>{!narrow && <kbd className="qb-tool-key" aria-hidden="true">{TOOL_KEYS[tool]}</kbd>}
+                {tool === 'accessories' ? <Shapes size={18} strokeWidth={1.7} /> : <Svg16 inner={icons[tool]} />}<span>{t(TOOL_LABELS[tool])}</span>
               </button>
           })}
           <button className="m-tool qb-tool" data-mode-on={api.mode === 'reinforce'} aria-pressed={api.mode === 'reinforce'} title={t('tool.reinforceHint')} aria-label={t('tool.reinforceHint')} onClick={() => { api.startReinforce(); close() }}>
-            <Svg16 inner={TOOL_ICON.reinforce} /><span>{t('tool.reinforce')}</span>{!narrow && <kbd className="qb-tool-key" aria-hidden="true">{TOOL_KEYS.reinforce}</kbd>}
+            <Svg16 inner={TOOL_ICON.reinforce} /><span>{t('tool.reinforce')}</span>
           </button>
           <button type="button" className="m-tool qb-tool" data-ui="tool-custom-components" title={narrow ? customComponentStrings[lang].title : `${customComponentStrings[lang].title} · 4`} aria-label={customComponentStrings[lang].title} onClick={event => {
             const rect = event.currentTarget.getBoundingClientRect()

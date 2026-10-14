@@ -15,6 +15,7 @@ function rowsFor(
 ): Row[] {
   if (pasting) {
     return [
+      { chord: 'Q / E', action: t('keys.rotate') },
       { chord: '↑ ↓', action: t('keys.lift') },
       { chord: 'M / ⇧M', action: t('keys.mirror') },
       { chord: t('keys.click'), action: t('keys.drop') },
@@ -71,6 +72,7 @@ function rowsFor(
         { chord: t('keys.chord.selectAll'), action: t('keys.selectAll') },
         { chord: t('keys.chord.copyPaste'), action: t('keys.copyPaste') },
         { chord: t('keys.chord.delete'), action: t('keys.deleteSel') },
+        { chord: 'Q / E', action: t('keys.rotate') },
         { chord: 'M / ⇧M', action: t('keys.mirror') },
         { chord: `${t('keys.chord.group')} / ${t('keys.chord.ungroup')}`, action: t('keys.group') },
         { chord: t('keys.chord.again'), action: t('keys.clickAgain') },
@@ -117,7 +119,7 @@ export default function ShortcutHint({ open, onToggle }: { open: boolean; onTogg
     : (MODE_TITLE[api.placingConnector ? 'fitting' : api.mode] || 'tool.select')
   const rows = rowsFor(t, api.mode, api.pasting, !!api.placingConnector)
   if (!api.readOnly && !api.pasting) {
-    rows.unshift({ chord: t('keys.space'), action: t('keys.toggleTool') }, { chord: '2', action: t('keys.fullPanel') })
+    rows.unshift({ chord: t('keys.space'), action: t('keys.toggleTool') })
   }
   const cameraLines = t('hint.camera').split('\n').filter(Boolean)
 

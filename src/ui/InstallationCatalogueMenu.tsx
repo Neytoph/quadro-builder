@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef } from 'react'
 import { useI18n } from '../i18n'
 import { useEngine } from '../store/EngineContext'
 import { installationActive, selectInstallation, type CatalogueChoice, type CatalogueTool } from '../store/installationCatalogue'
-import { CATALOGUE_TOOLS, TOOL_KEYS, TOOL_LABELS } from '../store/toolMemory'
+import { CATALOGUE_TOOLS, TOOL_LABELS } from '../store/toolMemory'
 import { PartImg, TOOL_ICON } from './icons'
 import { installationCatalogueStrings } from './installationCatalogueStrings'
 import { SLIDE_CARDS } from './SlideMenu'
@@ -59,7 +59,7 @@ export default function InstallationCatalogueMenu({ tool, requestId, entries, on
   return <div className="ic-menu ic-continuous" data-ui="installation-catalogue" lang={lang}>
     <div ref={scroller} className="ic-catalogue-scroll scrollbar-thin" data-ui="catalogue-scroll" onScroll={scroll}>
       {sections.map(id => <section key={id} data-catalogue-section={id} aria-label={t(TOOL_LABELS[id])}>
-        <h2 className="ic-section-title"><span>{t(TOOL_LABELS[id])}</span><kbd>{TOOL_KEYS[id]}</kbd></h2>
+        <h2 className="ic-section-title"><span>{t(TOOL_LABELS[id])}</span></h2>
         <div className="ic-grid">
           {id === 'slides' ? SLIDE_CARDS.map(card => <button key={card.id} type="button" className="ic-part" data-ui="catalogue-item" data-part-id={card.id} data-category="slides"
             aria-pressed={api.mode === 'slide' && api.slideKind === card.id} disabled={api.readOnly}
