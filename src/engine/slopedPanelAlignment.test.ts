@@ -108,14 +108,17 @@ describe('倾斜方框面板沿真实框边对齐', () => {
     expect(model.panels.size).toBe(1)
   })
 
-  it('同框真实布片占用也阻止反面板重复覆盖', () => {
+  it('同框真实布片允许叠放硬板，硬板的固定点和支撑检查仍有效', () => {
     const { model, candidates } = slopedFrames('panel_40x40'), candidate = candidates()[0]
     const textile = model.addTextile(candidate.a, candidate.b, candidate.t0, candidate.len, 'yellow')!
     expect(textile).toBeTruthy()
     const opposite = { ...candidate, a: candidate.b, b: candidate.a }
-    expect(model.confirmedDiagnostics(opposite)).toMatchObject({ valid: false, reason: 'component_space', obstacle: { id: textile.id } })
-    expect(model.addConfirmedComponent(opposite, 'red')).toBeNull()
-    expect(model.panels.size).toBe(0)
+    expect(model.confirmedDiagnostics(opposite).valid).toBe(true)
+    const panel = model.addConfirmedComponent(opposite, 'red')!
+    expect(panel).toBeTruthy()
+    expect(componentMountsValid(model, panel)).toBe(true)
+    expect(model.textiles.has(textile.id)).toBe(true)
+    expect(model.panels.size).toBe(1)
   })
 
   it('相邻透明板共边四螺丝冲突继续拒绝，改用上下对边可安装', () => {

@@ -2747,6 +2747,7 @@ export class Builder {
       let ok = false;
       this.recordHistory(() => { ok = this.model.turnPanel(pick.data.id); });
       if (ok) this.onNotice(t("notice_panel_turned"), "info");
+      else this.onNotice(t("notice_panel_turn_unavailable"), "info");
       this.refresh();
     });
     // Doppelklick tut dasselbe -- auf dem Touchpad ist er der bequemere Weg.
@@ -2766,6 +2767,7 @@ export class Builder {
       let ok = false;
       this.recordHistory(() => { ok = this.model.turnPanel(pick.data.id); });
       if (ok) this.onNotice(t("notice_panel_turned"), "info");
+      else this.onNotice(t("notice_panel_turn_unavailable"), "info");
       this.refresh();
     });
 

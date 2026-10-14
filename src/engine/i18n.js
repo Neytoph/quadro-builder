@@ -334,6 +334,7 @@ const de = {
   bom_textiles: 'Textilien',
   bom_textile: 'Textil',
   notice_panel_turned: 'Platte um 90° gedreht – die Schrauben sitzen jetzt im anderen Rohrpaar',
+  notice_panel_turn_unavailable: 'Diese Platte lässt sich mit ihrer aktuellen Befestigung nicht um 90° drehen.',
   bom_slides: 'Rutschen',
   slide_slide: 'Modularrutschen-Körper',
   slide_integral: 'Integralrutsche',
@@ -377,7 +378,7 @@ const de = {
 
   // Statuszeile
   status_add: 'Bauen: Kupplung wählen, dann grünen Punkt klicken. Oder Pfeiltasten. Ziehen = drehen.',
-  status_panel: 'Platte: erst ein Tragrohr anklicken, dann eines der hervorgehobenen Gegenrohre. Klick auf eine Platte legt sie um, Rechts- oder Doppelklick dreht sie um 90° (Schrauben ins andere Rohrpaar).',
+  status_panel: 'Platte: erst ein Tragrohr anklicken, dann eines der hervorgehobenen Gegenrohre. Klick auf eine Platte legt sie um, Rechts- oder Doppelklick dreht eine Standardplatte um 90° (Schrauben ins andere Rohrpaar).',
   status_reinforce: 'Verstärken: 75er-Rohr anklicken – oder zwei 35er in einer Linie nacheinander. Ein Klick auf ein verstärktes Rohr zieht das Profil wieder heraus (orange = empfohlen).',
   status_c45: 'Winkelkupplung: die äußeren Punkte setzen sie auf einen Stutzen der Kupplung. Der große Punkt MITTEN auf einer Dummy-Kupplung steckt sie direkt ins Rohr – sie ersetzt die Kupplung, am anderen Ende der Hülse entsteht eine neue. Ein Klick auf eine Kupplung zeigt nur noch deren Punkte, ein Klick auf die gesetzte Winkelkupplung dreht sie um 90°.',
   notice_c45_click_arm: 'Auf einen grünen Punkt klicken – außen an einem Stutzen oder mittig auf einer Dummy-Kupplung.',
@@ -937,6 +938,7 @@ const en = {
   bom_textiles: 'Textiles',
   bom_textile: 'Textile',
   notice_panel_turned: 'Panel turned by 90° – the screws now go into the other pair of tubes',
+  notice_panel_turn_unavailable: 'This panel cannot turn by 90° with its current mounting.',
   bom_slides: 'Slides',
   slide_slide: 'Modular slide body',
   slide_integral: 'Integral slide',
@@ -980,7 +982,7 @@ const en = {
 
   // Status bar
   status_add: 'Build: select a connector, then click the green dot. Or use arrow keys. Drag = rotate.',
-  status_panel: 'Panel: click one rail tube, then one of the highlighted counterparts. Clicking a panel flips it, right-click or double-click turns it by 90° (screws into the other pair of tubes).',
+  status_panel: 'Panel: click one rail tube, then one of the highlighted counterparts. Clicking a panel flips it, right-click or double-click turns a standard panel by 90° (screws into the other pair of tubes).',
   status_reinforce: 'Reinforce: click a 75 cm tube – or two 35 cm tubes in one line, one after the other. Clicking a reinforced tube pulls the profile back out (orange = recommended).',
   status_c45: 'Angle connector: the outer dots put it onto a stub of the connector. The big dot in the MIDDLE of a dummy connector plugs it straight into the tube – it replaces that connector, and a new one appears at the other end of the sleeve. Clicking a connector shows only its dots, clicking the placed angle connector turns it by 90°.',
   notice_c45_click_arm: 'Click a green dot – outside at a stub, or in the middle of a dummy connector.',
@@ -1305,6 +1307,7 @@ const zh = {
   notice_connector_no_node: '没有带空插座、能套这个型号的现有接头。',
   notice_connector_no_fit: '这个接头没有适合所选型号的空插座。',
   notice_panel_turned: '板转了 90°，螺丝改到另一对管子上。',
+  notice_panel_turn_unavailable: '这个板件当前的固定方式不支持旋转 90°。',
   notice_c45_click_arm: '点绿色箭头：空闲臂外侧，或占位连接件中心。',
   notice_c45_turned: '斜角接头已转动。',
   notice_c45_no_turn: '转不开：没有空间。',
