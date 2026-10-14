@@ -8,6 +8,7 @@ import { confirmedCandidates, ropeCandidate } from './confirmedComponentModel.js
 import { insetPanelProbes } from './insetPanelMounts.js';
 import { validAssemblyConfig } from './assemblyConfig.js';
 import { validHomeContext } from '../home/context.js';
+import { isSoftPart } from './softParts.js';
 
 // Zellweite des Rasters, mit dem die Kollisionspruefung Nachbarn sucht. Etwas
 // groesser als das laengste Rohr (75 cm + Kupplung): ein Rohr liegt damit in
@@ -1181,18 +1182,15 @@ export class BuildModel {
   }
 
   /**
-   * Liegt an dieser Stelle schon eine Platte (oder ein Netz)? Geprueft werden
-   * beide Sammlungen -- gestapelt wird nichts.
+   * 检查硬质面板是否占用开口；软装不阻止面板安装。
    */
   panelAt(aId, bId, t0, len, ignoreId = null) {
     const probe = this.panelCorners({ a: aId, b: bId, t0, len });
     if (!probe) return null;
-    for (const map of [this.panels, this.textiles]) {
-      for (const p of map.values()) {
-        if(p.id===ignoreId)continue;
-        const c = this.panelCorners(p);
-        if (c && this._panelsOverlap(c, probe)) return p;
-      }
+    for (const p of this.panels.values()) {
+      if (p.id === ignoreId || isSoftPart(this, p)) continue;
+      const c = this.panelCorners(p);
+      if (c && this._panelsOverlap(c, probe)) return p;
     }
     return null;
   }
@@ -1252,7 +1250,7 @@ export class BuildModel {
    */
   addPanel(aId, bId, t0, len, panelId, color, side = 1) {
     if (!this._rail(aId) || !this._rail(bId)) return null;
-    if (this.panelAt(aId, bId, t0, len)) return null;
+    if (!isSoftPart(this, { panelId }) && this.panelAt(aId, bId, t0, len)) return null;
     const panel = {
       id: this._id("p"), a: aId, b: bId, t0: round(t0), len: round(len),
       panelId, color: confirmedSpec(panelId)?.fixedColor || color || confirmedSpec(panelId)?.defaultColor, side: side < 0 ? -1 : 1,
@@ -1335,7 +1333,7 @@ export class BuildModel {
 
   addPanelAccessory(probe,color) {
     const candidate=this.panelAccessoryDiagnostics(probe);
-    if(!candidate.valid || this.panelAt(candidate.a,candidate.b,candidate.t0,candidate.len))return null;
+    if(!candidate.valid || !isSoftPart(this,candidate) && this.panelAt(candidate.a,candidate.b,candidate.t0,candidate.len))return null;
     const record={...candidate,id:this._id('p'),color:color || probe.color || null};
     for(const key of ['valid','reason','pos','obstacle'])delete record[key];
     this.panels.set(record.id,record);return record;
@@ -2418,15 +2416,11 @@ export class BuildModel {
           const pairKey = [t.id, p.id].sort().join("|") + "|" + t0 + "|" + p.len;
           if (seenPair.has(pairKey)) continue;
           seenPair.add(pairKey);
-          if (this._railFittingTaken(kind, t.id, p.id, t0, p.len)) continue;
           const cor = this.panelCorners({ a: t.id, b: p.id, t0, len: p.len });
           if (!cor) continue;
           const faceKey = this._railFaceKey(cor);
-          if (seenFace.has(faceKey) || this._railFaceTaken(kind, cor)) continue;
+          if (seenFace.has(faceKey)) continue;
           seenFace.add(faceKey);
-          // Auf einer Platte, einem Tuch oder quer ueber ein Rohr laesst sich
-          // nichts spannen -- das Feld muss frei sein.
-          if (!this._openingFree(cor)) continue;
           out.push({ a: t.id, b: p.id, t0, len: p.len, corners: cor });
         }
       }
@@ -2435,55 +2429,16 @@ export class BuildModel {
   }
 
   /**
-   * 两根承重管之间这一段还空着吗？kind 为 null 按面板算（面板和布面都不许叠），
-   * 网 / 布面 / 玩具袋用自己的占位规则，和 railFittingMounts 出绿格子是同一套。
+   * 面板检查硬质面板占用；网 / 布面 / 玩具袋允许重叠放置。
    */
   sectionFree(kind, aId, bId, t0, len) {
     if (!kind) return !this.panelAt(aId, bId, t0, len);
-    if (this._railFittingTaken(kind, aId, bId, t0, len)) return false;
     const cor = this.panelCorners({ a: aId, b: bId, t0, len });
-    return !!cor && !this._railFaceTaken(kind, cor) && this._openingFree(cor);
+    return !!cor;
   }
 
   _railFaceKey(cor) {
     return cor.map((c) => c.map((v) => Math.round(v)).join(",")).sort().join(";");
-  }
-
-  _railFaceTaken(kind, cor) {
-    const faceKey = this._railFaceKey(cor);
-    if (kind === "textil2") {
-      for (const x of this.textiles.values()) {
-        const existing = this.panelCorners(x);
-        if (existing && this._railFaceKey(existing) === faceKey) return true;
-      }
-      return false;
-    }
-    const mid = [0, 1, 2].map((i) => cor.reduce((s, q) => s + q[i], 0) / 4);
-    const near = kind === "bag2" ? 5 : 2;
-    for (const f of this.fittings.values()) {
-      if (f.kind !== kind) continue;
-      if (Math.hypot(f.x - mid[0], f.y - mid[1], f.z - mid[2]) < near) return true;
-    }
-    return false;
-  }
-
-  _railFittingTaken(kind, aId, bId, t0, len) {
-    if (kind === "textil2") {
-      for (const x of this.textiles.values()) {
-        if (((x.a === aId && x.b === bId) || (x.a === bId && x.b === aId))
-          && Math.abs((x.t0 || 0) - t0) < 2) return true;
-      }
-      return false;
-    }
-    const cor = this.panelCorners({ a: aId, b: bId, t0, len });
-    if (!cor) return false;
-    const c = [0, 1, 2].map((i) => cor.reduce((s, q) => s + q[i], 0) / 4);
-    const near = kind === "bag2" ? 5 : 2;
-    for (const f of this.fittings.values()) {
-      if (f.kind !== kind) continue;
-      if (Math.hypot(f.x - c[0], f.y - c[1], f.z - c[2]) < near) return true;
-    }
-    return false;
   }
 
   /**
@@ -2514,7 +2469,6 @@ export class BuildModel {
     const perp = [off[0] - ra.dir[0] * along, off[1] - ra.dir[1] * along, off[2] - ra.dir[2] * along];
     const gap = Math.hypot(perp[0], perp[1], perp[2]);
     if (gap < 1) return null;
-    if (this.panelAt(aId, bId, t0, len)) return null;        // dort liegt schon ein Tuch oder eine Platte
     const tx = {
       id: this._id("x"), a: aId, b: bId, t0: round(t0), len: round(len),
       w: round(len - 5), h: round(gap - 5), color: color || null, side: 1,
@@ -2554,9 +2508,6 @@ export class BuildModel {
     ];
     const ey = [ra.dir[0] * sign, ra.dir[1] * sign, ra.dir[2] * sign];
     const ez = [up[1] * ey[2] - up[2] * ey[1], up[2] * ey[0] - up[0] * ey[2], up[0] * ey[1] - up[1] * ey[0]];
-    for (const f of this.fittings.values()) {
-      if (f.kind === "lattice2" && Math.hypot(f.x - c[0], f.y - c[1], f.z - c[2]) < 2) return null;
-    }
     return this.addFitting("lattice2", c[0], c[1], c[2],
       { quat: quatFromBasis(up, ey, ez), color: color || null, w, h });
   }
@@ -2596,9 +2547,6 @@ export class BuildModel {
       A[1] + ra.dir[1] * (len / 2) + perp[1] / 2,
       A[2] + ra.dir[2] * (len / 2) + perp[2] / 2,
     ];
-    for (const f of this.fittings.values()) {
-      if (f.kind === "bag2" && Math.hypot(f.x - c[0], f.y - c[1], f.z - c[2]) < 5) return null;
-    }
     // Dreibein wie in den Herstellerdateien: lokales X laeuft AM ROHR entlang,
     // Y zeigt nach oben, Z zum zweiten Rohr. (Gemessen an allen fuenf Saecken:
     // Kupplungen liegen lokal bei (+-200, 0, 0) und (+-200, 0, 400).)
@@ -2780,24 +2728,12 @@ export class BuildModel {
   }
 
   /**
-   * Ist dieses Feld frei -- keine Platte, kein Tuch, kein Netz darauf, kein
-   * Rohr und keine Kupplung mittendrin? Der Rand (die tragenden Rohre und ihre
-   * Kupplungen) zaehlt nicht. Platten und Tuecher werden ueber die gemeinsame
-   * Ebene und Trennachsen verglichen, so faellt auch ein breiteres Tuch auf,
-   * das dieses Feld nur mit abdeckt.
+   * 开口检查硬质面板、管件和接头；软装不占用开口，承载边不算障碍。
    */
   _openingFree(corners) {
     for (const p of this.panels.values()) {
+      if (isSoftPart(this, p)) continue;
       const c = this.panelCorners(p);
-      if (c && this._panelsOverlap(corners, c)) return false;
-    }
-    for (const x of this.textiles.values()) {
-      const c = this.panelCorners(x);
-      if (c && this._panelsOverlap(corners, c)) return false;
-    }
-    for (const f of this.fittings.values()) {
-      if (f.kind !== "lattice2") continue;
-      const c = this._latticeCorners(f);
       if (c && this._panelsOverlap(corners, c)) return false;
     }
     const [c0, c1, , c3] = corners;

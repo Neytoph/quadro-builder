@@ -106,7 +106,7 @@ describe('原创配件固定点与空间约束', () => {
     expect(model.panels.has(part.id)).toBe(false)
   })
 
-  it('方框朝向、缺边和兜底空间分别校验', () => {
+  it('方框朝向、缺边和离地要求保留，布兜不受空间冲突阻挡', () => {
     const vertical = frame(false), horizontal = frame(true)
     expect(vertical.model.panelAccessoryDiagnostics({ ...vertical.probe, panelId: 'panel_40x40_pocket' }).reason).toBe('horizontal_frame')
     expect(horizontal.model.panelAccessoryDiagnostics({ ...horizontal.probe, panelId: 'panel_40x40_busy' }).reason).toBe('vertical_frame')
@@ -117,7 +117,7 @@ describe('原创配件固定点与空间约束', () => {
     const inside = frame(true)
     const a = inside.model.addNode(0, 25, 20), b = inside.model.addNode(40, 25, 20)
     inside.model.addTube(a.id, b.id, 'T35', 'red', 35)
-    expect(inside.model.panelAccessoryDiagnostics(inside.probe).reason).toBe('component_space')
+    expect(inside.model.panelAccessoryDiagnostics(inside.probe).valid).toBe(true)
   })
 
   it.each(['swing', 'steering_wheel'])('保存后重复吊点或错误尺寸不能通过结构检查：%s', kind => {

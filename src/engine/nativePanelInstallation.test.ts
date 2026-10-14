@@ -115,7 +115,7 @@ describe('工厂普通方板的确认安装入口', () => {
     expect(occupied.model.toJSON()).toEqual(before)
   })
 
-  it('普通板前后两种安装顺序都保留固定位占用检查', () => {
+  it('滚筒保留固定位占用检查，绳子与普通板可共用固定点', () => {
     const first = cube(), mount = first.probe.mounts[0]
     const sleeve: any = first.model.addFitting('sleeve', 0, 0, 0)
     sleeve.tube = mount.tube
@@ -127,10 +127,10 @@ describe('工厂普通方板的确认安装入口', () => {
     const a = second.model.addNode(82.5, 82.5, 82.5), b = second.model.addNode(122.5, 82.5, 82.5)
     const remote = second.model.addTube(a.id, b.id, 'T35', 'blue', 35)!
     const nativeMount = second.probe.mounts[0]
-    expect(second.model.ropeDiagnostics({ tube: nativeMount.tube, t: nativeMount.t }, { tube: remote.id, t: 0.5 }).reason).toBe('mount_occupied')
+    expect(second.model.ropeDiagnostics({ tube: nativeMount.tube, t: nativeMount.t }, { tube: remote.id, t: 0.5 }).valid).toBe(true)
     const restored = new BuildModel()
     expect(restored.loadJSON(second.model.toJSON()).ok).toBe(true)
-    expect(restored.ropeDiagnostics({ tube: nativeMount.tube, t: nativeMount.t }, { tube: remote.id, t: 0.5 }).reason).toBe('mount_occupied')
+    expect(restored.ropeDiagnostics({ tube: nativeMount.tube, t: nativeMount.t }, { tube: remote.id, t: 0.5 }).valid).toBe(true)
   })
 
   it('穿过板面中央的真实管件仍然阻止安装路径', () => {

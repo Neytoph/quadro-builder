@@ -2,6 +2,7 @@ import { quatFromBasis, xAxisOf, yAxisOf, zAxisOf } from './util.js';
 import { CONFIRMED_COMPONENTS, CONFIRMED_PANEL_IDS, CONFIRMED_FITTING_IDS, confirmedSpec } from './componentPack.js';
 import { confirmedCandidates, confirmedPanelDiagnostics, confirmedStructuralValid, confirmedFrame, confirmedVolumes, curvePoint, ropeCandidate, trampolineCandidate } from './confirmedComponentModel.js';
 import { INSET_MOUNT_LAYOUT, hasInsetScrews, oppositeScrewSupports, insetFrameTubeIds, insetScrewVolumes, insetPanelReference } from './insetPanelMounts.js';
+import { isSoftPart } from './softParts.js';
 
 export const ACCESSORY_PACK = [
   { id: 'steering_wheel', name: '方向盘', name_en: 'Steering wheel', name_de: 'Lenkrad', placement: 'fitting', mount: 'horizontal', diameter: 24, clampSpacing: 8, shaft: 8, width: 24, drop: 0 },
@@ -140,6 +141,7 @@ function panelVolume(model, panel) {
 }
 
 export function componentObstacle(model, part, { sweep = false } = {}) {
+  if (isSoftPart(model, part)) return null;
   const volumes = componentVolumes(model, part, { sweep });
   const supports = new Set(Array.isArray(part.supportTubes) ? part.supportTubes : [part.tube, part.a, part.b].filter(Boolean));
   if(hasInsetScrews(part)) {
@@ -162,7 +164,7 @@ export function componentObstacle(model, part, { sweep = false } = {}) {
     } else if (volumes.some(box => segmentHits(box, point(a), point(b)))) return { kind: 'tube', id: tube.id };
   }
   for (const other of [...model.panels.values(), ...model.textiles.values(), ...model.fittings.values()]) {
-    if (other.id === part.id) continue;
+    if (other.id === part.id || isSoftPart(model, other)) continue;
     const boxes = (ACCESSORY_IDS.has(other.kind) && (!confirmedSpec(other.kind) || other.appearanceVersion === 2)) || (other.appearanceVersion && PANEL_ACCESSORY_IDS.has(other.panelId)) || ['panel_40x40', 'panel_40x20'].includes(other.panelId)
       ? componentVolumes(model, other, { sweep: other.kind === 'swing' })
       : other.kind==='multi-wheel2' ? componentVolumes(model,other) : (other.a && other.b ? panelVolume(model, other) : [{ pos: [other.x, other.y, other.z], axes: other.quat?.every(Number.isFinite) ? [xAxisOf(other.quat), yAxisOf(other.quat), zAxisOf(other.quat)] : [[1, 0, 0], [0, 1, 0], [0, 0, 1]], half: other.kind === 'floating-wheel2' ? [7.5, 15.1, 15.1] : [3, 3, 3] }]);
@@ -192,10 +194,11 @@ function separatePanelRetainers(model, candidate, part, a, b) {
 }
 
 function occupiedMount(model, candidate, ignoreId) {
+  if (isSoftPart(model, candidate)) return null;
   const mounts = candidate.mounts;
   const parts = [...model.fittings.values(), ...model.panels.values()];
   for (const part of parts) {
-    if (part.id === ignoreId) continue;
+    if (part.id === ignoreId || isSoftPart(model, part)) continue;
     // 工厂普通板保留标准存档字段，固定位随当前支撑管即时计算。
     const nativePanelMounts = ['panel_40x40', 'panel_40x20'].includes(part.panelId) && !part.appearanceVersion ? confirmedPanelDiagnostics(model, part).mounts : null;
     const used = Array.isArray(part.mounts) ? part.mounts.filter(m => m && typeof m === 'object') : nativePanelMounts || (part.tube ? [{ tube: part.tube, t: 0.5, width: part.kind === 'sleeve' ? Infinity : 5 }] : []);
@@ -289,7 +292,7 @@ export function panelAccessoryDiagnostics(model, probe, { ignoreId = probe.id } 
   const occupied = occupiedMount(model, part, ignoreId);
   if (occupied) return { ...part, valid: false, reason: 'mount_occupied', obstacle: occupied };
   const existing = model.panelAt(probe.a, probe.b, probe.t0, probe.len);
-  if (existing && existing.id !== ignoreId) return { ...part, valid: false, reason: 'opening_occupied', obstacle: { kind: 'panel', id: existing.id } };
+  if (!isSoftPart(model, part) && existing && existing.id !== ignoreId) return { ...part, valid: false, reason: 'opening_occupied', obstacle: { kind: 'panel', id: existing.id } };
   const obstacle = componentObstacle(model, part);
   if (obstacle) return { ...part, valid: false, reason: 'component_space', obstacle };
   return { ...part, valid: true, reason: null, pos: componentFrame(model, part).pos };
@@ -348,7 +351,7 @@ export function confirmedDiagnostics(model, probe) {
     part = candidate ? { ...candidate, id: probe.id, color: probe.color } : invalid('missing_support');
   }
   if (!part.valid) return part;
-  if(part.panelId){
+  if(part.panelId && !isSoftPart(model,part)){
     const existing=model.panelAt(part.a,part.b,part.t0,part.len,probe.id);
     if(existing)return {...part,valid:false,reason:'component_space',obstacle:{kind:'panel',id:existing.id}};
   }

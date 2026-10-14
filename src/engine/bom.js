@@ -5,6 +5,8 @@ import { round2, xAxisOf, yAxisOf, zAxisOf } from "./util.js";
 import { POOL_KINDS, isHolePart, isBoltPart, BOLT_PART, HINGE_PART, ARM_FITTINGS } from "./model.js";
 import { isOriginalComponent, componentKitFields, componentPartId, componentColorName, componentOutputColor, componentFittingKey, componentSizeLabel } from './accessoryInfo.js';
 import { CONN_TYPE_MASK, DIRECTIONS } from './config.js';
+import { SOFT_PARTS } from './softParts.js';
+export { SOFT_PARTS } from './softParts.js';
 
 // Einheitsvektoren der Nachbarn eines Knotens. Doppelrohr-Verbindungen (link)
 // sind KEIN Arm der Kupplung und zaehlen nicht in die Kupplungstyp-Heuristik
@@ -836,8 +838,6 @@ export function computeBOM(model) {
 // Netz, Rundwand, Spielsack, Dachtextil -- ist Zubehoer: es fehlt vielleicht,
 // aber das Modell steht trotzdem. Die Zeilen bleiben in der Liste und faerben
 // sich rot, nur der Haken bleibt gruen.
-export const SOFT_PARTS = new Set(["textile", "textile_20x40", "textile_long", "textile_round_fourway", "textile_bridge", "textile_rainbow", "lattice", "lattice_curved", "trampoline", "rope", "textile_round", "bag", "roof", "roof_large"]);
-
 export function neededParts(bom) {
   const tubes = new Map();   // tubeId -> count
   for (const r of bom.tubes) tubes.set(r.tubeId, (tubes.get(r.tubeId) || 0) + r.count);

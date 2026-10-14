@@ -102,12 +102,12 @@ describe('连续完整边界蹦床尺寸和固定',()=>{
     const part=[...model.fittings.values()][0] as any;expect(part.params.width).toBe(40);expect(componentMountsValid(model,part)).toBe(true)
     expect(componentVolumes(model,part)[0].half.slice(0,2)).toEqual([17,17])
   })
-  it('缺边、重复、内部横管及伪造尺寸仍拒绝',()=>{
+  it('蹦床可重复放置和覆盖内部横管，缺边及伪造尺寸仍拒绝',()=>{
     const model=createDirectInstallationFrame(),candidate=model.confirmedMounts('trampoline').find((p:any)=>p.valid && p.params.width===80 && p.params.height===80)!
-    const saved=model.toJSON(),part=model.addConfirmedComponent(candidate,'black') as any;expect(model.addConfirmedComponent(candidate,'black')).toBeNull()
+    const saved=model.toJSON(),part=model.addConfirmedComponent(candidate,'black') as any;expect(model.addConfirmedComponent(candidate,'black')).toBeTruthy()
     part.params.width=60;expect(componentMountsValid(model,part)).toBe(false)
     model.loadJSON(saved);model.removeTube(candidate.supportTubes[0]);expect(model.confirmedMounts('trampoline').some((p:any)=>p.params.width===80 && p.params.height===80 && p.valid)).toBe(false)
     model.loadJSON(saved);const a=model.addNode(0,42.5,40),b=model.addNode(80,42.5,40);model.addTube(a.id,b.id,'T75','red',75)
-    expect(model.confirmedMounts('trampoline').some((p:any)=>p.params.width===80 && p.params.height===80 && p.valid)).toBe(false)
+    expect(model.confirmedMounts('trampoline').some((p:any)=>p.params.width===80 && p.params.height===80 && p.valid)).toBe(true)
   })
 })
