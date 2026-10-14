@@ -1116,6 +1116,12 @@ export class SceneManager {
     return this._raycaster.ray.intersectPlane(plane, p) ? p : null;
   }
 
+  screenPoint(pos) {
+    const point = new THREE.Vector3(...pos).project(this.camera);
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    return [(point.x + 1) * rect.width / 2 + rect.left, (1 - point.y) * rect.height / 2 + rect.top];
+  }
+
   /** Mauszeiger-Form setzen (Builder signalisiert damit "verschiebbar"). */
   setCursor(css) {
     this.container.classList.toggle("qb-cursor-delete", css === "delete-x");
@@ -4185,6 +4191,9 @@ export class SceneManager {
       // Kupplung, die in der Datei steht, aber nichts haelt: die Hersteller-
       // software zeichnet sie nicht -- sonst schweben Wuerfel in der Luft.
       if (n.unused) continue;
+      // 轴承连接件的空安装位置只是锚点，接管或手动指定通型后才显示接头。
+      if (n.bearingOn && !n.preferType && !n.arms?.length && !n.c45
+          && model.degree(n.id) === 0) continue;
       // 管端保留建模锚点和加管操作，单根管的自由末端不显示自动接头。
       if (!n.preferType && !n.part && !n.c45 && !n.c45body && !n.c45file && !n.arms?.length
           && (tubeDirsAt.get(n.id) || []).length === 1) continue;

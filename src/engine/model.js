@@ -458,10 +458,7 @@ export const POOL_SETS = {
 // Stellung der Scharniere in `hinges` -- Grad um diese Achse, 0 = lokal -Y.
 export const BOLT_PART = "flexi_bolt";
 export const HINGE_PART = "flexi_hinge";
-// Die Kraenze der beiden Scharniere sind verzahnt: sie rasten in 45-Grad-
-// Schritten. Naeher als 90 Grad koennen zwei Scharniere aber nicht
-// zusammenstehen -- dafuer sind ihre Riemen zu breit; im Bestand stehen sie an
-// allen 83 Gelenken 135 Grad auseinander.
+// 单击按45°调整，拖动保留连续角度。两片铰链仍至少相隔90°，避免互相穿过。
 export const HINGE_STEP = 45;
 export const HINGE_MIN_GAP = 90;
 export const MAX_HINGES = 2;
@@ -2285,6 +2282,14 @@ export class BuildModel {
     return n;
   }
 
+  /** 整套安装仍保存为一根栓和两片铰链，清单与 QDF 沿用独立零件。 */
+  addFlexiJoint(nodeId, cs = 5) {
+    const n = this.addBolt(nodeId, cs);
+    if (!n) return null;
+    n.hinges = [90, 225];
+    return n;
+  }
+
   /**
    * Die naechste freie Stellung fuer ein Scharnier an diesem Bolzen -- in
    * 45-Grad-Schritten und mindestens 90 Grad neben jedem, das schon steht.
@@ -2369,10 +2374,174 @@ export class BuildModel {
     let g = n.hinges[index];
     for (let i = 0; i < 360 / HINGE_STEP; i++) {
       g = (g + HINGE_STEP) % 360;
-      if (andere.every((h) => hingeGap(g, h) >= HINGE_MIN_GAP)
-          && this.rotateJoint({ kind: 'hinge', nodeId, index }, (i + 1) * HINGE_STEP * Math.PI / 180, 5, { skipHingeGap: true })) return true;
+      if (andere.every((h) => hingeGap(g, h) >= HINGE_MIN_GAP)) return this._rotateHingeTo(n, index, g);
     }
     return false;
+  }
+
+  /** 连续转动一片铰链；到达另一片的边界时停住，不跳过禁用角度。 */
+  rotateHingeBy(nodeId, index, delta) {
+    const node = this.nodes.get(nodeId);
+    if (!isBoltPart(node?.part) || !Number.isInteger(index) || index < 0
+        || !node.hinges || index >= node.hinges.length || !Number.isFinite(delta)) return false;
+    const angle = node.hinges[index];
+    let move = delta;
+    for (let i = 0; i < node.hinges.length; i++) {
+      if (i === index) continue;
+      const relative = ((angle - node.hinges[i]) % 360 + 360) % 360;
+      if (relative < HINGE_MIN_GAP - 0.01 || relative > 360 - HINGE_MIN_GAP + 0.01) return false;
+      move = Math.max(HINGE_MIN_GAP - relative, Math.min(360 - HINGE_MIN_GAP - relative, move));
+    }
+    return this._rotateHingeTo(node, index, Math.round((((angle + move) % 360 + 360) % 360) * 1e4) / 1e4 % 360);
+  }
+
+  /** 从这一片的接管方向出发，截断栓上的其他连接，找出可整体跟转的分支。 */
+  _hingeBranch(node, index) {
+    const direction = hingeDir(node, node.hinges[index]);
+    const roots = new Set(), fixed = new Set();
+    for (const tube of this.tubes.values()) {
+      const id = tube.a === node.id ? tube.b : tube.b === node.id ? tube.a : null;
+      if (!id) continue;
+      const end = this.nodes.get(id);
+      if (!end) continue;
+      const aligned = !tube.link && dot3(norm3(this._tubeDirAt(tube, node, end)), direction) > 0.9;
+      (aligned ? roots : fixed).add(id);
+    }
+    const adj = this._nodeAdj();
+    const join = (ids) => {
+      for (const id of ids) for (const other of ids) {
+        if (id === other) continue;
+        if (!adj.has(id)) adj.set(id, []);
+        adj.get(id).push(other);
+      }
+    };
+    for (const map of [this.panels, this.textiles, this.fittings, this.slides]) for (const part of map.values()) {
+      join([...new Set(this._jointSupports(part).flatMap(id => {
+        const tube = this.tubes.get(id);
+        return tube ? [tube.a, tube.b] : [];
+      }).concat(part.nodes || []))]);
+    }
+    for (const part of this.nodes.values()) {
+      if (!isHolePart(part.part) || part.clampOn) continue;
+      const carrier = this._holeCarrier(part);
+      if (carrier) join([part.id, carrier.id]);
+    }
+    for (const clamp of this.clamps.values()) {
+      const a = this._clampBaseTube(clamp), b = this._clampSecondTube(clamp);
+      if (a && b) join([a.a, a.b, b.a, b.b]);
+    }
+    const nodes = new Set(roots), queue = [...roots];
+    for (let i = 0; i < queue.length; i++) for (const id of adj.get(queue[i]) || []) {
+      if (id === node.id || nodes.has(id)) continue;
+      nodes.add(id); queue.push(id);
+    }
+    if ([...fixed].some(id => nodes.has(id))) return null;
+    // 管夹或板件在栓上还有独立固定点时，也不能把固定结构从锚点扯走。
+    const original = this._nodeAdj().get(node.id) || [];
+    if (original.some(id => nodes.has(id) && !roots.has(id))) return null;
+    const tubes = new Set();
+    for (const tube of this.tubes.values()) {
+      if (nodes.has(tube.a) && nodes.has(tube.b)
+          || tube.a === node.id && roots.has(tube.b)
+          || tube.b === node.id && roots.has(tube.a)) tubes.add(tube.id);
+    }
+    return { nodes, tubes };
+  }
+
+  _rotateHingeTo(node, index, angle) {
+    this.hingeRotationFailure = null;
+    const branch = this._hingeBranch(node, index);
+    if (!branch) { this.hingeRotationFailure = "connected"; return false; }
+    const affected = new Set(branch.nodes); affected.add(node.id);
+    if (this._incompleteComponentMove({ nodes: affected })) {
+      this.hingeRotationFailure = "connected"; return false;
+    }
+    const change = ((angle - node.hinges[index] + 540) % 360) - 180;
+    if (Math.abs(change) < 1e-7) return true;
+    const radians = -change * Math.PI / 180;
+    const ax = { o: [node.x, node.y, node.z], u: boltAxis(node) };
+    const co = Math.cos(radians), si = Math.sin(radians);
+    const point = p => rodriguesAt(p, ax.o, ax.u, co, si).map(round);
+    const direction = d => rodriguesDir(d, ax.u, co, si).map(round4);
+    const spin = q => spinAroundAxis(q || [0, 0, 0, 1], ax.u, radians);
+    const positions = new Map([...branch.nodes].map(id => {
+      const n = this.nodes.get(id); return [id, point([n.x, n.y, n.z])];
+    }));
+    const bows = new Map();
+    for (const id of branch.tubes) {
+      const tube = this.tubes.get(id);
+      if (tube.bow && tube.bowCenter) {
+        const center = point(tube.bowCenter);
+        const a = this.nodes.get(tube.a), b = this.nodes.get(tube.b);
+        if (this.isBelowGround(this._bowLowestY(positions.get(a.id) || [a.x, a.y, a.z], positions.get(b.id) || [b.x, b.y, b.z], center))) {
+          this.hingeRotationFailure = "ground"; return false;
+        }
+        bows.set(id, center);
+      }
+    }
+    if ([...positions.values()].some(p => this.isBelowGround(p[1]))) {
+      this.hingeRotationFailure = "ground"; return false;
+    }
+    // 配件按实际宿主管／节点归属；靠近分支的固定配件不会被顺带抓走。
+    const onBranch = (x, y, z, tubeId) => {
+      if (tubeId) return branch.tubes.has(tubeId);
+      let nearest = Infinity, moving = false;
+      const consider = (distance, belongs) => {
+        if (distance < nearest - 1e-6) { nearest = distance; moving = belongs; }
+        else if (Math.abs(distance - nearest) < 1e-6 && !belongs) moving = false;
+      };
+      for (const n of this.nodes.values()) consider(Math.hypot(n.x - x, n.y - y, n.z - z), branch.nodes.has(n.id));
+      for (const tube of this.tubes.values()) {
+        const a = this.nodes.get(tube.a), b = this.nodes.get(tube.b);
+        if (a && b && !tube.arm && !tube.link) consider(distPointToSeg(x, y, z, a, b), branch.tubes.has(tube.id));
+      }
+      return moving && nearest < 16;
+    };
+    const bearingIds = new Set([...branch.nodes].map(id => this.nodes.get(id).bearingOn).filter(Boolean));
+    if ([...bearingIds].some(id => {
+      const fitting = this.fittings.get(id);
+      return fitting && this.isBelowGround(point([fitting.x, fitting.y, fitting.z])[1]);
+    })) { this.hingeRotationFailure = "ground"; return false; }
+    const extras = [...this.fittings.values()].filter(f => !bearingIds.has(f.id) && onBranch(f.x, f.y, f.z, f.tube));
+    const clamps = [...this.clamps.values()].filter(c => branch.tubes.has(this._clampBaseTube(c)?.id));
+    const slideIds = new Set();
+    for (const slide of this.slides.values()) {
+      const entry = this.slideEntry(slide);
+      if (entry && onBranch(entry.x, entry.y, entry.z)) for (const id of this._slideChainIds(slide.id)) slideIds.add(id);
+    }
+    const slides = [...slideIds].map(id => this.slides.get(id));
+    if ([...extras, ...clamps, ...slides].some(o => this.isBelowGround(point([o.x, o.y, o.z])[1]))) {
+      this.hingeRotationFailure = "ground"; return false;
+    }
+    const snapshot = this.toJSON(), collidedBefore = this.collisions({ only: branch.tubes });
+    for (const [id, p] of positions) {
+      const n = this.nodes.get(id); [n.x, n.y, n.z] = p;
+      this._spinNodeAround(n, ax, co, si, radians);
+    }
+    for (const id of branch.tubes) {
+      const tube = this.tubes.get(id);
+      if (bows.has(id)) tube.bowCenter = bows.get(id);
+      if (tube.geom) tube.geom = { ...tube.geom, p0: point(tube.geom.p0), dir: direction(tube.geom.dir),
+        ...(tube.geom.up ? { up: direction(tube.geom.up) } : {}) };
+    }
+    for (const map of [this.panels, this.textiles]) for (const part of map.values()) {
+      if (!branch.tubes.has(part.a) || !branch.tubes.has(part.b)) continue;
+      if (part.geom?.p) part.geom = { ...part.geom, p: point(part.geom.p), ...(part.geom.quat ? { quat: spin(part.geom.quat) } : {}) };
+      if (part.pool?.p) part.pool = { ...part.pool, p: point(part.pool.p), quat: spin(part.pool.quat) };
+    }
+    for (const o of [...extras, ...clamps, ...slides]) {
+      [o.x, o.y, o.z] = point([o.x, o.y, o.z]);
+      if (o.quat || o.kind) o.quat = spin(o.quat);
+      if (o.dir) o.dir = direction(o.dir);
+      if (o.off) o.off = rodriguesDir(o.off, ax.u, co, si).map(round);
+      if (o.hook) o.hook = point(o.hook);
+      if (o.foot?.p0) o.foot = { ...o.foot, p0: point(o.foot.p0), dir: direction(o.foot.dir) };
+    }
+    node.hinges[index] = angle;
+    if ([...this.collisions({ only: branch.tubes })].some(id => !collidedBefore.has(id))) {
+      this.loadJSON(snapshot); this.hingeRotationFailure = "collision"; return false;
+    }
+    return true;
   }
 
   /**

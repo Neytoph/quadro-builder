@@ -6,6 +6,7 @@ import { useDock } from './dock'
 import { usePresence } from './motion'
 import { componentForTool } from '../store/builderComponents'
 import { useMobileControls } from './useMobileControls'
+import FlexiGuide from './FlexiGuide'
 
 const BY_MODE: Record<string, string> = {
   select: 'tip.select',
@@ -38,9 +39,12 @@ export default function StatusTip({ menuOpen }: { menuOpen: boolean }) {
   const { left, right, vw, toolbarW } = usePanelLayout()
   const narrow = vw <= NARROW_MAX
   const { pane } = useDock()
+  const adjustment = api.engine()?.builder.selectedPartAdjustment()
+  const adjusting = !!adjustment
   const key = api.pasting ? 'status.paste'
     : api.placingConnector ? 'tip.placeConnector'
     : api.assembly.active ? 'status.assembly'
+    : adjusting ? 'tip.adjustSelected'
     : (BY_MODE[api.mode] || 'tip.select')
   const text = t(key, { h: api.pasteHeightCm ?? 0 })
 
@@ -55,6 +59,25 @@ export default function StatusTip({ menuOpen }: { menuOpen: boolean }) {
     return () => window.clearTimeout(id)
   }, [text, menuOpen])
   const [shown, leaving] = usePresence(api.toast ? null : say)
+
+  const flexi = (api.mode === 'fitting' && ['flexi', 'flexi_bolt', 'flexi_hinge'].includes(api.fittingKind))
+    || (api.mode === 'select' && !!api.engine()?.builder.flexiTarget())
+  if (flexi && !menuOpen && !api.readOnly) {
+    const box = narrow ? { left: 8, right: 8, bottom: 68 } : statusTipBox(left, vw, toolbarW, pane ? right : null)
+    if (!box || (narrow && pane)) return null
+    return <div data-ui="flexi-guide" className="fixed z-40 flex justify-center pointer-events-none" style={box}><FlexiGuide /></div>
+  }
+
+  if (adjustment === 'panel' && !menuOpen && !api.toast && !api.canFlipAccessory && !api.installationPreview && !componentForTool(api)) {
+    const box = narrow ? { left: 8, right: 8, bottom: 68 } : statusTipBox(left, vw, toolbarW, pane ? right : null)
+    if (!box || (narrow && pane)) return null
+    return <div data-ui="panel-adjustment" className="fixed z-40 flex justify-center pointer-events-none" style={box}>
+      <div className="qb-card qb-flexi-guide qb-flexi-actions">
+        <span>{t('tip.adjustPanel')}</span>
+        <button type="button" onClick={() => { api.engine()?.builder.turnSelectedPanel(); api.bump() }}>{t('tip.turnPanel')}</button>
+      </div>
+    </div>
+  }
 
   if ((mobile && KEYBOARD_TIPS.has(key)) || api.installationPreview || api.canFlipAccessory || componentForTool(api)) return null
 

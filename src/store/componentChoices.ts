@@ -37,7 +37,7 @@ export function componentChoices(api: EngineApi, saved: CustomComponent[], t: (k
     else if (part.id === 'diagonal') action = { kind: 'c45', id: part.id }
     else if (part.id === 'double_tube' || part.id === 'tube_clamp') action = { kind: 'clamp', id: part.id }
     else if (part.id === 'bearing') action = { kind: 'fitting', id: 'bearing-clamp' }
-    else if (['hole_1', 'hole_2', 'hole_t', 'flexi_bolt', 'flexi_hinge', 'flexi'].includes(part.id)) action = { kind: 'fitting', id: part.id === 'flexi' ? 'flexi_bolt' : part.id }
+    else if (['hole_1', 'hole_2', 'hole_t', 'flexi_bolt', 'flexi_hinge', 'flexi'].includes(part.id)) action = { kind: 'fitting', id: part.id }
     if (action) choices.push({ key: `connector:${part.id}`, label: labelOf(part.id, part.name), group: t('tool.connections'), partId: part.id, icon: CONN_CAT_ICON[part.id] || CONN_CAT_ICON['6way'], action })
   }
   for (const part of api.catalog.accessories) {
