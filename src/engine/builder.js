@@ -635,6 +635,14 @@ export class Builder {
     const f = this._selectFlip;
     if (!f) return;
     this._cancelSelectFlip();
+    if (f.action === "clamp") {
+      if (this.readOnly || !this.selection.has(f.id) || this._selectedClampDriver() !== f.id) return;
+      let turned = false;
+      this.recordHistory(() => { turned = this._rotateClampWithFallback(f.id); });
+      if (!turned) this.onNotice(t("notice_fitting_fixed"), "warn");
+      this.refresh();
+      return;
+    }
     if (!this._partTurnsOnClick(f.id)) return;
     if (f.action === "bow") { this._turnBow(this.model.tubes.get(f.id)); return; }
     if (f.action === "c45") { this._turnC45(f.id); return; }
@@ -4544,6 +4552,11 @@ export class Builder {
     }
     const { kind, id } = pick.data;
     if (kind === "clamp") {
+      if (!add && this.selection.has(id) && this._selectedClampDriver() === id) {
+        this._selectClick = null;
+        this._queueSelectFlip(id, e, "clamp");
+        return;
+      }
       if (this._isBlockClick(e, id)) {
         this._selectConnectedFromPick(pick, add);
         return;

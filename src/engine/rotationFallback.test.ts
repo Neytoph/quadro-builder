@@ -53,12 +53,15 @@ describe('受阻后反向旋转', () => {
     const { model, clamp, foot } = flap()
     expect(model.rotateClamp(clamp.id, Math.asin(40 / 45))).toBe(true)
     const builder = editor(model, new Map([[clamp.id, 'clamp']]))
-    expect(builder._rotateClampWithFallback(clamp.id)).toBe(true)
+    builder._queueSelectFlip(clamp.id, { clientX: 20, clientY: 20 }, 'clamp')
+    builder._runSelectFlip()
     const firstHeight = model.nodes.get(foot.a)!.y
-    expect(builder._rotateClampWithFallback(clamp.id)).toBe(true)
+    builder._queueSelectFlip(clamp.id, { clientX: 20, clientY: 20 }, 'clamp')
+    builder._runSelectFlip()
     const secondHeight = model.nodes.get(foot.a)!.y
     expect(secondHeight).toBeGreaterThan(firstHeight)
-    expect(builder._rotateClampWithFallback(clamp.id)).toBe(true)
+    builder._queueSelectFlip(clamp.id, { clientX: 20, clientY: 20 }, 'clamp')
+    builder._runSelectFlip()
     expect(model.nodes.get(foot.a)!.y).toBeGreaterThan(secondHeight)
   })
 
