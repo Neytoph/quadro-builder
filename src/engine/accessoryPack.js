@@ -147,6 +147,20 @@ function panelVolume(model, panel) {
   return [{ pos: mid(c[0], c[2]), axes: [nx, y, nz], half: [Math.hypot(...x) / 2, 1.5, Math.hypot(...z) / 2] }];
 }
 
+// 原生轮保留轴承、轮帽等安装关系，硬质组件的空间约束在两个安装顺序下保持一致。
+export function nativeWheelComponentObstacle(model, wheel) {
+  const volumes = componentVolumes(model, wheel);
+  for (const part of [...model.fittings.values(), ...model.panels.values()]) {
+    if (part.id === wheel.id || isSoftPart(model, part)) continue;
+    const panel = model.panels.has(part.id);
+    if (!panel && !ACCESSORY_IDS.has(part.kind)) continue;
+    const legacyPanel = panel && !part.appearanceVersion && !['panel_40x40', 'panel_40x20'].includes(part.panelId);
+    const boxes = legacyPanel ? panelVolume(model, part) : componentVolumes(model, part, { sweep: part.kind === 'swing' });
+    if (volumes.some(box => boxes.some(other => boxesOverlap(box, other)))) return { kind: part.panelId ? 'panel' : 'fitting', id: part.id };
+  }
+  return null;
+}
+
 export function componentObstacle(model, part, { sweep = false } = {}) {
   if (isSoftPart(model, part)) return null;
   const volumes = componentVolumes(model, part, { sweep });
@@ -239,6 +253,10 @@ export function accessoryDiagnostics(model, kind, tubeId, opts = {}) {
   const mounts = [-1, 1].map(side => ({ tube: tubeId, t: 0.5 + side * spacing / (2 * len), width: 2.5, role: kind === 'steering_wheel' ? 'clamp' : 'hanger' }));
   const part = { kind, tube: tubeId, ...Object.fromEntries(['x', 'y', 'z'].map((key, i) => [key, mid(point(a), point(b))[i]])), quat,
     mounts, supportTubes: [tubeId], appearanceVersion: APPEARANCE_VERSION, facing, params: { ...spec }, id: opts.ignoreId };
+  if (kind === 'steering_wheel' && componentVolumes(model, part).some(box => {
+    const lowest = box.pos[1] - box.axes.reduce((height, axis, i) => height + Math.abs(axis[1]) * box.half[i], 0);
+    return model.isBelowGround(lowest);
+  })) return { ...part, valid: false, reason: 'ground_clearance' };
   const occupied = occupiedMount(model, part, opts.ignoreId);
   if (occupied) return { ...part, valid: false, reason: 'mount_occupied', obstacle: occupied };
   const obstacle = componentObstacle(model, part, { sweep: kind === 'swing' });
