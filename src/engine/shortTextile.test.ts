@@ -94,7 +94,7 @@ describe('短布面：放置规则', () => {
     expect(m.panelSection(p[0], 70)).toMatchObject({ t0: 60, len: 20, count: 4 })
     expect(m.latticePartners(f.bottom.id, 1.5, SHORT)).toEqual([])
   })
-  it('40×40 框：短布面能放两段，普通布面一段，互相不叠', () => {
+  it('40×40 框：短布面能放两段，也能重复叠放普通布面', () => {
     const m = new BuildModel()
     const f = frame(m, 0, 40, 40)
     const p = m.latticePartners(f.bottom.id, 1.5, SHORT).find(x => x.id === f.top.id)!
@@ -103,20 +103,19 @@ describe('短布面：放置规则', () => {
     expect(m.sectionFree('textil2', f.bottom.id, f.top.id, 20, 20)).toBe(true)
     const s1 = m.addTextile(f.bottom.id, f.top.id, 0, 20, 'red')!
     expect(s1).toBeTruthy()
-    // 同一段再放、或者普通布面盖上去，都不行
-    expect(m.addTextile(f.bottom.id, f.top.id, 0, 20, 'red')).toBeNull()
-    expect(m.sectionFree('textil2', f.bottom.id, f.top.id, 0, 40)).toBe(false)
-    expect(m.addTextile(f.bottom.id, f.top.id, 0, 40, 'red')).toBeNull()
+    expect(m.addTextile(f.bottom.id, f.top.id, 0, 20, 'red')).toBeTruthy()
+    expect(m.sectionFree('textil2', f.bottom.id, f.top.id, 0, 40)).toBe(true)
+    expect(m.addTextile(f.bottom.id, f.top.id, 0, 40, 'red')).toBeTruthy()
     // 另一半还空着
     expect(m.sectionFree('textil2', f.bottom.id, f.top.id, 20, 20)).toBe(true)
     expect(m.addTextile(f.bottom.id, f.top.id, 20, 20, 'red')).toBeTruthy()
-    expect(m.railFittingMounts('textil2', SHORT)).toHaveLength(0)
+    expect(m.railFittingMounts('textil2', SHORT)).toHaveLength(4)
   })
-  it('放下后格子不再亮', () => {
+  it('放下后格子仍可点选重复放置', () => {
     const m = new BuildModel()
     const f = frame(m, 0, 20, 40)
     m.addTextile(f.bottom.id, f.top.id, 0, 20, 'green')
-    expect(m.railFittingMounts('textil2', SHORT)).toHaveLength(0)
+    expect(m.railFittingMounts('textil2', SHORT)).toHaveLength(1)
   })
 })
 
