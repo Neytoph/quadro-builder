@@ -1,17 +1,28 @@
 import { getPartById, getTube, partForFitting, partName, textilePart } from './catalog.js';
 import { t } from './i18n.js';
 
-export function installationReason(model, diagnostic) {
-  if (!diagnostic.reason) return null;
+function obstacleName(model, diagnostic) {
   const obstacle = diagnostic.obstacle;
   const part = obstacle && (model.panels.get(obstacle.id) || model.textiles.get(obstacle.id) || model.fittings.get(obstacle.id) || model.tubes.get(obstacle.id) || model.slides.get(obstacle.id));
-  if (!part) return t('accessory_reason_' + diagnostic.reason);
+  if (!part) return null;
   let spec;
   if (part.panelId) spec = getPartById(part.panelId);
   else if (model.tubes.has(part.id)) spec = getTube(part.tubeId);
   else if (part.kind) spec = partForFitting(part.kind, part.mask);
   else spec = textilePart(part, part.variant);
-  const name = partName(spec) || t('accessory_obstacle_' + obstacle.kind);
+  return partName(spec) || t('accessory_obstacle_' + obstacle.kind);
+}
+
+export function installationFacingNotice(model, diagnostic) {
+  const name = obstacleName(model, diagnostic);
+  if (name && diagnostic.reason === 'component_space') return t('notice_panel_facing_space_adjusted', name);
+  return t('notice_panel_facing_adjusted', installationReason(model, diagnostic));
+}
+
+export function installationReason(model, diagnostic) {
+  if (!diagnostic.reason) return null;
+  const obstacle = diagnostic.obstacle, name = obstacleName(model, diagnostic);
+  if (!name) return t('accessory_reason_' + diagnostic.reason);
   if (diagnostic.reason === 'mount_occupied') {
     const tube = model.tubes.get(obstacle.tube), rail = tube && model._rail(tube.id);
     if (rail && Number.isFinite(obstacle.t)) {

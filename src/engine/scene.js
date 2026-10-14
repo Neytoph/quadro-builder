@@ -3955,7 +3955,7 @@ export class SceneManager {
     const invalid = opts.invalid && opts.invalid.size ? opts.invalid : null;
     // 按零件上色（id -> 颜色）：共享方案里别人选中的零件、版本对照里增减的零件
     const tints = opts.tints && opts.tints.size ? opts.tints : null;
-    const matFor = (id, base) => {
+    const matFor = (id, base, keepOpaque = false) => {
       if (invalid && id != null && invalid.has(id)) return this._invalidMaterial(base);
       if (focusId != null && id === focusId) return this._focusMaterial(base);
       if (highlight && id != null && highlight.has(id)) {
@@ -3963,7 +3963,7 @@ export class SceneManager {
       }
       if (marked) {
         if (id != null && marked.has(id)) return this._selectedMaterial(base);
-        if (dimOthers) return this._dimmedMaterial(base);
+        if (dimOthers) return keepOpaque ? base : this._dimmedMaterial(base);
       }
       if (tints && id != null && tints.has(id)) {
         const color = tints.get(id);
@@ -4588,10 +4588,12 @@ export class SceneManager {
       const currentDefinition = getPanel(p.panelId) || {};
       const pdef = !p.appearanceVersion && Object.hasOwn(currentDefinition, 'legacyFeature') ? { ...currentDefinition, feature: currentDefinition.legacyFeature } : currentDefinition;
       if (p.appearanceVersion && PANEL_ACCESSORY_IDS.has(p.panelId)) {
+        // 单面功能板保持遮挡，避免从背面透出正面的抓点或图案。
+        const keepOpaque = opts.keepPanelFacesOpaque && ['climbing', 'clock', 'maze', 'magnet', 'felt', 'basketball', 'busy'].includes(pdef.feature);
         for (const mesh of panelAccessoryMeshes(this, model, p)) {
           mesh.updateMatrix();
           const material = st === 'future' ? this._ghostMaterial() : (asm && st === 'done') ? mat : mesh.material;
-          this._batchAdd(mesh.geometry, matFor(p.id, material), mesh.matrix, 'panel', p.id, this.pickPanels);
+          this._batchAdd(mesh.geometry, matFor(p.id, material, keepOpaque), mesh.matrix, 'panel', p.id, this.pickPanels);
         }
         continue;
       }
