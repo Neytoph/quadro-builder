@@ -29,7 +29,7 @@ import { QDF_FITTING_KINDS, QDF_SLIDE_KINDS } from './qdfimport.js';
 import { officialColorId } from "./colors.js";
 import { panelNormal, modelMiddle } from "./util.js";
 import { isHolePart, HOLE_MASKS, BLACK_FITTINGS, isBoltPart, boltAxis, boltDepth, hingeDir, fixedFittingColor } from "./model.js";
-import { connectorFrameOf } from './bom.js';
+import { connectorFrameOf, connectorsForNode, resolveNodeConnection } from './bom.js';
 
 const NON_QDF_ACCESSORY_IDS = new Set(ACCESSORY_PACK.map(part => part.id));
 
@@ -408,6 +408,8 @@ export function buildQDF(model, opts = {}) {
   // Der Adapterkoerper einer 45-Grad-Winkelkupplung ist kein eigenes Teil: er
   // steckt auf der Eck-Kupplung, die dafuer als connector45_2 geschrieben wird.
   for (const n of model.nodes.values()) {
+    if (!n.part && !n.c45 && !n.c45body && !n.c45file && !n.preferType && !n.arms?.length
+        && !connectorsForNode(model, n).length) continue;
     // Adapter-Koerper sind keine eigene Kupplung -- ausser am freien Ende einer
     // Schraege, wo die Datei eine connector3 fuehrt (ownConnector).
     if (n.c45body && !n.ownConnector) continue;
@@ -492,8 +494,8 @@ export function buildQDF(model, opts = {}) {
 
     let mask = 0;
     let carriesAdapter = false;
-    // Vorhandene Stutzen aus dem Import (inklusive offener Arme ohne Rohr).
-    for (const a of n.arms || []) {
+    // 手动通型与文件中的空插口采用和画面、料表一致的真实方向。
+    for (const a of resolveNodeConnection(model, n).renderDirs) {
       const l = toLocal(a);
       for (const [bit, v] of ARM_BITS) if (dot(l, v) > 0.9) mask |= bit;
     }

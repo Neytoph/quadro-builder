@@ -39,12 +39,15 @@ describe('普通板共边安装', () => {
   it('朝平台内侧的攀爬板仍提示具体板面重叠原因', () => {
     const { model, candidate } = screenshotFrame()
     const back = model.addConfirmedComponent(candidate('panel_40x40_climbing', [20, 62.5, 0]), 'yellow')!
-    const blocked = candidate('panel_40x40', [20, 42.5, 20])
+    const available = candidate('panel_40x40', [20, 42.5, 20])
+    expect(available.valid).toBe(true)
+    const blocked = model.confirmedDiagnostics({ ...available, side: -(available.side || 1) })
     expect(blocked).toMatchObject({ valid: false, reason: 'component_space', obstacle: { id: back.id } })
     setLang('zh')
     expect(installationReason(model, blocked)).toContain('攀岩板')
     expect(installationReason(model, blocked)).toContain('重叠')
     expect(model.addNativePanel(blocked, 'green')).toBeNull()
+    expect(model.addNativePanel(available, 'green')).toBeTruthy()
   })
 
   it.each(['zh', 'en', 'de'])('软包真实占用提示部件名称、管件和距离，语言=%s', lang => {

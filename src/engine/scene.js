@@ -14,7 +14,7 @@ import { nodeClampOffset, isHolePart, HOLE_MASKS, holeArmDirs, BLACK_FITTINGS,
   ARM_FITTINGS, SLIDE_HOOK_LIFT, SLIDE_SPECS, SLIDE_PARTS } from "./model.js";
 import { reinforcementProfiles } from "./qdfexport.js";
 import { assemblyProfilePosition, assemblyProfileFallbackVisible } from './assemblyProfilePresentation.js';
-import { loadConnectorMeshes, loadSlideMeshes, loadTubeMeshes, loadFittingMeshes,
+import { loadConnectorMeshes, loadSlideMeshes, loadFittingMeshes,
   loadSurfaceMeshes } from "./meshes.js";
 import { CONNECTOR_ARM_BITS } from "./qdfimport.js";
 import { preferPanelCell } from "./pickcell.js";
@@ -106,7 +106,7 @@ const QUALITY = {
 
 // Wo die geladenen Modelle liegen: Satz -> Feld der Szene.
 const MESH_FIELDS = {
-  connectors: "_connMeshes", slides: "_slideMeshes", tubes: "_tubeMeshes",
+  connectors: "_connMeshes", slides: "_slideMeshes",
   fittings: "_fitMeshes", surfaces: "_surfMeshes",
 };
 
@@ -327,9 +327,6 @@ function pushUniqueArm(liste, d, bow) {
   if (liste.some((e) => e.d[0] * u[0] + e.d[1] * u[1] + e.d[2] * u[2] > 0.99)) return;
   liste.push({ d: u, bow: !!bow });
 }
-
-// Halbmesser des abgegriffenen Bogenrohrs (cm): 35er Rohr + Kupplung.
-const BOW_MESH_R = 40;
 
 // So weit rueckt der Import den Punkt des Spielsacks vor (BAG_OFFSET in
 // qdfimport.js). Das abgegriffene Modell braucht den Punkt aus der Datei.
@@ -1305,25 +1302,35 @@ export class SceneManager {
   // Rohr-Geometrie, gecacht je Laenge/Radius/Segmentzahl. Vorher entstand pro
   // Rohr und pro Render-Durchlauf eine neue CylinderGeometry (~425 Stueck), die
   // beim naechsten Durchlauf wieder weggeworfen wurde.
-  _tubeGeometry(radius, length, segments) {
-    const key = `${radius.toFixed(2)}:${length.toFixed(2)}:${segments}`;
+  _tubeGeometry(radius, length, segments, hollow = false) {
+    const key = `${radius.toFixed(2)}:${length.toFixed(2)}:${segments}:${hollow}`;
     let geo = this._tubeGeos.get(key);
     if (!geo) {
-      geo = new THREE.CylinderGeometry(radius, radius, length, segments);
+      // 真管保留 3 mm 管壁和两端环口；接头插杆、加强杆继续用实心几何。
+      const inner = Math.max(0.1, radius - 0.3);
+      geo = hollow ? new THREE.LatheGeometry([
+        new THREE.Vector2(inner, -length / 2), new THREE.Vector2(radius, -length / 2),
+        new THREE.Vector2(radius, length / 2), new THREE.Vector2(inner, length / 2),
+        new THREE.Vector2(inner, -length / 2),
+      ], segments) : new THREE.CylinderGeometry(radius, radius, length, segments);
+      if (hollow) {
+        const colors = new Float32Array(geo.getAttribute("position").count * 3);
+        for (let i = 0; i < colors.length / 3; i++) colors.fill(i % 5 === 0 || i % 5 >= 3 ? 0.45 : 1, i * 3, i * 3 + 3);
+        geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+      }
       this._tubeGeos.set(key, geo);
       this._keepGeos.add(geo);
     }
     return geo;
   }
 
-  // Abschluss-Scheibe fuer die Enden eines Bogenrohrs, gecacht wie die
-  // Rohr-Geometrien. Liegt in der XY-Ebene, Normale +Z.
+  // 弯管的管壁截面环，位于 XY 平面，法线 +Z。
   _capGeometry(radius, segments) {
     if (!this._capGeos) this._capGeos = new Map();
     const key = `${radius.toFixed(2)}:${segments}`;
     let geo = this._capGeos.get(key);
     if (!geo) {
-      geo = new THREE.CircleGeometry(radius, segments);
+      geo = new THREE.RingGeometry(Math.max(0.1, radius - 0.3), radius, segments);
       this._capGeos.set(key, geo);
       this._keepGeos.add(geo);
     }
@@ -1375,7 +1382,6 @@ export class SceneManager {
       this.onMeshesReady();
     } };
     const laden = which === "slides" ? loadSlideMeshes(fein, options)
-      : which === "tubes" ? loadTubeMeshes(fein, options)
       : which === "fittings" ? loadFittingMeshes(fein, options)
       : which === "surfaces" ? loadSurfaceMeshes(fein, options) : loadConnectorMeshes(fein, options);
     laden.then((rec) => {
@@ -1502,7 +1508,7 @@ export class SceneManager {
     const mask = (typeId && store && store[typeId] && store[typeId].mask)
       || CONN_TYPE_MASK[typeId]
       || 0;
-    if (mask && maskPopcount(mask) > dirs.length) {
+    if (mask) {
       const v = new THREE.Vector3();
       for (const [bit, d] of CONNECTOR_ARM_BITS) {
         if (!(mask & bit)) continue;
@@ -1620,39 +1626,6 @@ export class SceneManager {
     ey.normalize();
     const ez = new THREE.Vector3().crossVectors(ex, ey);
     return new THREE.Matrix4().makeBasis(ex, ey, ez).setPosition(pos);
-  }
-
-  /**
-   * Bogenrohr als abgegriffenes Originalmodell. Seine Lage ist dieselbe wie in
-   * der Datei: Ursprung im Knoten, lokales +X die Tangente am Bogenanfang,
-   * lokales +Y zum Kreismittelpunkt. Beides steht hier aus der Geometrie zur
-   * Verfügung, also braucht es die Datei-Lage (`t.geom`) nicht -- auch im
-   * Editor gesetzte Bögen kommen so durch.
-   *
-   * Das Modell ist ein festes Viertel mit 40 cm Halbmesser; weicht ein Bogen
-   * davon ab (Winkelrohre mit 135 Grad, ein Zuschlag am Maß), zeichnet der
-   * Aufrufer weiter seinen eigenen Schlauch.
-   */
-  _bowMeshFor(va, vb, center) {
-    const store = this._tubeMeshes;
-    const rec = store && store["round-tube2"];
-    if (!rec) return null;
-    const C = new THREE.Vector3(center[0], center[1], center[2]);
-    const u = va.clone().sub(C), w = vb.clone().sub(C);
-    const R = (u.length() + w.length()) / 2;
-    if (Math.abs(R - BOW_MESH_R) > 0.5) return null;
-    u.normalize(); w.normalize();
-    // Viertelkreis? Sonst passt das Modell nicht.
-    if (Math.abs(u.dot(w)) > 0.02) return null;
-    const N = u.clone().negate();                       // lokales +Y: zum Mittelpunkt
-    const T = w.clone().addScaledVector(u, -u.dot(w));  // lokales +X: Tangente am Anfang
-    if (T.lengthSq() < 1e-6) return null;
-    T.normalize();
-    const B = new THREE.Vector3().crossVectors(T, N);
-    return {
-      geo: this._meshGeometry("tube:round-tube2", rec),
-      matrix: new THREE.Matrix4().makeBasis(T, N, B).setPosition(va),
-    };
   }
 
   /**
@@ -3198,6 +3171,7 @@ export class SceneManager {
         color: new THREE.Color(this._look(colorId)),
         roughness: 0.5,
         metalness: 0,
+        vertexColors: true,
       });
       m.userData.tuneColorId = colorId;
       this._materials[key] = m;
@@ -4127,7 +4101,6 @@ export class SceneManager {
       || [...model.nodes.values()].some((n) => n.c45 || n.c45file || isHolePart(n.part) || isBoltPart(n.part));
     const braucht = [];
     if (model.nodes.size) braucht.push("connectors");
-    if ([...model.tubes.values()].some((t) => t.bow)) braucht.push("tubes");
     if (model.slides.size) braucht.push("slides");
     if (wantsFitMeshes) braucht.push("fittings");
     if (model.panels.size || (model.textiles && model.textiles.size)) braucht.push("surfaces");
@@ -4210,6 +4183,9 @@ export class SceneManager {
       // Kupplung, die in der Datei steht, aber nichts haelt: die Hersteller-
       // software zeichnet sie nicht -- sonst schweben Wuerfel in der Luft.
       if (n.unused) continue;
+      // 管端保留建模锚点和加管操作，单根管的自由末端不显示自动接头。
+      if (!n.preferType && !n.part && !n.c45 && !n.c45body && !n.c45file && !n.arms?.length
+          && (tubeDirsAt.get(n.id) || []).length === 1) continue;
       // Bezugspunkte fuer die Drehpunkt-Suche (_pointUnderCursor).
       this._nodePoints.push(new THREE.Vector3(n.x, n.y, n.z));
       let mat;
@@ -4431,14 +4407,7 @@ export class SceneManager {
           : (asm && st === "done") ? this._tubeMaterial(t.color)
           : this._tubeMaterial(t.color);
         const bowFinalMat = matFor(t.id, bowMat);
-        // Abgegriffenes Originalteil, wenn es passt: EIN Mesh, an beiden Enden
-        // geschlossen und mit dem geraden Vorlauf, in dem der Kupplungsarm steckt.
-        const echterBogen = wantMeshes ? this._bowMeshFor(va, vb, t.bowCenter) : null;
-        if (echterBogen) {
-          this._batchAdd(echterBogen.geo, bowFinalMat, echterBogen.matrix,
-            "tube", t.id, st !== "future" ? this.pickTubes : null);
-          continue;
-        }
+        // 弯管同样保持空心，闭合端面的旧网格不用于管身。
         const bowMesh = new THREE.Mesh(
           new THREE.TubeGeometry(bowCurve, 24, tubeRadius, qual.bow, false),
           bowFinalMat
@@ -4448,10 +4417,18 @@ export class SceneManager {
         this.buildGroup.add(bowMesh);
         if (st !== "future") this.pickTubes.push(bowMesh);
 
-        // TubeGeometry ist ein offener Schlauch. Ohne Deckel sieht man in das
-        // Rohr hinein (die Rueckseiten werden weggeschnitten) -- es wirkt als
-        // blosse Flaeche, waehrend gerade Rohre als CylinderGeometry
-        // geschlossen sind. Also je Ende eine Scheibe, Normale nach aussen.
+        const innerGeo = new THREE.TubeGeometry(bowCurve, 24, Math.max(0.1, tubeRadius - 0.3), qual.bow, false);
+        const indices = innerGeo.index.array;
+        for (let i = 0; i < indices.length; i += 3) [indices[i], indices[i + 1]] = [indices[i + 1], indices[i]];
+        const normals = innerGeo.getAttribute("normal");
+        for (let i = 0; i < normals.array.length; i++) normals.array[i] *= -1;
+        innerGeo.setAttribute("color", new THREE.BufferAttribute(new Float32Array(normals.count * 3).fill(0.45), 3));
+        const innerMesh = new THREE.Mesh(innerGeo, bowFinalMat);
+        innerMesh.userData = { kind: "tube", id: t.id };
+        this.buildGroup.add(innerMesh);
+        if (st !== "future") this.pickTubes.push(innerMesh);
+
+        // 两端只封住管壁截面，保留中间的孔。
         const capGeo = this._capGeometry(tubeRadius, qual.bow);
         for (const [u01, sign] of [[0, -1], [1, 1]]) {
           const cap = new THREE.Mesh(capGeo, bowFinalMat);
@@ -4481,9 +4458,9 @@ export class SceneManager {
         ? Math.max(1, t.geom.len + (t.geom.pad || 0)) : Math.max(1, len - cs);
       const isReinforceActive = reinforce && t.reinforced;
       const effectiveRadius = isReinforceActive ? tubeRadius * 1.08 : tubeRadius;
-      const geo = this._tubeGeometry(tubeRadius, drawLen, qual.tube);
+      const geo = this._tubeGeometry(tubeRadius, drawLen, qual.tube, true);
       const geo2 = isReinforceActive
-        ? this._tubeGeometry(effectiveRadius, drawLen, qual.tube)
+        ? this._tubeGeometry(effectiveRadius, drawLen, qual.tube, true)
         : geo;
       let mat = st === "future" ? this._ghostMaterial()
         : st === "current" ? this._tubeMaterial(t.color)
@@ -5423,10 +5400,10 @@ export class SceneManager {
     const colorId = group.userData.previewColor;
     const hex = colorId ? this._look(colorId) : ARROW_TEAL;
     if (!this._tubePreview) {
-      const geo = new THREE.CylinderGeometry(r, r, 1, 14);
+      const geo = this._tubeGeometry(r, 1, 14, true);
       const mat = new THREE.MeshStandardMaterial({
-        transparent: true, opacity: 0.28, roughness: 0.48, metalness: 0.04,
-        depthWrite: false,
+        transparent: true, opacity: 0.5, roughness: 0.48, metalness: 0.04,
+        depthWrite: false, vertexColors: true,
       });
       this._tubePreview = new THREE.Mesh(geo, mat);
       this._tubePreview.renderOrder = 998;
@@ -6241,6 +6218,14 @@ export class SceneManager {
   /** 整座模型要换了（开文件、切标签）：下一次画按「载入」处理，不跟上一座比。 */
   markModelReplaced() {
     this._motionLoad = true;
+  }
+
+  finishPartMotion(id) {
+    for (const [key, motion] of this._appearing) {
+      if (key !== `node:${id}`) continue;
+      this._posePieces(motion.center, motion.pieces, 1, 0);
+      this._appearing.delete(key);
+    }
   }
 
   /** 把画出来的东西按零件归拢：key 是 kind:id，值是它的全部碎片（管身、端盖、实例格子）。 */
