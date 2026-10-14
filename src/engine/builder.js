@@ -646,10 +646,27 @@ export class Builder {
     if (!this._partTurnsOnClick(f.id)) return;
     if (f.action === "bow") { this._turnBow(this.model.tubes.get(f.id)); return; }
     if (f.action === "c45") { this._turnC45(f.id); return; }
-    let side = null;
-    this.recordHistory(() => { side = this.model.flipPanelSide(f.id); });
-    if (side != null) this.onNotice(t(side < 0 ? "notice_panel_below" : "notice_panel_above"), "info");
+    this._flipPanel(f.id);
     this.refresh();
+  }
+
+  _flipPanel(id) {
+    const part = this.model.panels.get(id) || this.model.textiles.get(id);
+    if (this.readOnly || !part) return false;
+    if (part.appearanceVersion && part.panelId === 'panel_40x40_pocket') {
+      this.onNotice(t('notice_panel_flip_pocket'), 'warn');
+      return false;
+    }
+    const diagnostic = this.model.panelFlipDiagnostics(id);
+    if (!diagnostic.valid) {
+      this.onNotice(diagnostic.reason === 'ground_clearance' ? t('notice_panel_flip_ground') : t('notice_panel_flip_blocked', installationReason(this.model, diagnostic)), 'warn');
+      return false;
+    }
+    let side = null;
+    this.recordHistory(() => { side = this.model.flipPanelSide(id); });
+    if (side === null) return false;
+    this.onNotice(t('notice_panel_flipped'), 'info');
+    return true;
   }
 
   _selectConnectedFromPick(pick, add) {
@@ -4293,9 +4310,7 @@ export class Builder {
       clearTimeout(this._panelFlipTimer);
       this._panelFlipTimer = setTimeout(() => {
         this._panelFlipTimer = null;
-        let side = null;
-        this.recordHistory(() => { side = this.model.flipPanelSide(id); });
-        if (side != null) this.onNotice(t(side < 0 ? "notice_panel_below" : "notice_panel_above"), "info");
+        this._flipPanel(id);
         this.refresh();
       }, PANEL_DBLCLICK_MS);
       return;

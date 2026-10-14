@@ -2,7 +2,7 @@
 // Bewusst ohne Three.js-Abhaengigkeit, damit es testbar und Backend-tauglich bleibt.
 
 import { MERGE_EPS, FORMAT_VERSION, DIAGONAL_SNAP_TOL, DIRECTIONS, DIAGONAL_DIRECTIONS, DIR_ALIGN_TOL, ARM_ALIGN_TOL, CONN_TYPE_MASK, anchorGap } from "./config.js";
-import { ACCESSORY_IDS, PANEL_ACCESSORY_IDS, accessoryMount, accessoryDiagnostics, panelAccessoryDiagnostics, componentMountsValid, confirmedDiagnostics } from './accessoryPack.js';
+import { ACCESSORY_IDS, PANEL_ACCESSORY_IDS, accessoryMount, accessoryDiagnostics, panelAccessoryDiagnostics, componentMountsValid, componentVolumes, confirmedDiagnostics } from './accessoryPack.js';
 import { confirmedSpec } from './componentPack.js';
 import { confirmedCandidates, ropeCandidate } from './confirmedComponentModel.js';
 import { insetPanelProbes } from './insetPanelMounts.js';
@@ -1265,15 +1265,27 @@ export class BuildModel {
     return panel;
   }
 
+  // 翻面检查共用于模型与点击入口，失败时保留当前板件。
+  panelFlipDiagnostics(id) {
+    const part = this.panels.get(id) || this.textiles.get(id);
+    if (!part) return { valid: false, reason: 'missing_support' };
+    if (part.appearanceVersion && part.panelId === 'panel_40x40_pocket') return { valid: false, reason: 'pocket_facing' };
+    const flipped = { ...part, side: -(part.side || 1) };
+    if (part.appearanceVersion && PANEL_ACCESSORY_IDS.has(part.panelId)) {
+      const diagnostic = this.panelAccessoryDiagnostics(flipped);
+      if (!diagnostic.valid) return diagnostic;
+      if (componentVolumes(this, flipped).some(box => box.pos[1] - box.axes.reduce((sum, axis, i) => sum + Math.abs(axis[1]) * box.half[i], 0) < -0.01)) {
+        return { ...diagnostic, valid: false, reason: 'ground_clearance' };
+      }
+    }
+    return { ...flipped, valid: true, reason: null };
+  }
+
   /** Platte auf die andere Seite der Rohre legen. Liefert die neue Seite. */
   flipPanelSide(id) {
     const p = this.panels.get(id) || this.textiles.get(id);
     if (!p) return null;
-    if (p.appearanceVersion && p.panelId === 'panel_40x40_pocket') return null;
-    if (p.appearanceVersion && PANEL_ACCESSORY_IDS.has(p.panelId)) {
-      const flipped = { ...p, side: -(p.side || 1) };
-      if (!this.panelAccessoryDiagnostics(flipped).valid) return null;
-    }
+    if (!this.panelFlipDiagnostics(id).valid) return null;
     p.side = (p.side || 1) < 0 ? 1 : -1;
     // Die eigene Lage aus der Datei kennt die alte Seite -- ab jetzt rechnet
     // sich die Platte wieder aus ihrem Rohrpaar.
