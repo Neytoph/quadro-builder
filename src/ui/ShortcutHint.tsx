@@ -4,6 +4,7 @@ import type { CSSProperties } from 'react'
 import { FoldHeader } from './panelLayout'
 import { Collapse } from './MotionBits'
 import { customComponentStrings } from './customComponentStrings'
+import { CATALOGUE_TOOLS, NUMBER_TUBES, TOOL_KEYS, TOOL_LABELS } from '../store/toolMemory'
 
 type Row = { chord: string; action: string }
 
@@ -16,7 +17,6 @@ function rowsFor(
   if (pasting) {
     return [
       { chord: '↑ ↓', action: t('keys.lift') },
-      { chord: 'Q / E', action: t('keys.rotate') },
       { chord: 'M / ⇧M', action: t('keys.mirror') },
       { chord: t('keys.click'), action: t('keys.drop') },
       { chord: 'Esc', action: t('keys.escCancel') },
@@ -33,12 +33,12 @@ function rowsFor(
     case 'delete':
       return [
         { chord: t('keys.click'), action: t('keys.clickDelete') },
-        { chord: 'Esc / D / S', action: t('keys.escSelect') },
+        { chord: 'Esc / D', action: t('keys.escSelect') },
         { chord: t('keys.chord.undo'), action: t('keys.undo') },
       ]
     case 'add':
       return [
-        { chord: '1 – 3', action: t('keys.tubeLen') },
+        { chord: Object.keys(NUMBER_TUBES).join(' / '), action: t('keys.tubeLen') },
         { chord: '↑ ↓ ← →', action: t('keys.buildDir') },
         { chord: 'Esc', action: t('keys.escSelect') },
         { chord: 'D', action: t('keys.deleteMode') },
@@ -72,7 +72,6 @@ function rowsFor(
         { chord: t('keys.chord.selectAll'), action: t('keys.selectAll') },
         { chord: t('keys.chord.copyPaste'), action: t('keys.copyPaste') },
         { chord: t('keys.chord.delete'), action: t('keys.deleteSel') },
-        { chord: 'Q / E', action: t('keys.rotate') },
         { chord: 'M / ⇧M', action: t('keys.mirror') },
         { chord: `${t('keys.chord.group')} / ${t('keys.chord.ungroup')}`, action: t('keys.group') },
         { chord: t('keys.chord.again'), action: t('keys.clickAgain') },
@@ -118,6 +117,13 @@ export default function ShortcutHint({ open, onToggle }: { open: boolean; onTogg
     ? 'lib.placing'
     : (MODE_TITLE[api.placingConnector ? 'fitting' : api.mode] || 'tool.select')
   const rows = rowsFor(t, api.mode, api.pasting, !!api.placingConnector)
+  if (!api.readOnly && !api.pasting) {
+    rows.unshift({ chord: t('keys.space'), action: t('keys.toggleTool') }, { chord: '2', action: t('keys.fullPanel') })
+    if (api.mode === 'select') {
+      rows.push(...CATALOGUE_TOOLS.map(tool => ({ chord: TOOL_KEYS[tool], action: t('keys.openCatalogue', { tool: t(TOOL_LABELS[tool]) }) })))
+      rows.push({ chord: TOOL_KEYS.reinforce, action: t(TOOL_LABELS.reinforce) })
+    }
+  }
   if (!api.readOnly) rows.push({ chord: lang === 'zh' ? '按住 4' : lang === 'de' ? '4 halten' : 'Hold 4', action: customComponentStrings[lang].title })
   const cameraLines = t('hint.camera').split('\n').filter(Boolean)
 

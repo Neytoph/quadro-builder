@@ -3,7 +3,7 @@
 import * as THREE from "three";
 import { createHomeEnvironment, disposeHome, setHomeZonesVisible } from '../home/environment.js';
 import { HOME_STYLE } from '../home/visuals.js';
-import { ACCESSORY_IDS, PANEL_ACCESSORY_IDS, mountPoint, componentVolumes } from './accessoryPack.js';
+import { ACCESSORY_IDS, PANEL_ACCESSORY_IDS, componentVolumes } from './accessoryPack.js';
 import { accessoryMeshes, panelAccessoryMeshes } from './accessoryMeshes.js';
 import { confirmedSpec } from './componentPack.js';
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
@@ -2483,13 +2483,6 @@ export class SceneManager {
       if (!valid) mesh.material.color.set('#e03131');
       mesh.userData.previewMaterial = true;
       group.add(mesh);
-    }
-    const positions = part.mounts.map(m => mountPoint(model, m)).filter(Boolean);
-    for (const position of positions) {
-      const marker = new THREE.Mesh(new THREE.SphereGeometry(1.6, 20, 12), new THREE.MeshBasicMaterial({ color: valid ? '#22c55e' : '#e03131', depthTest: false, transparent: true, opacity: 0.85 }));
-      marker.position.fromArray(position); marker.renderOrder = 20;
-      marker.userData.previewGeometry = true; marker.userData.previewMaterial = true;
-      group.add(marker);
     }
     if (part.kind === 'swing') {
       const volumes = componentVolumes(model, part, { sweep: true });

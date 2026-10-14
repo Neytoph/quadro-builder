@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { bumpCount, track, entryAnalyticsObject, setAnalyticsObject } from '../analytics/track'
 import {
   BuildModel, Builder, SceneManager, loadCatalog, computeBOM, compareInventory, connectorsForNode, computeSafety,
@@ -40,6 +40,8 @@ import { validAssemblyConfig } from '../engine/assemblyConfig.js'
 import { assemblyPdfStrings, assemblyStrings } from '../ui/assemblyStrings'
 import { UI_ESCAPE_EVENT } from '../ui/events'
 import { validHomeContext, placeInRoom } from '../home/context.js'
+import { installationChoices, selectInstallation, type CatalogueChoice } from './installationCatalogue'
+import { captureTool, ToolMemory, type BuilderTool, type ToolState } from './toolMemory'
 
 // 引擎来自 Vanilla JS，这里不跟它的推断类型较劲。
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -189,6 +191,8 @@ interface EngineApi {
   dismissToast: () => void
   bump: () => void
   setMode: (mode: string) => void
+  activateTool: (tool: BuilderTool) => void
+  toggleLastTool: () => void
   setColor: (id: string) => void
   recolorAll: (colors: string[]) => void
   setTube: (id: string) => void
@@ -668,6 +672,18 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const clipboard = useRef<unknown>(null)
   const sessionTimer = useRef<number | null>(null)
   const highlightKey = useRef<string | null>(null)
+  const toolMemory = useRef(new ToolMemory())
+  const toolEntries = useRef<CatalogueChoice[]>([])
+  const toolApi = useRef<EngineApi | null>(null)
+  const rememberTool = useCallback(() => {
+    const b = eng.current?.builder
+    if (!b || switching.current || thumbBatch.current) return
+    const state: ToolState = { mode: b.mode, panelId: b.panelId, tubeId: b.tubeId, slideKind: b.slideKind,
+      clampPart: b.clampPart, placingConnector: b.placeConnectorId, fittingKind: b.fittingKind,
+      fittingPart: b.fittingPart, poolLinerId: b.poolLinerId, pasting: b.pasting, color: b.color,
+      insetScrewAxis: b.insetScrewAxis }
+    toolMemory.current.remember(activeRef.current, captureTool(state, toolEntries.current))
+  }, [])
 
   const [ready, setReady] = useState(false)
   const [entryReady, setEntryReady] = useState(false)
@@ -805,6 +821,11 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const analytics = tabAnalytics.get(tab) || resetTabAnalytics(tab, e.model.toJSON())
     setAnalyticsObject(analytics.object)
     e.builder.setUiState(tab.view || {})
+    // 引擎的旧界面快照不含具体布件、连接件和安装方向；用本页会话记录恢复，避免串页。
+    const remembered = toolMemory.current.get(tab.tabId)
+    e.builder.fittingPart = remembered?.fittingPart || null
+    e.builder.insetScrewAxis = remembered?.insetScrewAxis || 'vertical'
+    e.builder.placeConnectorId = tab.view?.mode === 'add' && remembered?.tool === 'connectors' ? remembered.partId : null
     e.builder.setMode((tab.view?.mode as string) || 'select')
     const home = tabHomeContext(tab, e.model.homeContext)
     const restoreCamera = tab.view?.camera && (!home || tab.view.camera.sceneViewVersion === 1)
@@ -829,9 +850,10 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const e = eng.current
     const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
     if (!e || !tab) return
+    rememberTool()
     flushModel()
     tab.view = { ...tab.view, ...(e.builder.uiState() as AnyRec), camera: e.scene.cameraState() }
-  }, [flushModel])
+  }, [flushModel, rememberTool])
 
   const reconcilePersonalNow = useCallback(async (tab: Tab, supplied?: AnyRec | null) => {
     if (!tab.docId || tab.planId || tab.readOnly || SESSIONLESS) return
@@ -1266,10 +1288,11 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   }, [builder])
 
   const setMode = useCallback((mode: string) => {
+    rememberTool()
     clearBomHighlight()
     builder?.setMode(mode)
     bump()
-  }, [builder, bump, clearBomHighlight])
+  }, [builder, bump, clearBomHighlight, rememberTool])
   const setColor = useCallback((id: string) => { track('builder.color.set', { id }); builder?.setColor(id); bump() }, [builder, bump])
   const setTube = useCallback((id: string) => {
     pickPart('tubes', id)
@@ -1308,13 +1331,56 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   }, [builder, bump, clearBomHighlight])
   const startPool = useCallback((id: string) => {
     pickPart('pools', id)
+    rememberTool()
     clearBomHighlight()
-    builder?.startPool?.(id)
+    if (builder?.startPool?.(id)) toolMemory.current.remember(activeRef.current, {
+      tool: 'pools', partId: id, color: builder.color, insetScrewAxis: builder.insetScrewAxis,
+    })
     bump()
-  }, [builder, bump, clearBomHighlight])
+  }, [builder, bump, clearBomHighlight, rememberTool])
   const startC45 = useCallback(() => { pickPart('tubes', 'c45'); clearBomHighlight(); builder?.setMode('c45'); bump() }, [builder, bump, clearBomHighlight])
   const startReinforce = useCallback(() => { pickPart('reinforcements', 'reinforce'); clearBomHighlight(); builder?.setMode('reinforce'); bump() }, [builder, bump, clearBomHighlight])
-  const placeConnector = useCallback((id: string) => { pickPart('connectors', id); clearBomHighlight(); builder?.placeConnector?.(id); bump() }, [builder, bump, clearBomHighlight])
+  const placeConnector = useCallback((id: string) => {
+    if (!builder || builder.readOnly) return
+    rememberTool()
+    pickPart('connectors', id)
+    clearBomHighlight()
+    builder.placeConnector(id)
+    toolMemory.current.remember(activeRef.current, { tool: 'connectors', partId: id, color: builder.color, insetScrewAxis: builder.insetScrewAxis })
+    bump()
+  }, [builder, bump, clearBomHighlight, rememberTool])
+
+  const activateTool = useCallback((tool: BuilderTool) => {
+    const api = toolApi.current
+    if (!api || !builder || builder.readOnly || builder.busy() || builder.pasting) return
+    rememberTool()
+    const saved = toolMemory.current.get(activeRef.current, tool)
+    const defaults: Partial<Record<BuilderTool, string>> = { tubes: geometry().defaultTube, panels: geometry().defaultPanel,
+      connectors: '6way', wheels: 'wheel', textiles: 'textile', slides: 'slide_integral' }
+    const choices = toolEntries.current.filter(entry => entry.tool === tool)
+    const entry = choices.find(entry => entry.id === saved?.partId)
+      || choices.find(entry => entry.id === defaults[tool]) || choices[0]
+    clearBomHighlight()
+    builder.setMode('select')
+    // 只恢复工具配色，不调用会给选中零件上色的 setColor。
+    if (saved) { builder.color = saved.color; builder.insetScrewAxis = saved.insetScrewAxis }
+    if (tool === 'reinforce') api.startReinforce()
+    else if (tool === 'slides' && saved) api.setSlide(saved.partId)
+    else if (entry) selectInstallation(entry, api)
+    rememberTool()
+    bump()
+  }, [builder, bump, clearBomHighlight, rememberTool])
+
+  const toggleLastTool = useCallback(() => {
+    if (!builder || builder.readOnly || builder.busy() || builder.pasting) return
+    if (builder.mode === 'select') activateTool(toolMemory.current.get(activeRef.current)?.tool || 'tubes')
+    else setMode('select')
+  }, [builder, activateTool, setMode])
+
+  useEffect(() => {
+    rememberTool()
+    toolMemory.current.retain(tabs.map(tab => tab.tabId))
+  }, [tick, tabs, rememberTool])
 
   const highlight = useCallback((kind: string, id: string, color?: string | null) => {
     if (!builder || !model) return
@@ -2773,7 +2839,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     side, setSide, notify,
     dismissToast: () => setToast(null),
     placingConnector: (builder?.placeConnectorId as string) || null,
-    bump, setMode, setColor, setTube, setPanel, setSlide, setFitting, setClamp, startPool, startC45, startReinforce, placeConnector,
+    bump, setMode, activateTool, toggleLastTool, setColor, setTube, setPanel, setSlide, setFitting, setClamp, startPool, startC45, startReinforce, placeConnector,
     buildStep: (dir) => { bumpCount('builder.edit.step'); builder?.buildStep?.(dir); bump() },
     moveSelection: (dir) => { bumpCount('builder.edit.move'); builder?.moveSelectionBy?.(dir); bump() },
     cameraAxes: () => ({
@@ -2842,6 +2908,11 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     engine,
   }
 
+  const catalogueChoices = useMemo(() => ready ? installationChoices(value, t) : [], [ready, catalog, t])
+  useLayoutEffect(() => {
+    toolApi.current = value
+    toolEntries.current = catalogueChoices
+  })
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }
 

@@ -769,7 +769,7 @@ export function selectInstallation(entry: CatalogueChoice, api: EngineApi): bool
   return activateComponent(entry.choice, api)
 }
 
-export function installationActive(entry: CatalogueChoice, api: EngineApi): boolean {
+export function installationActive(entry: CatalogueChoice, api: Pick<EngineApi, 'mode' | 'panelId' | 'tubeId' | 'slideKind' | 'clampPart' | 'placingConnector' | 'fittingKind' | 'fittingPart' | 'poolLinerId' | 'pasting'>): boolean {
   const action = entry.choice.action
   if (!action) return false
   switch (action.kind) {
