@@ -144,9 +144,6 @@ export class Builder {
 
     this._down = null;
     this._clampDrag = null;
-    this._clampSlide = null;
-    this._clampDragKandidat = null;
-    this._clampSlideKandidat = null;
     this._panning = false;
     this._boxing = false;
     this._paste = null;              // Kopie, die gerade am Zeiger haengt
@@ -181,7 +178,7 @@ export class Builder {
    * 中间状态。
    */
   busy() {
-    return !!(this.held || this._paste || this._drag || this._clampDrag || this._clampSlide);
+    return !!(this.held || this._paste || this._clampDrag);
   }
 
   _externalChange() {
@@ -719,7 +716,6 @@ export class Builder {
    * Regel wie bei den Pfeiltasten: geht es nicht, bleibt alles, wie es war.
    */
   rotateSelectionBy(steps = 1) {
-    if (this._drag) return false;         // laufender Zug hat seinen eigenen Stand
     if (this._paste) return this._rotatePaste(steps);
     if (this.mode !== "select" || !this.selection.size) return false;
     const driver = this._selectedClampDriver();
@@ -840,7 +836,6 @@ export class Builder {
 
   /** 选中部分沿世界轴 x 或 z 翻转；挂在指针上的副本就地翻。 */
   mirrorSelectionBy(axis = "x") {
-    if (this._drag) return false;
     if (this._paste) return this._mirrorPaste(axis);
     if (this.mode !== "select" || !this.selection.size) return false;
     const before = JSON.stringify(this.model.toJSON());
@@ -1121,7 +1116,7 @@ export class Builder {
   _troubleWith(sel, collidedBefore) {
     const tg = this.model.moveTargets(sel);
     const schlecht = new Set();
-    const invalidComponentsBefore = this._paste?.invalidComponentsBefore || this._drag?.invalidComponentsBefore || new Set();
+    const invalidComponentsBefore = this._paste?.invalidComponentsBefore || new Set();
     for (const id of this.model._invalidComponents()) if (!invalidComponentsBefore.has(id)) schlecht.add(id);
     for (const id of this.model.collisions({
       only: this.model.tubesAt(tg.nodes),
@@ -1196,7 +1191,7 @@ export class Builder {
       { merge: true, validate: infeasibleConnectors, snapDist: this._snapRadius() });
   }
 
-  // Gemeinsamer Abschluss von Tasten- und Zieh-Verschiebung.
+  // 按键移动后的选择、历史和画面更新。
   _afterMove(beforeJson, res) {
     // Zusammengelegte Kupplungen gibt es nicht mehr -> aus der Auswahl nehmen.
     this._pruneSelection();
@@ -1278,128 +1273,6 @@ export class Builder {
     return ids.size ? ids : null;
   }
 
-  /** Laesst sich an dieser Stelle ein Ziehen der Auswahl beginnen? */
-  _isMoveHandle(id) {
-    return !this.readOnly && this.mode === "select" && this.selection.size > 0 && this.selection.has(id);
-  }
-
-  _beginMoveDrag(e, pick) {
-    if (this.model._incompleteComponentMove(this.model.moveTargets(this.selection))) {
-      this.onNotice(t('notice_move_accessory_mounts'), 'warn'); return;
-    }
-    const origin = pick.point.clone();
-    this._drag = {
-      origin,
-      // Zustand vor dem Ziehen: der ganze Zug wird EIN Undo-Schritt.
-      before: JSON.stringify(this.model.toJSON()),
-      applied: [0, 0, 0],
-      // Letzte Lage, an der die Auswahl wirklich passt -- dorthin faellt sie
-      // zurueck, wenn losgelassen wird, waehrend es rot ist.
-      lastValid: [0, 0, 0],
-      gridWant: [0, 0, 0],
-      // Was vorher schon uebereinander lag, zaehlt nicht als neue Kollision.
-      collidedBefore: this.model.collisions(),
-      invalidComponentsBefore: this.model._invalidComponents(),
-      invalid: null,
-      result: null,
-      axes: this.scene.dragAxes(),
-    };
-    // Die Verbindungen zum stehenden Rest gleich trennen: ein Rohr, von dem nur
-    // ein Ende mitwandert, kann nicht mitwandern (Rohre haben feste Laengen).
-    // Ohne das zogen sich die angrenzenden Rohre waehrend des Ziehens in die
-    // Laenge und sprangen erst beim Loslassen zurueck. Der echte Zug rechnet
-    // beim Loslassen ohnehin vom Ausgangsstand aus neu.
-    this.model.detachSelection(this.selection);
-    this.scene.setCursor("grabbing");
-    this.refresh();
-  }
-
-  _updateMoveDrag(e) {
-    const d = this._drag;
-    const p = this.scene.dragPlanePoint(e.clientX, e.clientY, d.origin);
-    if (!p) return;
-    const off = p.sub(d.origin);
-    const { u, v } = d.axes;
-    // Zeiger-Versatz auf die beiden Schiebe-Achsen projizieren und je Achse
-    // auf das Raster runden.
-    const schritt = this.moveStep;
-    const su = Math.round((off.x * u[0] + off.y * u[1] + off.z * u[2]) / schritt) * schritt;
-    const sv = Math.round((off.x * v[0] + off.y * v[1] + off.z * v[2]) / schritt) * schritt;
-    const want = [
-      u[0] * su + v[0] * sv,
-      u[1] * su + v[1] * sv,
-      u[2] * su + v[2] * sv,
-    ];
-    const a = d.applied;
-    if (d.gridWant && want[0] === d.gridWant[0] && want[1] === d.gridWant[1] && want[2] === d.gridWant[2]) return;
-    d.gridWant = want.slice();
-    // Klemm-Kupplung: sie kann ihr Rohr nicht verlassen -- der Zeiger wird auf
-    // die Rohrachse projiziert, statt frei im Raster zu schieben.
-    const clamp = this._draggedClamp();
-    if (clamp) {
-      this.model.loadJSON(JSON.parse(d.before));
-      const target = [d.origin.x + want[0], d.origin.y + want[1], d.origin.z + want[2]];
-      if (this.model.slideTubeClamp(clamp, target, geometry().connectorSize)) {
-        d.applied = want;
-        d.result = { merged: 0, detached: 0 };
-      }
-      // Die Klemme gleitet auf ihrem Rohr statt im Raster zu wandern -- beim
-      // Loslassen steht das Modell deshalb schon richtig und darf nicht noch
-      // einmal ueber _move() geschoben werden.
-      d.slid = true;
-      this.refresh();
-      return;
-    }
-    // Die Vorschau VERSCHIEBT nur -- sie trennt nichts, legt nichts zusammen
-    // und prueft keine Kupplungen. Das faellt einmal beim Loslassen an. Frueher
-    // wurde je Rasterschritt das ganze Modell neu geladen und ein vollstaendiger
-    // Zug gerechnet; bei grossen Modellen ruckelte das Ziehen dadurch.
-    this.model.translateSelection(this.selection, want[0] - a[0], want[1] - a[1], want[2] - a[2]);
-    const extra = this.model.snapOffsetFor(this.model.moveTargets(this.selection).nodes, this._snapRadius());
-    if (extra[0] || extra[1] || extra[2]) {
-      this.model.translateSelection(this.selection, extra[0], extra[1], extra[2]);
-      want[0] += extra[0]; want[1] += extra[1]; want[2] += extra[2];
-    }
-    d.applied = want;
-    d.invalid = this._troubleWith(this.selection, d.collidedBefore);
-    if (!d.invalid) d.lastValid = want.slice();
-    this.refresh();
-  }
-
-  // Ist genau EINE Klemm-Kupplung ausgewaehlt? Dann bestimmt ihr Rohr den Weg.
-  _draggedClamp() {
-    if (this.selection.size !== 1) return null;
-    const [id, kind] = [...this.selection][0];
-    if (kind !== "node") return null;
-    const n = this.model.nodes.get(id);
-    return n && n.clampOn ? id : null;
-  }
-
-  _endMoveDrag() {
-    const d = this._drag;
-    this._drag = null;
-    this.scene.setCursor("default");
-    if (!d) return;
-    // Die gleitende Klemm-Kupplung ist schon an ihrem Platz.
-    if (d.slid) { this._afterMove(d.before, d.result || { merged: 0, detached: 0 }); return; }
-    // Beim Loslassen zaehlt die letzte Lage, an der es passt: ueber einer
-    // belegten Stelle rutscht die Auswahl dorthin zurueck.
-    const ziel = d.invalid ? d.lastValid : d.applied;
-    if (d.invalid) this.onNotice(t("notice_move_collision"), "warn");
-    // Die Vorschau hat nur verschoben -- jetzt der echte Zug von der
-    // Ausgangslage aus, mit Trennen, Zusammenlegen und Kupplungs-Pruefung.
-    this.model.loadJSON(JSON.parse(d.before));
-    if (!ziel[0] && !ziel[1] && !ziel[2]) { this.refresh(); return; }
-    const res = this._move(ziel[0], ziel[1], ziel[2]);
-    if (!res.ok) {
-      // Das faellt nur auf, was die Vorschau nicht sehen kann (etwa eine
-      // Kupplung, die es beim Zusammenlegen nicht gibt).
-      this.onNotice(t("notice_move_" + res.reason), "warn");
-      this.refresh();
-      return;
-    }
-    this._afterMove(d.before, res);
-  }
 
   // Anbauteil loeschen -- Laufrolle und ihr Adapter gehoeren zusammen und gehen
   // gemeinsam, egal welches der beiden ausgewaehlt war.
@@ -1873,11 +1746,10 @@ export class Builder {
     // erkennt und die uebrigen Rohre grau zeichnet.
     const selected = (this.mode === "select" || this.mode === "assembly") && this.selection.size
       ? this.selection : null;
-    // An einer belegten Stelle werden die betroffenen Teile rot gezeichnet --
-    // beim Einfuegen die ganze Kopie, beim Ziehen die gezogene Auswahl.
+    // 粘贴位置有冲突时，将整份副本标红。
     const invalid = this._paste && !this._paste.valid && this._paste.sel
       ? new Set(this._paste.sel.keys())
-      : (this._drag && this._drag.invalid ? new Set(this.selection.keys()) : null);
+      : null;
     // 面板 / 布件两步点选的第一步：还没选第一根管时，能当第一根的管先亮出来，
     // 其余零件退后；选了第一根，照旧只亮它（琥珀）和能配的对面管（绿）。
     const firstRails = this._firstRailCandidates();
@@ -1886,7 +1758,7 @@ export class Builder {
         selected, highlight: this.highlight || firstRails, invalid, tints: this.tints,
         focusId: this.panelRail ? this.panelRail.id : null,
         keepPanelFacesOpaque: this.mode === 'panel',
-        preview: !!(this._paste || this._drag || this._clampDrag || this._clampSlide) });
+        preview: !!(this._paste || this._clampDrag) });
     this._buildHandles();
     if (this._installationPart) this.scene.showInstallationPreview(this.model, this._installationPart, this.installationPreview.valid);
     this.scene.requestRender();
@@ -1895,7 +1767,7 @@ export class Builder {
     // mit, obwohl der Stand noch gar nicht gilt. Beim Absetzen wird ohnehin neu
     // gezeichnet -- dann laeuft es einmal. Nur die Knoepfe, die vom Zustand
     // abhaengen (Drehen), werden nachgezogen.
-    if (!this._paste && !this._drag && !this._clampDrag && !this._clampSlide) this.onChange();
+    if (!this._paste && !this._clampDrag) this.onChange();
     else this.onPreview();
   }
 
@@ -2862,11 +2734,7 @@ export class Builder {
       // Zeiger festhalten: sonst geht das pointerup verloren, wenn man beim
       // Aufziehen ueber den Rand des Canvas hinauszieht.
       if (el.setPointerCapture) { try { el.setPointerCapture(e.pointerId); } catch { /* egal */ } }
-      // Ziehen der Auswahl geht dem Drehen vor: setzt der Zug auf einem BEREITS
-      // ausgewaehlten Teil auf, wird verschoben statt gedreht. Auf allem
-      // anderen bleibt es beim Drehen -- so verliert man die Kamerasteuerung
-      // nicht, nur weil etwas markiert ist.
-      this._drag = null;
+      // 选择状态只影响点击；拖动零件所在位置仍然旋转视角。
       // Haengt eine Kopie am Zeiger, gehoert die linke Taste ihr: gezogen wird
       // gedreht, ein echter Klick setzt ab (siehe _onUp).
       if (this._paste) {
@@ -2874,44 +2742,10 @@ export class Builder {
         return;
       }
       this._clampDrag = null;
-      this._clampSlide = null;
-      this._clampDragKandidat = null;
-      this._clampSlideKandidat = null;
       if (e.button === 0 && this.mode === "clamp") {
         const pick = this.scene.pickClamp(e.clientX, e.clientY)
           || this.scene.pickBuild(e.clientX, e.clientY);
         if (pick && pick.data.kind === "clamp" && this._beginClampDrag(pick.data.id)) return;
-      }
-      this._dragKandidat = null;
-      if (e.button === 0 && !this._down.box && this.mode === "select") {
-        const pick = this._pickSelect(e.clientX, e.clientY);
-        if (pick && pick.data.kind === "clamp") {
-          if (this.selection.has(pick.data.id) && this._beginClampDrag(pick.data.id)) return;
-          this._clampDragKandidat = pick;
-        } else {
-          const slideId = pick && this._slideDriverForPick(pick);
-          if (slideId) {
-            if (this._selectedClampDriver() && this._beginClampSlide(slideId)) return;
-            this._clampSlideKandidat = slideId;
-          } else if (pick && this.selection.size && this._isMoveHandle(pick.data.id)) {
-            if (e.pointerType === "touch") {
-              // Mit dem Finger entscheidet erst die BEWEGUNG, ob geschoben wird --
-              // sonst kaeme das Halten auf einem gewaehlten Teil nie an, weil der
-              // Zug schon begonnen haette.
-              this._dragKandidat = { e, pick };
-            } else if (pick.data.kind === "panel"
-                || this._clickRotationKind(pick.data.id, pick.data.kind)
-                || (pick.data.kind === "slide" && this.model.slides.get(pick.data.id)?.kind === "curved-slide-domestic80")) {
-              // 翻面或旋转的零件：保留单击，挪过点击范围才开始拖。
-              // 不先转视角，免得开始拖之前画面跟着晃
-              this._dragKandidat = { e, pick };
-              return;
-            } else {
-              this._beginMoveDrag(e, pick);
-              return;
-            }
-          }
-        }
       }
       // ⌥ + Ziehen: quer verschieben -- am Mac-Trackpad die Alternative zur
       // mittleren / rechten Taste.
@@ -2925,7 +2759,7 @@ export class Builder {
       // Touch im Cursor-Modus: das Halten vorbereiten.
       this._clearLongPress();
       if (e.button === 0 && e.pointerType === "touch" && this.mode === "select"
-          && !this._paste && !this._drag && !this._down.box) {
+          && !this._paste && !this._down.box) {
         const px = e.clientX, py = e.clientY;
         this._longPress = setTimeout(() => this._fireLongPress(px, py), LONG_PRESS_MS);
       }
@@ -2964,7 +2798,6 @@ export class Builder {
    */
   _fireLongPress(x, y) {
     this._longPress = null;
-    this._dragKandidat = null;      // gehalten statt geschoben
     if (!this._down || this.mode !== "select") return;
     this._longDone = true;            // das folgende pointerup ist kein Klick
     this.scene.endOrbit();            // ab jetzt dreht der Finger nicht mehr
@@ -3002,9 +2835,6 @@ export class Builder {
   _abortGesture() {
     this._clearLongPress();
     this._longDone = false;
-    this._dragKandidat = null;
-    this._clampDragKandidat = null;
-    this._clampSlideKandidat = null;
     this._pointerId = null;
     this.cancelPaste();
     this._down = null;
@@ -3014,23 +2844,9 @@ export class Builder {
       this._boxing = false;
       this.scene.hideSelectBox();
     }
-    if (this._drag) {
-      const d = this._drag;
-      this._drag = null;
-      this.model.loadJSON(JSON.parse(d.before));
-      this.scene.setCursor("default");
-      this.refresh();
-    }
     if (this._clampDrag) {
       const d = this._clampDrag;
       this._clampDrag = null;
-      this.model.loadJSON(JSON.parse(d.before));
-      this.scene.setCursor("default");
-      this.refresh();
-    }
-    if (this._clampSlide) {
-      const d = this._clampSlide;
-      this._clampSlide = null;
       this.model.loadJSON(JSON.parse(d.before));
       this.scene.setCursor("default");
       this.refresh();
@@ -3094,43 +2910,7 @@ export class Builder {
       this._updatePaste(e);
       return;
     }
-    // Cursor-Modus: mit gedrueckter linker Taste ziehen zieht ein Auswahl-
-    // Rechteck auf, statt zu drehen (das liegt dort auf der rechten Taste).
-    // Finger auf einem gewaehlten Teil, jetzt bewegt: der Zug beginnt hier.
-    if (this._dragKandidat && (e.buttons & 1) && this._down
-        && Math.hypot(e.clientX - this._down.x, e.clientY - this._down.y) > CLICK_TOLERANCE) {
-      const kandidat = this._dragKandidat;
-      this._dragKandidat = null;
-      this._clearLongPress();
-      this.scene.endOrbit();
-      this._beginMoveDrag(kandidat.e, kandidat.pick);
-      this._updateMoveDrag(e);
-      return;
-    }
-    if (this._clampDragKandidat && (e.buttons & 1) && this._down
-        && Math.hypot(e.clientX - this._down.x, e.clientY - this._down.y) > CLICK_TOLERANCE) {
-      const pick = this._clampDragKandidat;
-      this._clampDragKandidat = null;
-      this._clearLongPress();
-      this.scene.endOrbit();
-      this._selectClampCohort(pick.data.id, false);
-      if (this._beginClampDrag(pick.data.id)) this._updateClampDrag(e);
-      return;
-    }
-    if (this._clampSlideKandidat && (e.buttons & 1) && this._down
-        && Math.hypot(e.clientX - this._down.x, e.clientY - this._down.y) > CLICK_TOLERANCE) {
-      const id = this._clampSlideKandidat;
-      this._clampSlideKandidat = null;
-      this._clearLongPress();
-      this.scene.endOrbit();
-      this._selectClampCohort(id, false);
-      if (this._beginClampSlide(id)) this._updateClampSlide(e);
-      return;
-    }
-    // Auswahl wird gerade geschoben.
-    if (this._drag && (e.buttons & 1)) { this._updateMoveDrag(e); return; }
     if (this._clampDrag && (e.buttons & 1)) { this._updateClampDrag(e); return; }
-    if (this._clampSlide && (e.buttons & 1)) { this._updateClampSlide(e); return; }
     if (this._panning && (e.buttons & 1)) {
       const dx = e.clientX - this._last.x, dy = e.clientY - this._last.y;
       this._last = { x: e.clientX, y: e.clientY };
@@ -3297,13 +3077,6 @@ export class Builder {
       const p = raw;
       this.scene.setHover(null);
       this.scene.setHoverPart(p, this.mode, x, y, this._deleteHoverExtras(p));
-      if (this.mode === "select" && p) {
-        if (p.data.kind === "clamp" && this.selection.has(p.data.id)) this.scene.setCursor("grab");
-        else if (this._slideDriverForPick(p)
-            && (this._selectedClampDriver() || this.selection.has(p.data.id))) {
-          this.scene.setCursor("move");
-        } else if (this.selection.size && this._isMoveHandle(p.data.id)) this.scene.setCursor("move");
-      }
       return;
     }
     this.scene.setHoverPart(null);
@@ -3324,13 +3097,11 @@ export class Builder {
     if (this._panning) {
       this._panning = false;
       this._down = null;
-      this._dragKandidat = null;
       this.scene.endPan();
       return;
     }
     const d = this._down;
     this._down = null;
-    this._dragKandidat = null;
     this._clearLongPress();
     const gehalten = this._longDone;
     this._longDone = false;
@@ -3343,13 +3114,7 @@ export class Builder {
       }
       return;
     }
-    // Verschieben abschliessen: hier faellt der eine Undo-Schritt an und hier
-    // werden deckungsgleiche Kupplungen zusammengelegt.
-    if (this._drag) { this._endMoveDrag(); return; }
     if (this._clampDrag) { this._endClampDrag(e); return; }
-    if (this._clampSlide) { this._endClampSlide(); return; }
-    this._clampDragKandidat = null;
-    this._clampSlideKandidat = null;
     if (!d) { this.scene.endOrbit(); return; }
     // endOrbit() fuehrt den Drehpunkt nach und ruft controls.update() -- das
     // kann die Kamera minimal versetzen. Deshalb ERST den Klick auswerten,
@@ -3501,9 +3266,6 @@ export class Builder {
   // den Treffpunkt; ein Klick auf eine bestehende dreht sie weiter. Ziehen um
   // das Rohr stellt einen beliebigen Winkel ein. Das Rohr in ihre freie
   // Oeffnung kommt im BAU-Modus dazu, nicht hier.
-  // Im Auswahl-Modus gilt dasselbe Drehen, sobald die Klemme gewaehlt ist;
-  // Schwestern mit zweiter Tube kommen in die Auswahl und drehen mit.
-  // Die zweite Tube laesst sich entlang der ersten schieben und snappt an sie.
 
   _pickSelect(x, y) {
     const clampHit = this.scene.pickClamp(x, y);
@@ -3713,60 +3475,6 @@ export class Builder {
     this.refresh();
   }
 
-  _beginClampSlide(id) {
-    if (this.readOnly) return false;
-    const c = this.model.clamps.get(id);
-    if (!c || !c.dir) return false;
-    const group = this.model.clampCohort(id);
-    if (!group.tubes.size) return false;
-    const tb = this.model.tubes.get([...group.tubes][0]);
-    const n0 = tb && this.model.nodes.get(tb.a);
-    this._clampSlide = {
-      id,
-      before: JSON.stringify(this.model.toJSON()),
-      origin: [c.x, c.y, c.z],
-      axis: c.dir.slice(),
-      mark: n0 ? [n0.id, n0.x, n0.y, n0.z] : null,
-      moved: false,
-    };
-    this.scene.setCursor("grabbing");
-    return true;
-  }
-
-  _updateClampSlide(e) {
-    const d = this._clampSlide;
-    if (!d || !this._down) return;
-    if (!d.moved && Math.hypot(e.clientX - this._down.x, e.clientY - this._down.y) <= CLICK_TOLERANCE) return;
-    d.moved = true;
-    const hit = this.scene.dragPlanePoint(e.clientX, e.clientY, d.origin);
-    if (!hit) return;
-    const u = d.axis;
-    const ul = Math.hypot(u[0], u[1], u[2]) || 1;
-    const ux = u[0] / ul, uy = u[1] / ul, uz = u[2] / ul;
-    let delta = (hit.x - d.origin[0]) * ux + (hit.y - d.origin[1]) * uy + (hit.z - d.origin[2]) * uz;
-    delta = Math.round(delta / SNAP_STEP) * SNAP_STEP;
-    this.model.loadJSON(JSON.parse(d.before));
-    this.model.slideClampFlap(d.id, delta, { snapDist: this._snapRadius() });
-    this.refresh();
-    let along = 0;
-    if (d.mark) {
-      const n = this.model.nodes.get(d.mark[0]);
-      if (n) {
-        along = Math.round((n.x - d.mark[1]) * ux + (n.y - d.mark[2]) * uy + (n.z - d.mark[3]) * uz);
-      }
-    }
-    this.onNotice(t("notice_clamp_slide", along), "info");
-  }
-
-  _endClampSlide() {
-    const d = this._clampSlide;
-    this._clampSlide = null;
-    this.scene.setCursor("default");
-    this.scene.endOrbit();
-    if (!d || !d.moved) return;
-    this._pushHistory(d.before);
-    this.refresh();
-  }
 
   _clickClamp(e) {
     const h = this.scene.pickHandle(e.clientX, e.clientY);
