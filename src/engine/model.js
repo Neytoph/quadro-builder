@@ -746,6 +746,24 @@ export class BuildModel {
     this._pruneOrphanedC45Bodies(tubeNeighbors);
   }
 
+  isAutomaticConnector(id) {
+    const node = this.nodes.get(id);
+    return !!node && !node.preferType && !node.part && !node.c45body;
+  }
+
+  /** 自动接头连管一起删；手动接头只移除配件，管端恢复自动匹配。 */
+  removeConnector(id) {
+    const node = this.nodes.get(id);
+    if (!node) return;
+    if (node.c45body) { this.removeC45(id); return; }
+    if (this.isAutomaticConnector(id)) { this.removeNode(id); return; }
+    delete node.preferType;
+    if (node.part) {
+      for (const key of ["part", "partMask", "partQuat", "clampOn", "stub", "hinges", "boltDeep"]) delete node[key];
+    }
+    this.removeEmptyNodes([id]);
+  }
+
   /**
    * 管子从通上拿走时，通在这个方向上的臂一起去掉。
    *
@@ -980,7 +998,7 @@ export class BuildModel {
     let weg = 0;
     for (const id of ids) {
       const n = this.nodes.get(id);
-      if (!n || n.part) continue;
+      if (!n || n.part || n.preferType) continue;
       let belegt = false;
       for (const t of this.tubes.values()) if (t.a === id || t.b === id) { belegt = true; break; }
       if (belegt) continue;
@@ -5741,7 +5759,7 @@ export class BuildModel {
    * steckt der Adapter im Rohr, also dreht sich die Huelsenseite. Traegt die
    * Kupplung an der Huelse schon etwas anderes, bleibt alles stehen.
    */
-  rotateC45Sleeve(bodyId) {
+  rotateC45Sleeve(bodyId, steps = 1) {
     const body = this.nodes.get(bodyId);
     if (!body || !body.c45body || !body.c45axis) return false;
     const dir = this._c45BodyTubeDir(bodyId);
@@ -5761,7 +5779,7 @@ export class BuildModel {
     }
     const dreh = (v) => {
       // 90 Grad um `dir`: v' = (dir x v) + dir (dir . v)
-      const c = cross3(dir, v);
+      const c = cross3(dir, v).map(value => value * (steps < 0 ? -1 : 1));
       const d = dot3(dir, v);
       return [c[0] + dir[0] * d, c[1] + dir[1] * d, c[2] + dir[2] * d];
     };
@@ -5774,6 +5792,7 @@ export class BuildModel {
     const r4 = (v) => Math.round((v / L) * 1e4) / 1e4;
     body.c45axis = [r4(achse[0]), r4(achse[1]), r4(achse[2])];
     base.quat = quatFromXAxis(body.c45axis);
+    this._updateC45Quat(body, base);
     this._moveTubeGeom(new Set([base.id]));
     return true;
   }
@@ -5853,7 +5872,7 @@ export class BuildModel {
    * Winkelkupplung um 90 Grad um ihre Huelsenachse weiterdrehen -- mit allem,
    * was an ihr haengt. Vier Stellungen, danach ist sie wieder am Anfang.
    */
-  rotateC45(bodyId) {
+  rotateC45(bodyId, steps = 1) {
     const body = this.nodes.get(bodyId);
     if (!body || !body.c45body || !body.c45axis) return false;
     // Die Kupplung, auf der die Huelse steckt: ueber die Arm-Kante.
@@ -5870,7 +5889,7 @@ export class BuildModel {
     // Drehpunkt: die Kupplung selbst; gedreht wird um ihre Huelsenachse.
     const dreh = (p) => {
       const r = [p.x - base.x, p.y - base.y, p.z - base.z];
-      const c = cross3(u, r);
+      const c = cross3(u, r).map(value => value * (steps < 0 ? -1 : 1));
       const d = dot3(u, r);
       // 90 Grad: cos = 0, sin = 1 -> p' = (u x r) + u (u . r)
       return { x: base.x + c[0] + u[0] * d, y: base.y + c[1] + u[1] * d, z: base.z + c[2] + u[2] * d };
@@ -5890,10 +5909,20 @@ export class BuildModel {
     const zweig = [...seen].map((id) => this.nodes.get(id)).filter(Boolean).map((n) => ({ n, p: dreh(n) }));
     if (zweig.some((e) => this.isBelowGround(e.p.y))) return false;
     for (const e of zweig) { e.n.x = round(e.p.x); e.n.y = round(e.p.y); e.n.z = round(e.p.z); }
+    this._updateC45Quat(body, base);
     const bewegt = new Set(zweig.map((e) => e.n.id));
     this._moveTubeGeom(bewegt);
     this._movePanelGeom(bewegt);
     return true;
+  }
+
+  // 旋转后更新接头自己的朝向，渲染、保存和 QDF 导出使用同一姿态。
+  _updateC45Quat(body, base) {
+    const ex = norm3(body.c45axis);
+    const span = [body.x - base.x, body.y - base.y, body.z - base.z];
+    const along = dot3(span, ex);
+    const ey = norm3(span.map((value, i) => value - ex[i] * along));
+    base.c45quat = quatFromBasis(ex, ey, cross3(ex, ey));
   }
 
   // Aussenmasse des Modells in cm. Die Bounding-Box laeuft ueber alle Kupplungen
@@ -6059,8 +6088,9 @@ export class BuildModel {
   rotateBow(id, steps = 1, { pivot } = {}) {
     const t = this.tubes.get(id);
     if (!t || !t.bow || !t.bowCenter) return null;
-    if (pivot != null && pivot === t.b) { const tmp = t.a; t.a = t.b; t.b = tmp; }
-    const a = this.nodes.get(t.a), b = this.nodes.get(t.b);
+    const reversed = pivot != null && pivot === t.b;
+    const startId = reversed ? t.b : t.a, endId = reversed ? t.a : t.b;
+    const a = this.nodes.get(startId), b = this.nodes.get(endId);
     if (!a || !b) return null;
     const c = { x: t.bowCenter[0], y: t.bowCenter[1], z: t.bowCenter[2] };
     const R = Math.hypot(c.x - a.x, c.y - a.y, c.z - a.z);
@@ -6068,14 +6098,10 @@ export class BuildModel {
     const n = [(c.x - a.x) / R, (c.y - a.y) / R, (c.z - a.z) / R];
     // Tangente am Anfang: Sehne minus Radiusanteil, normiert.
     const t0 = unit([(b.x - a.x) / R - n[0], (b.y - a.y) / R - n[1], (b.z - a.z) / R - n[2]]);
-    // Die drei uebrigen Lagen: 90, 180, 270 Grad um die Tangente. Geht eine
-    // nicht (unter dem Boden, Ziel schon verbunden), wird die naechste
-    // genommen -- sonst liesse sich ein Bogen ueber dem Boden gar nicht mehr
-    // bewegen, weil ausgerechnet der naechste Schritt nach unten zeigt.
+    // 优先转指定方向 90 度；受阻就反向转 90 度，不跳过障碍转 180 度。
     const perp = cross(t0, n);
-    const back = [-n[0], -n[1], -n[2]];
     const anti = [-perp[0], -perp[1], -perp[2]];
-    const order = steps < 0 ? [anti, back, perp] : [perp, back, anti];
+    const order = steps < 0 ? [anti, perp] : [perp, anti];
     let blocked = null;
     for (const n2 of order) {
       const target = {
@@ -6086,11 +6112,12 @@ export class BuildModel {
       const cy = a.y + n2[1] * R;
       if (this.bowBelowGround(a, t0, n2, R)) { blocked = { ground: true }; continue; }
       const hit = this.findNodeNear(target.x, target.y, target.z);
-      if (hit && hit.id !== t.b && this.tubeBetween(t.a, hit.id)) { blocked = { duplicate: true }; continue; }
+      if (hit && hit.id !== endId && this.tubeBetween(startId, hit.id)) { blocked = { duplicate: true }; continue; }
 
-      const oldEnd = t.b;
+      const oldEnd = endId;
       const to = hit || this.addNode(target.x, target.y, target.z);
-      if (to.id === t.a) { blocked = { duplicate: true }; continue; }
+      if (to.id === startId) { blocked = { duplicate: true }; continue; }
+      t.a = startId;
       t.b = to.id;
       t.bowCenter = [round(a.x + n2[0] * R), round(cy), round(a.z + n2[2] * R)];
       // Zurueckgebliebener Knoten ohne Rohr verschwindet.

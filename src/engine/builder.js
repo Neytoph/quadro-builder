@@ -608,17 +608,21 @@ export class Builder {
   // 选择模式里再点一下就翻面的，只有单独选着的这块面板（或者只选着它所在的那一组）。
   // 选着好几件时点其中一块，先变成只选它，再点才翻。
   _panelFlipsOnClick(id) {
+    return this._partTurnsOnClick(id);
+  }
+
+  _partTurnsOnClick(id) {
     if (this.readOnly || !this.selection.has(id)) return false;
     const gid = this.model.groupOf(id);
     const members = gid ? this.model.groups.get(gid) : new Set([id]);
     return this.selection.size === members.size && [...this.selection.keys()].every((x) => members.has(x));
   }
 
-  // 翻面等过选整块的时间窗口再执行：这段时间里在同一处再点一下是选整块，不能先翻了。
-  _queueSelectFlip(id, e) {
+  // 翻面或旋转等双击窗口过后执行，双击选整块时取消待执行操作。
+  _queueSelectFlip(id, e, action = "panel") {
     this._cancelSelectFlip();
     const timer = setTimeout(() => this._runSelectFlip(), SELECT_BLOCK_MS);
-    this._selectFlip = { id, x: e.clientX, y: e.clientY, timer };
+    this._selectFlip = { id, x: e.clientX, y: e.clientY, timer, action };
   }
 
   _cancelSelectFlip() {
@@ -632,6 +636,9 @@ export class Builder {
     const f = this._selectFlip;
     if (!f) return;
     this._cancelSelectFlip();
+    if (!this._partTurnsOnClick(f.id)) return;
+    if (f.action === "bow") { this._turnBow(this.model.tubes.get(f.id)); return; }
+    if (f.action === "c45") { this._turnC45(f.id); return; }
     let side = null;
     this.recordHistory(() => { side = this.model.flipPanelSide(f.id); });
     if (side != null) this.onNotice(t(side < 0 ? "notice_panel_below" : "notice_panel_above"), "info");
@@ -716,29 +723,62 @@ export class Builder {
     const driver = this._selectedClampDriver();
     if (driver) {
       let ok = false;
-      this.recordHistory(() => { ok = this.model.rotateClamp(driver, steps * Math.PI / 2); });
+      this.recordHistory(() => { ok = this._rotateClampWithFallback(driver, steps * Math.PI / 2); });
       if (!ok) { this.onNotice(t("notice_fitting_fixed"), "warn"); return false; }
       this.refresh();
       return true;
     }
     // 单选一根弯管：绕它接着的那头转 90 度，和放置时点它转是同一个动作。
     const bow = this._selectedLoneBow();
-    if (bow) {
-      const pivot = this._bowPivotFor(bow);
-      if (!pivot) { this.onNotice(t("notice_bow_attached"), "warn"); return false; }
-      let res;
-      this.recordHistory(() => { res = this.model.rotateBow(bow.id, steps, { pivot }); });
-      if (res && res.ground) { this.onNotice(t("notice_ground"), "warn"); return false; }
-      if (res && res.duplicate) { this.onNotice(t("notice_bow_blocked"), "warn"); return false; }
-      this.refresh();
-      return !!(res && res.node);
-    }
+    if (bow) return this._turnBow(bow, steps);
     const before = JSON.stringify(this.model.toJSON());
-    const res = this.model.rotateSelection(this.selection, steps,
-      { merge: true, validate: infeasibleConnectors, grid: SNAP_STEP });
+    const options = { merge: true, validate: infeasibleConnectors, grid: SNAP_STEP };
+    let res = this.model.rotateSelection(this.selection, steps, options);
+    if (!res.ok && res.reason === "collision") {
+      res = this.model.rotateSelection(this.selection, -steps, options);
+    }
     if (!res.ok) { this.onNotice(t("notice_rotate_" + res.reason), "warn"); return false; }
     this._afterMove(before, res);
     return true;
+  }
+
+  // 点击或快捷键的固定角度受阻时，尝试同角度反向转；拖动仍跟随指针。
+  _rotateClampWithFallback(id, radians = Math.PI / 4) {
+    return this.model.rotateClamp(id, radians) || this.model.rotateClamp(id, -radians);
+  }
+
+  _clickRotationKind(id, kind) {
+    if (kind === "tube" && this.model.tubes.get(id)?.bow) return "bow";
+    if (kind === "node" && this.model.nodes.get(id)?.c45body) return "c45";
+    return null;
+  }
+
+  _turnBow(bow, steps = 1) {
+    if (this.readOnly || !bow?.bow) return false;
+    const pivot = this._bowPivotFor(bow);
+    if (!pivot) { this.onNotice(t("notice_bow_attached"), "warn"); return false; }
+    let res;
+    this.recordHistory(() => { res = this.model.rotateBow(bow.id, steps, { pivot }); });
+    if (res?.ground) this.onNotice(t("notice_ground"), "warn");
+    else if (res?.duplicate) this.onNotice(t("notice_bow_blocked"), "warn");
+    else if (res?.node) this.onNotice(t("notice_bow_turned"));
+    this.refresh();
+    return !!res?.node;
+  }
+
+  _turnC45(id) {
+    if (this.readOnly || !this.model.nodes.get(id)?.c45body) return false;
+    const sleeve = this._c45HasTube(id);
+    let ok = false;
+    this.recordHistory(() => {
+      ok = sleeve
+        ? this.model.rotateC45Sleeve(id, 1) || this.model.rotateC45Sleeve(id, -1)
+        : this.model.rotateC45(id, 1) || this.model.rotateC45(id, -1);
+    });
+    const blockedNotice = sleeve ? "notice_c45_has_tube" : "notice_c45_no_turn";
+    this.onNotice(t(ok ? "notice_c45_turned" : blockedNotice), ok ? "ok" : "warn");
+    this.refresh();
+    return ok;
   }
 
   /** 选中的正好是一根弯管（没有别的）就给它，否则 null。 */
@@ -1397,13 +1437,7 @@ export class Builder {
       }
       for (const [id, kind] of entries) {
         if (kind !== "node") continue;
-        // Eine Winkelkupplung haelt zwei Enden zusammen, die fuer sich
-        // weiterbestehen: sie kommt heraus, die Rohre bleiben und tragen
-        // wieder Dummy-Kupplungen (`removeC45`). Erst danach die gewoehnliche
-        // Loeschung, die auch die Rohre mitnimmt.
-        const n = this.model.nodes.get(id);
-        if (n && n.c45body && this.model.removeC45(id)) continue;
-        this.model.removeNode(id);
+        this.model.removeConnector(id);
       }
       for (const [id] of entries) nachbarn.delete(id);
       this.model.removeEmptyNodes(nachbarn);
@@ -2415,22 +2449,7 @@ export class Builder {
     // der sie steckt (Huelse und Arm gehoeren beiden) -- beides dreht sie.
     const body = node && (node.c45body ? node : this._c45BodyAt(node.id));
     if (body) {
-      // Steckt sie IM Rohr, dreht sich die Huelsenseite: die Dummy-Kupplung
-      // wandert um die Rohrachse, das Rohr bleibt stehen.
-      if (this._c45HasTube(body.id)) {
-        let gedreht = false;
-        this.recordHistory(() => { gedreht = this.model.rotateC45Sleeve(body.id); });
-        // Sonst bleibt sie stehen: mitzudrehen hiesse, das halbe Modell
-        // mitzuziehen -- dafuer gibt es das Drehen der Auswahl.
-        this.onNotice(gedreht ? t("notice_c45_turned") : t("notice_c45_has_tube"),
-          gedreht ? "ok" : "warn");
-        if (gedreht) this.refresh();
-        return;
-      }
-      let ok = false;
-      this.recordHistory(() => { ok = this.model.rotateC45(body.id); });
-      this.onNotice(ok ? t("notice_c45_turned") : t("notice_c45_no_turn"), ok ? "ok" : "warn");
-      this.refresh();
+      this._turnC45(body.id);
       return;
     }
     // Klick auf eine Kupplung ohne Winkelkupplung waehlt sie: danach zeigt nur
@@ -2858,8 +2877,9 @@ export class Builder {
               // Zug schon begonnen haette.
               this._dragKandidat = { e, pick };
             } else if (pick.data.kind === "panel"
+                || this._clickRotationKind(pick.data.id, pick.data.kind)
                 || (pick.data.kind === "slide" && this.model.slides.get(pick.data.id)?.kind === "curved-slide-domestic80")) {
-              // 面板翻面 / 国产弯滑梯换向：先保留单击，挪过点击范围才开始拖。
+              // 翻面或旋转的零件：保留单击，挪过点击范围才开始拖。
               // 不先转视角，免得开始拖之前画面跟着晃
               this._dragKandidat = { e, pick };
               return;
@@ -3251,7 +3271,7 @@ export class Builder {
       const raw = this.mode === "select"
         ? this._pickSelect(x, y)
         : this.scene.pickForDelete(x, y);
-      const p = this.mode === "delete" ? this._resolveDeletePick(raw, x, y) : raw;
+      const p = raw;
       this.scene.setHover(null);
       this.scene.setHoverPart(p, this.mode, x, y, this._deleteHoverExtras(p));
       if (this.mode === "select" && p) {
@@ -3470,7 +3490,7 @@ export class Builder {
     // （见 _clickSelectRaw），不往里选。快的两下还是选整块，不冲突。
     const last = this._selectClick;
     const cur = this.selection.size === 1 ? [...this.selection][0] : null;
-    if (hits.length > 1 && cur && cur[1] !== "panel" && this.model.slides.get(cur[0])?.kind !== "curved-slide-domestic80" && last
+    if (hits.length > 1 && cur && cur[1] !== "panel" && !this._clickRotationKind(cur[0], cur[1]) && this.model.slides.get(cur[0])?.kind !== "curved-slide-domestic80" && last
         && Math.hypot(x - last.x, y - last.y) < CLICK_TOLERANCE
         && performance.now() - last.t >= SELECT_BLOCK_MS) {
       const idx = hits.findIndex((h) => h.data && h.data.id === cur[0]);
@@ -3661,7 +3681,7 @@ export class Builder {
     if (!d) return;
     if (!d.moved) {
       let turned = false;
-      this.recordHistory(() => { turned = this.model.rotateClamp(d.id); });
+      this.recordHistory(() => { turned = this._rotateClampWithFallback(d.id); });
       if (!turned) this.onNotice(t("notice_fitting_fixed"), "warn");
       this.refresh();
       return;
@@ -3744,7 +3764,7 @@ export class Builder {
       // Erneuter Klick DREHT ihn um 45 Grad weiter -- geloescht wird im
       // Auswahl-Modus, wie bei allen anderen Teilen auch.
       let turned = false;
-      this.recordHistory(() => { turned = this.model.rotateClamp(pick.data.id); });
+      this.recordHistory(() => { turned = this._rotateClampWithFallback(pick.data.id); });
       if (!turned) this.onNotice(t("notice_fitting_fixed"), "warn");
       this.refresh();
       return;
@@ -4655,15 +4675,7 @@ export class Builder {
     const front = this.scene.pickBuild(e.clientX, e.clientY);
     const bow = front && front.data.kind === "tube" ? this.model.tubes.get(front.data.id) : null;
     if (bow && bow.bow && (!h || front.distance < h.distance)) {
-      // 另一头接着东西就不转：转了弯管会从那个接头上脱开。
-      const pivot = this._bowPivotFor(bow);
-      if (!pivot) { this.onNotice(t("notice_bow_attached"), "warn"); return; }
-      let res;
-      this.recordHistory(() => { res = this.model.rotateBow(bow.id, 1, { pivot }); });
-      if (res && res.ground) this.onNotice(t("notice_ground"), "warn");
-      else if (res && res.duplicate) this.onNotice(t("notice_bow_blocked"));
-      else if (res && res.node) this.onNotice(t("notice_bow_turned"));
-      this.refresh();
+      this._turnBow(bow);
       return;
     }
     if (h) {
@@ -4739,77 +4751,17 @@ export class Builder {
    * Lauf, nicht nur das eine Rohr. Klick ins Leere tut nichts.
    */
   _clickDelete(e) {
-    const pick = this._resolveDeletePick(this.scene.pickForDelete(e.clientX, e.clientY), e.clientX, e.clientY);
+    const pick = this.scene.pickForDelete(e.clientX, e.clientY);
     if (!pick) return;
     this._fillSelectionFromPick(pick);
     this.deleteSelection();
-  }
-
-  /**
-   * 删接头会带走相连的管子。接头常被管子或面板挡住，射线先打在它们上——
-   * 落在接头范围内时仍按接头算，预览和点击才一致。
-   */
-  _resolveDeletePick(pick, clientX, clientY) {
-    if (!pick) return pick;
-    if (pick.data.kind === "node") return pick;
-    const cs = geometry().connectorSize;
-    if ((pick.data.kind === "panel" || pick.data.kind === "textile") && clientX != null) {
-      const corners = this._surfaceCornerNodes(pick.data.id);
-      const near = this.scene.closestOnRay(corners, clientX, clientY, cs * 0.75);
-      if (near) return { ...pick, data: { kind: "node", id: near.id } };
-    }
-    if (!pick.point) return pick;
-    const pt = pick.point;
-    const ball = this._nodeNearPoint(pt, cs * 1.2);
-    if (ball) return { ...pick, data: { kind: "node", id: ball.id } };
-    if (pick.data.kind !== "tube") return pick;
-    const t = this.model.tubes.get(pick.data.id);
-    if (!t || t.arm || t.link) return pick;
-    const a = this.model.nodes.get(t.a);
-    const b = this.model.nodes.get(t.b);
-    if (!a || !b) return pick;
-    const span = Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z) || 1;
-    const along = ((pt.x - a.x) * (b.x - a.x) + (pt.y - a.y) * (b.y - a.y) + (pt.z - a.z) * (b.z - a.z)) / span;
-    const zone = cs * 1.55;
-    let n = null;
-    if (along <= zone && !a.c45body) n = a;
-    else if (along >= span - zone && !b.c45body) n = b;
-    return n ? { ...pick, data: { kind: "node", id: n.id } } : pick;
-  }
-
-  _surfaceCornerNodes(partId) {
-    const part = this.model.panels.get(partId) || this.model.textiles.get(partId);
-    if (!part) return [];
-    const ids = new Set();
-    if (part.nodes) for (const id of part.nodes) ids.add(id);
-    for (const tid of [part.a, part.b]) {
-      const t = this.model.tubes.get(tid);
-      if (t) { ids.add(t.a); ids.add(t.b); }
-    }
-    const out = [];
-    for (const id of ids) {
-      const n = this.model.nodes.get(id);
-      if (n && !n.c45body && !n.unused) out.push(n);
-    }
-    return out;
-  }
-
-  _nodeNearPoint(pt, reach) {
-    let best = null, bestD = reach;
-    for (const n of this.model.nodes.values()) {
-      if (n.c45body || n.unused) continue;
-      const d = Math.hypot(pt.x - n.x, pt.y - n.y, pt.z - n.z);
-      if (d < bestD) { bestD = d; best = n; }
-    }
-    return best;
   }
 
   /** 删除模式下：指到接头时，把会一起删掉的管子也标出来。 */
   _deleteHoverExtras(pick) {
     if (this.mode !== "delete" || !pick || pick.data.kind !== "node") return null;
     if (pick.data.hinge != null) return null;
-    const n = this.model.nodes.get(pick.data.id);
-    if (!n || n.c45body) return null;
+    if (!this.model.isAutomaticConnector(pick.data.id)) return null;
     const ids = this.model.incidentTubeIds(pick.data.id);
     return ids.length ? ids : null;
   }
@@ -4907,6 +4859,12 @@ export class Builder {
     // and bends selected with their group. Other parts keep block selection.
     if (kind === "slide" && !add && this._curveFlipsOnClick(id) && this._flipDomesticCurve(id)) {
       this._selectClick = null;
+      return;
+    }
+    const rotation = this._clickRotationKind(id, kind);
+    if (rotation && !add && this._partTurnsOnClick(id)) {
+      this._selectClick = null;
+      this._queueSelectFlip(id, e, rotation);
       return;
     }
     if (this._isBlockClick(e, ids[0])) {
