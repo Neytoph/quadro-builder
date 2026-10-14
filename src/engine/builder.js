@@ -14,6 +14,7 @@ import { TUBE_FITTINGS, POOL_KINDS, isHolePart, holeArmDirs, holeClampDirsAt, HO
 import { CONNECTOR_ARM_BITS } from "./qdfimport.js";
 import { ACCESSORY_IDS, PANEL_ACCESSORY_IDS, componentFrame } from './accessoryPack.js';
 import { confirmedSpec } from './componentPack.js';
+import { installationReason } from './installationReason.js';
 import { pickStepAnchor, stepCandidates, stepCandidatesFromSelection, stepNeighbor } from "./stepAnchor.js";
 
 // Kupplungen, die auf einem Rohr sitzen statt im Raster: QDF-Art -> Katalogteil.
@@ -343,7 +344,7 @@ export class Builder {
       if (!this.model.accessoryMounts(this.fittingKind).length) {
         const diagnostics = [...this.model.tubes.keys()].map(id => this.model.accessoryDiagnostics(this.fittingKind, id));
         const result = diagnostics.find(d => !['straight_tube', 'horizontal_tube', 'tube_short'].includes(d.reason)) || diagnostics.find(d => d.reason !== 'straight_tube') || { reason: 'straight_tube' };
-        this.onNotice(t('accessory_reason_' + result.reason), 'info');
+        this.onNotice(installationReason(this.model, result), 'info');
       }
       return;
     }
@@ -4538,7 +4539,7 @@ export class Builder {
     this.scene.clearInstallationPreview?.();
     this._installationPart = part.mounts?.length ? part : null;
     this.installationPreview = { kind: part.kind ? 'fitting' : 'panel', partId, mountCount: part.mounts?.length || 0, supportCount: part.supportTubes?.length || 0, assumption: part.params?.assumption || 'frame-grid-unmeasured',
-      valid: part.valid, reason: part.reason ? t('accessory_reason_' + part.reason) : null, canFlip: partId === 'steering_wheel' && !!part.mounts?.length };
+      valid: part.valid, reason: installationReason(this.model, part), canFlip: partId === 'steering_wheel' && !!part.mounts?.length };
     if (!part.valid) this.onNotice(this.installationPreview.reason, 'warn');
     if(part.valid)return this.confirmInstallation();
     this.refresh();

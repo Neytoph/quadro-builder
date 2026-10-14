@@ -1356,6 +1356,27 @@ const zh = {
 };
 
 const LANG_KEY = 'quadro.lang';
+Object.assign(zh, {
+  accessory_mount_conflict_detail: (name, tube, distance) => `“${name}”占用了${tube}上距管端 ${distance} cm 的固定位置。请移开该部件或改选固定边。`,
+  accessory_opening_conflict_detail: name => `这个开口已有“${name}”。请先移开它或选择其它开口。`,
+  accessory_space_conflict_detail: name => `安装后的部件会与“${name}”重叠。请移开障碍或更换安装位置。`,
+  accessory_swing_conflict_detail: name => `“${name}”位于秋千前后 ±30° 的活动范围内。请移开障碍或更换安装位置。`,
+  accessory_obstacle_panel: '板或布件', accessory_obstacle_fitting: '配件', accessory_obstacle_tube: '管件', accessory_obstacle_slide: '滑梯',
+});
+Object.assign(en, {
+  accessory_mount_conflict_detail: (name, tube, distance) => `“${name}” occupies a fixing point on ${tube}, ${distance} cm from the tube end. Move that part or choose different fixing edges.`,
+  accessory_opening_conflict_detail: name => `This opening already contains “${name}”. Move it or choose another opening.`,
+  accessory_space_conflict_detail: name => `The installed component would overlap “${name}”. Move the obstacle or choose another position.`,
+  accessory_swing_conflict_detail: name => `“${name}” is within the swing’s ±30° movement range. Move the obstacle or choose another position.`,
+  accessory_obstacle_panel: 'panel or textile', accessory_obstacle_fitting: 'fitting', accessory_obstacle_tube: 'tube', accessory_obstacle_slide: 'slide',
+});
+Object.assign(de, {
+  accessory_mount_conflict_detail: (name, tube, distance) => `„${name}“ belegt einen Befestigungspunkt an ${tube}, ${distance} cm vom Rohrende. Bauteil versetzen oder andere Befestigungskanten wählen.`,
+  accessory_opening_conflict_detail: name => `In dieser Öffnung befindet sich bereits „${name}“. Bauteil versetzen oder andere Öffnung wählen.`,
+  accessory_space_conflict_detail: name => `Das montierte Bauteil würde sich mit „${name}“ überschneiden. Hindernis versetzen oder andere Montagestelle wählen.`,
+  accessory_swing_conflict_detail: name => `„${name}“ liegt im Schwenkbereich von ±30°. Hindernis versetzen oder andere Montagestelle wählen.`,
+  accessory_obstacle_panel: 'Platte oder Textil', accessory_obstacle_fitting: 'Zubehörteil', accessory_obstacle_tube: 'Rohr', accessory_obstacle_slide: 'Rutsche',
+});
 const componentReasons = {
   zh: { straight_tube: '需要一根水平直管，弧管和连接边不能承载。', horizontal_tube: '承载管必须水平。', missing_support: '缺少承载管或端点。', tube_short: '管子太短，两个固定点需要端部安装余量。', ground_clearance: '组件下方离地空间不足。', mount_occupied: '固定区间已被其它配件或软包占用。', component_space: '组件空间与管、板或其它部件重叠。', swing_clearance: '秋千前后±30°活动范围有障碍，请移开障碍或更换安装位置。', frame_size: '需要40×40厘米方框。', vertical_frame: '忙碌板需要竖直方框。', horizontal_frame: '布兜需要水平方框。', four_edges: '方框四条边需要完整的直管支撑。', four_corners: '缺少四角固定位置。', opening_occupied: '这个开口已有板或布件。' },
   en: { straight_tube: 'A horizontal straight tube is required; curved tubes and connector edges cannot support this part.', horizontal_tube: 'The support tube must be horizontal.', missing_support: 'A support tube or endpoint is missing.', tube_short: 'The tube is too short to leave installation clearance at both fixing points.', ground_clearance: 'There is insufficient clearance above the ground.', mount_occupied: 'A fixing interval is occupied by another fitting or sleeve.', component_space: 'The component overlaps a tube, panel or other part.', swing_clearance: 'An obstacle lies within the swing’s ±30° range. Remove it or choose another mount.', frame_size: 'A 40 × 40 cm frame is required.', vertical_frame: 'The busy board requires a vertical frame.', horizontal_frame: 'The fabric pocket requires a horizontal frame.', four_edges: 'All four frame edges need complete straight tube supports.', four_corners: 'A corner fixing point is missing.', opening_occupied: 'This opening already contains a panel or textile.' },

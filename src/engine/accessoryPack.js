@@ -176,7 +176,23 @@ export function componentObstacle(model, part, { sweep = false } = {}) {
   return null;
 }
 
-function occupiedMount(model, mounts, ignoreId) {
+function separatePanelRetainers(model, candidate, part, a, b) {
+  if (!candidate.panelId || !part.panelId || a.role !== 'retainer' || b.role !== 'retainer') return false;
+  const standard = ['panel_40x40', 'panel_40x20', 'panel_30x30', 'hole_panel_40x40'];
+  if (!standard.includes(candidate.panelId) && !standard.includes(part.panelId)) return false;
+  const rail = model._rail(a.tube), first = componentFrame(model, candidate), second = componentFrame(model, { ...part, appearanceVersion: 2 });
+  const point = mountPoint(model, a);
+  if (!rail || !first || !second || !point) return false;
+  const inward = frame => {
+    const delta = sub(frame.pos, point), along = dot(delta, rail.dir);
+    return unit(sub(delta, rail.dir.map(v => v * along)));
+  };
+  // 普通板扣朝各自开口内侧；不同侧共边仍交由实际部件空间检查。
+  return dot(inward(first), inward(second)) <= 0.01;
+}
+
+function occupiedMount(model, candidate, ignoreId) {
+  const mounts = candidate.mounts;
   const parts = [...model.fittings.values(), ...model.panels.values()];
   for (const part of parts) {
     if (part.id === ignoreId) continue;
@@ -185,8 +201,9 @@ function occupiedMount(model, mounts, ignoreId) {
     const used = Array.isArray(part.mounts) ? part.mounts.filter(m => m && typeof m === 'object') : nativePanelMounts || (part.tube ? [{ tube: part.tube, t: 0.5, width: part.kind === 'sleeve' ? Infinity : 5 }] : []);
     for (const a of mounts) for (const b of used) {
       if (a.tube !== b.tube) continue;
+      if (separatePanelRetainers(model, candidate, part, a, b)) continue;
       const t = model.tubes.get(a.tube), n = t && model.nodes.get(t.a), m = t && model.nodes.get(t.b);
-      if (n && m && Math.abs(a.t - b.t) * Math.hypot(...sub(point(m), point(n))) < (a.width + b.width) / 2 + 0.2) return part.id;
+      if (n && m && Math.abs(a.t - b.t) * Math.hypot(...sub(point(m), point(n))) < (a.width + b.width) / 2 + 0.2) return { kind: part.panelId ? 'panel' : 'fitting', id: part.id, tube: a.tube, t: a.t };
     }
   }
   return null;
@@ -212,7 +229,8 @@ export function accessoryDiagnostics(model, kind, tubeId, opts = {}) {
   const mounts = [-1, 1].map(side => ({ tube: tubeId, t: 0.5 + side * spacing / (2 * len), width: 2.5, role: kind === 'steering_wheel' ? 'clamp' : 'hanger' }));
   const part = { kind, tube: tubeId, ...Object.fromEntries(['x', 'y', 'z'].map((key, i) => [key, mid(point(a), point(b))[i]])), quat,
     mounts, supportTubes: [tubeId], appearanceVersion: APPEARANCE_VERSION, facing, params: { ...spec }, id: opts.ignoreId };
-  if (occupiedMount(model, mounts, opts.ignoreId)) return { ...part, valid: false, reason: 'mount_occupied' };
+  const occupied = occupiedMount(model, part, opts.ignoreId);
+  if (occupied) return { ...part, valid: false, reason: 'mount_occupied', obstacle: occupied };
   const obstacle = componentObstacle(model, part, { sweep: kind === 'swing' });
   if (obstacle) return { ...part, valid: false, reason: kind === 'swing' ? 'swing_clearance' : 'component_space', obstacle };
   return { ...part, pos: [part.x, part.y, part.z], valid: true, reason: null };
@@ -268,9 +286,10 @@ export function panelAccessoryDiagnostics(model, probe, { ignoreId = probe.id } 
   }
   if(legacy)delete part.params.mountLayout;
   if (spec.mount === 'horizontal-frame' && Math.min(...corners.map(p => p[1])) < spec.depth + 3) return { ...part, valid: false, reason: 'ground_clearance' };
-  if (occupiedMount(model, part.mounts, ignoreId)) return { ...part, valid: false, reason: 'mount_occupied' };
+  const occupied = occupiedMount(model, part, ignoreId);
+  if (occupied) return { ...part, valid: false, reason: 'mount_occupied', obstacle: occupied };
   const existing = model.panelAt(probe.a, probe.b, probe.t0, probe.len);
-  if (existing && existing.id !== ignoreId) return { ...part, valid: false, reason: 'opening_occupied' };
+  if (existing && existing.id !== ignoreId) return { ...part, valid: false, reason: 'opening_occupied', obstacle: { kind: 'panel', id: existing.id } };
   const obstacle = componentObstacle(model, part);
   if (obstacle) return { ...part, valid: false, reason: 'component_space', obstacle };
   return { ...part, valid: true, reason: null, pos: componentFrame(model, part).pos };
@@ -333,7 +352,8 @@ export function confirmedDiagnostics(model, probe) {
     const existing=model.panelAt(part.a,part.b,part.t0,part.len,probe.id);
     if(existing)return {...part,valid:false,reason:'component_space',obstacle:{kind:'panel',id:existing.id}};
   }
-  if (occupiedMount(model, part.mounts, probe.id)) return { ...part, valid: false, reason: 'mount_occupied' };
+  const occupied = occupiedMount(model, part, probe.id);
+  if (occupied) return { ...part, valid: false, reason: 'mount_occupied', obstacle: occupied };
   const obstacle = componentObstacle(model, part);
   if (obstacle) return { ...part, valid: false, reason: 'component_space', obstacle };
   return part;
