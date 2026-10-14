@@ -28,7 +28,7 @@
 import { round2 as round, panelNormal, modelMiddle, quatFromBasis } from "./util.js";
 import { FORMAT_VERSION, C45_SLEEVE_LEN, C45_ARM_LEN } from "./config.js";
 import { QDF_FEATURE_SUFFIX, qdfPanelDimensionKey } from './qdfFeatures.js';
-import { holePartForMask, holeArmDirs, BOLT_PART, MAX_HINGES, HINGE_STEP } from "./model.js";
+import { holePartForMask, holeArmDirs, BOLT_PART, MAX_HINGES } from "./model.js";
 
 // Alle benannten Richtungen (kardinal + 45°-diagonal) fuer Arm-Erkennung.
 const S45 = Math.SQRT1_2;
@@ -684,7 +684,7 @@ export function parseQDF(text, opts = {}) {
       const ey = rotateByQuat(q, [0, 1, 0]);
       holeClamps.push({
         x: round(p.tuple[4] / 10), y: round(p.tuple[5] / 10), z: round(p.tuple[6] / 10),
-        stub: nearestCardinal([-ey[0], -ey[1], -ey[2]]),
+        stub: [-ey[0], -ey[1], -ey[2]].map(v => Math.round(v * 1e4) / 1e4),
         // Arm-Maske wie bei der Kupplung (rest[4]). Die Bits 0x01/0x02 sind das
         // Loch, der Rest sind ihre eigenen Arme -- daran haengt, ob sie ein-,
         // zwei- oder dreiarmig ist. Ohne Angabe die einarmige (51 von 55).
@@ -1008,6 +1008,22 @@ export function parseQDF(text, opts = {}) {
     // Die getragene Kupplung steht wie die Klemme -- sonst bietet sie die
     // Weltachsen an und ein angestecktes Rohr laeuft im falschen Winkel weg.
     if (!nd.quat) nd.quat = f.quat.slice();
+    // 根据开口的真实轴找被夹住的管，重开后仍保留转轴与固定侧。
+    const ey = rotateByQuat([f.quat[3], f.quat[0], f.quat[1], f.quat[2]], [0, 1, 0]);
+    let best = 2;
+    for (const t of tubes) {
+      if (t.bow || t.arm || t.link) continue;
+      const a = nodes.find(n => n.id === t.a), b = nodes.find(n => n.id === t.b);
+      if (!a || !b) continue;
+      const ab = [b.x - a.x, b.y - a.y, b.z - a.z], len = Math.hypot(...ab);
+      if (len < 1e-6) continue;
+      const u = ab.map(v => v / len);
+      if (Math.abs(u.reduce((sum, v, i) => sum + v * ey[i], 0)) < 0.99) continue;
+      const rel = [f.x - a.x, f.y - a.y, f.z - a.z];
+      const s = Math.max(0, Math.min(len, rel.reduce((sum, v, i) => sum + v * u[i], 0)));
+      const distance = Math.hypot(...rel.map((v, i) => v - u[i] * s));
+      if (distance < best) { best = distance; nd.clampOn = { tubeId: t.id, t: round(s) }; }
+    }
   }
 
   // 3. Durchlauf: Alu-Verstaerkungsprofile -> markiere getroffene Rohre.
@@ -1184,9 +1200,13 @@ export function parseQDF(text, opts = {}) {
   // des Rohrs -- dort wird gesucht.
   const clampNodes = new Map(nodes.map((n) => [n.id, n]));
   for (const h of holeClamps) {
+    // 孔销套在接头插杆上时，局部 -X 指向真实承载节点；不把自身的管误当转轴。
+    const ex = rotateByQuat([h.quat[3], h.quat[0], h.quat[1], h.quat[2]], [1, 0, 0]);
+    const carrier = [h.x - ex[0] * conn, h.y - ex[1] * conn, h.z - ex[2] * conn];
+    const onPeg = [...clampNodes.values()].some(n => Math.hypot(n.x - carrier[0], n.y - carrier[1], n.z - carrier[2]) < 2);
     const axis = [h.x - h.stub[0] * conn, h.y - h.stub[1] * conn, h.z - h.stub[2] * conn];
     let onTube = null, best = 6;   // Toleranz: die Huelse sitzt auf der Rohrachse
-    for (const t of tubes) {
+    for (const t of onPeg ? [] : tubes) {
       if (t.bow) continue;
       const a = clampNodes.get(t.a), b = clampNodes.get(t.b);
       if (!a || !b) continue;
@@ -1346,7 +1366,7 @@ export function parseQDF(text, opts = {}) {
       const arm = einsVec(rotateByQuat(qh, [0, -1, 0]));
       const u = -(arm[0] * ey[0] + arm[1] * ey[1] + arm[2] * ey[2]);   // 0 Grad = -Y
       const v = arm[0] * ez[0] + arm[1] * ez[1] + arm[2] * ez[2];
-      let grad = Math.round((Math.atan2(v, u) * 180) / Math.PI / HINGE_STEP) * HINGE_STEP;
+      let grad = Math.round((Math.atan2(v, u) * 180) / Math.PI * 1e4) / 1e4;
       grad = ((grad % 360) + 360) % 360;
       if (!nd.hinges.includes(grad)) nd.hinges.push(grad);
       flexiWeg.add(h.id);

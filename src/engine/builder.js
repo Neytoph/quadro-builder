@@ -1,6 +1,7 @@
 // Bau-Interaktion: Auswahl, Anbau ueber Richtungs-Handles, Loeschen.
 
 import { DIRECTIONS, DIAGONAL_DIRECTIONS, DIR_ALIGN_TOL, ARM_ALIGN_TOL, CLAMP_LINK_DIST, C45_SLEEVE_LEN, C45_ARM_LEN, CONN_TYPE_MASK } from "./config.js";
+import { Vector3 } from "three";
 import { buildableTubes, geometry, getTube, spacingFor, getPanel, defaultPanel, diagonalTubeId, slideKindLabel, slideKindName, isCurvedTube, gridSpacing, partName, partForFitting, getPartById, getConnector, poolLinerFor, reinforcementPart, textilePart } from "./catalog.js";
 import { CLASSIC_COLOR_IDS, officialColorId } from "./colors.js";
 import { connectorLabelInfo } from "./buildplan.js";
@@ -644,6 +645,22 @@ export class Builder {
       return;
     }
     if (!this._partTurnsOnClick(f.id)) return;
+    if (['tubeClamp', 'bearing', 'hinge', 'hole'].includes(f.action)) {
+      let turned = false;
+      this.recordHistory(() => {
+        if (f.action === 'hinge') {
+          const ref = splitHingeKey(f.id);
+          turned = !!ref && this.model.turnHinge(ref.nodeId, ref.index);
+        } else {
+          const ref = this._nodeJointRef(f.id);
+          if (ref?.kind === 'tubeClamp') turned = this.model.rotateTubeClamp(ref.nodeId, geometry().connectorSize);
+          else if (ref?.kind === 'hole') turned = this.model.turnHoleClamp(ref.nodeId);
+          else if (ref) turned = this.model.turnBearingMouth(ref.nodeId);
+        }
+      });
+      if (!turned) this.onNotice(t('notice_fitting_fixed'), 'warn');
+      this.refresh(); return;
+    }
     if (f.action === "bow") { this._turnBow(this.model.tubes.get(f.id)); return; }
     if (f.action === "c45") { this._turnC45(f.id); return; }
     let side = null;
@@ -771,6 +788,10 @@ export class Builder {
   }
 
   _clickRotationKind(id, kind) {
+    if (kind === 'node' || kind === 'fitting') {
+      const ref = this._nodeJointRef(id);
+      if (ref) return ref.kind;
+    }
     if (kind === "tube" && this.model.tubes.get(id)?.bow) return "bow";
     if (kind === "node" && this.model.nodes.get(id)?.c45body) return "c45";
     return null;
@@ -1432,6 +1453,11 @@ export class Builder {
       fitting: this.model.fittings,
     };
     for (const [id, kind] of [...this.selection]) {
+      if (kind === 'hinge') {
+        const ref = splitHingeKey(id), node = ref && this.model.nodes.get(ref.nodeId);
+        if (!node || !isBoltPart(node.part) || ref.index < 0 || ref.index >= (node.hinges || []).length) this.selection.delete(id);
+        continue;
+      }
       const map = maps[kind];
       if (!map || !map.has(id)) this.selection.delete(id);
     }
@@ -1815,7 +1841,14 @@ export class Builder {
         // eine volle Lochweite daneben.
         const center = [c.x + c.off[0], c.y + c.off[1], c.z + c.off[2]];
         if (this._openingOccupied(center, c.dir)) continue;
-        this.scene.addHandle(center, { clampOpening: true, center, dir: c.dir, clampId: c.id }, "dir");
+        const tube = getTube(this.tubeId);
+        if (!tube) continue;
+        const span = spacingFor(tube.length_cm);
+        const { p1, p2 } = this.model.secondTubeEnds(c.id, span,
+          { step: SNAP_STEP, cs: geometry().connectorSize });
+        this.scene.addHandle(center, { clampOpening: true, center, dir: c.dir, clampId: c.id,
+          previewEnds: [p1, p2], previewSpan: span, previewColor: this.colorFor("tube"),
+          arrowCompact: true }, "dir");
       }
       // Dasselbe fuer das noch leere Maul einer Lagerkupplung: der Punkt liegt
       // GENAU auf der Achse, auf der das Rohr durchlaeuft.
@@ -2755,6 +2788,12 @@ export class Builder {
           || this.scene.pickBuild(e.clientX, e.clientY);
         if (pick && pick.data.kind === "clamp" && this._beginClampDrag(pick.data.id)) return;
       }
+      if (e.button === 0 && this.mode === "select" && !this._down.add && !e.altKey) {
+        const pick = this._pickSelect(e.clientX, e.clientY);
+        const driver = this._rotationDriverForPick(pick);
+        const key = this._rotationPickKey(pick);
+        if (driver && this.selection.has(key) && this._beginClampDrag(driver)) return;
+      }
       // ⌥ + Ziehen: quer verschieben -- am Mac-Trackpad die Alternative zur
       // mittleren / rechten Taste.
       if (e.button === 0 && e.altKey && !this._down.box) {
@@ -3085,6 +3124,8 @@ export class Builder {
       const p = raw;
       this.scene.setHover(null);
       this.scene.setHoverPart(p, this.mode, x, y, this._deleteHoverExtras(p));
+      if (this.mode === "select" && p && this.selection.has(this._rotationPickKey(p)) && this._rotationDriverForPick(p))
+        this.scene.setCursor("grab");
       return;
     }
     this.scene.setHoverPart(null);
@@ -3321,55 +3362,96 @@ export class Builder {
     this.refresh();
   }
 
-  _selectedClampDriver() {
-    let driver = null;
-    for (const [id, kind] of this.selection) {
-      if (kind === "clamp") { driver = id; break; }
-    }
-    if (!driver) {
-      for (const [id, kind] of this.selection) {
-        if (kind !== "tube") continue;
-        for (const c of this.model.clamps.values()) {
-          const t = this.model._clampSecondTube(c);
-          if (t && t.id === id) { driver = c.id; break; }
-        }
-        if (driver) break;
-      }
-    }
-    if (!driver) return null;
-    const c = this.model.clamps.get(driver);
-    if (!c) return null;
-    const flap = this.model._clampFlap(c);
-    const panelOk = (id, kind) => {
-      if (kind !== "panel" && kind !== "textile") return false;
+  _clampMovesPart(c, flap, id, kind) {
+    if (kind === "clamp") return flap.clampIds.has(id);
+    if (kind === "tube") return flap.second.has(id);
+    if (kind === "panel" || kind === "textile") {
       const p = (kind === "panel" ? this.model.panels : this.model.textiles).get(id);
       return !!(p && (flap.second.has(p.a) || flap.second.has(p.b)));
-    };
-    for (const [id, kind] of this.selection) {
-      if (kind === "clamp" && flap.clampIds.has(id)) continue;
-      if (kind === "tube" && flap.second.has(id)) continue;
-      if (panelOk(id, kind)) continue;
-      return null;
     }
-    return driver;
+    // 与 rotateClamp 共用活动节点范围，固定的第一根管和其端点不进入。
+    if (!flap.nodes) flap.nodes = this.model._flapNodeAxes(c, flap);
+    if (kind === "node") return flap.nodes.has(id);
+    let part;
+    if (kind === "fitting") part = this.model.fittings.get(id);
+    if (kind === "slide") part = this.model.slides.get(id);
+    return !!(part && this.model.clampPartAxis(flap, flap.nodes, part));
+  }
+
+  _selectedClampDriver() {
+    if (!this.selection.size) return null;
+    const candidates = [...this.model.clamps.values()].filter(c => c.dir && c.off);
+    // 有嵌套夹子时，先使用选中的夹子或直接夹着所选管的关节。
+    candidates.sort((a, b) => {
+      const priority = c => {
+        if (this.selection.has(c.id)) return 0;
+        if (this.selection.has(this.model._clampSecondTube(c)?.id)) return 1;
+        return 2;
+      };
+      return priority(a) - priority(b);
+    });
+    for (const c of candidates) {
+      const flap = this.model._clampFlap(c);
+      if ([...this.selection].every(([id, kind]) => this._clampMovesPart(c, flap, id, kind))) return c.id;
+    }
+    return null;
   }
 
   _flapDriverForPick(pick) {
     if (!pick || !this.selection.size) return null;
-    const kind = pick.data.kind;
-    const id = pick.data.id;
-    for (const [cid, k] of this.selection) {
-      if (k !== "clamp") continue;
-      const c = this.model.clamps.get(cid);
-      if (!c) continue;
-      const flap = this.model._clampFlap(c);
-      if (kind === "tube" && flap.second.has(id)) return cid;
-      if (kind === "panel" || kind === "textile") {
-        const p = (kind === "panel" ? this.model.panels : this.model.textiles).get(id);
-        if (p && (flap.second.has(p.a) || flap.second.has(p.b))) return cid;
+    const driver = this._selectedClampDriver();
+    const c = driver && this.model.clamps.get(driver);
+    return c && this._clampMovesPart(c, this.model._clampFlap(c), pick.data.id, pick.data.kind) ? driver : null;
+  }
+
+  _rotationPickKey(pick) {
+    return Number.isInteger(pick?.data.hinge) ? hingeKey(pick.data.id, pick.data.hinge) : pick?.data.id;
+  }
+
+  _nodeJointRef(id) {
+    const n = this.model.nodes.get(id) || [...this.model.nodes.values()].find(n => n.bearingOn === id);
+    if (n?.clampOn && n.stub) return { kind: 'tubeClamp', nodeId: n.id };
+    if (n && isHolePart(n.part) && n.partQuat) return { kind: 'hole', nodeId: n.id };
+    if (n?.bearingOn && !n.clampOn) return { kind: 'bearing', nodeId: n.id };
+    return null;
+  }
+
+  _rotationDriverForPick(pick) {
+    if (!pick || !this.selection.size) return null;
+    const refs = [];
+    for (const n of this.model.nodes.values()) {
+      const ref = this._nodeJointRef(n.id);
+      if (ref) refs.push(ref);
+      for (let index = 0; index < (n.hinges || []).length; index++) refs.push({ kind: 'hinge', nodeId: n.id, index });
+    }
+    const keyOf = ref => ref.kind === 'hinge' ? hingeKey(ref.nodeId, ref.index) : ref.nodeId;
+    const candidates = [];
+    for (const ref of refs) {
+      const j = this.model.rotationJoint(ref, geometry().connectorSize);
+      const kind = Number.isInteger(pick.data.hinge) ? 'hinge' : pick.data.kind;
+      if (j && [...this.selection].every(([id, kind]) => this.model.jointMovesPart(j, id, kind))
+          && this.model.jointMovesPart(j, this._rotationPickKey(pick), kind)) {
+        const selectedJoint = this.selection.has(keyOf(ref)) || this.selection.has(this.model.nodes.get(ref.nodeId)?.bearingOn);
+        const directTube = [...this.selection].some(([id, kind]) => {
+          const t = kind === 'tube' && this.model.tubes.get(id);
+          return t && (t.a === ref.nodeId || t.b === ref.nodeId);
+        });
+        let rank = 2;
+        if (selectedJoint) rank = 0;
+        else if (directTube) rank = 1;
+        candidates.push({ driver: ref, rank, size: j.nodes.size });
       }
     }
-    return null;
+    const clampId = this._flapDriverForPick(pick);
+    if (clampId) {
+      const c = this.model.clamps.get(clampId), flap = this.model._clampFlap(c);
+      let rank = 2;
+      if (this.selection.has(clampId)) rank = 0;
+      else if (this.selection.has(this.model._clampSecondTube(c)?.id)) rank = 1;
+      candidates.push({ driver: clampId, rank, size: flap.second.size * 2 });
+    }
+    candidates.sort((a, b) => a.rank - b.rank || a.size - b.size);
+    return candidates[0]?.driver || null;
   }
 
   /** Zweite Tube / Klappen-Platte: die Klemme, entlang deren Rohr sich das schiebt. */
@@ -3398,18 +3480,40 @@ export class Builder {
 
   _beginClampDrag(id) {
     if (this.readOnly) return false;
-    const c = this.model.clamps.get(id);
-    if (!c || !c.dir || !c.off) return false;
+    const joint = typeof id === 'object' ? this.model.rotationJoint(id, geometry().connectorSize) : null;
+    const c = joint || this.model.clamps.get(id);
+    if (!c || !(joint || c.dir && c.off)) return false;
     this._clampDrag = {
       id,
+      joint: joint ? id : null,
       before: JSON.stringify(this.model.toJSON()),
-      origin: [c.x, c.y, c.z],
-      axis: c.dir.slice(),
-      startOff: c.off.slice(),
+      origin: joint ? joint.origin.slice() : [c.x, c.y, c.z],
+      axis: (joint ? joint.axis : c.dir).slice(),
+      startOff: (joint ? joint.dir : c.off).slice(),
       moved: false,
     };
+    const d = this._clampDrag;
+    if (this._down) {
+      d.pointerDir = this._clampPointerDir(this._down.x, this._down.y, d);
+      if (!d.pointerDir) {
+        const points = this.scene.projectWorld([d.origin, d.origin.map((v, i) => v + d.axis[i] * 10)]);
+        const rect = this.scene.renderer.domElement.getBoundingClientRect();
+        const dx = (points[1].u - points[0].u) * rect.width, dy = (points[1].v - points[0].v) * rect.height;
+        const length = Math.hypot(dx, dy);
+        d.screenPerp = length > 1 ? [-dy / length, dx / length] : [0, 1];
+      }
+    }
     this.scene.setCursor("grabbing");
     return true;
+  }
+
+  _clampPointerDir(x, y, d) {
+    const hit = this.scene.pointOnPlane(x, y, d.origin, d.axis);
+    if (!hit) return null;
+    const u = new Vector3(...d.axis).normalize();
+    const q = new Vector3(hit.x, hit.y, hit.z).sub(new Vector3(...d.origin));
+    q.addScaledVector(u, -q.dot(u));
+    return q.length() >= 0.4 ? q.normalize() : null;
   }
 
   _snapDirAroundAxis(dir, u, stepRad) {
@@ -3434,24 +3538,36 @@ export class Builder {
     if (!d || !this._down) return;
     if (!d.moved && Math.hypot(e.clientX - this._down.x, e.clientY - this._down.y) <= CLICK_TOLERANCE) return;
     d.moved = true;
-    const hit = this.scene.pointOnPlane(e.clientX, e.clientY, d.origin, d.axis);
-    if (!hit) return;
     const u = d.axis;
     const ul = Math.hypot(u[0], u[1], u[2]) || 1;
     const ux = u[0] / ul, uy = u[1] / ul, uz = u[2] / ul;
-    let q = [hit.x - d.origin[0], hit.y - d.origin[1], hit.z - d.origin[2]];
-    const along = q[0] * ux + q[1] * uy + q[2] * uz;
-    q = [q[0] - ux * along, q[1] - uy * along, q[2] - uz * along];
-    const ql = Math.hypot(q[0], q[1], q[2]);
-    if (ql < 0.4) return;
-    q = [q[0] / ql, q[1] / ql, q[2] / ql];
+    const axis = new Vector3(ux, uy, uz);
+    let angle;
+    if (d.pointerDir) {
+      const pointer = this._clampPointerDir(e.clientX, e.clientY, d);
+      if (!pointer) return;
+      angle = Math.atan2(axis.dot(new Vector3().crossVectors(d.pointerDir, pointer)), d.pointerDir.dot(pointer));
+    } else {
+      // 从侧面看转轴时射线无法稳定落在旋转平面，按屏幕垂直于转轴的拖动连续换角。
+      const dx = e.clientX - this._down.x, dy = e.clientY - this._down.y;
+      angle = (dx * d.screenPerp[0] + dy * d.screenPerp[1]) * Math.PI / 180;
+    }
+    let q = new Vector3(...d.startOff).normalize().applyAxisAngle(axis, angle).toArray();
     if (e.shiftKey) q = this._snapDirAroundAxis(q, [ux, uy, uz], Math.PI / 12);
     this.model.loadJSON(JSON.parse(d.before));
-    const ok = this.model.setClampOffDir(d.id, q);
-    if (!ok && d.lastDir) this.model.setClampOffDir(d.id, d.lastDir);
+    const apply = dir => {
+      if (new Vector3(...d.startOff).normalize().distanceTo(new Vector3(...dir).normalize()) < 1e-8) return true;
+      if (!d.joint) return this.model.setClampOffDir(d.id, dir);
+      const from = new Vector3(...d.startOff).normalize(), to = new Vector3(...dir).normalize();
+      const radians = Math.atan2(axis.dot(new Vector3().crossVectors(from, to)), from.dot(to));
+      return this.model.rotateJoint(d.joint, radians, geometry().connectorSize);
+    };
+    const ok = apply(q);
+    if (!ok && d.lastDir) apply(d.lastDir);
     else if (ok) d.lastDir = q;
     this.refresh();
-    const c = this.model.clamps.get(d.id);
+    if (!ok) { this.onNotice(t('notice_joint_limit'), 'warn'); return; }
+    const c = d.joint ? { off: d.lastDir || d.startOff } : this.model.clamps.get(d.id);
     if (c && c.off && d.startOff) {
       const a = d.startOff, b = c.off;
       const al = Math.hypot(...a) || 1, bl = Math.hypot(...b) || 1;
@@ -3473,6 +3589,7 @@ export class Builder {
     this.scene.endOrbit();
     if (!d) return;
     if (!d.moved) {
+      if (this.mode === "select") { this._clickSelect(e); return; }
       let turned = false;
       this.recordHistory(() => { turned = this._rotateClampWithFallback(d.id); });
       if (!turned) this.onNotice(t("notice_fitting_fixed"), "warn");
@@ -3898,7 +4015,7 @@ export class Builder {
    * die Dummy-Kupplung, das SCHARNIER auf das mittlere Segment eines Bolzens
    * (hoechstens zwei). Ein Klick auf ein gesetztes Scharnier dreht es um 45
    * Grad um die Bolzenachse weiter -- die Stellung des zweiten Scharniers wird
-   * dabei uebersprungen, und ein Arm mit Rohr bleibt stehen.
+   * dabei uebersprungen, und angeschlossene Teile drehen mit.
    */
   _clickFlexi(e) {
     const cs = geometry().connectorSize;
@@ -4570,6 +4687,18 @@ export class Builder {
         this._selectConnectedFromPick(pick, add);
         return;
       }
+      if (kind === "panel" || kind === "textile") {
+        if (kind === "panel" && !add && this._panelFlipsOnClick(id)) {
+          this._queueSelectFlip(id, e);
+          return;
+        }
+        if (!add) this.selection.clear();
+        if (add && this.selection.has(id)) this.selection.delete(id);
+        else this.selection.set(id, kind);
+        this._profilAuswahl = null;
+        this.refresh();
+        return;
+      }
       this._selectClampCohort(slideOwner, add);
       return;
     }
@@ -4581,6 +4710,7 @@ export class Builder {
         this._selectConnectedFromPick(pick, add);
         return;
       }
+      if (!add && this._partTurnsOnClick(key)) { this._queueSelectFlip(key, e, 'hinge'); return; }
       if (add) {
         if (this.selection.has(key)) this.selection.delete(key);
         else this.selection.set(key, "hinge");

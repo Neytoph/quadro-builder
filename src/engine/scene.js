@@ -1305,25 +1305,35 @@ export class SceneManager {
   // Rohr-Geometrie, gecacht je Laenge/Radius/Segmentzahl. Vorher entstand pro
   // Rohr und pro Render-Durchlauf eine neue CylinderGeometry (~425 Stueck), die
   // beim naechsten Durchlauf wieder weggeworfen wurde.
-  _tubeGeometry(radius, length, segments) {
-    const key = `${radius.toFixed(2)}:${length.toFixed(2)}:${segments}`;
+  _tubeGeometry(radius, length, segments, hollow = false) {
+    const key = `${radius.toFixed(2)}:${length.toFixed(2)}:${segments}:${hollow}`;
     let geo = this._tubeGeos.get(key);
     if (!geo) {
-      geo = new THREE.CylinderGeometry(radius, radius, length, segments);
+      const inner = Math.max(0.1, radius - 0.3);
+      geo = hollow ? new THREE.LatheGeometry([
+        new THREE.Vector2(inner, -length / 2), new THREE.Vector2(radius, -length / 2),
+        new THREE.Vector2(radius, length / 2), new THREE.Vector2(inner, length / 2),
+        new THREE.Vector2(inner, -length / 2),
+      ], segments) : new THREE.CylinderGeometry(radius, radius, length, segments);
+      if (hollow) {
+        const colors = new Float32Array(geo.getAttribute("position").count * 3);
+        for (let i = 0; i < colors.length / 3; i++) colors.fill(i % 5 === 0 || i % 5 >= 3 ? 0.45 : 1, i * 3, i * 3 + 3);
+        geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+      } else geo.setAttribute("color", new THREE.BufferAttribute(new Float32Array(geo.getAttribute("position").count * 3).fill(1), 3));
       this._tubeGeos.set(key, geo);
       this._keepGeos.add(geo);
     }
     return geo;
   }
 
-  // Abschluss-Scheibe fuer die Enden eines Bogenrohrs, gecacht wie die
-  // Rohr-Geometrien. Liegt in der XY-Ebene, Normale +Z.
+  // 弯管两端的管壁环，中心保留开口；位于 XY 平面，法线 +Z。
   _capGeometry(radius, segments) {
     if (!this._capGeos) this._capGeos = new Map();
     const key = `${radius.toFixed(2)}:${segments}`;
     let geo = this._capGeos.get(key);
     if (!geo) {
-      geo = new THREE.CircleGeometry(radius, segments);
+      geo = new THREE.RingGeometry(Math.max(0.1, radius - 0.3), radius, segments);
+      geo.setAttribute("color", new THREE.BufferAttribute(new Float32Array(geo.getAttribute("position").count * 3).fill(1), 3));
       this._capGeos.set(key, geo);
       this._keepGeos.add(geo);
     }
@@ -3198,6 +3208,7 @@ export class SceneManager {
         color: new THREE.Color(this._look(colorId)),
         roughness: 0.5,
         metalness: 0,
+        vertexColors: true,
       });
       m.userData.tuneColorId = colorId;
       this._materials[key] = m;
@@ -4080,6 +4091,7 @@ export class SceneManager {
       pushDir(n.id, -n.stub[0], -n.stub[1], -n.stub[2], false);
     }
     for (const t of model.tubes.values()) {
+      if (t.link) continue;
       const na = model.nodes.get(t.a), nb = model.nodes.get(t.b);
       if (!na || !nb) continue;
       if (t.bow && t.bowCenter) {
@@ -4234,6 +4246,9 @@ export class SceneManager {
           && !(model.hasWheelCap && model.hasWheelCap(n))) {
         const pos = new THREE.Vector3(n.x, n.y, n.z);
         const connection = resolveNodeConnection(model, n);
+        // 虚拟双管连杆保留图关系；自由管端没有实际接头。
+        if (!connection.types.length && !n.preferType && !n.arms?.length
+            && !n.part && !n.c45 && !n.bearingOn) continue;
         const quat = connection.quat ? new THREE.Quaternion(...connection.quat).normalize()
           : connection.frame ? new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(...connection.frame.map(axis => new THREE.Vector3(...axis))))
           : new THREE.Quaternion();
@@ -4431,27 +4446,29 @@ export class SceneManager {
           : (asm && st === "done") ? this._tubeMaterial(t.color)
           : this._tubeMaterial(t.color);
         const bowFinalMat = matFor(t.id, bowMat);
-        // Abgegriffenes Originalteil, wenn es passt: EIN Mesh, an beiden Enden
-        // geschlossen und mit dem geraden Vorlauf, in dem der Kupplungsarm steckt.
-        const echterBogen = wantMeshes ? this._bowMeshFor(va, vb, t.bowCenter) : null;
-        if (echterBogen) {
-          this._batchAdd(echterBogen.geo, bowFinalMat, echterBogen.matrix,
-            "tube", t.id, st !== "future" ? this.pickTubes : null);
-          continue;
-        }
+        // 弯管同样保留空心管口，旧网格的实心端面不用于管身。
         const bowMesh = new THREE.Mesh(
           new THREE.TubeGeometry(bowCurve, 24, tubeRadius, qual.bow, false),
           bowFinalMat
         );
+        bowMesh.geometry.setAttribute("color", new THREE.BufferAttribute(new Float32Array(bowMesh.geometry.getAttribute("position").count * 3).fill(1), 3));
         bowMesh.userData = { kind: "tube", id: t.id };
         bowMesh.castShadow = true;
         this.buildGroup.add(bowMesh);
         if (st !== "future") this.pickTubes.push(bowMesh);
 
-        // TubeGeometry ist ein offener Schlauch. Ohne Deckel sieht man in das
-        // Rohr hinein (die Rueckseiten werden weggeschnitten) -- es wirkt als
-        // blosse Flaeche, waehrend gerade Rohre als CylinderGeometry
-        // geschlossen sind. Also je Ende eine Scheibe, Normale nach aussen.
+        const innerGeo = new THREE.TubeGeometry(bowCurve, 24, Math.max(0.1, tubeRadius - 0.3), qual.bow, false);
+        const indices = innerGeo.index.array;
+        for (let i = 0; i < indices.length; i += 3) [indices[i], indices[i + 1]] = [indices[i + 1], indices[i]];
+        const normals = innerGeo.getAttribute("normal");
+        for (let i = 0; i < normals.array.length; i++) normals.array[i] *= -1;
+        innerGeo.setAttribute("color", new THREE.BufferAttribute(new Float32Array(normals.count * 3).fill(0.45), 3));
+        const innerMesh = new THREE.Mesh(innerGeo, bowFinalMat);
+        innerMesh.userData = { kind: "tube", id: t.id };
+        this.buildGroup.add(innerMesh);
+        if (st !== "future") this.pickTubes.push(innerMesh);
+
+        // 端面只画管壁截面，保留中间的孔。
         const capGeo = this._capGeometry(tubeRadius, qual.bow);
         for (const [u01, sign] of [[0, -1], [1, 1]]) {
           const cap = new THREE.Mesh(capGeo, bowFinalMat);
@@ -4481,9 +4498,9 @@ export class SceneManager {
         ? Math.max(1, t.geom.len + (t.geom.pad || 0)) : Math.max(1, len - cs);
       const isReinforceActive = reinforce && t.reinforced;
       const effectiveRadius = isReinforceActive ? tubeRadius * 1.08 : tubeRadius;
-      const geo = this._tubeGeometry(tubeRadius, drawLen, qual.tube);
+      const geo = this._tubeGeometry(tubeRadius, drawLen, qual.tube, true);
       const geo2 = isReinforceActive
-        ? this._tubeGeometry(effectiveRadius, drawLen, qual.tube)
+        ? this._tubeGeometry(effectiveRadius, drawLen, qual.tube, true)
         : geo;
       let mat = st === "future" ? this._ghostMaterial()
         : st === "current" ? this._tubeMaterial(t.color)
@@ -4493,7 +4510,7 @@ export class SceneManager {
         : (asm && st === "done") ? this._tubeMaterial(t.color)
         : this._tubeMaterial(t.color);
       if (t.tubeId?.startsWith('TA') && st !== 'future' && !(asm && st === 'done')) {
-        if (!this._materials.aluminiumTube) this._materials.aluminiumTube = new THREE.MeshStandardMaterial({ color: '#b9c0c5', metalness: 0.85, roughness: 0.27 });
+        if (!this._materials.aluminiumTube) this._materials.aluminiumTube = new THREE.MeshStandardMaterial({ color: '#b9c0c5', metalness: 0.85, roughness: 0.27, vertexColors: true });
         mat = this._materials.aluminiumTube;
       }
       const dir = vb.clone().sub(va).normalize();
@@ -5339,14 +5356,28 @@ export class SceneManager {
       guideAxis: this._guideAxisOf([dir.x, dir.y, dir.z]),
     }, userData);
 
-    this._addNodeGuide(origin, [dir.x, dir.y, dir.z]);
+    const ends = userData.previewEnds;
+    const parallelMid = ends ? new THREE.Vector3(...ends[0]).add(new THREE.Vector3(...ends[1]))
+      .multiplyScalar(0.5).sub(group.position).dot(dir) : null;
+    const parallelSpan = ends ? new THREE.Vector3(...ends[0]).distanceTo(new THREE.Vector3(...ends[1])) : null;
+    if (ends) {
+      const guide = new THREE.Mesh(this._cachedGeo("parallelGuide", () =>
+        new THREE.CylinderGeometry(GUIDE.r, GUIDE.r, 1, 6)),
+        this._guideMaterial(group.userData.guideAxis, false));
+      guide.scale.y = parallelSpan;
+      guide.position.y = parallelMid;
+      guide.renderOrder = 998;
+      guide.raycast = () => {};
+      group.add(guide);
+    } else this._addNodeGuide(origin, [dir.x, dir.y, dir.z]);
 
     // 指到这个方向时亮起来的那一条，从接点往外，比引导线略长也略粗
     const beam = new THREE.Mesh(
       this._guideBeamGeo(),
       this._guideMaterial(group.userData.guideAxis, true),
     );
-    beam.position.y = GUIDE.beamHalf / 2;
+    beam.position.y = ends ? parallelMid : GUIDE.beamHalf / 2;
+    if (ends) beam.scale.y = parallelSpan / GUIDE.beamHalf;
     beam.renderOrder = 1000;
     beam.visible = false;
     beam.raycast = () => {};
@@ -5354,9 +5385,10 @@ export class SceneManager {
     // 两个碰撞体现在一样长：静止和指上去的区别只在那条亮线，
     // 判定范围没有理由跟着变。长度跟引导线对齐，指到线的任何一段都算数。
     const hitStub = new THREE.Mesh(this._guideHitGeo(), this._arrowHitMaterial());
-    hitStub.position.y = GUIDE.hitLen / 2;
+    hitStub.position.y = ends ? parallelMid : GUIDE.hitLen / 2;
     const hitFull = new THREE.Mesh(this._guideHitGeo(), this._arrowHitMaterial());
-    hitFull.position.y = GUIDE.hitLen / 2;
+    hitFull.position.y = hitStub.position.y;
+    if (ends) hitStub.scale.y = hitFull.scale.y = parallelSpan / GUIDE.hitLen;
     const childData = Object.assign({ kind: "handle", arrowRoot: group }, userData);
     hitStub.userData = hitFull.userData = childData;
     group.userData.beamMesh = beam;
@@ -5423,10 +5455,10 @@ export class SceneManager {
     const colorId = group.userData.previewColor;
     const hex = colorId ? this._look(colorId) : ARROW_TEAL;
     if (!this._tubePreview) {
-      const geo = new THREE.CylinderGeometry(r, r, 1, 14);
+      const geo = this._tubeGeometry(r, 1, 14, true);
       const mat = new THREE.MeshStandardMaterial({
-        transparent: true, opacity: 0.28, roughness: 0.48, metalness: 0.04,
-        depthWrite: false,
+        transparent: true, opacity: 0.5, roughness: 0.48, metalness: 0.04,
+        depthWrite: false, vertexColors: true,
       });
       this._tubePreview = new THREE.Mesh(geo, mat);
       this._tubePreview.renderOrder = 998;
@@ -5435,7 +5467,9 @@ export class SceneManager {
     }
     this._tubePreview.material.color.set(hex);
     this._tubePreview.scale.set(1, drawLen, 1);
-    const mid = new THREE.Vector3().copy(group.position).addScaledVector(dir, cs / 2 + drawLen / 2);
+    const ends = group.userData.previewEnds;
+    const mid = ends ? new THREE.Vector3(...ends[0]).add(new THREE.Vector3(...ends[1])).multiplyScalar(0.5)
+      : new THREE.Vector3().copy(group.position).addScaledVector(dir, cs / 2 + drawLen / 2);
     this._tubePreview.position.copy(mid);
     this._tubePreview.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
     this._tubePreview.visible = true;
@@ -6107,7 +6141,8 @@ export class SceneManager {
         this._clearTubePreview();
       } else {
         const isArrow = !!root.userData.arrowRoot;
-        root.scale.setScalar(isArrow ? 1.12 : root.userData.panelDot ? 1.4 : 1.6);
+        if (root.userData.previewEnds) root.scale.setScalar(1);
+        else root.scale.setScalar(isArrow ? 1.12 : root.userData.panelDot ? 1.4 : 1.6);
         if (isArrow) {
           this._paintArrow(root, "focus");
           this._setTubePreview(root);
