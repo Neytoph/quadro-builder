@@ -6020,8 +6020,12 @@ export class BuildModel {
    *
    * steps < 0 转另一个方向（Q 键）；pivot 指定绕哪一头转（默认 a 头），
    * 传 b 头就先把两头对调——弯管两头本来就没有先后。
+   * Builder 记住点击方向时传 reverseOnBlock:false，由控制器处理换向。
+   * @param {string} id
+   * @param {number} [steps]
+   * @param {{ pivot?: string, reverseOnBlock?: boolean }} [options]
    */
-  rotateBow(id, steps = 1, { pivot } = {}) {
+  rotateBow(id, steps = 1, { pivot, reverseOnBlock = true } = {}) {
     const t = this.tubes.get(id);
     if (!t || !t.bow || !t.bowCenter) return null;
     const reversed = pivot != null && pivot === t.b;
@@ -6037,7 +6041,8 @@ export class BuildModel {
     // 优先转指定方向 90 度；受阻就反向转 90 度，不跳过障碍转 180 度。
     const perp = cross(t0, n);
     const anti = [-perp[0], -perp[1], -perp[2]];
-    const order = steps < 0 ? [anti, perp] : [perp, anti];
+    const directions = steps < 0 ? [anti, perp] : [perp, anti];
+    const order = reverseOnBlock ? directions : directions.slice(0, 1);
     let blocked = null;
     for (const n2 of order) {
       const target = {

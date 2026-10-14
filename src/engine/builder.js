@@ -136,6 +136,7 @@ export class Builder {
     this.readOnly = false;
     // 选择模式里再点选中的面板、排着等执行的翻面（见 _queueSelectFlip）
     this._selectFlip = null;
+    this._rotationDirections = new Map();
     // 外壳借模型去截缩略图、封面：这段时间模型里放的是别的东西
     this.held = false;
     // 按零件上色（id -> 颜色）：共享方案里别人选中的零件
@@ -163,6 +164,7 @@ export class Builder {
    * 读出来的内容）时从文档重新读出整座；拖动或粘贴进行中就等它收尾。
    */
   setHistory(history) {
+    if (this.history !== history) this._rotationDirections = new Map();
     if (this.history && this.history !== history) {
       this.history.onChange(() => {});
       this.history.onExternal(() => {});
@@ -733,18 +735,35 @@ export class Builder {
     if (bow) return this._turnBow(bow, steps);
     const before = JSON.stringify(this.model.toJSON());
     const options = { merge: true, validate: infeasibleConnectors, grid: SNAP_STEP };
-    let res = this.model.rotateSelection(this.selection, steps, options);
-    if (!res.ok && res.reason === "collision") {
-      res = this.model.rotateSelection(this.selection, -steps, options);
-    }
+    const key = `selection:${[...this.selection.keys()].sort().join(",")}`;
+    const res = this._rotateWithDirection(key, steps,
+      (direction) => this.model.rotateSelection(this.selection, direction, options),
+      (result) => result.ok, (result) => result.reason === "collision");
     if (!res.ok) { this.onNotice(t("notice_rotate_" + res.reason), "warn"); return false; }
     this._afterMove(before, res);
     return true;
   }
 
-  // 点击或快捷键的固定角度受阻时，尝试同角度反向转；拖动仍跟随指针。
+  // 同一零件沿当前方向继续转；受阻后换向并记住，直到再次受阻或主动指定相反方向。
+  _rotateWithDirection(key, amount, rotate, succeeded = (result) => result === true,
+      blocked = () => true) {
+    if (!amount) return rotate(amount);
+    const requested = Math.sign(amount);
+    const previous = this._rotationDirections.get(key);
+    let direction = previous?.requested === requested ? previous.direction : requested;
+    let result = rotate(Math.abs(amount) * direction);
+    if (!succeeded(result) && blocked(result)) {
+      direction = -direction;
+      result = rotate(Math.abs(amount) * direction);
+    }
+    this._rotationDirections.set(key, { requested, direction });
+    return result;
+  }
+
+  // 点击和快捷键共用夹子的方向；拖动仍跟随指针。
   _rotateClampWithFallback(id, radians = Math.PI / 4) {
-    return this.model.rotateClamp(id, radians) || this.model.rotateClamp(id, -radians);
+    return this._rotateWithDirection(`clamp:${id}`, radians,
+      (direction) => this.model.rotateClamp(id, direction));
   }
 
   _clickRotationKind(id, kind) {
@@ -758,7 +777,11 @@ export class Builder {
     const pivot = this._bowPivotFor(bow);
     if (!pivot) { this.onNotice(t("notice_bow_attached"), "warn"); return false; }
     let res;
-    this.recordHistory(() => { res = this.model.rotateBow(bow.id, steps, { pivot }); });
+    this.recordHistory(() => {
+      res = this._rotateWithDirection(`bow:${bow.id}`, steps,
+        (direction) => this.model.rotateBow(bow.id, direction, { pivot, reverseOnBlock: false }),
+        (result) => !!result?.node, (result) => !!(result?.ground || result?.duplicate));
+    });
     if (res?.ground) this.onNotice(t("notice_ground"), "warn");
     else if (res?.duplicate) this.onNotice(t("notice_bow_blocked"), "warn");
     else if (res?.node) this.onNotice(t("notice_bow_turned"));
@@ -771,9 +794,9 @@ export class Builder {
     const sleeve = this._c45HasTube(id);
     let ok = false;
     this.recordHistory(() => {
-      ok = sleeve
-        ? this.model.rotateC45Sleeve(id, 1) || this.model.rotateC45Sleeve(id, -1)
-        : this.model.rotateC45(id, 1) || this.model.rotateC45(id, -1);
+      ok = this._rotateWithDirection(`c45:${id}`, 1, (direction) => sleeve
+        ? this.model.rotateC45Sleeve(id, direction)
+        : this.model.rotateC45(id, direction));
     });
     const blockedNotice = sleeve ? "notice_c45_has_tube" : "notice_c45_no_turn";
     this.onNotice(t(ok ? "notice_c45_turned" : blockedNotice), ok ? "ok" : "warn");
