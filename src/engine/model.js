@@ -727,17 +727,23 @@ export class BuildModel {
   removeNode(id) {
     const weg = this.nodes.get(id);
     if (!weg) return;
+    const armNeighbors = new Set();
+    const tubeNeighbors = new Set();
     // Die Lagerkupplung gehoert zu der Kupplung, die sie traegt -- faellt die,
     // faellt auch die Klemme.
     if (weg.bearingOn) this.fittings.delete(weg.bearingOn);
     for (const t of [...this.tubes.values()]) {
       if (t.a !== id && t.b !== id) continue;
+      tubeNeighbors.add(t.a === id ? t.b : t.a);
+      if (t.arm) armNeighbors.add(t.a === id ? t.b : t.a);
       this._releaseArms(t);
       this.tubes.delete(t.id);
     }
     this.nodes.delete(id);
+    for (const neighborId of armNeighbors) this._syncC45Flag(neighborId);
     this._prunePanels();
     this._pruneClamps();
+    this._pruneOrphanedC45Bodies(tubeNeighbors);
   }
 
   /**
@@ -1017,9 +1023,11 @@ export class BuildModel {
 
   // Verwaiste c45body-Knoten entfernen: Adapter-Koerper ohne Diagonalrohr
   // (nur noch per Arm-Kante mit der Eck-Kupplung verbunden) werden geloescht.
-  _pruneOrphanedC45Bodies() {
+  _pruneOrphanedC45Bodies(ids = null) {
+    const armNeighbors = new Set();
     for (const n of [...this.nodes.values()]) {
       if (!n.c45body) continue;
+      if (ids && !ids.has(n.id)) continue;
       let hasNonArmTube = false;
       for (const t of this.tubes.values()) {
         if ((t.a === n.id || t.b === n.id) && !t.arm && !t.link) { hasNonArmTube = true; break; }
@@ -1027,12 +1035,15 @@ export class BuildModel {
       if (!hasNonArmTube) {
         for (const t of [...this.tubes.values()]) {
           if (t.a !== n.id && t.b !== n.id) continue;
+          if (t.arm) armNeighbors.add(t.a === n.id ? t.b : t.a);
           this._releaseArms(t);
           this.tubes.delete(t.id);
         }
         this.nodes.delete(n.id);
       }
     }
+    // 转接头移除后同步承载接头，避免继续绘制已不存在的斜向管头。
+    for (const id of armNeighbors) this._syncC45Flag(id);
   }
 
   // --- Platten -----------------------------------------------------------
