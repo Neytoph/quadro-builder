@@ -104,7 +104,7 @@ function neighborDirs(model, node) {
  * Weltachsen.
  */
 function localDirs(model, node, dirs) {
-  const achsen = frameOf(model, node);
+  const achsen = connectorFrameOf(model, node);
   if (!achsen) return dirs;
   const [ex, ey, ez] = achsen;
   const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -121,7 +121,7 @@ function localDirs(model, node, dirs) {
  * Winkelkupplung und der Wuerfel steht kardinal (siehe `_slopeRotationAxis` in
  * scene.js, dieselbe Regel).
  */
-function frameOf(model, node) {
+export function connectorFrameOf(model, node) {
   if (node.quat && node.quat.length === 4) {
     return [xAxisOf(node.quat), yAxisOf(node.quat), zAxisOf(node.quat)];
   }
@@ -144,17 +144,36 @@ function frameOf(model, node) {
     k = [0, 1, 2].find((a) => !act.includes(a));
     break;
   }
-  if (k < 0) return null;
+  if (k < 0) return orthogonalFrame(rohre);
   const [i, j] = [0, 1, 2].filter((a) => a !== k);
   const S = Math.SQRT1_2;
   const e = (a, b, va, vb) => { const v = [0, 0, 0]; v[a] = va; v[b] = vb; return v; };
-  const ex = e(i, j, S, S), ey = e(i, j, -S, S), ez = e(k, k, 1, 1);
+  const ex = e(i, j, S, S), ey = e(i, j, -S, S);
+  // XZ 平面中的第三轴朝 -Y，必须保持右手坐标系才能转换成 Quaternion。
+  const ez = [ex[1] * ey[2] - ex[2] * ey[1], ex[2] * ey[0] - ex[0] * ey[2], ex[0] * ey[1] - ex[1] * ey[0]];
   const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
   const passt = rohre.every((u) => {
     const l = [dot(u, ex), dot(u, ey), dot(u, ez)];
     return Math.max(Math.abs(l[0]), Math.abs(l[1]), Math.abs(l[2])) >= 0.99;
   });
-  return passt ? [ex, ey, ez] : null;
+  return passt ? [ex, ey, ez] : orthogonalFrame(rohre);
+}
+
+// 从真实直角管端恢复整体倾斜后的接头朝向，保留坐标舍入误差。
+// 所有管端都必须落在同一组正交轴上，锐角连接仍由诊断拦截。
+function orthogonalFrame(dirs) {
+  if (dirs.length < 2 || dirs.every(d => isAxisDir(d))) return null;
+  const dot = (a, b) => a.reduce((sum, v, i) => sum + v * b[i], 0);
+  const ex = dirs[0];
+  const second = dirs.find(d => Math.abs(dot(ex, d)) < 0.01);
+  if (!second) return null;
+  const along = dot(ex, second);
+  const perpendicular = second.map((v, i) => v - along * ex[i]);
+  const length = Math.hypot(...perpendicular);
+  const ey = perpendicular.map(v => v / length);
+  const ez = [ex[1] * ey[2] - ex[2] * ey[1], ex[2] * ey[0] - ex[0] * ey[2], ex[0] * ey[1] - ex[1] * ey[0]];
+  const frame = [ex, ey, ez];
+  return dirs.every(d => frame.some(axis => Math.abs(dot(d, axis)) > 0.99)) ? frame : null;
 }
 
 /**
@@ -443,7 +462,7 @@ export function resolveNodeConnection(model, nodeOrId) {
   const importedAdapter = hasStandaloneFileC45(model, node);
   if (importedAdapter && !types.includes('diagonal')) types = [...types, 'diagonal'];
   for (const value of types) if (!getConnector(value)) diag('UNKNOWN_CONNECTOR', `连接件 ${value} 不在零件目录中。`, '选择实际可用的连接件。');
-  const frame = frameOf(model, node), renderDirs = [...worldDirs];
+  const frame = connectorFrameOf(model, node), renderDirs = [...worldDirs];
   const addRender = d => { const length = Math.hypot(...d) || 1, normalized = d.map(v => v / length); if (!renderDirs.some(e => e.reduce((s, v, i) => s + v * normalized[i], 0) > 0.99)) renderDirs.push(normalized); };
   for (const d of node.arms || []) if (Array.isArray(d) && d.length === 3) addRender(d);
   if (preferredPattern) for (const d of preferredPattern.arms) addRender(frame ? [0, 1, 2].map(i => d.reduce((s, v, j) => s + v * frame[j][i], 0)) : d);
