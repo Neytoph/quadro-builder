@@ -5,6 +5,7 @@ import { labelOf } from '../names'
 import { inventoryCatalog, INV_SECTIONS, INV_SECTION_TITLE, type InvCatalogItem, type InvGroup, type InvSection } from '../data/inventoryCatalog'
 import PartThumbnail from './PartThumbnail'
 import { bumpCount, track } from '../analytics/track'
+import ReplenishmentList from './ReplenishmentList'
 
 function QtyField({
   value, onCommit, name, minus, plus,
@@ -146,6 +147,7 @@ export default function InventoryPane() {
       </div>
 
       <div className="px-3 py-2 border-b border-gray-800 space-y-2">
+        {hasStock && <ReplenishmentList showRows={false} />}
         <p className="text-[11px] text-gray-500 leading-snug">{t('inv.hint')}</p>
         <input
           value={query}

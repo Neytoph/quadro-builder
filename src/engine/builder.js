@@ -14,6 +14,8 @@ import { TUBE_FITTINGS, POOL_KINDS, isHolePart, holeArmDirs, holeClampDirsAt, HO
 import { CONNECTOR_ARM_BITS } from "./qdfimport.js";
 import { ACCESSORY_IDS, PANEL_ACCESSORY_IDS, componentFrame } from './accessoryPack.js';
 import { confirmedSpec } from './componentPack.js';
+import { installationReason, installationFacingNotice } from './installationReason.js';
+import { panelInstallationFacing } from './panelInstallationFacing.js';
 import { pickStepAnchor, stepCandidates, stepCandidatesFromSelection, stepNeighbor } from "./stepAnchor.js";
 
 // Kupplungen, die auf einem Rohr sitzen statt im Raster: QDF-Art -> Katalogteil.
@@ -97,6 +99,7 @@ export class Builder {
     this.installationPreview = null;
     this.insetScrewAxis='vertical';
     this._installationPart = null;
+    this._installationFacingConflict = null;
     // Verstaerken-Modus: erstes angeklicktes 35er-Rohr, das noch seinen Partner
     // sucht (ein Profil deckt immer 80 cm).
     this.reinforceRail = null;
@@ -343,7 +346,7 @@ export class Builder {
       if (!this.model.accessoryMounts(this.fittingKind).length) {
         const diagnostics = [...this.model.tubes.keys()].map(id => this.model.accessoryDiagnostics(this.fittingKind, id));
         const result = diagnostics.find(d => !['straight_tube', 'horizontal_tube', 'tube_short'].includes(d.reason)) || diagnostics.find(d => d.reason !== 'straight_tube') || { reason: 'straight_tube' };
-        this.onNotice(t('accessory_reason_' + result.reason), 'info');
+        this.onNotice(installationReason(this.model, result), 'info');
       }
       return;
     }
@@ -1825,6 +1828,7 @@ export class Builder {
       { labelFor, slideNameFor, labelIds, soloId, soloLabel, assembly, suggest, reinforce,
         selected, highlight: this.highlight || firstRails, invalid, tints: this.tints,
         focusId: this.panelRail ? this.panelRail.id : null,
+        keepPanelFacesOpaque: this.mode === 'panel',
         preview: !!(this._paste || this._drag || this._clampDrag || this._clampSlide) });
     this._buildHandles();
     if (this._installationPart) this.scene.showInstallationPreview(this.model, this._installationPart, this.installationPreview.valid);
@@ -4530,15 +4534,13 @@ export class Builder {
 
   _previewInstallation(part, partId) {
     if (this.readOnly) return;
-    if (!part.kind && part.mounts?.length && part.panelId === 'panel_40x40_busy') {
-      const frame=componentFrame(this.model,part),cam=this.scene.cameraPosition();
-      const towardCamera=frame && frame.axes[2].reduce((sum,v,i)=>sum+v*(cam[i]-frame.pos[i]),0);
-      if(towardCamera<0)part=this.model.panelAccessoryDiagnostics({...part,side:-(part.side||1)});
-    }
+    const facing = panelInstallationFacing(this.model, part, this.scene.cameraPosition());
+    part = facing.part;
+    this._installationFacingConflict = facing.conflict;
     this.scene.clearInstallationPreview?.();
     this._installationPart = part.mounts?.length ? part : null;
     this.installationPreview = { kind: part.kind ? 'fitting' : 'panel', partId, mountCount: part.mounts?.length || 0, supportCount: part.supportTubes?.length || 0, assumption: part.params?.assumption || 'frame-grid-unmeasured',
-      valid: part.valid, reason: part.reason ? t('accessory_reason_' + part.reason) : null, canFlip: partId === 'steering_wheel' && !!part.mounts?.length };
+      valid: part.valid, reason: installationReason(this.model, part), canFlip: partId === 'steering_wheel' && !!part.mounts?.length };
     if (!part.valid) this.onNotice(this.installationPreview.reason, 'warn');
     if(part.valid)return this.confirmInstallation();
     this.refresh();
@@ -4556,16 +4558,19 @@ export class Builder {
         : this.model.addPanelAccessory(fresh,part.color || this.colorFor('panel'));
     });
     if (!added) return false;
+    const facingConflict = this._installationFacingConflict;
+    this._installationFacingConflict = null;
     this._installationPart = null; this.installationPreview = null;
     this.scene.clearInstallationPreview();
     this._notePlaced(added.id, part.kind ? 'fitting' : 'panel');
-    this.onNotice(t('notice_accessory_added'), 'ok');
+    this.onNotice(facingConflict ? installationFacingNotice(this.model, facingConflict) : t('notice_accessory_added'), facingConflict ? 'info' : 'ok');
     this.refresh();
     return true;
   }
 
   cancelInstallation() {
     this._ropeFirst = null;
+    this._installationFacingConflict = null;
     this._installationPart = null; this.installationPreview = null;
     this.scene.clearInstallationPreview?.(); this.refresh();
   }

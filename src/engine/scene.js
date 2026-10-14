@@ -553,8 +553,8 @@ export class SceneManager {
     this._dirLight.shadow.camera.bottom = -480;
     this._dirLight.shadow.camera.near   =   1;
     this._dirLight.shadow.camera.far    =  800;
-    this._dirLight.shadow.bias          = -0.0005;
-    this._dirLight.shadow.radius        =   3;
+    this._dirLight.shadow.bias          = -0.0001;
+    this._dirLight.shadow.radius        =   2;
     this.scene.add(this._dirLight);
     // Fuell- und Randlicht: weiches Volumen statt einer Plastik-Hotspot.
     this._fillLight = new THREE.DirectionalLight(0xfff4ea, 0.5);
@@ -1208,6 +1208,10 @@ export class SceneManager {
         sh.mapSize.set(size, size);
         if (sh.map) { sh.map.dispose(); sh.map = null; }
       }
+      // 按阴影像素的世界尺寸沿法线偏移，避免平板表面出现自身阴影斜纹。
+      const camera = sh.camera;
+      const texel = Math.max(camera.right - camera.left, camera.top - camera.bottom) / size;
+      sh.normalBias = Math.max(0.08, texel * 0.5);
     }
     this._shadowsDirty();
   }
@@ -1729,11 +1733,12 @@ export class SceneManager {
   // mit ausgestanzten Kreisen extrudiert.
   // Wichtig: Der Cache muss in _disposeGroup ausgenommen werden, sonst gibt der
   // naechste Render-Durchlauf die noch benutzte Geometrie frei.
-  // Zwischen zwei Platten bleibt ein schmaler Spalt, damit die Rohre darunter
-  // sichtbar und anklickbar bleiben -- Kante an Kante verdeckt das Geruest.
+  // 标准板边缘到达管轴；特殊板保留原有间隙，接头位置仍由角部让位避开。
   _panelGeometry(panelId, wSpan, dSpan, thickness) {
-    const w = Math.max(1, wSpan - PANEL_GAP);
-    const d = Math.max(1, dSpan - PANEL_GAP);
+    const standard = ['panel_40x40', 'panel_40x20', 'panel_30x30', 'hole_panel_40x40'].includes(panelId);
+    const gap = standard ? 0 : PANEL_GAP;
+    const w = Math.max(1, wSpan - gap);
+    const d = Math.max(1, dSpan - gap);
     const def = getPanel(panelId);
     const holes = (def && def.holes) || 0;
     const acrylic = !!(def && def.acrylic);
@@ -3213,8 +3218,10 @@ export class SceneManager {
     if (!this._materials[key]) {
       const m = new THREE.MeshStandardMaterial({
         color: new THREE.Color(this._look(colorId)),
-        roughness: transparent ? 0.95 : 0.48, metalness: transparent ? 0.0 : 0.04,
+        roughness: transparent ? 0.95 : 0.48, metalness: 0,
         side: THREE.DoubleSide,
+        // 实心板用背面写入阴影深度，外表面继续双面可见并接收管件的投影。
+        shadowSide: transparent ? null : THREE.BackSide,
         transparent: !!transparent, opacity: transparent ? 0.5 : 1,
         emissive: new THREE.Color(isCurrent ? 0x3a2400 : 0x000000),
       });
@@ -3948,7 +3955,7 @@ export class SceneManager {
     const invalid = opts.invalid && opts.invalid.size ? opts.invalid : null;
     // 按零件上色（id -> 颜色）：共享方案里别人选中的零件、版本对照里增减的零件
     const tints = opts.tints && opts.tints.size ? opts.tints : null;
-    const matFor = (id, base) => {
+    const matFor = (id, base, keepOpaque = false) => {
       if (invalid && id != null && invalid.has(id)) return this._invalidMaterial(base);
       if (focusId != null && id === focusId) return this._focusMaterial(base);
       if (highlight && id != null && highlight.has(id)) {
@@ -3956,7 +3963,7 @@ export class SceneManager {
       }
       if (marked) {
         if (id != null && marked.has(id)) return this._selectedMaterial(base);
-        if (dimOthers) return this._dimmedMaterial(base);
+        if (dimOthers) return keepOpaque ? base : this._dimmedMaterial(base);
       }
       if (tints && id != null && tints.has(id)) {
         const color = tints.get(id);
@@ -4581,10 +4588,12 @@ export class SceneManager {
       const currentDefinition = getPanel(p.panelId) || {};
       const pdef = !p.appearanceVersion && Object.hasOwn(currentDefinition, 'legacyFeature') ? { ...currentDefinition, feature: currentDefinition.legacyFeature } : currentDefinition;
       if (p.appearanceVersion && PANEL_ACCESSORY_IDS.has(p.panelId)) {
+        // 单面功能板保持遮挡，避免从背面透出正面的抓点或图案。
+        const keepOpaque = opts.keepPanelFacesOpaque && ['climbing', 'clock', 'maze', 'magnet', 'felt', 'basketball', 'busy'].includes(pdef.feature);
         for (const mesh of panelAccessoryMeshes(this, model, p)) {
           mesh.updateMatrix();
           const material = st === 'future' ? this._ghostMaterial() : (asm && st === 'done') ? mat : mesh.material;
-          this._batchAdd(mesh.geometry, matFor(p.id, material), mesh.matrix, 'panel', p.id, this.pickPanels);
+          this._batchAdd(mesh.geometry, matFor(p.id, material, keepOpaque), mesh.matrix, 'panel', p.id, this.pickPanels);
         }
         continue;
       }

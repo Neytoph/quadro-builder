@@ -116,11 +116,26 @@ function clips(f,model,part,color='#343a3e') {
   }
 }
 function panelMeshes(scene,model,part,spec,frame) {
+  const standard=['panel_40x40','panel_40x20','panel_30x30','hole_panel_40x40'].includes(spec.id);
+  if(standard && scene._q?.().meshes) {
+    // 旧v2标准板复用工厂网格：板边到达管轴，包管唇边及接头让位保留原厂形状。
+    let [x,y,z]=frame.axes.map(vec),width=spec.width,height=spec.height;
+    if(part.turned){[x,y]=[y,x.clone().negate()];[width,height]=[height,width];}
+    const native=scene._surfaceMeshFor(spec.feature==='holes'?spec.id:'panel2',x,y,width,height,vec(frame.pos),z.toArray(),1);
+    if(native) {
+      const mesh=new THREE.Mesh(native.geo,scene._panelMaterial(part.color,false,false));
+      mesh.name=`plate:native:${spec.id}`;native.matrix.decompose(mesh.position,mesh.quaternion,mesh.scale);
+      mesh.castShadow=true;mesh.receiveShadow=true;return [mesh];
+    }
+  }
   const f=factory(scene,frame),w=spec.width-3,h=spec.height-3,feature=spec.feature;
   const color=confirmedColor(part)||'#398ddb';
   const clear=['acrylic','acrylic_holes','capsule'].includes(feature);
-  if(feature!=='basin' && feature!=='grid' && feature!=='sensory')f.add(`plate:${w}:${h}:${feature}`,()=>plateGeometry(w,h,feature,clear?0.45:1.2),clear?'#eaf7fa':color,[0,0,1.8],null,clear?'glass':feature==='magnet'?'coated-metal':feature==='felt'?'cloth':'plastic');
-  if(feature==='plain')for(const x of [-w/2+1,w/2-1])f.box('plain-edge-lip',[1,h-4,0.8],color,[x,0,1.5]);
+  if(standard) {
+    // 网格加载期间及低画质使用同样外宽和管顶高度，避免加载前后板面跳变。
+    const mesh=f.add(`plate:standard:${spec.id}`,()=>plateGeometry(spec.width-0.24,spec.height-0.24,feature),color,[0,0,1.19]);
+    if(scene._panelMaterial)mesh.material=scene._panelMaterial(part.color,false,false);
+  } else if(feature!=='basin' && feature!=='grid' && feature!=='sensory')f.add(`plate:${w}:${h}:${feature}`,()=>plateGeometry(w,h,feature,clear?0.45:1.2),clear?'#eaf7fa':color,[0,0,1.8],null,clear?'glass':feature==='magnet'?'coated-metal':feature==='felt'?'cloth':'plastic');
   if(clear)f.meshes.push(...insetScrewMeshes(scene,model,part,frame));
   if(clear){
     const points=outline(w,h,feature).getPoints(64).map(p=>[p.x,p.y,2.2]);
