@@ -89,7 +89,6 @@ export function confirmedPanelDiagnostics(model,probe,{legacyInset=false,screwAx
   const lengths=[Math.hypot(...cSub(cor[1],cor[0])),Math.hypot(...cSub(cor[3],cor[0]))].sort((a,b)=>a-b),dims=[spec.width,spec.height].sort((a,b)=>a-b);
   if(lengths.some((v,i)=>Math.abs(v-dims[i])>0.5))return bad('frame_size',probe);
   const normal=unit(cross(cSub(cor[1],cor[0]),cSub(cor[3],cor[0])));
-  if(spec.mountType==='vertical-frame' && Math.abs(normal[1])>0.01)return bad('vertical_frame',probe);
   if(spec.mountType==='horizontal-frame' && Math.abs(normal[1])<0.999)return bad('horizontal_frame',probe);
   const inset=INSET_PANEL_IDS.has(spec.id),legacy=legacyInset || (probe.appearanceVersion===2 && Array.isArray(probe.mounts) && probe.params?.mountLayout==null);
   if(inset && !['vertical','horizontal'].includes(screwAxis))return bad('missing_support',probe);
@@ -276,7 +275,11 @@ export function confirmedStructuralValid(model,part) {
   if(part.mounts.some(m=>!m || !part.supportTubes.includes(m.tube) || !Number.isFinite(m.t) || m.t<0 || m.t>1 || !Number.isFinite(m.width) || m.width<=0 || !curvePoint(model,m.tube,m.t)))return false;
   const size=componentSize(part,spec);
   if(spec.feature==='trampoline' && (!spec.sizes.some(([w,h])=>size.width===w && size.height===h) || (part.w!=null && part.w!==size.width) || (part.h!=null && part.h!==size.height)))return false;
-  for(const key of ['width','height','depth','radius','feature','mountType'])if((key==='width'||key==='height'?size[key]:spec[key])!==part.params?.[key])return false;
+  for(const key of ['width','height','depth','radius','feature','mountType']){
+    // 旧板件保留原存档字段，安装朝向已放开，固定点仍按真实框架校验。
+    if(key==='mountType' && spec.placement==='panel' && spec.mountType==='frame' && part.params?.mountType==='vertical-frame')continue;
+    if((key==='width'||key==='height'?size[key]:spec[key])!==part.params?.[key])return false;
+  }
   if(INSET_PANEL_IDS.has(spec.id) && part.params?.mountLayout!=null && part.params.mountLayout!==INSET_MOUNT_LAYOUT)return false;
   if(INSET_PANEL_IDS.has(spec.id) && part.params?.screwAxis!=null && !['vertical','horizontal'].includes(part.params.screwAxis))return false;
   if(spec.feature==='lego' && part.params?.studHeight!=null && part.params.studHeight!==spec.studHeight)return false;

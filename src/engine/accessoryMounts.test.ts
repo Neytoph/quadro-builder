@@ -109,7 +109,7 @@ describe('原创配件固定点与空间约束', () => {
   it('方框朝向、缺边和离地要求保留，布兜不受空间冲突阻挡', () => {
     const vertical = frame(false), horizontal = frame(true)
     expect(vertical.model.panelAccessoryDiagnostics({ ...vertical.probe, panelId: 'panel_40x40_pocket' }).reason).toBe('horizontal_frame')
-    expect(horizontal.model.panelAccessoryDiagnostics({ ...horizontal.probe, panelId: 'panel_40x40_busy' }).reason).toBe('vertical_frame')
+    expect(horizontal.model.panelAccessoryDiagnostics({ ...horizontal.probe, panelId: 'panel_40x40_busy' }).valid).toBe(true)
     vertical.model.removeTube(vertical.tubes[1].id)
     expect(vertical.model.panelAccessoryDiagnostics(vertical.probe).reason).toBe('opposite_edges')
     const low = frame(true, 20)
