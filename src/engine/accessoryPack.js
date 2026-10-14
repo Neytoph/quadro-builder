@@ -10,7 +10,7 @@ export const ACCESSORY_PACK = [
   { id: 'gym_rings', name: '吊环', name_en: 'Gym rings', name_de: 'Turnringe', placement: 'fitting', mount: 'horizontal', drop: 40, width: 30 },
 ];
 export const PANEL_COMPONENT_PACK = [
-  { id: 'panel_40x40_busy', name: '忙碌板', name_en: 'Busy board', name_de: 'Motoriktafel', placement: 'panel', mount: 'vertical-frame', width: 40, height: 40, depth: 6, mountLayout:INSET_MOUNT_LAYOUT, kitContents:['component','transparent-screw-4'] },
+  { id: 'panel_40x40_busy', name: '忙碌板', name_en: 'Busy board', name_de: 'Motoriktafel', placement: 'panel', mount: 'frame', width: 40, height: 40, depth: 6, mountLayout:INSET_MOUNT_LAYOUT, kitContents:['component','transparent-screw-4'] },
   { id: 'panel_40x40_pocket', name: '布兜', name_en: 'Fabric pocket', name_de: 'Stofftasche', placement: 'panel', mount: 'horizontal-frame', width: 40, height: 40, depth: 25 },
 ];
 export const BUILDER_COMPONENT_PACK = [...ACCESSORY_PACK, ...PANEL_COMPONENT_PACK, ...CONFIRMED_COMPONENTS];
@@ -63,11 +63,18 @@ export function componentFrame(model, part) {
   const c = model.panelCorners(part);
   if (!c || c.some(p => !p.every(Number.isFinite)) || Math.hypot(...sub(c[1], c[0])) < 0.01 || Math.hypot(...sub(c[3], c[0])) < 0.01) return null;
   const pos = c[0].map((_, i) => c.reduce((n, p) => n + p[i], 0) / 4);
-  const e = unit(sub(c[1], c[0])), v = unit(sub(c[3], c[0]));
+  let e = unit(sub(c[1], c[0])), v = unit(sub(c[3], c[0]));
+  if (hasInsetScrews(part) && part.params?.screwAxis !== 'horizontal') [e, v] = [v, e];
   if (part.panelId === 'panel_40x40_pocket') {
     const x = Math.abs(e[1]) < 0.01 ? e : v;
     const y = [0, 1, 0], z = cross(x, y);
     return { pos, axes: [x, y, z], quat: quatFromBasis(x, y, z) };
+  }
+  const normal = unit(cross(e, v));
+  if (Math.abs(normal[1]) > 0.01) {
+    const sign = (part.side || 1) < 0 ? -1 : 1;
+    const x = e.map(n => n * sign), z = normal.map(n => n * sign);
+    return { pos, axes: [x, v, z], quat: quatFromBasis(x, v, z) };
   }
   const x = Math.abs(e[1]) < 0.01 ? e : v;
   const y = [0, 1, 0];
@@ -250,7 +257,6 @@ export function panelAccessoryDiagnostics(model, probe, { ignoreId = probe.id } 
   if (!corners) return invalid('missing_support');
   const e = sub(corners[1], corners[0]), v = sub(corners[3], corners[0]), normal = unit(cross(e, v));
   if (Math.abs(Math.hypot(...e) - 40) > 1 || Math.abs(Math.hypot(...v) - 40) > 1) return invalid('frame_size');
-  if (spec.mount === 'vertical-frame' && Math.abs(normal[1]) > 0.01) return invalid('vertical_frame');
   if (spec.mount === 'horizontal-frame' && Math.abs(normal[1]) < 0.999) return invalid('horizontal_frame');
   const supportTubes = new Set(), mounts = [];
   const inset=probe.panelId==='panel_40x40_busy',legacy=inset && probe.appearanceVersion===1 && Array.isArray(probe.mounts) && probe.params?.mountLayout==null;
