@@ -110,6 +110,10 @@ export const PART_IMAGE_MANIFEST = {
       "src": "parts/acrylic_platform_40x40.png",
       "srcLarge": "parts/large/acrylic_platform_40x40.png"
     },
+    "alu_connector": {
+      "src": "parts/alu_connector.png",
+      "srcLarge": "parts/large/alu_connector.png"
+    },
     "bag": {
       "src": "parts/bag.png",
       "srcLarge": "parts/large/bag.png"
@@ -302,6 +306,14 @@ export const PART_IMAGE_MANIFEST = {
       "src": "parts/pool_liner_xxl.png",
       "srcLarge": "parts/large/pool_liner_xxl.png"
     },
+    "reinforce35": {
+      "src": "parts/reinforce35.png",
+      "srcLarge": "parts/large/reinforce35.png"
+    },
+    "reinforce55": {
+      "src": "parts/reinforce55.png",
+      "srcLarge": "parts/large/reinforce55.png"
+    },
     "reinforce80": {
       "src": "parts/reinforce80.png",
       "srcLarge": "parts/large/reinforce80.png"
@@ -473,7 +485,8 @@ export const PART_IMAGE_MANIFEST = {
     "11670": "pool_liner_l",
     "11680": "pool_liner_xxl",
     "12600": "balls",
-    "40641": "screw_acrylic",
+    "40274": "alu_connector",
+    "40275": "reinforce55",
     "slide-new2": "slide_integral",
     "CS6": "6way",
     "CS5": "5way",
@@ -504,6 +517,7 @@ export const PART_IMAGE_MANIFEST = {
     "PAC": "acrylic_panel_40x40",
     "P7C": "panel_70x120",
     "RV8": "reinforce80",
+    "alu-connector2": "alu_connector",
     "bearing2": "wheel_bearing",
     "TCP": "tube_cap",
     "tube-cap2": "tube_cap",

@@ -29,6 +29,7 @@ import { round2 as round, panelNormal, modelMiddle, quatFromBasis } from "./util
 import { FORMAT_VERSION, C45_SLEEVE_LEN, C45_ARM_LEN } from "./config.js";
 import { QDF_FEATURE_SUFFIX, qdfPanelDimensionKey } from './qdfFeatures.js';
 import { holePartForMask, holeArmDirs, BOLT_PART, MAX_HINGES } from "./model.js";
+import { aluminiumConnectorSupport } from './reinforcement.js';
 
 // Alle benannten Richtungen (kardinal + 45°-diagonal) fuer Arm-Erkennung.
 const S45 = Math.SQRT1_2;
@@ -57,6 +58,7 @@ function nearestNamedDir(v) {
 //   sized      = bringt Kantenmasse mit (rest[3]/rest[5], wie panel2)
 //   masked     = fuehrt eine Arm-Maske (rest[4], wie connector3)
 const FITTING_KINDS = {
+  'alu-connector2': { keepRest: true },
   "bearing2":        {},                  // Lagerkupplung, traegt die Radachse
   "multi-wheel2":    {},                  // Speichenrad
   "floating-wheel2": {},                  // schwarzes Laufrad
@@ -737,6 +739,7 @@ export function parseQDF(text, opts = {}) {
       // Rohtext merken, damit der Export dieselbe Zeile schreibt wie die
       // Datei sie hatte.
       if (spec.keepRest && p.rawRest) f.rest = p.rawRest;
+      if (p.name === 'alu-connector2') f.w = typeof p.rest[3] === 'number' ? p.rest[3] / 10 : 40;
       fittings.push(f);
     } else if (
       p.name === "slide2" || p.name === "slide-new2" || p.name === "slide-domestic80" || p.name === "slide-domestic60" || p.name === "slide-domestic15" ||
@@ -1032,7 +1035,7 @@ export function parseQDF(text, opts = {}) {
   for (const raw of lines) {
     const p = parseLine(raw);
     if (!p) continue;
-    if (p.name !== "alu2" && p.name !== "alu-connector2") continue;
+    if (p.name !== "alu2") continue;
     if (!p.tuple || p.tuple.length < 7) { skipped[p.name] = (skipped[p.name] || 0) + 1; continue; }
     if (istTot(p)) continue;
     const q = decodeQuat([p.tuple[0], p.tuple[1], p.tuple[2], p.tuple[3]]);
@@ -1047,6 +1050,7 @@ export function parseQDF(text, opts = {}) {
     const u = [d[0] / dl, d[1] / dl, d[2] / dl];
     const span = lenCm + conn;
     let hit = false;
+    const matchingTubes = [];
     for (const t of tubes) {
       const A = nodeById.get(t.a), B = nodeById.get(t.b);
       if (!A || !B) continue;
@@ -1060,9 +1064,26 @@ export function parseQDF(text, opts = {}) {
       const cosang = Math.abs((tx * u[0] + ty * u[1] + tz * u[2]) / tl);
       if (cosang < 0.9) continue; // Rohr nicht parallel zum Alu
       if (!t.reinforced) { t.reinforced = true; reinforced++; }
+      matchingTubes.push(t);
       hit = true;
     }
     if (!hit) skipped[p.name] = (skipped[p.name] || 0) + 1;
+    const partId = Math.abs(lenCm - 40) < 0.6 ? 'reinforce35'
+      : Math.abs(lenCm - 60) < 0.6 ? 'reinforce55' : Math.abs(lenCm - 80) < 0.6 ? 'reinforce80' : null;
+    const totalSpan = matchingTubes.reduce((sum, tube) => {
+      const a = nodeById.get(tube.a), b = nodeById.get(tube.b);
+      return sum + Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
+    }, 0);
+    if (partId && matchingTubes.length && matchingTubes.every(tube => !tube.reinforcement) && Math.abs(totalSpan - lenCm) < 0.6) {
+      for (const tube of matchingTubes) tube.reinforcement = { partId, group: matchingTubes[0].id };
+    }
+  }
+  const reinforcementModel = { tubes: new Map(tubes.map(tube => [tube.id, tube])), nodes: nodeById,
+    fittings: new Map(fittings.map(fitting => [fitting.id, fitting])) };
+  for (const fitting of fittings) if (fitting.kind === 'alu-connector2') {
+    const mount = aluminiumConnectorSupport(reinforcementModel, fitting);
+    if (mount) Object.assign(fitting, { tube: mount.supportTubes[0], supportTubes: mount.supportTubes,
+      mounts: mount.supportTubes.map(tube => ({ tube })), params: {}, appearanceVersion: 1 });
   }
 
   // --- 4. Durchlauf: Doppelrohrverbinder (clamp2) -----------------------------

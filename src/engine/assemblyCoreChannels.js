@@ -1,12 +1,13 @@
 import { reinforcementRuns, resolveNodeConnection } from './bom.js';
 import { beginAssemblyCollisionPass, checkAssemblyPath } from './assemblyCollision.js';
+import { REINFORCEMENT_SPECS } from './reinforcement.js';
 const xyz=p=>[p.x,p.y,p.z],sub=(a,b)=>a.map((v,i)=>v-b[i]),dot=(a,b)=>a.reduce((s,v,i)=>s+v*b[i],0),unit=a=>a.map(v=>v/(Math.hypot(...a)||1));
-/** The official 80 cm wood profile fits QUADRO tube/through-port channels.
- * Its exterior occupied-space bound uses the carrier's outer radius, without
- * inventing a wood cross-section. Compatibility applies only inside that channel. */
+/** 75 cm 加固铝管位于80 cm节点间距的连续通道内。
+ * 碰撞包络沿用完整通道及承载管外径，兼容判断仅适用于该同轴通道。 */
 export function createCoreChannels(model,pathOptions={}){
   const virtual=Object.assign(Object.create(Object.getPrototypeOf(model)),model,{nodes:new Map(model.nodes),tubes:new Map(model.tubes)}),channels=[];
   for(const [index,run] of reinforcementRuns(model).entries()){
+    const coverage = REINFORCEMENT_SPECS[run.partId]?.span || 80;
     if(!run.tubeIds.every(id=>{const t=model.tubes.get(id);return t&&model.nodes.has(t.a)&&model.nodes.has(t.b);}))continue;
     const points=run.tubeIds.flatMap(id=>{const t=model.tubes.get(id);return [model.nodes.get(t.a),model.nodes.get(t.b)];});
     const first=model.tubes.get(run.tubeIds[0]),axis0=unit(sub(xyz(model.nodes.get(first.b)),xyz(model.nodes.get(first.a)))),dominant=axis0.findIndex(v=>Math.abs(v)===Math.max(...axis0.map(Math.abs))),axis=axis0[dominant]<0?axis0.map(v=>-v):axis0;
@@ -17,8 +18,10 @@ export function createCoreChannels(model,pathOptions={}){
     const id=`assembly-wood-${index+1}`,a=`${id}-start`,b=`${id}-end`;
     virtual.nodes.set(a,{id:a,x:start[0]-axis[0]*2.5,y:start[1]-axis[1]*2.5,z:start[2]-axis[2]*2.5});
     virtual.nodes.set(b,{id:b,x:end[0]+axis[0]*2.5,y:end[1]+axis[1]*2.5,z:end[2]+axis[2]*2.5});
-    virtual.tubes.set(id,{id,a,b,tubeId:'T75',length:80,geom:{p0:xyz(virtual.nodes.get(a)),dir:axis,len:80},reinforced:false});
-    channels.push({id,run,axis,start,end,span,middle,carrierOrder,firstCarrier:carrierOrder[0],valid:Math.abs(span-80)<.6&&through&&run.tubeIds.length<=2&&run.tubeIds.every(id=>{const t=model.tubes.get(id);return !t.bow&&!t.arm&&!t.link&&((run.tubeIds.length===1&&Math.abs((t.geom?.len||t.length)-75)<.01)||(run.tubeIds.length===2&&Math.abs((t.geom?.len||t.length)-35)<.01));}),active:false,terminalNodeIds:[ordered[0].id,ordered.at(-1).id],basis:'official-80cm-profile-compatibility-and-opposed-port-topology',crossSection:'official-compatible; dimensions-unmeasured'});
+    virtual.tubes.set(id,{id,a,b,tubeId:'T75',length:coverage,geom:{p0:xyz(virtual.nodes.get(a)),dir:axis,len:coverage},reinforced:false});
+    const validTubes = run.tubeIds.every(id => { const t = model.tubes.get(id); return !t.bow && !t.arm && !t.link; });
+    const legacyValid = run.tubeIds.length<=2&&run.tubeIds.every(id=>{const t=model.tubes.get(id);return (run.tubeIds.length===1&&Math.abs((t.geom?.len||t.length)-75)<.01)||(run.tubeIds.length===2&&Math.abs((t.geom?.len||t.length)-35)<.01);});
+    channels.push({id,run,axis,start,end,span,middle,carrierOrder,firstCarrier:carrierOrder[0],valid:Math.abs(span-coverage)<.6&&through&&validTubes&&(run.explicit||legacyValid),active:false,terminalNodeIds:[ordered[0].id,ordered.at(-1).id],basis:'official-profile-compatibility-and-opposed-port-topology',crossSection:'official-compatible; dimensions-unmeasured'});
   }
   beginAssemblyCollisionPass(virtual);
   const check=(moving,installed,start,end=[0,0,0],{obstacleTranslations:poses=new Map(),...extra}={})=>{
@@ -39,9 +42,9 @@ export function createCoreChannels(model,pathOptions={}){
             // based exemption after one member has been transported sideways.
             const relative=sub(point.map((v,i)=>v+obstacleOffset[i]),channel.start.map((v,i)=>v+end[i])),along=dot(relative,channel.axis),radial=Math.hypot(...relative.map((v,i)=>v-channel.axis[i]*along));
             if(radial>.01)return true;
-            if(through){const resolution=resolveNodeConnection(model,other);if(!resolution.renderDirs.some(d=>Math.abs(dot(d,channel.axis))>.995))return true;return along< -7.5||along>80+7.5;}
+            if(through){const resolution=resolveNodeConnection(model,other);if(!resolution.renderDirs.some(d=>Math.abs(dot(d,channel.axis))>.995))return true;return along< -7.5||along>channel.span+7.5;}
             const far=dot(sub(xyz(model.nodes.get(tube.b)).map((v,i)=>v+obstacleOffset[i]),channel.start.map((v,i)=>v+end[i])),channel.axis);
-            return Math.max(along,far)< -7.5||Math.min(along,far)>80+7.5;
+            return Math.max(along,far)< -7.5||Math.min(along,far)>channel.span+7.5;
           });
         }else{
           const tube=model.tubes.get(id),through=channel.middle.includes(id)||channel.terminalNodeIds[1]===id,carrier=channel.run.tubeIds.includes(id);

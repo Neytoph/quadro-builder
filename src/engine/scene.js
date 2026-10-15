@@ -1813,6 +1813,12 @@ export class SceneManager {
    * Flaechennormale) -- genau wie im QDF.
    */
   _fittingMeshes(f) {
+    if (f.kind === 'alu-connector2') {
+      const geo = new THREE.BoxGeometry(f.w || 40, 0.65, 0.25);
+      geo.translate((f.w || 40) / 2, 6, -8);
+      return [this._placeFitting(new THREE.Mesh(geo, this._fittingMaterial('#bcc2c7', false)), f,
+        new THREE.Quaternion(...(f.quat || [0, 0, 0, 1])).normalize())];
+    }
     if ((f.appearanceVersion === 2 && f.kind !== 'multi-wheel2') || (ACCESSORY_IDS.has(f.kind) && !confirmedSpec(f.kind))) return accessoryMeshes(this, this._renderModel, f, this._look(f.color || 'yellow'));
     const q = f.quat && f.quat.length === 4
       ? new THREE.Quaternion(f.quat[0], f.quat[1], f.quat[2], f.quat[3]).normalize()
@@ -3260,11 +3266,11 @@ export class SceneManager {
     return this._materials["water"];
   }
 
-  // Verstaerkungsprofil-Stab (Bauen-Modus): dunkles Alu-Metallic.
+  // 内置铝管采用浅银色金属，草地和室内光照下都能辨认边缘。
   _rodMaterial() {
     if (!this._materials["rod"]) {
       this._materials["rod"] = new THREE.MeshStandardMaterial({
-        color: new THREE.Color(0x7a8794), roughness: 0.3, metalness: 0.85,
+        color: new THREE.Color(0xb9c0c5), roughness: 0.45, metalness: 0.25,
       });
     }
     return this._materials["rod"];
@@ -4131,7 +4137,8 @@ export class SceneManager {
       return;
     }
     // Verstaerkungsprofile: die abgegriffenen Modelle liegen bei den Anbauteilen.
-    // Sie decken die genormten Laeufe (80 und 60 cm) ab; was uebrig bleibt --
+    // Alle drei Laengen verwenden dasselbe silberne Profil und denselben Querschnitt.
+    // Sie decken die genormten Laeufe (40, 60 und 80 cm) ab; was uebrig bleibt --
     // etwa die krummen Abstaende eines gedrehten Aufbaus -- behaelt den
     // gezeichneten Innenstab. `aluGedeckt` haelt fest, welche Rohre schon ein
     // Profil haben.
@@ -4156,8 +4163,8 @@ export class SceneManager {
         if (!profilePosition) continue;
         const zustand = lauf.tubes.map((id) => stateOf(id));
         if (zustand.every((z) => z === "future")) continue;
-        const rec = this._fitMeshes[
-          Math.abs(lauf.len - 80) < 1 ? "alu2_800" : Math.abs(lauf.len - 60) < 1 ? "alu2_600" : null];
+        const meshKey = 'alu2_800';
+        const rec = this._fitMeshes[meshKey];
         if (!rec) continue;
         for (const id of lauf.tubes) aluGedeckt.add(id);
         const ex = new THREE.Vector3(lauf.dir[0], lauf.dir[1], lauf.dir[2]).normalize();
@@ -4175,8 +4182,8 @@ export class SceneManager {
           : (asm && zustand.every((z) => z === "done")) ? this._assemblyDoneMaterial(this._rodMaterial())
           : this._rodMaterial();
         const mat = matFor(lauf.tubes.find((id) => marked && marked.has(id)) ?? null, grund);
-        this._batchAdd(this._meshGeometry("fit:" + (Math.abs(lauf.len - 80) < 1 ? "alu2_800" : "alu2_600"), rec),
-          mat, new THREE.Matrix4().makeBasis(ex, ey, ez)
+        this._batchAdd(this._meshGeometry('fit:' + meshKey, rec),
+          mat, new THREE.Matrix4().makeBasis(ex, ey, ez).scale(new THREE.Vector3(lauf.len / 80, 1, 1))
             .setPosition(new THREE.Vector3(...profilePosition)),
           // Ein Klick auf das Profil meint das Rohr darunter; `tubes` haelt den
           // ganzen Lauf fest, damit die Auswahl beide Rohre erwischt.

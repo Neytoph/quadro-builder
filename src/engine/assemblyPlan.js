@@ -1,7 +1,7 @@
 import {normalizedAssemblyQuaternion} from './assemblyAccessoryMethods.js';
 import { structuralBearingSupport } from './assemblyStructuralBearings.js';
 import { computeBOM, connectorsForNode, resolveNodeConnection, reinforcementRuns, textileRow } from './bom.js';
-import { reinforcementPart } from './catalog.js';
+import { reinforcementPart, getPartById } from './catalog.js';
 import { geometry } from './catalog.js';
 import { checkAssemblyPath, beginAssemblyCollisionPass } from './assemblyCollision.js';
 import { assemblyMeshes } from './assemblyNativeMesh.js';
@@ -354,13 +354,17 @@ function allocateBOM(model, bom, steps, owner, diagnostics) {
     for (const group of ['panels', 'fittings']) for (const row of one[group]) add(group, rowKey(group, row), [p.id], row.count);
   }
   for (const f of values(model, 'fittings')) {
+    if (f.kind === 'alu-connector2') { add('reinforcements', 'alu_connector', [f.id]); continue; }
     const subset = Object.assign(Object.create(Object.getPrototypeOf(model)), model, { panels: new Map(), fittings: new Map([[f.id, f]]), textiles: new Map(), slides: new Map() });
     for (const row of computeBOM(subset).fittings) add('fittings', rowKey('fittings', row), [f.id], row.count);
   }
   for (const tx of values(model, 'textiles')) add('textiles', textileRow(model, tx).key, [tx.id]);
   for (const sl of values(model, 'slides')) add('slides', sl.kind, [sl.id]);
   const reinforcement = reinforcementPart();
-  if (reinforcement) for (const run of reinforcementRuns(model)) add('reinforcements', reinforcement.id, run.tubeIds, Math.max(1, Math.round(run.length / (reinforcement.length_cm || 80))));
+  if (reinforcement) for (const run of reinforcementRuns(model)) {
+    const part = run.partId ? getPartById(run.partId) : reinforcement;
+    add('reinforcements', part.id, run.tubeIds, run.explicit ? 1 : Math.max(1, Math.round(run.length / (part.coverage_cm || 80))));
+  }
   for (const group of GROUPS) for (const row of bom[group]) {
     const key = rowKey(group, row), sources = allocations.get(`${group}:${key}`) || [];
     const actual = sources.reduce((sum, a) => sum + a.count, 0);

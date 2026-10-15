@@ -767,15 +767,34 @@
   ],
   "reinforcements": [
     {
+      "id": "reinforce35", "code": "", "name": "Aluminium-Verstärkungsrohr 35 cm",
+      "name_en": "Internal aluminium reinforcement tube 35 cm", "length_cm": 35,
+      "coverage_cm": 40, "material": "Aluminium", "price": 0,
+      "note": "内置加固铝管，实际长度35cm，对应40cm节点间距。", "url": ""
+    },
+    {
+      "id": "reinforce55", "code": "40275", "name": "Aluminium-Verstärkungsrohr 55 cm",
+      "name_en": "Internal aluminium reinforcement tube 55 cm", "length_cm": 55,
+      "coverage_cm": 60, "material": "Aluminium", "price": 0,
+      "note": "内置加固铝管，实际长度55cm，对应60cm节点间距。", "url": ""
+    },
+    {
       "id": "reinforce80",
       "code": "RV8",
-      "name": "Holz-Profil 80 cm",
-      "name_en": "Wood profile 80 cm",
-      "length_cm": 80,
-      "material": "Holz",
+      "name": "Aluminium-Verstärkungsrohr 75 cm",
+      "name_en": "Internal aluminium reinforcement tube 75 cm",
+      "length_cm": 75,
+      "coverage_cm": 80,
+      "material": "Aluminium",
       "price": 8.99,
-      "note": "Stab, der in die Rohre geschoben wird und sie versteift; es gibt NUR diese eine Länge (80 cm, Holz) zu kaufen -- die Alu-Profile der Herstellersoftware sind nicht mehr erhältlich. Ein Profil deckt 80 cm Knotenabstand: entweder ein 75er-Rohr oder zwei 35er in einer Linie; nötig bei frei tragenden, von unten ungestuetzten Ebenen",
-      "url": "https://quadroshop.com/products/wood-tube-core"
+      "note": "内置加固铝管，实际长度 75 cm；一根对应 80 cm 节点间距，可加固一根 75 cm 管或同一直线上的两根 35 cm 管。",
+      "url": ""
+    },
+    {
+      "id": "alu_connector", "code": "40274", "name": "Verbinder für Aluminium-Verstärkungsrohre",
+      "name_en": "Aluminium reinforcement tube connector", "qdf": "alu-connector2",
+      "length_cm": 40, "material": "Stahl", "price": 0,
+      "note": "连接同轴相邻的两根内置加固铝管，细长金属连接条。", "url": ""
     }
   ],
   "accessories": [

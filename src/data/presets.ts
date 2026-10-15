@@ -219,7 +219,7 @@ class Frame {
     if (!added) throw new Error(`module: panel rejected at ${a.join(',')}`)
   }
 
-  /** 两根共线的 35 管插 80 木芯。 */
+  /** 两根共线的 35 管插 75 cm 加固铝管。 */
   reinforce(a: Pt, b: Pt, c: Pt) {
     const t0 = this.m.tubeBetween(this.at(a).id, this.at(b).id)
     const t1 = this.m.tubeBetween(this.at(b).id, this.at(c).id)
@@ -415,7 +415,7 @@ function packAFrame(): EngineJson {
   return f.json()
 }
 
-/** 秋千门架：两片 80 宽 120 高的端架，顶上一根横梁（插 80 木芯），地面两根拉杆。 */
+/** 秋千门架：两片 80 宽 120 高的端架，顶上一根横梁（插 75 cm 加固铝管），地面两根拉杆。 */
 function packSwingFrame(): EngineJson {
   const f = new Frame()
   for (const x of [0, 80]) {

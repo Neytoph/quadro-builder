@@ -202,7 +202,8 @@ interface EngineApi {
   setClamp: (id: string) => void
   startPool: (id: string) => void
   startC45: () => void
-  startReinforce: () => void
+  startReinforce: (partId?: string) => void
+  reinforcementPartId: string
   placeConnector: (id: string) => void
   placingConnector: string | null
   buildStep: (dir: number[]) => void
@@ -1339,7 +1340,16 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     bump()
   }, [builder, bump, clearBomHighlight, rememberTool])
   const startC45 = useCallback(() => { pickPart('tubes', 'c45'); clearBomHighlight(); builder?.setMode('c45'); bump() }, [builder, bump, clearBomHighlight])
-  const startReinforce = useCallback(() => { pickPart('reinforcements', 'reinforce'); clearBomHighlight(); builder?.setMode('reinforce'); bump() }, [builder, bump, clearBomHighlight])
+  const startReinforce = useCallback((partId?: string) => {
+    if (!builder || builder.readOnly) return
+    const selected = partId || builder.reinforcementPartId || 'reinforce80'
+    pickPart('reinforcements', selected)
+    clearBomHighlight()
+    builder._clearReinforceRail()
+    builder.reinforcementPartId = selected
+    builder.setMode('reinforce')
+    bump()
+  }, [builder, bump, clearBomHighlight])
   const placeConnector = useCallback((id: string) => {
     if (!builder || builder.readOnly) return
     rememberTool()
@@ -1407,7 +1417,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     } else if (kind === 'slides') {
       for (const sl of model.slides.values()) if (sl.kind === id) ids.add(sl.id)
     } else if (kind === 'reinforcements') {
-      for (const tb of model.tubes.values()) if (tb.reinforced) ids.add(tb.id)
+      for (const tb of model.tubes.values()) if (tb.reinforced && (tb.reinforcement?.partId || 'reinforce80') === id) ids.add(tb.id)
+      if (id === 'alu_connector') for (const f of model.fittings.values()) if (f.kind === 'alu-connector2') ids.add(f.id)
     } else if (kind === 'textiles') {
       // 普通布面、短布面、彩虹带各是一行：按这块布认出来的零件比对
       for (const tx of model.textiles.values()) {
@@ -2839,7 +2850,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     side, setSide, notify,
     dismissToast: () => setToast(null),
     placingConnector: (builder?.placeConnectorId as string) || null,
-    bump, setMode, activateTool, toggleLastTool, setColor, setTube, setPanel, setSlide, setFitting, setClamp, startPool, startC45, startReinforce, placeConnector,
+    bump, setMode, activateTool, toggleLastTool, setColor, setTube, setPanel, setSlide, setFitting, setClamp, startPool, startC45, startReinforce, reinforcementPartId: builder?.reinforcementPartId || 'reinforce80', placeConnector,
     buildStep: (dir) => { bumpCount('builder.edit.step'); builder?.buildStep?.(dir); bump() },
     moveSelection: (dir) => { bumpCount('builder.edit.move'); builder?.moveSelectionBy?.(dir); bump() },
     cameraAxes: () => ({

@@ -135,15 +135,14 @@ export function partForFitting(kind, mask) {
     for (let b = 2; b < 6; b++) if ((mask || 0) & (1 << b)) arms++;
     return getConnector(arms >= 3 ? "hole_t" : arms === 2 ? "hole_2" : "hole_1");
   }
-  const all = [...allConnectors(), ...accessories(), ...allTubes(), ...panels()];
+  const all = [...allConnectors(), ...accessories(), ...allTubes(), ...panels(), ...reinforcements()];
   // Manche Teile waehlt die Leiste unter ihrer KATALOG-Kennung statt unter der
   // QDF-Art: die Lochzapfenkupplungen und die beiden Teile der Flexikupplung.
   // Ohne diesen zweiten Griff stand ueber der Szene kein Name.
   return all.find((x) => x.qdf === kind) || all.find((x) => x.id === kind) || null;
 }
 
-// Verstaerkungen (Holz-Profile), die in Rohre geschoben werden. Zu kaufen gibt
-// es nur die 80-cm-Laenge; die Alu-Profile der Herstellersoftware sind weg.
+// 内置加固铝管；目录分别记录实际长度和对应的节点间距。
 export function reinforcements() {
   return catalog().reinforcements || [];
 }
@@ -169,7 +168,7 @@ export function poolLinerFor(s1, s2) {
 
 // Standard-Verstaerkungsprofil (erstes definiertes).
 export function reinforcementPart() {
-  return reinforcements()[0] || null;
+  return reinforcements().find(part => part.id === 'reinforce80') || null;
 }
 
 export function defaultPanel() {

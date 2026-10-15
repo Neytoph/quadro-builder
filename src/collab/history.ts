@@ -32,6 +32,7 @@ export function refsOf(get: (k: string) => unknown): string[] {
       add(get('a'))
       add(get('b'))
       add(get('tube'))
+      if (get('$type') === 'tube') add((get('reinforcement') as { group?: string } | undefined)?.group)
       for (const id of (get('supportTubes') as unknown[] | undefined) || []) add(id)
       for (const mount of (get('mounts') as Array<{ tube?: string }> | undefined) || []) add(mount?.tube)
       break

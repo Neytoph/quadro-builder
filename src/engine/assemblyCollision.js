@@ -95,6 +95,7 @@ function computeEnvelope(model,id) {
   }
   const f=model.fittings?.get(id)||model.slides?.get(id);
   if(f) {
+    if (f.kind === 'alu-connector2') return [nativeBox(f, [[0, f.w || 40], [5.675, 6.325], [-8.125, -7.875]])];
     if(f.appearanceVersion)return componentVolumes(model,f).map(b=>({...b,kind:'box'}));
     if(['pool2','pool-small2'].includes(f.kind)){
       const [width,depth]=f.kind==='pool2'?[120,160]:[80,120];
