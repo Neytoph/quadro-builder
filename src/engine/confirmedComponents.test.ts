@@ -21,6 +21,13 @@ function meshes(model: BuildModel,part: any): THREE.Mesh[] {
 }
 
 describe('确认组件实际安装与生命周期',()=>{
+  it.each(['lattice','textile_bridge'])('%s 保存前包含默认朝向，原生字段完整往返',id=>{
+    const {model,part}=createConfirmedComponentFixture(id)
+    expect((part as any).facing).toBe(1)
+    const saved=model.toJSON(),reopened=new BuildModel()
+    expect(reopened.loadJSON(saved).ok).toBe(true)
+    expect(reopened.toJSON()).toEqual(saved)
+  })
   it.each(CONFIRMED_COMPONENTS.map(p=>p.id))('%s 安装、保存重开、整组变换、复制引用与依赖删除',id=>{
     const {model,part:record}=createConfirmedComponentFixture(id),part=record as any
     expect(componentMountsValid(model,part)).toBe(true)

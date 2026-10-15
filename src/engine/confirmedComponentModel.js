@@ -117,7 +117,7 @@ export function confirmedPanelDiagnostics(model,probe,{legacyInset=false,screwAx
   return {...result,pos:frame.pos};
 }
 
-function asFitting(spec,probe,frame,supports) {return {...probe,tube:probe.tube||probe.a,kind:spec.kind||spec.id,partId:spec.id,x:frame.pos[0],y:frame.pos[1],z:frame.pos[2],quat:frame.quat,...supports,appearanceVersion:2,params:{...spec},valid:true,reason:null,pos:frame.pos};}
+function asFitting(spec,probe,frame,supports) {return {...probe,tube:probe.tube||probe.a,kind:spec.kind||spec.id,partId:spec.id,x:frame.pos[0],y:frame.pos[1],z:frame.pos[2],quat:frame.quat,facing:probe.facing||1,...supports,appearanceVersion:2,params:{...spec},valid:true,reason:null,pos:frame.pos};}
 export function trampolineCandidate(model,probe) {
   const spec=confirmedSpec('trampoline'),size=componentSize(probe,spec),cor=model.panelCorners(probe);
   if(!cor || !spec.sizes.some(([w,h])=>w===size.width && h===size.height))return bad('frame_size',probe);
