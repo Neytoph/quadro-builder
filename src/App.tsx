@@ -48,7 +48,7 @@ function Toast() {
     // key 跟着消息走：连着两条提示时，第二条重新演一遍入场。
     // 压在顶栏、右侧面板和下拉菜单上面：手机上右侧面板盖满画布，
     // 在「文件」里点保存，提示要浮在面板上才看得见。确认框（z-75）仍在它上面。
-    <div key={toast.message} className={`m-toast qb-card fixed top-[9.5rem] left-1/2 -translate-x-1/2 w-max max-w-[calc(100vw-2rem)] text-center ${tone} text-sm font-medium px-4 py-2 z-[70] pointer-events-none ${leaving ? 'm-leave' : ''}`}>
+    <div data-ui="toast" key={toast.message} className={`qb-floating-toast m-toast qb-card fixed top-[9.5rem] left-1/2 -translate-x-1/2 w-max max-w-[calc(100vw-2rem)] text-center ${tone} text-sm font-medium px-4 py-2 z-[70] pointer-events-none ${leaving ? 'm-leave' : ''}`}>
       {toast.message}
     </div>
   )

@@ -1116,6 +1116,12 @@ export class SceneManager {
     return this._raycaster.ray.intersectPlane(plane, p) ? p : null;
   }
 
+  screenPoint(pos) {
+    const point = new THREE.Vector3(...pos).project(this.camera);
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    return [(point.x + 1) * rect.width / 2 + rect.left, (1 - point.y) * rect.height / 2 + rect.top];
+  }
+
   /** Mauszeiger-Form setzen (Builder signalisiert damit "verschiebbar"). */
   setCursor(css) {
     this.container.classList.toggle("qb-cursor-delete", css === "delete-x");
@@ -1317,20 +1323,21 @@ export class SceneManager {
         const colors = new Float32Array(geo.getAttribute("position").count * 3);
         for (let i = 0; i < colors.length / 3; i++) colors.fill(i % 5 === 0 || i % 5 >= 3 ? 0.45 : 1, i * 3, i * 3 + 3);
         geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-      }
+      } else geo.setAttribute("color", new THREE.BufferAttribute(new Float32Array(geo.getAttribute("position").count * 3).fill(1), 3));
       this._tubeGeos.set(key, geo);
       this._keepGeos.add(geo);
     }
     return geo;
   }
 
-  // 弯管的管壁截面环，位于 XY 平面，法线 +Z。
+  // 弯管两端的管壁环，中心保留开口；位于 XY 平面，法线 +Z。
   _capGeometry(radius, segments) {
     if (!this._capGeos) this._capGeos = new Map();
     const key = `${radius.toFixed(2)}:${segments}`;
     let geo = this._capGeos.get(key);
     if (!geo) {
       geo = new THREE.RingGeometry(Math.max(0.1, radius - 0.3), radius, segments);
+      geo.setAttribute("color", new THREE.BufferAttribute(new Float32Array(geo.getAttribute("position").count * 3).fill(1), 3));
       this._capGeos.set(key, geo);
       this._keepGeos.add(geo);
     }
@@ -4054,6 +4061,7 @@ export class SceneManager {
       pushDir(n.id, -n.stub[0], -n.stub[1], -n.stub[2], false);
     }
     for (const t of model.tubes.values()) {
+      if (t.link) continue;
       const na = model.nodes.get(t.a), nb = model.nodes.get(t.b);
       if (!na || !nb) continue;
       if (t.bow && t.bowCenter) {
@@ -4183,6 +4191,9 @@ export class SceneManager {
       // Kupplung, die in der Datei steht, aber nichts haelt: die Hersteller-
       // software zeichnet sie nicht -- sonst schweben Wuerfel in der Luft.
       if (n.unused) continue;
+      // 轴承连接件的空安装位置只是锚点，接管或手动指定通型后才显示接头。
+      if (n.bearingOn && !n.preferType && !n.arms?.length && !n.c45
+          && model.degree(n.id) === 0) continue;
       // 管端保留建模锚点和加管操作，单根管的自由末端不显示自动接头。
       if (!n.preferType && !n.part && !n.c45 && !n.c45body && !n.c45file && !n.arms?.length
           && (tubeDirsAt.get(n.id) || []).length === 1) continue;
@@ -4210,6 +4221,9 @@ export class SceneManager {
           && !(model.hasWheelCap && model.hasWheelCap(n))) {
         const pos = new THREE.Vector3(n.x, n.y, n.z);
         const connection = resolveNodeConnection(model, n);
+        // 虚拟双管连杆保留图关系；自由管端没有实际接头。
+        if (!connection.types.length && !n.preferType && !n.arms?.length
+            && !n.part && !n.c45 && !n.bearingOn) continue;
         const quat = connection.quat ? new THREE.Quaternion(...connection.quat).normalize()
           : connection.frame ? new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(...connection.frame.map(axis => new THREE.Vector3(...axis))))
           : new THREE.Quaternion();
@@ -4407,11 +4421,12 @@ export class SceneManager {
           : (asm && st === "done") ? this._tubeMaterial(t.color)
           : this._tubeMaterial(t.color);
         const bowFinalMat = matFor(t.id, bowMat);
-        // 弯管同样保持空心，闭合端面的旧网格不用于管身。
+        // 弯管同样保留空心管口，旧网格的实心端面不用于管身。
         const bowMesh = new THREE.Mesh(
           new THREE.TubeGeometry(bowCurve, 24, tubeRadius, qual.bow, false),
           bowFinalMat
         );
+        bowMesh.geometry.setAttribute("color", new THREE.BufferAttribute(new Float32Array(bowMesh.geometry.getAttribute("position").count * 3).fill(1), 3));
         bowMesh.userData = { kind: "tube", id: t.id };
         bowMesh.castShadow = true;
         this.buildGroup.add(bowMesh);
@@ -4428,7 +4443,7 @@ export class SceneManager {
         this.buildGroup.add(innerMesh);
         if (st !== "future") this.pickTubes.push(innerMesh);
 
-        // 两端只封住管壁截面，保留中间的孔。
+        // 端面只画管壁截面，保留中间的孔。
         const capGeo = this._capGeometry(tubeRadius, qual.bow);
         for (const [u01, sign] of [[0, -1], [1, 1]]) {
           const cap = new THREE.Mesh(capGeo, bowFinalMat);
@@ -4470,7 +4485,7 @@ export class SceneManager {
         : (asm && st === "done") ? this._tubeMaterial(t.color)
         : this._tubeMaterial(t.color);
       if (t.tubeId?.startsWith('TA') && st !== 'future' && !(asm && st === 'done')) {
-        if (!this._materials.aluminiumTube) this._materials.aluminiumTube = new THREE.MeshStandardMaterial({ color: '#b9c0c5', metalness: 0.85, roughness: 0.27 });
+        if (!this._materials.aluminiumTube) this._materials.aluminiumTube = new THREE.MeshStandardMaterial({ color: '#b9c0c5', metalness: 0.85, roughness: 0.27, vertexColors: true });
         mat = this._materials.aluminiumTube;
       }
       const dir = vb.clone().sub(va).normalize();
@@ -5316,14 +5331,28 @@ export class SceneManager {
       guideAxis: this._guideAxisOf([dir.x, dir.y, dir.z]),
     }, userData);
 
-    this._addNodeGuide(origin, [dir.x, dir.y, dir.z]);
+    const ends = userData.previewEnds;
+    const parallelMid = ends ? new THREE.Vector3(...ends[0]).add(new THREE.Vector3(...ends[1]))
+      .multiplyScalar(0.5).sub(group.position).dot(dir) : null;
+    const parallelSpan = ends ? new THREE.Vector3(...ends[0]).distanceTo(new THREE.Vector3(...ends[1])) : null;
+    if (ends) {
+      const guide = new THREE.Mesh(this._cachedGeo("parallelGuide", () =>
+        new THREE.CylinderGeometry(GUIDE.r, GUIDE.r, 1, 6)),
+        this._guideMaterial(group.userData.guideAxis, false));
+      guide.scale.y = parallelSpan;
+      guide.position.y = parallelMid;
+      guide.renderOrder = 998;
+      guide.raycast = () => {};
+      group.add(guide);
+    } else this._addNodeGuide(origin, [dir.x, dir.y, dir.z]);
 
     // 指到这个方向时亮起来的那一条，从接点往外，比引导线略长也略粗
     const beam = new THREE.Mesh(
       this._guideBeamGeo(),
       this._guideMaterial(group.userData.guideAxis, true),
     );
-    beam.position.y = GUIDE.beamHalf / 2;
+    beam.position.y = ends ? parallelMid : GUIDE.beamHalf / 2;
+    if (ends) beam.scale.y = parallelSpan / GUIDE.beamHalf;
     beam.renderOrder = 1000;
     beam.visible = false;
     beam.raycast = () => {};
@@ -5331,9 +5360,10 @@ export class SceneManager {
     // 两个碰撞体现在一样长：静止和指上去的区别只在那条亮线，
     // 判定范围没有理由跟着变。长度跟引导线对齐，指到线的任何一段都算数。
     const hitStub = new THREE.Mesh(this._guideHitGeo(), this._arrowHitMaterial());
-    hitStub.position.y = GUIDE.hitLen / 2;
+    hitStub.position.y = ends ? parallelMid : GUIDE.hitLen / 2;
     const hitFull = new THREE.Mesh(this._guideHitGeo(), this._arrowHitMaterial());
-    hitFull.position.y = GUIDE.hitLen / 2;
+    hitFull.position.y = hitStub.position.y;
+    if (ends) hitStub.scale.y = hitFull.scale.y = parallelSpan / GUIDE.hitLen;
     const childData = Object.assign({ kind: "handle", arrowRoot: group }, userData);
     hitStub.userData = hitFull.userData = childData;
     group.userData.beamMesh = beam;
@@ -5412,7 +5442,9 @@ export class SceneManager {
     }
     this._tubePreview.material.color.set(hex);
     this._tubePreview.scale.set(1, drawLen, 1);
-    const mid = new THREE.Vector3().copy(group.position).addScaledVector(dir, cs / 2 + drawLen / 2);
+    const ends = group.userData.previewEnds;
+    const mid = ends ? new THREE.Vector3(...ends[0]).add(new THREE.Vector3(...ends[1])).multiplyScalar(0.5)
+      : new THREE.Vector3().copy(group.position).addScaledVector(dir, cs / 2 + drawLen / 2);
     this._tubePreview.position.copy(mid);
     this._tubePreview.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
     this._tubePreview.visible = true;
@@ -6084,7 +6116,8 @@ export class SceneManager {
         this._clearTubePreview();
       } else {
         const isArrow = !!root.userData.arrowRoot;
-        root.scale.setScalar(isArrow ? 1.12 : root.userData.panelDot ? 1.4 : 1.6);
+        if (root.userData.previewEnds) root.scale.setScalar(1);
+        else root.scale.setScalar(isArrow ? 1.12 : root.userData.panelDot ? 1.4 : 1.6);
         if (isArrow) {
           this._paintArrow(root, "focus");
           this._setTubePreview(root);

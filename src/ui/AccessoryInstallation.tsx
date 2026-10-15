@@ -40,6 +40,7 @@ export default function AccessoryInstallation({ menuOpen }: { menuOpen: boolean 
       {preview && !part && <p role="status">{preview.reason || t('accessory.stage.preview')}</p>}
       {api.canFlipAccessory && <div className="flex flex-wrap gap-2 mt-2">
         <button type="button" className="qb-btn qb-btn-sm flex items-center gap-1" data-ui="flip-accessory" onClick={api.flipAccessory} disabled={api.readOnly}><RotateCcw size={14} />{t('accessory.flip')}</button>
+        {api.engine()?.builder.selectedPartAdjustment() === 'panel' && <button type="button" className="qb-btn qb-btn-sm" onClick={() => { api.engine()?.builder.turnSelectedPanel(); api.bump() }} disabled={api.readOnly}>{t('tip.turnPanel')}</button>}
       </div>}
     </section>
   </div>
