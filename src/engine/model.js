@@ -9,6 +9,7 @@ import { insetPanelProbes } from './insetPanelMounts.js';
 import { validAssemblyConfig } from './assemblyConfig.js';
 import { validHomeContext } from '../home/context.js';
 import { isSoftPart } from './softParts.js';
+import { nativePanelDiagnostics, nativePanelMounts } from './nativePanelDiagnostics.js';
 import { reinforcementPaths, aluminiumConnectorMounts, aluminiumConnectorSupport, isAluminiumConnector, validReinforcementRecords, explicitReinforcementGroups } from './reinforcement.js';
 
 // Zellweite des Rasters, mit dem die Kollisionspruefung Nachbarn sucht. Etwas
@@ -1423,11 +1424,13 @@ export class BuildModel {
   }
   ropeDiagnostics(first, second) { return confirmedDiagnostics(this, ropeCandidate(this, first, second)); }
   confirmedDiagnostics(probe) { return confirmedDiagnostics(this, probe); }
+  nativePanelDiagnostics(probe) { return nativePanelDiagnostics(this, probe); }
+  nativePanelMounts(panelId) { return nativePanelMounts(this,panelId); }
 
   // 普通方板与半高围板使用工厂原生形状；安装前仍检查四边及固定位。
-  addNativePanel(probe, color) {
+  addNativePanel(probe, color, { nativeGeometry = false } = {}) {
     if (!['panel_40x40', 'panel_40x20'].includes(probe?.panelId)) return null;
-    const candidate = confirmedDiagnostics(this, { ...probe, id: undefined });
+    const candidate = nativeGeometry ? nativePanelDiagnostics(this, { ...probe, id: undefined }) : confirmedDiagnostics(this, { ...probe, id: undefined });
     if (!candidate.valid) return null;
     const panel = {
       id: this._id('p'), a: candidate.a, b: candidate.b,
