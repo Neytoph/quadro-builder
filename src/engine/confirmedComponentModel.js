@@ -60,7 +60,7 @@ export function localToWorld(frame,p) {return frame.pos.map((v,i)=>v+frame.axes.
 export function worldToLocal(frame,p) {const d=cSub(p,frame.pos);return frame.axes.map(a=>cDot(d,a));}
 export function cVolume(frame,lo,hi) {return {pos:localToWorld(frame,lo.map((v,i)=>(v+hi[i])/2)),axes:frame.axes,half:lo.map((v,i)=>(hi[i]-v)/2)};}
 
-function edgeSupports(model, corners, density=0) {
+function edgeSupports(model, corners, density=0, coverage=null) {
   const supportTubes=new Set(),mounts=[];
   for(let i=0;i<4;i++) {
     const a=corners[i],b=corners[(i+1)%4],d=unit(cSub(b,a)),L=Math.hypot(...cSub(b,a)),spans=[];
@@ -73,6 +73,7 @@ function edgeSupports(model, corners, density=0) {
     }
     spans.sort((a,b)=>a.lo-b.lo);let reach=0;
     for(const s of spans){if(s.lo>reach+0.35)break;reach=Math.max(reach,s.hi);supportTubes.add(s.tube.id);}
+    if(coverage){coverage.push(reach>=L-0.35);continue;}
     if(reach<L-0.35)return null;
     const positions=density?Array.from({length:Math.max(2,Math.floor((L-8)/density)+1)},(_,k)=>4+k*(L-8)/Math.max(1,Math.floor((L-8)/density))):[4];
     for(const position of positions) {
@@ -82,6 +83,10 @@ function edgeSupports(model, corners, density=0) {
     }
   }
   return {mounts,supportTubes:[...supportTubes]};
+}
+
+export function panelEdgeCoverage(model,corners) {
+  const coverage=[];edgeSupports(model,corners,0,coverage);return coverage;
 }
 
 export function confirmedPanelDiagnostics(model,probe,{legacyInset=false,screwAxis=probe.params?.screwAxis || 'vertical'}={}) {

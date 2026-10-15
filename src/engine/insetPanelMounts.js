@@ -7,8 +7,8 @@ const local=(frame,p)=>frame.axes.map(a=>dot(sub(p,frame.pos),a));
 
 export function hasInsetScrews(part) {return INSET_PANEL_IDS.has(part.panelId) && part.params?.mountLayout===INSET_MOUNT_LAYOUT;}
 
-// 仅内嵌安装使用连续对边探针；每根短管都仍是实际模型管件。
-export function insetPanelProbes(model,width,height) {
+// 连续边管用于查找矩形候选；调用方分别核对普通板四边或内嵌板安装条件。
+export function insetPanelProbes(model,width,height,{deduplicate=true}={}) {
   const rails=[...model.tubes.values()].flatMap(t=>{const rail=model._rail(t.id);return rail?[{...rail,id:t.id}]:[];}),out=[],seen=new Set();
   for(const rail of rails){
     const starts=new Set(),intervals=[];
@@ -32,7 +32,7 @@ export function insetPanelProbes(model,width,height) {
       for(const t0 of complete){
         const start=rail.p0.map((v,i)=>v+rail.dir[i]*t0),end=start.map((v,i)=>v+rail.dir[i]*height);
         const key=[start,end,start.map((v,i)=>v+across[i]),end.map((v,i)=>v+across[i])].map(p=>p.map(v=>v.toFixed(2)).join(',')).sort().join('|');
-        if(seen.has(key))continue;seen.add(key);out.push({a:rail.id,b:partner.id,t0,len:height});
+        if(deduplicate&&seen.has(key))continue;seen.add(key);out.push({a:rail.id,b:partner.id,t0,len:height});
       }
     }
   }
