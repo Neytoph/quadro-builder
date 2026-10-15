@@ -9,9 +9,12 @@ import { syncConfigured } from '../sync/bootstrap'
 import { displaySaveState } from '../store/personalTabs'
 import { legacyBackupWithTabs } from '../collab/legacyBackup'
 import { Modal } from '../collab/ui/Modals'
+import { colorStrings } from './colorStrings'
+import { COLOR_HEX } from '../engine/colors.js'
 import { Box, BookOpen, ChevronDown, FileJson, FolderInput, Image, Link, Plus, Save, Sparkles, Upload } from 'lucide-react'
 
 const btn = 'qb-file-action'
+const officialHexes = new Set([...Object.values(COLOR_HEX).map(hex => hex.toUpperCase()), '#2B2B2B'])
 
 export default function FilePanel() {
   const api = useEngine()
@@ -64,6 +67,7 @@ export default function FilePanel() {
           <button onClick={api.exportQdf} className="qb-file-export" title={t('btn.exportQdf')}><Box aria-hidden="true" /><strong>{t('chrome.original')}</strong><small>{t('chrome.originalHint')}</small></button>
           <button onClick={() => void api.exportAssemblyPdf()} disabled={!!api.exportingManual} aria-busy={!!api.exportingManual} className="qb-file-export" title={t('btn.exportManual')}><BookOpen aria-hidden="true" /><strong>{t('chrome.manual')}</strong><small>{t('chrome.manualHint')}</small></button>
         </div>
+        {api.modelColors.some(hex => !officialHexes.has(hex)) && <p className="text-xs text-gray-300 leading-relaxed px-2 mt-2">{colorStrings[lang].export}</p>}
         <button onClick={() => void api.shareCurrent()} className="qb-file-row"><Link aria-hidden="true" /><span>{t('btn.share')}</span></button>
       </section>
       {batch && <BatchImport onClose={() => setBatch(false)} />}

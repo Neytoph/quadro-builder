@@ -30,6 +30,7 @@ import { MOTION } from '../ui/motion'
 import { createTabDoc, dropTabDoc, memoryDoc, openTabDoc, readPersonalState, writePersonalState, SEED_ORIGIN, type LocalDoc } from '../collab/localDocs'
 import { partCountOf, writeJSON, type ModelJSON } from '../collab/ymodel'
 import { appendTab } from './tabs'
+import { modelColors, selectionColor } from '../engine/customColors.js'
 import { modelContent, personalDecision, personalRecordUnconfirmed, personalSaveBaseline, readPersonalBinding, restorePersonalBinding, samePersonalBinding, savedGenerationUnchanged, savedRecordState, type PersonalState } from './personalTabs'
 import { renderModelCover } from './modelCover'
 import { computeAssemblyPlan } from '../engine/assemblyPlan.js'
@@ -194,6 +195,12 @@ interface EngineApi {
   activateTool: (tool: BuilderTool) => void
   toggleLastTool: () => void
   setColor: (id: string) => void
+  modelColors: string[]
+  selectionColor: string | null
+  previewingColor: boolean
+  beginColorPreview: () => boolean
+  previewColor: (hex: string) => void
+  finishColorPreview: (hex?: string) => boolean
   recolorAll: (colors: string[]) => void
   setTube: (id: string) => void
   setPanel: (id: string) => void
@@ -2805,6 +2812,12 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     ready, entryReady, completeEntry, error, hostRef, tick,
     mode: (builder?.mode as string) || 'select',
     color: (builder?.color as string) || 'random',
+    modelColors: modelColors(model),
+    selectionColor: selectionColor(model, builder?.selection),
+    previewingColor: !!builder?._colorPreview,
+    beginColorPreview: () => { const ok = !!builder?.beginColorPreview(); bump(); return ok },
+    previewColor: (hex) => { builder?.previewColor(hex) },
+    finishColorPreview: (hex) => { const ok = !!builder?.finishColorPreview(hex); bump(); return ok },
     recolorAll: (colors) => { track('builder.color.all', { n: colors.length }); builder?.recolorAll?.(colors); bump() },
     tubeId: (builder?.tubeId as string) || 'T35',
     panelId: (builder?.panelId as string) || '',

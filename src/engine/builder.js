@@ -5,6 +5,7 @@ import { Vector3 } from "three";
 import { ALUMINIUM_CONNECTOR } from './reinforcement.js';
 import { buildableTubes, geometry, getTube, spacingFor, getPanel, defaultPanel, diagonalTubeId, slideKindLabel, slideKindName, isCurvedTube, gridSpacing, partName, partForFitting, getPartById, getConnector, poolLinerFor, reinforcementPart, textilePart } from "./catalog.js";
 import { CLASSIC_COLOR_IDS, officialColorId } from "./colors.js";
+import { colorPreviewModel, normalizeColor } from './customColors.js';
 import { connectorLabelInfo } from "./buildplan.js";
 import { computeAssemblyPlan, assemblyState } from "./assemblyPlan.js";
 import { infeasibleConnectors, inferConnectorType, resolveNodeConnection } from "./bom.js";
@@ -165,6 +166,7 @@ export class Builder {
    * 读出来的内容）时从文档重新读出整座；拖动或粘贴进行中就等它收尾。
    */
   setHistory(history) {
+    this._colorPreview = null;
     if (this.history !== history) this._cancelHingeDrag();
     if (this.history !== history) this._rotationDirections = new Map();
     if (this.history && this.history !== history) {
@@ -194,6 +196,7 @@ export class Builder {
 
   /** 从文档读出来的整座造型换进模型，选择里已经不存在的零件去掉。 */
   applyExternal(json) {
+    this._colorPreview = null;
     const res = this.model.loadJSON(json);
     if (!res.ok) throw new Error(`Yjs document does not load: ${res.reason}`);
     if (this.selectedNodeId && !this.model.nodes.has(this.selectedNodeId)) {
@@ -206,6 +209,7 @@ export class Builder {
   }
 
   setReadOnly(on) {
+    if (on) this._colorPreview = null;
     if (on) this._cancelHingeDrag();
     this.readOnly = !!on;
     if (this.readOnly && this.mode !== "select" && this.mode !== "assembly") this.setMode("select");
@@ -222,6 +226,7 @@ export class Builder {
   // Fuehrt eine Modell-Aenderung aus und gibt sie an die Bearbeitungshistorie
   // weiter (nur wenn sich wirklich etwas geaendert hat).
   recordHistory(mutateFn) {
+    this._colorPreview = null;
     const before = JSON.stringify(this.model.toJSON());
     const ret = mutateFn();
     const after = JSON.stringify(this.model.toJSON());
@@ -278,6 +283,7 @@ export class Builder {
 
   // --- oeffentliche Steuerung --------------------------------------------
   setMode(mode) {
+    this._colorPreview = null;
     this._cancelHingeDrag();
     this._ropeFirst = null;
     this._installationPart = null; this.installationPreview = null;
@@ -506,8 +512,33 @@ export class Builder {
   // Farbe der Toolbar. Im Cursor-Modus faerbt sie ausserdem die aktuelle
   // Auswahl um -- im Platzier-Modus gilt sie nur fuer NEUE Teile.
   setColor(colorId) {
+    this._colorPreview = null;
     this.color = colorId;
     if (this.mode === "select" && this.selection.size) this.colorSelection(colorId);
+  }
+
+  beginColorPreview() {
+    if (this.readOnly || this.busy() || this.mode === 'assembly') return false;
+    this._runSelectFlip();
+    this._colorPreview = { hex: null, selection: this.mode === 'select' ? new Map(this.selection) : new Map() };
+    return true;
+  }
+
+  previewColor(value) {
+    const hex = normalizeColor(value);
+    if (!hex || !this._colorPreview || this.readOnly) return false;
+    this._colorPreview.hex = hex;
+    this.refresh();
+    return true;
+  }
+
+  finishColorPreview(value = null) {
+    if (!this._colorPreview) return false;
+    this._colorPreview = null;
+    const hex = normalizeColor(value);
+    if (hex && !this.readOnly) this.setColor(hex);
+    this.refresh();
+    return !!hex && !this.readOnly;
   }
 
   /**
@@ -549,20 +580,20 @@ export class Builder {
         if (t.arm || t.link) continue;
         if (fixedTubeColor(t.tubeId)) continue;
         const next = pick();
-        if (t.color !== next) { t.color = next; changed++; }
+        if (this.model.setColorOf('tube', t.id, next)) changed++;
       }
-      for (const map of [this.model.panels, this.model.textiles, this.model.slides]) {
+      for (const [kind, map] of [['panel', this.model.panels], ['textile', this.model.textiles], ['slide', this.model.slides]]) {
         for (const el of map.values()) {
           if (el.appearanceVersion === 2 && confirmedSpec(el.panelId || el.partId || el.kind)?.fixedColor) continue;
           const next = pick();
-          if (el.color !== next) { el.color = next; changed++; }
+          if (this.model.setColorOf(kind, el.id, next)) changed++;
         }
       }
       for (const f of this.model.fittings.values()) {
         if (f.appearanceVersion === 2 && confirmedSpec(f.partId || f.kind)?.fixedColor) continue;
         if (fixedFittingColor(f.kind)) continue;
         const next = pick();
-        if (f.color !== next) { f.color = next; changed++; }
+        if (this.model.setColorOf('fitting', f.id, next)) changed++;
       }
     });
     if (changed) this.onNotice(t("notice_color_changed"));
@@ -1487,6 +1518,7 @@ export class Builder {
    * Zaehler starten wieder bei 1) -- _pruneSelection findet das nicht.
    */
   modelReplaced() {
+    this._colorPreview = null;
     if (this._hingeDrag) {
       this._hingeDrag = null;
       this._down = null;
@@ -1901,12 +1933,15 @@ export class Builder {
     // 面板 / 布件两步点选的第一步：还没选第一根管时，能当第一根的管先亮出来，
     // 其余零件退后；选了第一根，照旧只亮它（琥珀）和能配的对面管（绿）。
     const firstRails = this._firstRailCandidates();
-    this.scene.renderModel(this.model, this.selectedNodeId,
+    const displayModel = this._colorPreview?.hex
+      ? colorPreviewModel(this.model, this._colorPreview.selection, this._colorPreview.hex) : this.model;
+    this.scene.renderModel(displayModel, this.selectedNodeId,
       { labelFor, slideNameFor, labelIds, soloId, soloLabel, assembly, suggest, reinforce,
-        selected, highlight: this.highlight || firstRails, invalid, tints: this.tints,
+        selected: this._colorPreview ? null : selected,
+        highlight: this._colorPreview ? null : this.highlight || firstRails, invalid, tints: this.tints,
         focusId: this.panelRail ? this.panelRail.id : null,
         keepPanelFacesOpaque: this.mode === 'panel',
-        preview: !!(this._paste || this._clampDrag || this._hingeDrag) });
+        preview: !!(this._paste || this._clampDrag || this._hingeDrag || this._colorPreview) });
     this._buildHandles();
     if (this._installationPart) this.scene.showInstallationPreview(this.model, this._installationPart, this.installationPreview.valid);
     this.scene.requestRender();
@@ -1915,7 +1950,7 @@ export class Builder {
     // mit, obwohl der Stand noch gar nicht gilt. Beim Absetzen wird ohnehin neu
     // gezeichnet -- dann laeuft es einmal. Nur die Knoepfe, die vom Zustand
     // abhaengen (Drehen), werden nachgezogen.
-    if (!this._paste && !this._clampDrag && !this._hingeDrag) this.onChange();
+    if (!this._paste && !this._clampDrag && !this._hingeDrag && !this._colorPreview) this.onChange();
     else this.onPreview();
   }
 
