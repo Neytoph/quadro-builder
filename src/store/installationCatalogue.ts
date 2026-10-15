@@ -5,6 +5,7 @@ import { builderComponents, selectBuilderComponent } from './builderComponents'
 export type CatalogueTool = 'panels' | 'accessories' | 'textiles' | 'wheels' | 'slides' | 'pools' | 'tubes' | 'connectors' | 'reinforce'
 export type CatalogueEntry = { id: string; origin: 'official' | 'extended'; group: string; tool: CatalogueTool; method: string; aliases: string }
 // 已确认零件的唯一归属与已核对来源；来源独立于运行时compat。
+// 平台目录同步器直接按JSON读取这个数组，须保留双引号并避免尾逗号。
 export const INSTALLATION_CATALOGUE: readonly CatalogueEntry[] = [
   {
     "id": "panel_40x40",
@@ -734,10 +735,10 @@ export const INSTALLATION_CATALOGUE: readonly CatalogueEntry[] = [
     "method": "节点连接",
     "aliases": ""
   },
-  { id: 'reinforce35', origin: 'official', group: 'reinforce', tool: 'reinforce', method: '穿管', aliases: '铝管 加固 aluminium aluminum Verstärkungsrohr' },
-  { id: 'reinforce55', origin: 'official', group: 'reinforce', tool: 'reinforce', method: '穿管', aliases: '铝管 加固 aluminium aluminum Verstärkungsrohr' },
-  { id: 'reinforce80', origin: 'official', group: 'reinforce', tool: 'reinforce', method: '穿管', aliases: '铝管 加固 aluminium aluminum Verstärkungsrohr' },
-  { id: 'alu_connector', origin: 'official', group: 'reinforce', tool: 'reinforce', method: '连接', aliases: '铝管 连接器 aluminium aluminum Verbinder' },
+  { "id": "reinforce35", "origin": "official", "group": "reinforce", "tool": "reinforce", "method": "穿管", "aliases": "铝管 加固 aluminium aluminum Verstärkungsrohr" },
+  { "id": "reinforce55", "origin": "official", "group": "reinforce", "tool": "reinforce", "method": "穿管", "aliases": "铝管 加固 aluminium aluminum Verstärkungsrohr" },
+  { "id": "reinforce80", "origin": "official", "group": "reinforce", "tool": "reinforce", "method": "穿管", "aliases": "铝管 加固 aluminium aluminum Verstärkungsrohr" },
+  { "id": "alu_connector", "origin": "official", "group": "reinforce", "tool": "reinforce", "method": "连接", "aliases": "铝管 连接器 aluminium aluminum Verbinder" }
 ]
 
 type EngineApi = ReturnType<typeof useEngine>

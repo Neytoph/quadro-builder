@@ -5,9 +5,16 @@ import { isNewComponent } from './newComponentStatus'
 import { installationCatalogueStrings } from '../ui/installationCatalogueStrings'
 import type { useEngine } from './EngineContext'
 import { INSTALLATION_CATALOGUE, installationActive, installationChoices, searchInstallation, selectInstallation } from './installationCatalogue'
+import catalogueSource from './installationCatalogue.ts?raw'
 
 type EngineApi = ReturnType<typeof useEngine>
 beforeAll(async () => { await loadCatalog() })
+
+it('平台库存同步器可以按JSON读取完整目录', () => {
+  const match = catalogueSource.match(/export const INSTALLATION_CATALOGUE:[\s\S]*?= (\[[\s\S]*?\n\])/)
+  expect(match).not.toBeNull()
+  expect(JSON.parse(match![1])).toEqual(INSTALLATION_CATALOGUE)
+})
 
 // 使用仓库真实目录；仅隔离检查菜单调用与状态匹配，不作为三维安装成功证据。
 function routingApi() {
