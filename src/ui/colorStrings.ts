@@ -1,0 +1,32 @@
+export const colorStrings = {
+  zh: {
+    custom: '自定义颜色', edit: '编辑', done: '完成', empty: '添加颜色', use: '使用颜色', model: '造型用色',
+    title: '选一个喜欢的颜色', hex: 'HEX 色号', invalid: '请输入 3 位或 6 位十六进制色号',
+    apply: '使用此颜色', cancel: '取消', before: '原色', after: '新颜色',
+    selected: '实时预览已选零件，确认后应用', next: '用于接下来新增的零件',
+    all: '全部同色', allHint: '将整个造型的可着色零件改为当前颜色',
+    storage: '自定义颜色暂时无法保存，当前仍可使用',
+    export: '自定义色可随造型保存；导出 QDF 会转换为接近的官方色。',
+    saturation: '饱和度与明度', hue: '色相', close: '关闭选色',
+  },
+  en: {
+    custom: 'Custom colours', edit: 'Edit', done: 'Done', empty: 'Add colour', use: 'Use colour', model: 'In this model',
+    title: 'Find your colour', hex: 'HEX colour', invalid: 'Enter a 3- or 6-digit hex colour',
+    apply: 'Use this colour', cancel: 'Cancel', before: 'Original', after: 'New colour',
+    selected: 'Preview on selected parts. Apply to keep.', next: 'For parts you add next',
+    all: 'Make all one colour', allHint: 'Apply the current colour to all colourable parts',
+    storage: 'Custom colours cannot be saved right now. You can still use them.',
+    export: 'Custom colours are saved with your model. QDF maps them to the nearest official colour.',
+    saturation: 'Saturation and brightness', hue: 'Hue', close: 'Close colour picker',
+  },
+  de: {
+    custom: 'Eigene Farben', edit: 'Bearbeiten', done: 'Fertig', empty: 'Farbe hinzufügen', use: 'Farbe verwenden', model: 'Farben im Modell',
+    title: 'Wähle deine Farbe', hex: 'HEX-Farbcode', invalid: '3 oder 6 Hexadezimalstellen eingeben',
+    apply: 'Farbe verwenden', cancel: 'Abbrechen', before: 'Bisher', after: 'Neue Farbe',
+    selected: 'Vorschau an der Auswahl. Zum Behalten bestätigen.', next: 'Für die nächsten neuen Teile',
+    all: 'Alles einfarbig', allHint: 'Aktuelle Farbe auf alle färbbaren Teile anwenden',
+    storage: 'Eigene Farben können gerade nicht gespeichert werden. Sie bleiben verwendbar.',
+    export: 'Eigene Farben werden im Modell gespeichert. QDF nutzt die nächstliegende offizielle Farbe.',
+    saturation: 'Sättigung und Helligkeit', hue: 'Farbton', close: 'Farbauswahl schließen',
+  },
+}
