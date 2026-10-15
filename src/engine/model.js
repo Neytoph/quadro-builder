@@ -9,6 +9,7 @@ import { insetPanelProbes } from './insetPanelMounts.js';
 import { validAssemblyConfig } from './assemblyConfig.js';
 import { validHomeContext } from '../home/context.js';
 import { isSoftPart } from './softParts.js';
+import { nativePanelDiagnostics, nativePanelMounts } from './nativePanelDiagnostics.js';
 import { reinforcementPaths, aluminiumConnectorMounts, aluminiumConnectorSupport, isAluminiumConnector, validReinforcementRecords, explicitReinforcementGroups } from './reinforcement.js';
 import { nativePanelDiagnostics, nativePanelMounts } from './nativePanelDiagnostics.js';
 

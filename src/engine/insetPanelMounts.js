@@ -7,8 +7,8 @@ const local=(frame,p)=>frame.axes.map(a=>dot(sub(p,frame.pos),a));
 
 export function hasInsetScrews(part) {return INSET_PANEL_IDS.has(part.panelId) && part.params?.mountLayout===INSET_MOUNT_LAYOUT;}
 
-// 连续框边探针保留每根短管的实际模型引用。
-export function insetPanelProbes(model,width,height,{segmentedOnly=false,deduplicate=true}={}) {
+// 连续边管用于查找矩形候选；调用方分别核对普通板四边或内嵌板安装条件。
+export function insetPanelProbes(model,width,height,{deduplicate=true,segmentedOnly=false}={}) {
   const rails=[...model.tubes.values()].flatMap(t=>{const rail=model._rail(t.id);return rail?[{...rail,id:t.id}]:[];}),out=[],seen=new Set();
   for(const rail of rails){
     if(segmentedOnly && rail.len>=height-.35)continue;

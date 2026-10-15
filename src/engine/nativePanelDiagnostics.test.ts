@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { BuildModel } from './model.js'
 import { loadCatalog } from './catalog.js'
 import { ensureAssemblyMeshes } from './assemblyNativeMesh.js'
+import { computeSafety } from './safety.js'
 
 beforeAll(async () => { await loadCatalog(); await ensureAssemblyMeshes() })
 
@@ -80,10 +81,12 @@ describe('普通板真实网格安装复核',()=>{
     expect(panel).toBeTruthy()
     const loaded=new BuildModel();expect(loaded.loadJSON(model.toJSON()).ok).toBe(true)
     expect(loaded.toJSON()).toEqual(model.toJSON())
-    model.panels.delete(panel.id)
-    const supports=model.nativePanelDiagnostics(probe).supportTubes
+    const supports=model.nativePanelDiagnostics({...panel,id:panel.id}).supportTubes
+    for(const node of model.nodes.values()){const y=node.y;node.y=node.z+40;node.z=y-40}
+    expect(computeSafety(model).findings.some(f=>f.rule==='deck_edges')).toBe(false)
     model.tubes.delete(supports.find((id:string)=>id!==probe.a&&id!==probe.b)!)
-    expect(model.nativePanelDiagnostics(probe).valid).toBe(false)
+    expect(model.nativePanelDiagnostics({...panel,id:panel.id}).valid).toBe(false)
+    expect(computeSafety(model).findings.some(f=>f.rule==='deck_edges'&&f.ids.panels.includes(panel.id))).toBe(true)
   })
   it('侧管位于整板边缘时保留整板，原生文件完整往返',()=>{
     const {model,probe}=frame()
