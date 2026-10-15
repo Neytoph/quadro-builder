@@ -2,9 +2,10 @@ import type { useEngine } from './EngineContext'
 import { componentChoices, activateComponent, type ComponentChoice } from './componentChoices'
 import { builderComponents, selectBuilderComponent } from './builderComponents'
 
-export type CatalogueTool = 'panels' | 'accessories' | 'textiles' | 'wheels' | 'slides' | 'pools' | 'tubes' | 'connectors'
+export type CatalogueTool = 'panels' | 'accessories' | 'textiles' | 'wheels' | 'slides' | 'pools' | 'tubes' | 'connectors' | 'reinforce'
 export type CatalogueEntry = { id: string; origin: 'official' | 'extended'; group: string; tool: CatalogueTool; method: string; aliases: string }
-// 用户确认的91件唯一归属与已核对来源；来源独立于运行时compat。
+// 已确认零件的唯一归属与已核对来源；来源独立于运行时compat。
+// 平台目录同步器直接按JSON读取这个数组，须保留双引号并避免尾逗号。
 export const INSTALLATION_CATALOGUE: readonly CatalogueEntry[] = [
   {
     "id": "panel_40x40",
@@ -733,7 +734,11 @@ export const INSTALLATION_CATALOGUE: readonly CatalogueEntry[] = [
     "tool": "connectors",
     "method": "节点连接",
     "aliases": ""
-  }
+  },
+  { "id": "reinforce35", "origin": "official", "group": "reinforce", "tool": "reinforce", "method": "穿管", "aliases": "铝管 加固 aluminium aluminum Verstärkungsrohr" },
+  { "id": "reinforce55", "origin": "official", "group": "reinforce", "tool": "reinforce", "method": "穿管", "aliases": "铝管 加固 aluminium aluminum Verstärkungsrohr" },
+  { "id": "reinforce80", "origin": "official", "group": "reinforce", "tool": "reinforce", "method": "穿管", "aliases": "铝管 加固 aluminium aluminum Verstärkungsrohr" },
+  { "id": "alu_connector", "origin": "official", "group": "reinforce", "tool": "reinforce", "method": "连接", "aliases": "铝管 连接器 aluminium aluminum Verbinder" }
 ]
 
 type EngineApi = ReturnType<typeof useEngine>
@@ -769,7 +774,7 @@ export function selectInstallation(entry: CatalogueChoice, api: EngineApi): bool
   return activateComponent(entry.choice, api)
 }
 
-export function installationActive(entry: CatalogueChoice, api: Pick<EngineApi, 'mode' | 'panelId' | 'tubeId' | 'slideKind' | 'clampPart' | 'placingConnector' | 'fittingKind' | 'fittingPart' | 'poolLinerId' | 'pasting'>): boolean {
+export function installationActive(entry: CatalogueChoice, api: Pick<EngineApi, 'mode' | 'panelId' | 'tubeId' | 'slideKind' | 'clampPart' | 'placingConnector' | 'fittingKind' | 'fittingPart' | 'poolLinerId' | 'pasting' | 'reinforcementPartId'>): boolean {
   const action = entry.choice.action
   if (!action) return false
   switch (action.kind) {
@@ -781,6 +786,7 @@ export function installationActive(entry: CatalogueChoice, api: Pick<EngineApi, 
     case 'fitting': return api.mode === 'fitting' && api.fittingKind === action.id && (action.partId ? api.fittingPart === action.partId : !api.fittingPart)
     case 'pool': return api.poolLinerId === action.id && (api.mode === 'fitting' || api.pasting)
     case 'c45': return api.mode === 'c45'
+    case 'reinforce': return api.mode === 'reinforce' && api.reinforcementPartId === action.id
     default: return false
   }
 }

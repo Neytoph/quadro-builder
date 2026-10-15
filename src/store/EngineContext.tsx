@@ -689,7 +689,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const state: ToolState = { mode: b.mode, panelId: b.panelId, tubeId: b.tubeId, slideKind: b.slideKind,
       clampPart: b.clampPart, placingConnector: b.placeConnectorId, fittingKind: b.fittingKind,
       fittingPart: b.fittingPart, poolLinerId: b.poolLinerId, pasting: b.pasting, color: b.color,
-      insetScrewAxis: b.insetScrewAxis }
+      insetScrewAxis: b.insetScrewAxis, reinforcementPartId: b.reinforcementPartId }
     toolMemory.current.remember(activeRef.current, captureTool(state, toolEntries.current))
   }, [])
 
@@ -1373,7 +1373,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     rememberTool()
     const saved = toolMemory.current.get(activeRef.current, tool)
     const defaults: Partial<Record<BuilderTool, string>> = { tubes: geometry().defaultTube, panels: geometry().defaultPanel,
-      connectors: '6way', wheels: 'wheel', textiles: 'textile', slides: 'slide_integral' }
+      connectors: '6way', wheels: 'wheel', textiles: 'textile', slides: 'slide_integral', reinforce: 'reinforce80' }
     const choices = toolEntries.current.filter(entry => entry.tool === tool)
     const entry = choices.find(entry => entry.id === saved?.partId)
       || choices.find(entry => entry.id === defaults[tool]) || choices[0]
@@ -1381,7 +1381,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     builder.setMode('select')
     // 只恢复工具配色，不调用会给选中零件上色的 setColor。
     if (saved) { builder.color = saved.color; builder.insetScrewAxis = saved.insetScrewAxis }
-    if (tool === 'reinforce') api.startReinforce()
+    if (tool === 'reinforce') api.startReinforce(entry?.id)
     else if (tool === 'slides' && saved) api.setSlide(saved.partId)
     else if (entry) selectInstallation(entry, api)
     rememberTool()

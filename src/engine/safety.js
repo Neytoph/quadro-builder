@@ -20,6 +20,7 @@ import { connectorsForNode } from "./bom.js";
 import { getPanel } from "./catalog.js";
 import { ACCESSORY_IDS, PANEL_ACCESSORY_IDS, componentMountsValid, componentObstacle } from './accessoryPack.js';
 import { confirmedSpec } from './componentPack.js';
+import { panelEdgeCoverage } from './confirmedComponentModel.js';
 
 const EPS = 2;              // cm：网格点重合判定
 const CORNER_EPS = 6;       // cm：板角落到接头的距离（半个接头加余量）
@@ -164,6 +165,7 @@ function ruleDeckEdges(model, decks, out) {
       const a = nodeNear(model, corners[i]), b = nodeNear(model, corners[(i + 1) % 4]);
       if (!a || !b || !model.tubeBetween(a.id, b.id)) missing++;
     }
+    if(missing&&['panel_40x40','panel_40x20','panel_30x30','hole_panel_40x40'].includes(p.panelId))missing=Math.min(missing,panelEdgeCoverage(model,corners).filter(covered=>!covered).length);
     if (missing) { panels.push(p.id); edges += missing; }
   }
   if (panels.length) out.push({ rule: "deck_edges", level: "warn", ref: "1.3", params: { n: panels.length, edges }, ids: { panels } });

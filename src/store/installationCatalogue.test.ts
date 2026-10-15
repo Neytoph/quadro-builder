@@ -5,15 +5,22 @@ import { isNewComponent } from './newComponentStatus'
 import { installationCatalogueStrings } from '../ui/installationCatalogueStrings'
 import type { useEngine } from './EngineContext'
 import { INSTALLATION_CATALOGUE, installationActive, installationChoices, searchInstallation, selectInstallation } from './installationCatalogue'
+import catalogueSource from './installationCatalogue.ts?raw'
 
 type EngineApi = ReturnType<typeof useEngine>
 beforeAll(async () => { await loadCatalog() })
+
+it('平台库存同步器可以按JSON读取完整目录', () => {
+  const match = catalogueSource.match(/export const INSTALLATION_CATALOGUE:[\s\S]*?= (\[[\s\S]*?\n\])/)
+  expect(match).not.toBeNull()
+  expect(JSON.parse(match![1])).toEqual(INSTALLATION_CATALOGUE)
+})
 
 // 使用仓库真实目录；仅隔离检查菜单调用与状态匹配，不作为三维安装成功证据。
 function routingApi() {
   const api = {
     catalog: { tubes: buildableTubes(), curved: buildableCurvedTubes(), panels: buildablePanels(), connectors: allConnectors(), accessories: accessories() },
-    readOnly: false, mode: 'select', panelId: '', tubeId: '', fittingKind: '', fittingPart: null as string | null, poolLinerId: null as string | null, slideKind: '', clampPart: '', placingConnector: null as string | null, pasting: false,
+    readOnly: false, mode: 'select', panelId: '', tubeId: '', fittingKind: '', fittingPart: null as string | null, poolLinerId: null as string | null, slideKind: '', clampPart: '', placingConnector: null as string | null, pasting: false, reinforcementPartId: 'reinforce80',
     setPanel(id: string) { this.mode = 'panel'; this.panelId = id },
     setTube(id: string) { this.mode = 'add'; this.tubeId = id },
     setFitting(kind: string, partId?: string) { this.mode = 'fitting'; this.fittingKind = kind; this.fittingPart = partId || null },
@@ -22,15 +29,16 @@ function routingApi() {
     startPool(id: string) { this.mode = 'fitting'; this.poolLinerId = id },
     placeConnector(id: string) { this.mode = 'add'; this.placingConnector = id },
     startC45() { this.mode = 'c45' },
+    startReinforce(id: string) { this.mode = 'reinforce'; this.reinforcementPartId = id },
   }
   return api as unknown as EngineApi
 }
 
-it('91个真实物理件各归属一次，数量与确认方案完整一致', () => {
+it('95个真实物理件各归属一次，包含三种铝管与连接器', () => {
   const entries = installationChoices(routingApi(), key => key)
-  expect(entries).toHaveLength(91)
-  expect(new Set(entries.map(entry => entry.id)).size).toBe(91)
-  expect(Object.fromEntries([...new Set(entries.map(entry => entry.tool))].map(tool => [tool, entries.filter(entry => entry.tool === tool).length]))).toEqual({ panels:24, accessories:10, textiles:13, wheels:7, slides:4, pools:5, tubes:10, connectors:18 })
+  expect(entries).toHaveLength(95)
+  expect(new Set(entries.map(entry => entry.id)).size).toBe(95)
+  expect(Object.fromEntries([...new Set(entries.map(entry => entry.tool))].map(tool => [tool, entries.filter(entry => entry.tool === tool).length]))).toEqual({ panels:24, accessories:10, textiles:13, wheels:7, slides:4, pools:5, tubes:10, connectors:18, reinforce:4 })
   expect(entries.filter(entry => entry.group === 'outside')).toHaveLength(16)
   expect(entries.filter(entry => entry.group === 'inset')).toHaveLength(8)
   expect(entries.filter(entry => entry.group === 'on-tube')).toHaveLength(4)
@@ -58,7 +66,7 @@ it('全库三语名称与组合别名搜索，荡桥只找到绳子', () => {
   setLang('zh')
 })
 
-it('全部91项路由可进入对应真实选择API，匹配选择状态', () => {
+it('全部95项路由可进入对应真实选择API，匹配选择状态', () => {
   const entries = installationChoices(routingApi(), key => key)
   for (const entry of entries) {
     const api = routingApi()

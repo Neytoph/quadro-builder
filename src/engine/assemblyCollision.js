@@ -15,6 +15,7 @@ import { componentVolumes } from './accessoryPack.js';
 import { curvePoint } from './confirmedComponentModel.js';
 import { C45_SLEEVE_LEN, C45_ARM_LEN } from './config.js';
 import { structuralBearingSupport } from './assemblyStructuralBearings.js';
+import { aluminiumConnectorDisplay } from './reinforcement.js';
 import { xAxisOf, yAxisOf, zAxisOf, panelNormal, modelMiddle } from './util.js';
 
 const xyz = p => [p.x, p.y, p.z];
@@ -44,6 +45,8 @@ const envelopeCache=new WeakMap();
 const portDepthCache=new WeakMap();
 const pathResultCache=new WeakMap();
 export function beginAssemblyCollisionPass(model,queryCache=new Map()){envelopeCache.set(model,new Map());portDepthCache.set(model,new Map());pathResultCache.set(model,queryCache);}
+export function forkAssemblyCollisionPass(source,target,excludedId){beginAssemblyCollisionPass(target);const cache=new Map(envelopeCache.get(source));cache.delete(excludedId);envelopeCache.set(target,cache);}
+export function invalidateAssemblyEnvelope(model,id){envelopeCache.get(model)?.delete(id);}
 export function partEnvelope(model,id){useMeshes();const cache=envelopeCache.get(model);if(cache?.has(id))return cache.get(id);const shapes=computeEnvelope(model,id);cache?.set(id,shapes);return shapes;}
 function computeEnvelope(model,id) {
   const radius=geometry().tubeRadius||2.45, cs=geometry().connectorSize||5;
@@ -95,7 +98,7 @@ function computeEnvelope(model,id) {
   }
   const f=model.fittings?.get(id)||model.slides?.get(id);
   if(f) {
-    if (f.kind === 'alu-connector2') return [nativeBox(f, [[0, f.w || 40], [5.675, 6.325], [-8.125, -7.875]])];
+    if (f.kind === 'alu-connector2') { const display = aluminiumConnectorDisplay(f); return [nativeBox(display, display.bounds)]; }
     if(f.appearanceVersion)return componentVolumes(model,f).map(b=>({...b,kind:'box'}));
     if(['pool2','pool-small2'].includes(f.kind)){
       const [width,depth]=f.kind==='pool2'?[120,160]:[80,120];

@@ -2,7 +2,7 @@
 
 import { DIRECTIONS, DIAGONAL_DIRECTIONS, DIR_ALIGN_TOL, ARM_ALIGN_TOL, CLAMP_LINK_DIST, C45_SLEEVE_LEN, C45_ARM_LEN, CONN_TYPE_MASK } from "./config.js";
 import { Vector3 } from "three";
-import { ALUMINIUM_CONNECTOR } from './reinforcement.js';
+import { ALUMINIUM_CONNECTOR, reinforcementGuide, aluminiumConnectorTargets } from './reinforcement.js';
 import { buildableTubes, geometry, getTube, spacingFor, getPanel, defaultPanel, diagonalTubeId, slideKindLabel, slideKindName, isCurvedTube, gridSpacing, partName, partForFitting, getPartById, getConnector, poolLinerFor, reinforcementPart, textilePart } from "./catalog.js";
 import { CLASSIC_COLOR_IDS, officialColorId } from "./colors.js";
 import { colorPreviewModel, normalizeColor } from './customColors.js';
@@ -1918,9 +1918,9 @@ export class Builder {
       ? { id: labelAn, text: profil != null
         ? partName(getPartById(this.model.tubes.get(profil)?.reinforcement?.partId || 'reinforce80'))
         : this._partLabel(soloId, this.selection.get(soloId)) } : null;
-    // Vorschlaege, welche Rohre ein Verstaerkungsprofil gebrauchen koennten --
-    // sichtbar genau dann, wenn man verstaerkt.
-    const suggest = this.mode === "reinforce" ? this.model.reinforcementSuggestions() : null;
+    // Only mark paths that accept the currently selected reinforcement size.
+    const suggest = this.mode === "reinforce"
+      ? reinforcementGuide(this.model, this.reinforcementPartId, this.reinforceRail).installable : null;
     const reinforce = this.mode === "reinforce";
     // Kollisions-Modus: immer ein Set (auch leeres), damit die Szene den Modus
     // erkennt und die uebrigen Rohre grau zeichnet.
@@ -1936,10 +1936,10 @@ export class Builder {
     const displayModel = this._colorPreview?.hex
       ? colorPreviewModel(this.model, this._colorPreview.selection, this._colorPreview.hex) : this.model;
     this.scene.renderModel(displayModel, this.selectedNodeId,
-      { labelFor, slideNameFor, labelIds, soloId, soloLabel, assembly, suggest, reinforce,
+      { labelFor, slideNameFor, labelIds, soloId, soloLabel, assembly, suggest, reinforce, reinforcementPartId: this.reinforcementPartId,
         selected: this._colorPreview ? null : selected,
         highlight: this._colorPreview ? null : this.highlight || firstRails, invalid, tints: this.tints,
-        focusId: this.panelRail ? this.panelRail.id : null,
+        focusId: this.panelRail ? this.panelRail.id : this.reinforceRail,
         keepPanelFacesOpaque: this.mode === 'panel',
         preview: !!(this._paste || this._clampDrag || this._hingeDrag || this._colorPreview) });
     this._buildHandles();
@@ -1974,6 +1974,13 @@ export class Builder {
     if (this.mode === "clamp") { this._buildClampHandles(); return; }
     if (this.mode === "c45") { this._buildC45Handles(); return; }
     if (this.mode === "fitting") { this._buildFittingHandles(); return; }
+    if (this.mode === 'reinforce' && this.reinforcementPartId === ALUMINIUM_CONNECTOR) {
+      for (const mount of this.model.aluminiumConnectorMounts()) {
+        const node = this.model.nodes.get(mount.nodeId);
+        this.scene.addHandle([node.x, node.y, node.z], { aluminiumConnectorMount: mount, placeNode: true }, 'place');
+      }
+      return;
+    }
     if (this.mode !== "add") return;
     if (this.placeConnectorId) { this._buildConnectorPlaceHandles(); return; }
 
@@ -3328,9 +3335,13 @@ export class Builder {
     } else if (this.mode === "reinforce") {
       // Sucht das erste Rohr noch seinen Partner, zeigt die Hand nur auf den
       // hervorgehobenen Gegenstuecken.
+      const connector = this.reinforcementPartId === ALUMINIUM_CONNECTOR;
+      const h = connector ? this.scene.pickHandle(x, y) : null;
       const p = (this.reinforceRail && this.highlight && this.scene.pickAmong(x, y, this.highlight))
-        || build(["tube"]);
-      obj = p && p.data.kind === "tube" && this._reinforceUsable(p.data.id) ? p.object : null;
+        || build(connector ? ['tube', 'node', 'fitting'] : ['tube']);
+      const removable = connector && p?.data.kind === 'fitting' && this.model.fittings.get(p.data.id)?.kind === 'alu-connector2';
+      if (h?.data.aluminiumConnectorMount) obj = h.object;
+      else obj = p && (removable || this._reinforceUsable(p.data.id)) ? p.object : null;
     } else if (this.mode === "assembly") {
       // Nur ansehen -- aber die Hand zeigt, dass sich ein Teil nachschlagen laesst.
       obj = this.scene.pickForDelete(x, y)?.object || null;
@@ -3462,20 +3473,26 @@ export class Builder {
       && this.scene.pickAmong(e.clientX, e.clientY, this.highlight))
       || this.scene.pickBuild(e.clientX, e.clientY);
     if (this.reinforcementPartId === ALUMINIUM_CONNECTOR) {
+      const handle = this.scene.pickHandle(e.clientX, e.clientY);
+      if (handle?.data.aluminiumConnectorMount) {
+        this.recordHistory(() => this.model.addAluminiumConnector(handle.data.aluminiumConnectorMount));
+        this.onNotice(t('notice_alu_connector_added')); this.refresh(); return;
+      }
       const fitting = pick?.data.kind === 'fitting' && this.model.fittings.get(pick.data.id);
       if (fitting?.kind === 'alu-connector2') {
         this.recordHistory(() => this.model.removeFitting(fitting.id));
+        this.onNotice(t('notice_alu_connector_removed'));
         this.refresh(); return;
       }
       const mounts = this.model.aluminiumConnectorMounts().filter(mount =>
-        pick && (mount.nodeId === pick.data.id || mount.supportTubes.includes(pick.data.id)));
+        pick && aluminiumConnectorTargets(this.model, mount).includes(pick.data.id));
       if (!mounts.length) { this.onNotice(t('notice_alu_connector_no_mount'), 'warn'); return; }
       mounts.sort((a, b) => {
         const distance = mount => { const node = this.model.nodes.get(mount.nodeId); return Math.hypot(node.x - pick.point.x, node.y - pick.point.y, node.z - pick.point.z); };
         return distance(a) - distance(b);
       });
       this.recordHistory(() => this.model.addAluminiumConnector(mounts[0]));
-      this.onNotice(t('notice_reinforce_added')); this.refresh(); return;
+      this.onNotice(t('notice_alu_connector_added')); this.refresh(); return;
     }
     if (!pick || pick.data.kind !== "tube") { this._clearReinforceRail(); return; }
     const tube = this.model.tubes.get(pick.data.id);
@@ -3521,9 +3538,9 @@ export class Builder {
 
   /** Laesst sich an diesem Rohr gerade ein Profil setzen oder herausziehen? */
   _reinforceUsable(id) {
+    if (this.reinforcementPartId === ALUMINIUM_CONNECTOR) return this.model.aluminiumConnectorMounts().some(mount => aluminiumConnectorTargets(this.model, mount).includes(id));
     const tube = this.model.tubes.get(id);
     if (!tube || tube.arm || tube.link || tube.bow) return false;
-    if (this.reinforcementPartId === ALUMINIUM_CONNECTOR) return this.model.aluminiumConnectorMounts().some(mount => mount.supportTubes.includes(id));
     if (this.reinforceRail) return this.highlight ? this.highlight.has(id) : false;
     if (tube.reinforced) return true;
     return this.model.reinforcementPaths(id, this.reinforcementPartId).length > 0;
