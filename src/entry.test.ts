@@ -2,6 +2,30 @@ import { describe, expect, it } from 'vitest'
 import { dropParam, readEntry } from './entry'
 import { appendTab } from './store/tabs'
 
+describe('锁定模型预览', () => {
+  it('保持来源并禁用复制、导出、导入及协作写入入口', () => {
+    const entry = readEntry('?view=locked&src=/admin/people/2/designs/3/model&copy=1&export=qdf&import=qdf&plan=p1&invite=i1&createShared=1&delivery=d1&new=1&doc=m1', '', true)
+    expect(entry.view).toBe(true)
+    expect(entry.lockedView).toBe(true)
+    expect(entry.src).toBe('/admin/people/2/designs/3/model')
+    expect(entry.copy).toBe(false)
+    expect(entry.resume).toBeNull()
+    expect(entry.importQdf).toBe(false)
+    expect(entry.plan).toBeNull()
+    expect(entry.invite).toBeNull()
+    expect(entry.delivery).toBeNull()
+    expect(entry.createShared).toBe(false)
+    expect(entry.blank).toBe(false)
+    expect(entry.doc).toBeNull()
+  })
+  it('普通查看模式保留原行为', () => {
+    const entry = readEntry('?view=1&src=/quadro/model&copy=1', '', true)
+    expect(entry.view).toBe(true)
+    expect(entry.lockedView).toBe(false)
+    expect(entry.copy).toBe(true)
+  })
+})
+
 describe('来源页指定预览背景', () => {
   it('草地和家中场景跟随导入入口，非法值不改变偏好', () => {
     expect(readEntry('?background=grass', '#s=payload', true).background).toBe('grass')

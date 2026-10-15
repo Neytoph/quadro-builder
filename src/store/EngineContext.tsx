@@ -822,7 +822,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     switching.current = true
     e.builder.modelReplaced()
     e.builder.setHistory(tab.local.history)
-    e.builder.setReadOnly(!!tab.readOnly)
+    e.builder.setReadOnly(!!tab.readOnly || bootEntry().lockedView)
     e.model.idTag = tab.idTag || ''
     const res = e.model.loadJSON(tab.local.history.toJSON())
     if (!res.ok) throw new Error(`tab ${tab.tabId} does not load: ${res.reason}`)

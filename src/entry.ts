@@ -8,6 +8,7 @@
 //	&name=小屋             标签页的名字
 //	&copy=1               打开之后存一份到自己的存档里（登录了就跟着同步进账号）
 //	?view=1               只看模式：嵌在方案页里，只有 3D 画面和分步手册，不改、不存
+//	?view=locked          锁定预览：禁止编辑，不提供打开编辑器的入口
 //	?export=manual|bom|bompng|shareimg|qdf|json|link   注册完回来，接着导出（link 是复制分享链接）
 //	?lang=zh|en|de        界面语言，嵌在别的页面里时跟着那一页
 //	?background=grass|home 导入造型时使用来源页选择的背景，成功导入后应用
@@ -35,6 +36,7 @@ const RESUMES: ResumeExport[] = ['manual', 'bom', 'bompng', 'shareimg', 'qdf', '
 
 export interface Entry {
   view: boolean
+  lockedView: boolean
   src: string | null
   /** ?src= 里的来源标记 */
   source: string | null
@@ -78,6 +80,8 @@ const collab = Boolean(import.meta.env.VITE_SYNC_BASE)
 /** 按地址上的参数读出打开方式；collab 是托管版有没有设 VITE_SYNC_BASE */
 export function readEntry(search: string, hash: string, collab: boolean): Entry {
   const q = new URLSearchParams(search)
+  const lockedView = q.get('view') === 'locked'
+  if (lockedView) collab = false
   const lang = q.get('lang')
   const resume = q.get('export') as ResumeExport | null
   const src = q.get('src')
@@ -85,13 +89,14 @@ export function readEntry(search: string, hash: string, collab: boolean): Entry 
   const room = q.get('room') || ''
   const background = q.get('background')
   return {
-    view: q.get('view') === '1',
+    view: lockedView || q.get('view') === '1',
+    lockedView,
     src: sameSite(src),
     source: src && SOURCE_RE.test(src) ? src : null,
     origin: sameSite(q.get('origin')) ?? sameSite(src),
     name: q.get('name'),
-    copy: q.get('copy') === '1',
-    resume: resume && RESUMES.includes(resume) ? resume : null,
+    copy: !lockedView && q.get('copy') === '1',
+    resume: !lockedView && resume && RESUMES.includes(resume) ? resume : null,
     lang: lang === 'zh' || lang === 'en' || lang === 'de' ? lang : null,
     hash,
     plan: collab ? q.get('plan') : null,
@@ -101,7 +106,7 @@ export function readEntry(search: string, hash: string, collab: boolean): Entry 
     compare: collab && cmp.length === 2 ? [cmp[0], cmp[1]] : null,
     delivery: collab ? q.get('delivery') : null,
     assembly: collab && !!q.get('delivery') && q.get('assembly') === '1',
-    importQdf: q.get('import') === 'qdf',
+    importQdf: !lockedView && q.get('import') === 'qdf',
     roomBrief: collab && room.startsWith('brief:') ? room.slice('brief:'.length) : null,
     doc: collab ? q.get('doc') : null,
     blank: collab && q.get('new') === '1',

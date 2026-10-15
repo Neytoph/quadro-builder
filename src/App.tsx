@@ -194,7 +194,7 @@ function ViewShell() {
   return (
     <div className={`app-viewport w-screen flex bg-gray-950 overflow-hidden ${snapshot && !VIEW_ONLY ? 'cb-snapshot-shell' : ''}`} data-ui={DELIVERY_EMBED ? 'delivery-embed' : undefined}>
       <CanvasHost hideViewCube={DELIVERY_EMBED || snapshotEmbed} />
-      {!delivery && !snapshot && <a href={fullBuilderUrl()} target="_top" className="qb-btn qb-btn-sm fixed top-3 left-3 z-40 no-underline">{t('view.open')} ↗</a>}
+      {!delivery && !snapshot && !bootEntry().lockedView && <a href={fullBuilderUrl()} target="_top" className="qb-btn qb-btn-sm fixed top-3 left-3 z-40 no-underline">{t('view.open')} ↗</a>}
       {snapshot && !VIEW_ONLY && readOnly && !collab.error && <SnapshotInfo planId={bootEntry().plan!} versionId={Number(bootEntry().version)} />}
       {snapshot && collab.error && <p role="alert" className="cb-snapshot-error cb-action-error">{collab.error}</p>}
       {!DELIVERY_EMBED && !snapshotEmbed && <ViewBar />}

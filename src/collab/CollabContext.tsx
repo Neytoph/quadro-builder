@@ -139,8 +139,8 @@ function errText(err: unknown) {
 export function CollabProvider({ children }: { children: ReactNode }) {
   const api = useEngine()
   const { t } = useI18n()
-  const enabled = collabEnabled()
   const entry = useMemo(() => bootEntry(), [])
+  const enabled = collabEnabled() && !entry.lockedView
   const [rev, setRev] = useState(0)
   const bump = useCallback(() => setRev(n => n + 1), [])
   const sessions = useRef(new Map<string, PlanSession>())
@@ -166,6 +166,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
     return () => setModalCount(count => count - 1)
   }, [])
   const [createdPlan, setCreatedPlan] = useState<{ id: string; name: string; coverError?: string } | null>(() => {
+    if (entry.lockedView) return null
     const pending = localStorage.getItem(storage.accountKey('quadro.shared.created'))
     return pending ? JSON.parse(pending) : null
   })

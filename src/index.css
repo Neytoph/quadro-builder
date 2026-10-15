@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "./ui/fieldFocus.css";
+@source not "./engine/assemblyNativeEnvelopes.js";
 
 /*
  * 小麦坊品牌色：
