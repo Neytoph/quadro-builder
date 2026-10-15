@@ -1,0 +1,9 @@
+node_modules
+dist
+dist-*/
+.DS_Store
+*.tsbuildinfo
+.vite
+.playwright-mcp
+.work/
+*.pdf

@@ -1,0 +1,2602 @@
+{
+  "source": "2b45062 public/examples, actual API-installed baseline; frozen before opposite-transparent-screws",
+  "models": {
+    "acrylic_panel_40x40": {
+      "format": 2,
+      "nodes": [
+        {
+          "id": "n1",
+          "x": 0,
+          "y": 42.5,
+          "z": 0
+        },
+        {
+          "id": "n2",
+          "x": 40,
+          "y": 42.5,
+          "z": 0
+        },
+        {
+          "id": "n4",
+          "x": 40,
+          "y": 82.5,
+          "z": 0
+        },
+        {
+          "id": "n6",
+          "x": 0,
+          "y": 82.5,
+          "z": 0
+        },
+        {
+          "id": "n9",
+          "x": 0,
+          "y": 2.5,
+          "z": 0
+        },
+        {
+          "id": "n11",
+          "x": 0,
+          "y": 2.5,
+          "z": 40
+        },
+        {
+          "id": "n13",
+          "x": 40,
+          "y": 2.5,
+          "z": 0
+        },
+        {
+          "id": "n15",
+          "x": 40,
+          "y": 2.5,
+          "z": 40
+        }
+      ],
+      "tubes": [
+        {
+          "id": "t3",
+          "a": "n1",
+          "b": "n2",
+          "tubeId": "T35",
+          "color": "red",
+          "length": 35
+        },
+        {
+          "id": "t5",
+          "a": "n2",
+          "b": "n4",
+          "tubeId": "T35",
+          "color": "green",
+          "length": 35
+        },
+        {
+          "id": "t7",
+          "a": "n4",
+          "b": "n6",
+          "tubeId": "T35",
+          "color": "blue",
+          "length": 35
+        },
+        {
+          "id": "t8",
+          "a": "n6",
+          "b": "n1",
+          "tubeId": "T35",
+          "color": "yellow",
+          "length": 35
+        },
+        {
+          "id": "t10",
+          "a": "n9",
+          "b": "n1",
+          "tubeId": "T35",
+          "color": "green",
+          "length": 35
+        },
+        {
+          "id": "t12",
+          "a": "n9",
+          "b": "n11",
+          "tubeId": "T35",
+          "color": "blue",
+          "length": 35
+        },
+        {
+          "id": "t14",
+          "a": "n13",
+          "b": "n2",
+          "tubeId": "T35",
+          "color": "green",
+          "length": 35
+        },
+        {
+          "id": "t16",
+          "a": "n13",
+          "b": "n15",
+          "tubeId": "T35",
+          "color": "blue",
+          "length": 35
+        },
+        {
+          "id": "t17",
+          "a": "n11",
+          "b": "n15",
+          "tubeId": "T35",
+          "color": "red",
+          "length": 35
+        }
+      ],
+      "panels": [
+        {
+          "id": "p18",
+          "a": "t3",
+          "b": "t7",
+          "t0": 0,
+          "len": 40,
+          "panelId": "acrylic_panel_40x40",
+          "color": "#eaf7fa",
+          "appearanceVersion": 2,
+          "params": {
+            "id": "acrylic_panel_40x40",
+            "name": "透明大板",
+            "feature": "acrylic",
+            "w": 40,
+            "h": 40,
+            "width": 40,
+            "height": 40,
+            "depth": 1.2,
+            "placement": "panel",
+            "mountType": "frame",
+            "verifiedLoad": false,
+            "appearanceVersion": 2,
+            "kitContents": [
+              "component",
+              "retainers"
+            ],
+            "name_en": "Clear panel",
+            "name_de": "Transparente Platte",
+            "fixedColor": "#eaf7fa",
+            "mount": "frame",
+            "designAssumption": true,
+            "assumption": "frame-grid-unmeasured",
+            "qdfSupported": true,
+            "qdfSimplified": true
+          },
+          "mounts": [
+            {
+              "tube": "t3",
+              "t": 0.1,
+              "role": "retainer",
+              "width": 2,
+              "edge": 0
+            },
+            {
+              "tube": "t5",
+              "t": 0.1,
+              "role": "retainer",
+              "width": 2,
+              "edge": 1
+            },
+            {
+              "tube": "t7",
+              "t": 0.1,
+              "role": "retainer",
+              "width": 2,
+              "edge": 2
+            },
+            {
+              "tube": "t8",
+              "t": 0.1,
+              "role": "retainer",
+              "width": 2,
+              "edge": 3
+            }
+          ],
+          "supportTubes": [
+            "t3",
+            "t5",
+            "t7",
+            "t8"
+          ]
+        }
+      ],
+      "clamps": [],
+      "textiles": [],
+      "fittings": [],
+      "slides": [],
+      "groups": []
+    },
+    "acrylic_panel_40x20": {
+      "format": 2,
+      "nodes": [
+        {
+          "id": "n1",
+          "x": 0,
+          "y": 42.5,
+          "z": 0
+        },
+        {
+          "id": "n2",
+          "x": 40,
+          "y": 42.5,
+          "z": 0
+        },
+        {
+          "id": "n4",
+          "x": 40,
+          "y": 62.5,
+          "z": 0
+        },
+        {
+          "id": "n6",
+          "x": 0,
+          "y": 62.5,
+          "z": 0
+        },
+        {
+          "id": "n9",
+          "x": 0,
+          "y": 2.5,
+          "z": 0
+        },
+        {
+          "id": "n11",
+          "x": 0,
+          "y": 2.5,
+          "z": 40
+        },
+        {
+          "id": "n13",
+          "x": 40,
+          "y": 2.5,
+          "z": 0
+        },
+        {
+          "id": "n15",
+          "x": 40,
+          "y": 2.5,
+          "z": 40
+        }
+      ],
+      "tubes": [
+        {
+          "id": "t3",
+          "a": "n1",
+          "b": "n2",
+          "tubeId": "T35",
+          "color": "red",
+          "length": 35
+        },
+        {
+          "id": "t5",
+          "a": "n2",
+          "b": "n4",
+          "tubeId": "T15",
+          "color": "green",
+          "length": 15
+        },
+        {
+          "id": "t7",
+          "a": "n4",
+          "b": "n6",
+          "tubeId": "T35",
+          "color": "blue",
+          "length": 35
+        },
+        {
+          "id": "t8",
+          "a": "n6",
+          "b": "n1",
+          "tubeId": "T15",
+          "color": "yellow",
+          "length": 15
+        },
+        {
+          "id": "t10",
+          "a": "n9",
+          "b": "n1",
+          "tubeId": "T35",
+          "color": "green",
+          "length": 35
+        },
+        {
+          "id": "t12",
+          "a": "n9",
+          "b": "n11",
+          "tubeId": "T35",
+          "color": "blue",
+          "length": 35
+        },
+        {
+          "id": "t14",
+          "a": "n13",
+          "b": "n2",
+          "tubeId": "T35",
+          "color": "green",
+          "length": 35
+        },
+        {
+          "id": "t16",
+          "a": "n13",
+          "b": "n15",
+          "tubeId": "T35",
+          "color": "blue",
+          "length": 35
+        },
+        {
+          "id": "t17",
+          "a": "n11",
+          "b": "n15",
+          "tubeId": "T35",
+          "color": "red",
+          "length": 35
+        }
+      ],
+      "panels": [
+        {
+          "id": "p18",
+          "a": "t3",
+          "b": "t7",
+          "t0": 0,
+          "len": 40,
+          "panelId": "acrylic_panel_40x20",
+          "color": "#eaf7fa",
+          "appearanceVersion": 2,
+          "params": {
+            "id": "acrylic_panel_40x20",
+            "name": "透明小板",
+            "feature": "acrylic",
+            "w": 40,
+            "h": 20,
+            "width": 40,
+            "height": 20,
+            "depth": 1.2,
+            "placement": "panel",
+            "mountType": "frame",
+            "verifiedLoad": false,
+            "appearanceVersion": 2,
+            "kitContents": [
+              "component",
+              "retainers"
+            ],
+            "name_en": "Small clear panel",
+            "name_de": "Kleine transparente Platte",
+            "fixedColor": "#eaf7fa",
+            "mount": "frame",
+            "designAssumption": true,
+            "assumption": "frame-grid-unmeasured",
+            "qdfSupported": true,
+            "qdfSimplified": true
+          },
+          "mounts": [
+            {
+              "tube": "t3",
+              "t": 0.1,
+              "role": "retainer",
+              "width": 2,
+              "edge": 0
+            },
+            {
+              "tube": "t5",
+              "t": 0.2,
+              "role": "retainer",
+              "width": 2,
+              "edge": 1
+            },
+            {
+              "tube": "t7",
+              "t": 0.1,
+              "role": "retainer",
+              "width": 2,
+              "edge": 2
+            },
+            {
+              "tube": "t8",
+              "t": 0.2,
+              "role": "retainer",
+              "width": 2,
+              "edge": 3
+            }
+          ],
+          "supportTubes": [
+            "t3",
+            "t5",
+            "t7",
+            "t8"
+          ]
+        }
+      ],
+      "clamps": [],
+      "textiles": [],
+      "fittings": [],
+      "slides": [],
+      "groups": []
+    },
+    "acrylic_panel_40x60": {
+      "format": 2,
+      "nodes": [
+        {
+          "id": "n1",
+          "x": 0,
+          "y": 42.5,
+          "z": 0
+        },
+        {
+          "id": "n2",
+          "x": 40,
+          "y": 42.5,
+          "z": 0
+        },
+        {
+          "id": "n4",
+          "x": 40,
+          "y": 102.5,
+          "z": 0
+        },
+        {
+          "id": "n5",
+          "x": 40,
+          "y": 72.5,
+          "z": 0
+        },
+        {
+          "id": "n8",
+          "x": 0,
+          "y": 102.5,
+          "z": 0
+        },
+        {
+          "id": "n10",
+          "x": 0,
+          "y": 72.5,
+          "z": 0
+        },
+        {
+          "id": "n13",
+          "x": 0,
+          "y": 2.5,
+          "z": 0
+        },
+        {
+          "id": "n15",
+          "x": 0,
+          "y": 2.5,
+          "z": 40
+        },
+        {
+          "id": "n17",
+          "x": 40,
+          "y": 2.5,
+          "z": 0
+        },
+        {
+          "id": "n19",
+          "x": 40,
+          "y": 2.5,
+          "z": 40
+        }
+      ],
+      "tubes": [
+        {
+          "id": "t3",
+          "a": "n1",
+          "b": "n2",
+          "tubeId": "T35",
+          "color": "red",
+          "length": 35
+        },
+        {
+          "id": "t6",
+          "a": "n2",
+          "b": "n5",
+          "tubeId": "T25",
+          "color": "green",
+          "length": 25
+        },
+        {
+          "id": "t7",
+          "a": "n5",
+          "b": "n4",
+          "tubeId": "T25",
+          "color": "green",
+          "length": 25
+        },
+        {
+          "id": "t9",
+          "a": "n4",
+          "b": "n8",
+          "tubeId": "T35",
+          "color": "blue",
+          "length": 35
+        },
+        {
+          "id": "t11",
+          "a": "n8",
+          "b": "n10",
+          "tubeId": "T25",
+          "color": "yellow",
+          "length": 25
+        },
+        {
+          "id": "t12",
+          "a": "n10",
+          "b": "n1",
+          "tubeId": "T25",
+          "color": "yellow",
+          "length": 25
+        },
+        {
+          "id": "t14",
+          "a": "n13",
+          "b": "n1",
+          "tubeId": "T35",
+          "color": "green",
+          "length": 35
+        },
+        {
+          "id": "t16",
+          "a": "n13",
+          "b": "n15",
+          "tubeId": "T35",
+          "color": "blue",
+          "length": 35
+        },
+        {
+          "id": "t18",
+          "a": "n17",
+          "b": "n2",
+          "tubeId": "T35",
+          "color": "green",
+          "length": 35
+        },
+        {
+          "id": "t20",
+          "a": "n17",
+          "b": "n19",
+          "tubeId": "T35",
+          "color": "blue",
+          "length": 35
+        },
+        {
+          "id": "t21",
+          "a": "n15",
+          "b": "n19",
+          "tubeId": "T35",
+          "color": "red",
+          "length": 35
+        }
+      ],
+      "panels": [
+        {
+          "id": "p22",
+          "a": "t3",
+          "b": "t9",
+          "t0": 0,
+          "len": 40,
+          "panelId": "acrylic_panel_40x60",
+          "color": "#eaf7fa",
+          "appearanceVersion": 2,
+          "params": {
+            "id": "acrylic_panel_40x60",
+            "name": "亚克力长板",
+            "feature": "acrylic",
+            "w": 40,
+            "h": 60,
+            "width": 40,
+            "height": 60,
+            "depth": 1.2,
+            "placement": "panel",
+            "mountType": "frame",
+            "verifiedLoad": false,
+            "appearanceVersion": 2,
+            "kitContents": [
+              "component",
+              "retainers"
+            ],
+            "name_en": "Long acrylic panel",
+            "name_de": "Lange Acrylplatte",
+            "fixedColor": "#eaf7fa",
+            "mount": "frame",
+            "designAssumption": true,
+            "assumption": "frame-grid-unmeasured",
+            "qdfSupported": true,
+            "qdfSimplified": true
+          },
+          "mounts": [
+            {
+              "tube": "t3",
+              "t": 0.1,
+              "role": "retainer",
+              "width": 2,
+              "edge": 0
+            },
+            {
+              "tube": "t6",
+              "t": 0.13333333333333333,
+              "role": "retainer",
+              "width": 2,
+              "edge": 1
+            },
+            {
+              "tube": "t9",
+              "t": 0.1,
+              "role": "retainer",
+              "width": 2,
+              "edge": 2
+            },
+            {
+              "tube": "t11",
+              "t": 0.13333333333333333,
+              "role": "retainer",
+              "width": 2,
+              "edge": 3
+            }
+          ],
+          "supportTubes": [
+            "t3",
+            "t6",
+            "t7",
+            "t9",
+            "t11",
+            "t12"
+          ]
+        }
+      ],
+      "clamps": [],
+      "textiles": [],
+      "fittings": [],
+      "slides": [],
+      "groups": []
+    },
+    "acrylic_hole_panel_40x40": {
+      "format": 2,
+      "nodes": [
+        {
+          "id": "n1",
+          "x": 0,
+          "y": 42.5,
+          "z": 0
+        },
+        {
+          "id": "n2",
+          "x": 40,
+          "y": 42.5,
+          "z": 0
+        },
+        {
+          "id": "n4",
+          "x": 40,
+          "y": 82.5,
+          "z": 0
+        },
+        {
+          "id": "n6",
+          "x": 0,
+          "y": 82.5,
+          "z": 0
+        },
+        {
+          "id": "n9",
+          "x": 0,
+          "y": 2.5,
+          "z": 0
+        },
+        {
+          "id": "n11",
+          "x": 0,
+          "y": 2.5,
+          "z": 40
+        },
+        {
+          "id": "n13",
+          "x": 40,
+          "y": 2.5,
+          "z": 0
+        },
+        {
+          "id": "n15",
+          "x": 40,
+          "y": 2.5,
+          "z": 40
+        }
+      ],
+      "tubes": [
+        {
+          "id": "t3",
+          "a": "n1",
+          "b": "n2",
+          "tubeId": "T35",
+          "color": "red",
+          "length": 35
+        },
+        {
+          "id": "t5",
+          "a": "n2",
+          "b": "n4",
+          "tubeId": "T35",
+          "color": "green",
+          "length": 35
+        },
+        {
+          "id": "t7",
+          "a": "n4",
+          "b": "n6",
+          "tubeId": "T35",
+          "color": "blue",
+          "length": 35
+        },
+        {
+          "id": "t8",
+          "a": "n6",
+          "b": "n1",
+          "tubeId": "T35",
+          "color": "yellow",
+          "length": 35
+        },
+        {
+          "id": "t10",
+          "a": "n9",
+          "b": "n1",
+          "tubeId": "T35",
+          "color": "green",
+          "length": 35
+        },
+        {
+          "id": "t12",
+          "a": "n9",
+          "b": "n11",
+          "tubeId": "T35",
+          "color": "blue",
+          "length": 35
+        },
+        {
+          "id": "t14",
+          "a": "n13",
+          "b": "n2",
+          "tubeId": "T35",
+          "color": "green",
+          "length": 35
+        },
+        {
+          "id": "t16",
+          "a": "n13",
+          "b": "n15",
+          "tubeId": "T35",
+          "color": "blue",
+          "length": 35
+        },
+        {
+          "id": "t17",
+          "a": "n11",
+          "b": "n15",
+          "tubeId": "T35",
+          "color": "red",
+          "length": 35
+        }
+      ],
+      "panels": [
+        {
+          "id": "p18",
+          "a": "t3",
+          "b": "t7",
+          "t0": 0,
+          "len": 40,
+          "panelId": "acrylic_hole_panel_40x40",
+          "color": "#eaf7fa",
+          "appearanceVersion": 2,
+          "params": {
+            "id": "acrylic_hole_panel_40x40",
+            "name": "亚克力九洞板",
+            "feature": "acrylic_holes",
+            "w": 40,
+            "h": 40,
+            "width": 40,
+            "height": 40,
+            "depth": 1.2,
+            "placement": "panel",
+            "mountType": "frame",
+            "verifiedLoad": false,
+            "appearanceVersion": 2,
+            "kitContents": [
+              "component",
+              "retainers"
+            ],
+            "name_en": "Perforated acrylic panel",
+            "name_de": "Acryl-Lochplatte",
+            "fixedColor": "#eaf7fa",
+            "mount": "frame",
+            "designAssumption": true,
+            "assumption": "frame-grid-unmeasured",
+            "qdfSupported": true,
+            "qdfSimplified": true
+          },
+          "mounts": [
+            {
+              "tube": "t3",
+              "t": 0.1,
+              "role": "retainer",
+              "width": 2,
+              "edge": 0
+            },
+            {
+              "tube": "t5",
+              "t": 0.1,
+              "role": "retainer",
+              "width": 2,
+              "edge": 1
+            },
+            {
+              "tube": "t7",
+              "t": 0.1,
+              "role": "retainer",
+              "width": 2,
+              "edge": 2
+            },
+            {
+              "tube": "t8",
+              "t": 0.1,
+              "role": "retainer",
+              "width": 2,
+              "edge": 3
+            }
+          ],
+          "supportTubes": [
+            "t3",
+            "t5",
+            "t7",
+            "t8"
+          ]
+        }
+      ],
+      "clamps": [],
+      "textiles": [],
+      "fittings": [],
+      "slides": [],
+      "groups": []
+    },
+    "acrylic_platform_40x40": {
+      "format": 2,
+      "nodes": [
+        {
+          "id": "n1",
+          "x": 0,
+          "y": 42.5,
+          "z": 0
+        },
+        {
+          "id": "n2",
+          "x": 40,
+          "y": 42.5,
+          "z": 0
+        },
+        {
+          "id": "n4",
+          "x": 40,
+          "y": 42.5,
+          "z": 40
+        },
+        {
+          "id": "n6",
+          "x": 0,
+          "y": 42.5,
+          "z": 40
+        },
+        {
+          "id": "n9",
+          "x": 0,
+          "y": 2.5,
+          "z": 0
+        },
+        {
+          "id": "n11",
+          "x": 0,
+          "y": 2.5,
+          "z": 40
+        },
+        {
+          "id": "n13",
+          "x": 40,
+          "y": 2.5,
+          "z": 0
+        },
+        {
+          "id": "n15",
+          "x": 40,
+          "y": 2.5,
+          "z": 40
+        }
+      ],
+      "tubes": [
+        {
+          "id": "t3",
+          "a": "n1",
+          "b": "n2",
+          "tubeId": "T35",
+          "color": "red",
+          "length": 35
+        },
+        {
+          "id": "t5",
+          "a": "n2",
+          "b": "n4",
+          "tubeId": "T35",
+          "color": "green",
+          "length": 35
+        },
+        {
+          "id": "t7",
+          "a": "n4",
+          "b": "n6",
+          "tubeId": "T35",
+          "color": "blue",
+          "length": 35
+        },
+        {
+          "id": "t8",
+          "a": "n6",
+          "b": "n1",
+          "tubeId": "T35",
+          "color": "yellow",
+          "length": 35
+        },
+        {
+          "id": "t10",
+          "a": "n9",
+          "b": "n1",
+          "tubeId": "T35",
+          "color": "green",
+          "length": 35
+        },
+        {
+          "id": "t12",
+          "a": "n9",
+          "b": "n11",
+          "tubeId": "T35",
+          "color": "blue",
+          "length": 35
+        },
+        {
+          "id": "t14",
+          "a": "n13",
+          "b": "n2",
+          "tubeId": "T35",
+          "color": "green",
+          "length": 35
+        },
+        {
+          "id": "t16",
+          "a": "n13",
+          "b": "n15",
+          "tubeId": "T35",
+          "color": "blue",
+          "length": 35
+        },
+        {
+          "id": "t17",
+          "a": "n11",
+          "b": "n15",
+          "tubeId": "T35",
+          "color": "red",
+          "length": 35
+        }
+      ],
+      "panels": [
+        {
+          "id": "p18",
+          "a": "t3",
+          "b": "t7",
+          "t0": 0,
+          "len": 40,
+          "panelId": "acrylic_platform_40x40",
+          "color": "#eaf7fa",
+          "appearanceVersion": 2,
+          "params": {
+            "id": "acrylic_platform_40x40",
+            "name": "透明平台",
+            "feature": "acrylic",
+            "w": 40,
+            "h": 40,
+            "width": 40,
+            "height": 40,
+            "depth": 1.2,
+            "placement": "panel",
+            "mountType": "horizontal-frame",
+            "verifiedLoad": false,
+            "appearanceVersion": 2,
+            "kitContents": [
+              "component",
+              "retainers"
+            ],
+            "name_en": "Clear platform",
+            "name_de": "Transparente Plattform",
+            "fixedColor": "#eaf7fa",
+            "mount": "horizontal-frame",
+            "designAssumption": true,
+            "assumption": "frame-grid-unmeasured",
+            "qdfSupported": true,
+            "qdfSimplified": true
+          },
+          "mounts": [
+            {
+              "tube": "t3",
+              "t": 0.1,
+              "role": "retainer",
+              "width": 2,
+              "edge": 0
+            },
+            {
+              "tube": "t5",
+              "t": 0.1,
+              "role": "retainer",
+              "width": 2,
+              "edge": 1
+            },
+            {
+              "tube": "t7",
+              "t": 0.1,
+              "role": "retainer",
+              "width": 2,
+              "edge": 2
+            },
+            {
+              "tube": "t8",
+              "t": 0.1,
+              "role": "retainer",
+              "width": 2,
+              "edge": 3
+            }
+          ],
+          "supportTubes": [
+            "t3",
+            "t5",
+            "t7",
+            "t8"
+          ]
+        }
+      ],
+      "clamps": [],
+      "textiles": [],
+      "fittings": [],
+      "slides": [],
+      "groups": []
+    },
+    "panel_40x40_capsule": {
+      "format": 2,
+      "nodes": [
+        {
+          "id": "n1",
+          "x": 0,
+          "y": 42.5,
+          "z": 0
+        },
+        {
+          "id": "n2",
+          "x": 40,
+          "y": 42.5,
+          "z": 0
+        },
+        {
+          "id": "n4",
+          "x": 40,
+          "y": 82.5,
+          "z": 0
+        },
+        {
+          "id": "n6",
+          "x": 0,
+          "y": 82.5,
+          "z": 0
+        },
+        {
+          "id": "n9",
+          "x": 0,
+          "y": 2.5,
+          "z": 0
+        },
+        {
+          "id": "n11",
+          "x": 0,
+          "y": 2.5,
+          "z": 40
+        },
+        {
+          "id": "n13",
+          "x": 40,
+          "y": 2.5,
+          "z": 0
+        },
+        {
+          "id": "n15",
+          "x": 40,
+          "y": 2.5,
+          "z": 40
+        }
+      ],
+      "tubes": [
+        {
+          "id": "t3",
+          "a": "n1",
+          "b": "n2",
+          "tubeId": "T35",
+          "color": "red",
+          "length": 35
+        },
+        {
+          "id": "t5",
+          "a": "n2",
+          "b": "n4",
+          "tubeId": "T35",
+          "color": "green",
+          "length": 35
+        },
+        {
+          "id": "t7",
+          "a": "n4",
+          "b": "n6",
+          "tubeId": "T35",
+          "color": "blue",
+          "length": 35
+        },
+        {
+          "id": "t8",
+          "a": "n6",
+          "b": "n1",
+          "tubeId": "T35",
+          "color": "yellow",
+          "length": 35
+        },
+        {
+          "id": "t10",
+          "a": "n9",
+          "b": "n1",
+          "tubeId": "T35",
+          "color": "green",
+          "length": 35
+        },
+        {
+          "id": "t12",
+          "a": "n9",
+          "b": "n11",
+          "tubeId": "T35",
+          "color": "blue",
+          "length": 35
+        },
+        {
+          "id": "t14",
+          "a": "n13",
+          "b": "n2",
+          "tubeId": "T35",
+          "color": "green",
+          "length": 35
+        },
+        {
+          "id": "t16",
+          "a": "n13",
+          "b": "n15",
+          "tubeId": "T35",
+          "color": "blue",
+          "length": 35
+        },
+        {
+          "id": "t17",
+          "a": "n11",
+          "b": "n15",
+          "tubeId": "T35",
+          "color": "red",
+          "length": 35
+        }
+      ],
+      "panels": [
+        {
+          "id": "p18",
+          "a": "t3",
+          "b": "t7",
+          "t0": 0,
+          "len": 40,
+          "panelId": "panel_40x40_capsule",
+          "color": "#eaf7fa",
+          "appearanceVersion": 2,
+          "params": {
+            "id": "panel_40x40_capsule",
+            "name": "太空舱",
+            "feature": "capsule",
+            "w": 40,
+            "h": 40,
+            "width": 40,
+            "height": 40,
+            "depth": 16,
+            "placement": "panel",
+            "mountType": "vertical-frame",
+            "verifiedLoad": false,
+            "appearanceVersion": 2,
+            "kitContents": [
+              "component",
+              "retainers"
+            ],
+            "name_en": "Clear hemisphere",
+            "name_de": "Transparente Halbkugel",
+            "fixedColor": "#eaf7fa",
+            "mount": "vertical-frame",
+            "designAssumption": true,
+            "assumption": "frame-grid-unmeasured",
+            "qdfSupported": true,
+            "qdfSimplified": true
+          },
+          "mounts": [
+            {
+              "tube": "t3",
+              "t": 0.1,
+              "role": "retainer",
+              "width": 2,
+              "edge": 0
+            },
+            {
+              "tube": "t5",
+              "t": 0.1,
+              "role": "retainer",
+              "width": 2,
+              "edge": 1
+            },
+            {
+              "tube": "t7",
+              "t": 0.1,
+              "role": "retainer",
+              "width": 2,
+              "edge": 2
+            },
+            {
+              "tube": "t8",
+              "t": 0.1,
+              "role": "retainer",
+              "width": 2,
+              "edge": 3
+            }
+          ],
+          "supportTubes": [
+            "t3",
+            "t5",
+            "t7",
+            "t8"
+          ]
+        }
+      ],
+      "clamps": [],
+      "textiles": [],
+      "fittings": [],
+      "slides": [],
+      "groups": []
+    },
+    "panel_40x40_grid": {
+      "format": 2,
+      "nodes": [
+        {
+          "id": "n1",
+          "x": 0,
+          "y": 42.5,
+          "z": 0
+        },
+        {
+          "id": "n2",
+          "x": 40,
+          "y": 42.5,
+          "z": 0
+        },
+        {
+          "id": "n4",
+          "x": 40,
+          "y": 82.5,
+          "z": 0
+        },
+        {
+          "id": "n6",
+          "x": 0,
+          "y": 82.5,
+          "z": 0
+        },
+        {
+          "id": "n9",
+          "x": 0,
+          "y": 2.5,
+          "z": 0
+        },
+        {
+          "id": "n11",
+          "x": 0,
+          "y": 2.5,
+          "z": 40
+        },
+        {
+          "id": "n13",
+          "x": 40,
+          "y": 2.5,
+          "z": 0
+        },
+        {
+          "id": "n15",
+          "x": 40,
+          "y": 2.5,
+          "z": 40
+        }
+      ],
+      "tubes": [
+        {
+          "id": "t3",
+          "a": "n1",
+          "b": "n2",
+          "tubeId": "T35",
+          "color": "red",
+          "length": 35
+        },
+        {
+          "id": "t5",
+          "a": "n2",
+          "b": "n4",
+          "tubeId": "T35",
+          "color": "green",
+          "length": 35
+        },
+        {
+          "id": "t7",
+          "a": "n4",
+          "b": "n6",
+          "tubeId": "T35",
+          "color": "blue",
+          "length": 35
+        },
+        {
+          "id": "t8",
+          "a": "n6",
+          "b": "n1",
+          "tubeId": "T35",
+          "color": "yellow",
+          "length": 35
+        },
+        {
+          "id": "t10",
+          "a": "n9",
+          "b": "n1",
+          "tubeId": "T35",
+          "color": "green",
+          "length": 35
+        },
+        {
+          "id": "t12",
+          "a": "n9",
+          "b": "n11",
+          "tubeId": "T35",
+          "color": "blue",
+          "length": 35
+        },
+        {
+          "id": "t14",
+          "a": "n13",
+          "b": "n2",
+          "tubeId": "T35",
+          "color": "green",
+          "length": 35
+        },
+        {
+          "id": "t16",
+          "a": "n13",
+          "b": "n15",
+          "tubeId": "T35",
+          "color": "blue",
+          "length": 35
+        },
+        {
+          "id": "t17",
+          "a": "n11",
+          "b": "n15",
+          "tubeId": "T35",
+          "color": "red",
+          "length": 35
+        }
+      ],
+      "panels": [
+        {
+          "id": "p18",
+          "a": "t3",
+          "b": "t7",
+          "t0": 0,
+          "len": 40,
+          "panelId": "panel_40x40_grid",
+          "color": "#f6f2e7",
+          "appearanceVersion": 2,
+          "params": {
+            "id": "panel_40x40_grid",
+            "name": "格子板",
+            "feature": "grid",
+            "w": 40,
+            "h": 40,
+            "width": 40,
+            "height": 40,
+            "depth": 1.2,
+            "placement": "panel",
+            "mountType": "frame",
+            "verifiedLoad": false,
+            "appearanceVersion": 2,
+            "kitContents": [
+              "component",
+              "retainers"
+            ],
+            "name_en": "Grid panel",
+            "name_de": "Gitterplatte",
+            "fixedColor": "#f6f2e7",
+            "mount": "frame",
+            "designAssumption": true,
+            "assumption": "frame-grid-unmeasured",
+            "qdfSupported": true,
+            "qdfSimplified": true
+          },
+          "mounts": [
+            {
+              "tube": "t3",
+              "t": 0.1,
+              "role": "retainer",
+              "width": 2,
+              "edge": 0
+            },
+            {
+              "tube": "t5",
+              "t": 0.1,
+              "role": "retainer",
+              "width": 2,
+              "edge": 1
+            },
+            {
+              "tube": "t7",
+              "t": 0.1,
+              "role": "retainer",
+              "width": 2,
+              "edge": 2
+            },
+            {
+              "tube": "t8",
+              "t": 0.1,
+              "role": "retainer",
+              "width": 2,
+              "edge": 3
+            }
+          ],
+          "supportTubes": [
+            "t3",
+            "t5",
+            "t7",
+            "t8"
+          ]
+        }
+      ],
+      "clamps": [],
+      "textiles": [],
+      "fittings": [],
+      "slides": [],
+      "groups": []
+    },
+    "panel_40x40_busy": {
+      "format": 2,
+      "nodes": [
+        {
+          "id": "n1",
+          "x": 0,
+          "y": 2.5,
+          "z": 0
+        },
+        {
+          "id": "n2",
+          "x": 40,
+          "y": 2.5,
+          "z": 0
+        },
+        {
+          "id": "n4",
+          "x": 0,
+          "y": 42.5,
+          "z": 0
+        },
+        {
+          "id": "n6",
+          "x": 0,
+          "y": 2.5,
+          "z": 40
+        },
+        {
+          "id": "n8",
+          "x": 40,
+          "y": 2.5,
+          "z": 40
+        },
+        {
+          "id": "n10",
+          "x": 0,
+          "y": 42.5,
+          "z": 40
+        },
+        {
+          "id": "n12",
+          "x": 0,
+          "y": 2.5,
+          "z": 80
+        },
+        {
+          "id": "n14",
+          "x": 40,
+          "y": 2.5,
+          "z": 80
+        },
+        {
+          "id": "n16",
+          "x": 0,
+          "y": 42.5,
+          "z": 80
+        },
+        {
+          "id": "n18",
+          "x": 40,
+          "y": 42.5,
+          "z": 0
+        },
+        {
+          "id": "n20",
+          "x": 0,
+          "y": 82.5,
+          "z": 0
+        },
+        {
+          "id": "n23",
+          "x": 40,
+          "y": 42.5,
+          "z": 40
+        },
+        {
+          "id": "n25",
+          "x": 0,
+          "y": 82.5,
+          "z": 40
+        },
+        {
+          "id": "n28",
+          "x": 40,
+          "y": 42.5,
+          "z": 80
+        },
+        {
+          "id": "n30",
+          "x": 0,
+          "y": 82.5,
+          "z": 80
+        },
+        {
+          "id": "n32",
+          "x": 40,
+          "y": 82.5,
+          "z": 0
+        },
+        {
+          "id": "n35",
+          "x": 40,
+          "y": 82.5,
+          "z": 40
+        },
+        {
+          "id": "n38",
+          "x": 40,
+          "y": 82.5,
+          "z": 80
+        },
+        {
+          "id": "n40",
+          "x": 80,
+          "y": 2.5,
+          "z": 0
+        },
+        {
+          "id": "n44",
+          "x": 80,
+          "y": 2.5,
+          "z": 40
+        },
+        {
+          "id": "n48",
+          "x": 80,
+          "y": 2.5,
+          "z": 80
+        },
+        {
+          "id": "n51",
+          "x": 80,
+          "y": 42.5,
+          "z": 0
+        },
+        {
+          "id": "n55",
+          "x": 80,
+          "y": 42.5,
+          "z": 40
+        },
+        {
+          "id": "n59",
+          "x": 80,
+          "y": 42.5,
+          "z": 80
+        },
+        {
+          "id": "n62",
+          "x": 80,
+          "y": 82.5,
+          "z": 0
+        },
+        {
+          "id": "n65",
+          "x": 80,
+          "y": 82.5,
+          "z": 40
+        },
+        {
+          "id": "n68",
+          "x": 80,
+          "y": 82.5,
+          "z": 80
+        },
+        {
+          "id": "n82",
+          "x": 140,
+          "y": 2.5,
+          "z": 0
+        },
+        {
+          "id": "n83",
+          "x": 140,
+          "y": 42.5,
+          "z": 0
+        },
+        {
+          "id": "n85",
+          "x": 140,
+          "y": 82.5,
+          "z": 0
+        },
+        {
+          "id": "n87",
+          "x": 140,
+          "y": 122.5,
+          "z": 0
+        },
+        {
+          "id": "n89",
+          "x": 140,
+          "y": 2.5,
+          "z": 80
+        },
+        {
+          "id": "n90",
+          "x": 140,
+          "y": 42.5,
+          "z": 80
+        },
+        {
+          "id": "n92",
+          "x": 140,
+          "y": 82.5,
+          "z": 80
+        },
+        {
+          "id": "n94",
+          "x": 140,
+          "y": 122.5,
+          "z": 80
+        },
+        {
+          "id": "n99",
+          "x": 140,
+          "y": 122.5,
+          "z": 40
+        },
+        {
+          "id": "n102",
+          "x": 220,
+          "y": 2.5,
+          "z": 0
+        },
+        {
+          "id": "n103",
+          "x": 220,
+          "y": 42.5,
+          "z": 0
+        },
+        {
+          "id": "n105",
+          "x": 220,
+          "y": 82.5,
+          "z": 0
+        },
+        {
+          "id": "n107",
+          "x": 220,
+          "y": 122.5,
+          "z": 0
+        },
+        {
+          "id": "n109",
+          "x": 220,
+          "y": 2.5,
+          "z": 80
+        },
+        {
+          "id": "n110",
+          "x": 220,
+          "y": 42.5,
+          "z": 80
+        },
+        {
+          "id": "n112",
+          "x": 220,
+          "y": 82.5,
+          "z": 80
+        },
+        {
+          "id": "n114",
+          "x": 220,
+          "y": 122.5,
+          "z": 80
+        },
+        {
+          "id": "n119",
+          "x": 220,
+          "y": 122.5,
+          "z": 40
+        }
+      ],
+      "tubes": [
+        {
+          "id": "t3",
+          "a": "n1",
+          "b": "n2",
+          "tubeId": "T35",
+          "color": "red",
+          "length": 35
+        },
+        {
+          "id": "t5",
+          "a": "n1",
+          "b": "n4",
+          "tubeId": "T35",
+          "color": "green",
+          "length": 35
+        },
+        {
+          "id": "t7",
+          "a": "n1",
+          "b": "n6",
+          "tubeId": "T35",
+          "color": "blue",
+          "length": 35
+        },
+        {
+          "id": "t9",
+          "a": "n6",
+          "b": "n8",
+          "tubeId": "T35",
+          "color": "yellow",
+          "length": 35
+        },
+        {
+          "id": "t11",
+          "a": "n6",
+          "b": "n10",
+          "tubeId": "T35",
+          "color": "red",
+          "length": 35
+        },
+        {
+          "id": "t13",
+          "a": "n6",
+          "b": "n12",
+          "tubeId": "T35",
+          "color": "green",
+          "length": 35
+        },
+        {
+          "id": "t15",
+          "a": "n12",
+          "b": "n14",
+          "tubeId": "T35",
+          "color": "blue",
+          "length": 35
+        },
+        {
+          "id": "t17",
+          "a": "n12",
+          "b": "n16",
+          "tubeId": "T35",
+          "color": "yellow",
+          "length": 35
+        },
+        {
+          "id": "t19",
+          "a": "n4",
+          "b": "n18",
+          "tubeId": "T35",
+          "color": "red",
+          "length": 35
+        },
+        {
+          "id": "t21",
+          "a": "n4",
+          "b": "n20",
+          "tubeId": "T35",
+          "color": "green",
+          "length": 35
+        },
+        {
+          "id": "t22",
+          "a": "n4",
+          "b": "n10",
+          "tubeId": "T35",
+          "color": "blue",
+          "length": 35
+        },
+        {
+          "id": "t24",
+          "a": "n10",
+          "b": "n23",
+          "tubeId": "T35",
+          "color": "yellow",
+          "length": 35
+        },
+        {
+          "id": "t26",
+          "a": "n10",
+          "b": "n25",
+          "tubeId": "T35",
+          "color": "red",
+          "length": 35
+        },
+        {
+          "id": "t27",
+          "a": "n10",
+          "b": "n16",
+          "tubeId": "T35",
+          "color": "green",
+          "length": 35
+        },
+        {
+          "id": "t29",
+          "a": "n16",
+          "b": "n28",
+          "tubeId": "T35",
+          "color": "blue",
+          "length": 35
+        },
+        {
+          "id": "t31",
+          "a": "n16",
+          "b": "n30",
+          "tubeId": "T35",
+          "color": "yellow",
+          "length": 35
+        },
+        {
+          "id": "t33",
+          "a": "n20",
+          "b": "n32",
+          "tubeId": "T35",
+          "color": "red",
+          "length": 35
+        },
+        {
+          "id": "t34",
+          "a": "n20",
+          "b": "n25",
+          "tubeId": "T35",
+          "color": "green",
+          "length": 35
+        },
+        {
+          "id": "t36",
+          "a": "n25",
+          "b": "n35",
+          "tubeId": "T35",
+          "color": "blue",
+          "length": 35
+        },
+        {
+          "id": "t37",
+          "a": "n25",
+          "b": "n30",
+          "tubeId": "T35",
+          "color": "yellow",
+          "length": 35
+        },
+        {
+          "id": "t39",
+          "a": "n30",
+          "b": "n38",
+          "tubeId": "T35",
+          "color": "red",
+          "length": 35
+        },
+        {
+          "id": "t41",
+          "a": "n2",
+          "b": "n40",
+          "tubeId": "T35",
+          "color": "green",
+          "length": 35
+        },
+        {
+          "id": "t42",
+          "a": "n2",
+          "b": "n18",
+          "tubeId": "T35",
+          "color": "blue",
+          "length": 35
+        },
+        {
+          "id": "t43",
+          "a": "n2",
+          "b": "n8",
+          "tubeId": "T35",
+          "color": "yellow",
+          "length": 35
+        },
+        {
+          "id": "t45",
+          "a": "n8",
+          "b": "n44",
+          "tubeId": "T35",
+          "color": "red",
+          "length": 35
+        },
+        {
+          "id": "t46",
+          "a": "n8",
+          "b": "n23",
+          "tubeId": "T35",
+          "color": "green",
+          "length": 35
+        },
+        {
+          "id": "t47",
+          "a": "n8",
+          "b": "n14",
+          "tubeId": "T35",
+          "color": "blue",
+          "length": 35
+        },
+        {
+          "id": "t49",
+          "a": "n14",
+          "b": "n48",
+          "tubeId": "T35",
+          "color": "yellow",
+          "length": 35
+        },
+        {
+          "id": "t50",
+          "a": "n14",
+          "b": "n28",
+          "tubeId": "T35",
+          "color": "red",
+          "length": 35
+        },
+        {
+          "id": "t52",
+          "a": "n18",
+          "b": "n51",
+          "tubeId": "T35",
+          "color": "green",
+          "length": 35
+        },
+        {
+          "id": "t53",
+          "a": "n18",
+          "b": "n32",
+          "tubeId": "T35",
+          "color": "blue",
+          "length": 35
+        },
+        {
+          "id": "t54",
+          "a": "n18",
+          "b": "n23",
+          "tubeId": "T35",
+          "color": "yellow",
+          "length": 35
+        },
+        {
+          "id": "t56",
+          "a": "n23",
+          "b": "n55",
+          "tubeId": "T35",
+          "color": "red",
+          "length": 35
+        },
+        {
+          "id": "t57",
+          "a": "n23",
+          "b": "n35",
+          "tubeId": "T35",
+          "color": "green",
+          "length": 35
+        },
+        {
+          "id": "t58",
+          "a": "n23",
+          "b": "n28",
+          "tubeId": "T35",
+          "color": "blue",
+          "length": 35
+        },
+        {
+          "id": "t60",
+          "a": "n28",
+          "b": "n59",
+          "tubeId": "T35",
+          "color": "yellow",
+          "length": 35
+        },
+        {
+          "id": "t61",
+          "a": "n28",
+          "b": "n38",
+          "tubeId": "T35",
+          "color": "red",
+          "length": 35
+        },
+        {
+          "id": "t63",
+          "a": "n32",
+          "b": "n62",
+          "tubeId": "T35",
+          "color": "green",
+          "length": 35
+        },
+        {
+          "id": "t64",
+          "a": "n32",
+          "b": "n35",
+          "tubeId": "T35",
+          "color": "blue",
+          "length": 35
+        },
+        {
+          "id": "t66",
+          "a": "n35",
+          "b": "n65",
+          "tubeId": "T35",
+          "color": "yellow",
+          "length": 35
+        },
+        {
+          "id": "t67",
+          "a": "n35",
+          "b": "n38",
+          "tubeId": "T35",
+          "color": "red",
+          "length": 35
+        },
+        {
+          "id": "t69",
+          "a": "n38",
+          "b": "n68",
+          "tubeId": "T35",
+          "color": "green",
+          "length": 35
+        },
+        {
+          "id": "t70",
+          "a": "n40",
+          "b": "n51",
+          "tubeId": "T35",
+          "color": "blue",
+          "length": 35
+        },
+        {
+          "id": "t71",
+          "a": "n40",
+          "b": "n44",
+          "tubeId": "T35",
+          "color": "yellow",
+          "length": 35
+        },
+        {
+          "id": "t72",
+          "a": "n44",
+          "b": "n55",
+          "tubeId": "T35",
+          "color": "red",
+          "length": 35
+        },
+        {
+          "id": "t73",
+          "a": "n44",
+          "b": "n48",
+          "tubeId": "T35",
+          "color": "green",
+          "length": 35
+        },
+        {
+          "id": "t74",
+          "a": "n48",
+          "b": "n59",
+          "tubeId": "T35",
+          "color": "blue",
+          "length": 35
+        },
+        {
+          "id": "t75",
+          "a": "n51",
+          "b": "n62",
+          "tubeId": "T35",
+          "color": "yellow",
+          "length": 35
+        },
+        {
+          "id": "t76",
+          "a": "n51",
+          "b": "n55",
+          "tubeId": "T35",
+          "color": "red",
+          "length": 35
+        },
+        {
+          "id": "t77",
+          "a": "n55",
+          "b": "n65",
+          "tubeId": "T35",
+          "color": "green",
+          "length": 35
+        },
+        {
+          "id": "t78",
+          "a": "n55",
+          "b": "n59",
+          "tubeId": "T35",
+          "color": "blue",
+          "length": 35
+        },
+        {
+          "id": "t79",
+          "a": "n59",
+          "b": "n68",
+          "tubeId": "T35",
+          "color": "yellow",
+          "length": 35
+        },
+        {
+          "id": "t80",
+          "a": "n62",
+          "b": "n65",
+          "tubeId": "T35",
+          "color": "red",
+          "length": 35
+        },
+        {
+          "id": "t81",
+          "a": "n65",
+          "b": "n68",
+          "tubeId": "T35",
+          "color": "green",
+          "length": 35
+        },
+        {
+          "id": "t84",
+          "a": "n82",
+          "b": "n83",
+          "tubeId": "T35",
+          "color": "blue",
+          "length": 35
+        },
+        {
+          "id": "t86",
+          "a": "n83",
+          "b": "n85",
+          "tubeId": "T35",
+          "color": "yellow",
+          "length": 35
+        },
+        {
+          "id": "t88",
+          "a": "n85",
+          "b": "n87",
+          "tubeId": "T35",
+          "color": "red",
+          "length": 35
+        },
+        {
+          "id": "t91",
+          "a": "n89",
+          "b": "n90",
+          "tubeId": "T35",
+          "color": "green",
+          "length": 35
+        },
+        {
+          "id": "t93",
+          "a": "n90",
+          "b": "n92",
+          "tubeId": "T35",
+          "color": "blue",
+          "length": 35
+        },
+        {
+          "id": "t95",
+          "a": "n92",
+          "b": "n94",
+          "tubeId": "T35",
+          "color": "yellow",
+          "length": 35
+        },
+        {
+          "id": "t96",
+          "a": "n82",
+          "b": "n89",
+          "tubeId": "T75",
+          "color": "red",
+          "length": 75
+        },
+        {
+          "id": "t97",
+          "a": "n83",
+          "b": "n90",
+          "tubeId": "T75",
+          "color": "green",
+          "length": 75
+        },
+        {
+          "id": "t98",
+          "a": "n85",
+          "b": "n92",
+          "tubeId": "T75",
+          "color": "blue",
+          "length": 75
+        },
+        {
+          "id": "t100",
+          "a": "n87",
+          "b": "n99",
+          "tubeId": "T35",
+          "color": "yellow",
+          "length": 35
+        },
+        {
+          "id": "t101",
+          "a": "n99",
+          "b": "n94",
+          "tubeId": "T35",
+          "color": "red",
+          "length": 35
+        },
+        {
+          "id": "t104",
+          "a": "n102",
+          "b": "n103",
+          "tubeId": "T35",
+          "color": "green",
+          "length": 35
+        },
+        {
+          "id": "t106",
+          "a": "n103",
+          "b": "n105",
+          "tubeId": "T35",
+          "color": "blue",
+          "length": 35
+        },
+        {
+          "id": "t108",
+          "a": "n105",
+          "b": "n107",
+          "tubeId": "T35",
+          "color": "yellow",
+          "length": 35
+        },
+        {
+          "id": "t111",
+          "a": "n109",
+          "b": "n110",
+          "tubeId": "T35",
+          "color": "red",
+          "length": 35
+        },
+        {
+          "id": "t113",
+          "a": "n110",
+          "b": "n112",
+          "tubeId": "T35",
+          "color": "green",
+          "length": 35
+        },
+        {
+          "id": "t115",
+          "a": "n112",
+          "b": "n114",
+          "tubeId": "T35",
+          "color": "blue",
+          "length": 35
+        },
+        {
+          "id": "t116",
+          "a": "n102",
+          "b": "n109",
+          "tubeId": "T75",
+          "color": "yellow",
+          "length": 75
+        },
+        {
+          "id": "t117",
+          "a": "n103",
+          "b": "n110",
+          "tubeId": "T75",
+          "color": "red",
+          "length": 75
+        },
+        {
+          "id": "t118",
+          "a": "n105",
+          "b": "n112",
+          "tubeId": "T75",
+          "color": "green",
+          "length": 75
+        },
+        {
+          "id": "t120",
+          "a": "n107",
+          "b": "n119",
+          "tubeId": "T35",
+          "color": "blue",
+          "length": 35
+        },
+        {
+          "id": "t121",
+          "a": "n119",
+          "b": "n114",
+          "tubeId": "T35",
+          "color": "yellow",
+          "length": 35
+        },
+        {
+          "id": "t122",
+          "a": "n82",
+          "b": "n102",
+          "tubeId": "T75",
+          "color": "red",
+          "length": 75
+        },
+        {
+          "id": "t123",
+          "a": "n89",
+          "b": "n109",
+          "tubeId": "T75",
+          "color": "green",
+          "length": 75
+        },
+        {
+          "id": "t124",
+          "a": "n99",
+          "b": "n119",
+          "tubeId": "T75",
+          "color": "yellow",
+          "length": 75,
+          "reinforced": true
+        }
+      ],
+      "panels": [
+        {
+          "id": "p125",
+          "a": "t29",
+          "b": "t39",
+          "t0": 0,
+          "len": 40,
+          "panelId": "panel_40x40_busy",
+          "color": "green",
+          "appearanceVersion": 1,
+          "params": {
+            "id": "panel_40x40_busy",
+            "name": "忙碌板",
+            "name_en": "Busy board",
+            "name_de": "Motoriktafel",
+            "placement": "panel",
+            "mount": "vertical-frame",
+            "width": 40,
+            "height": 40,
+            "depth": 6
+          },
+          "mounts": [
+            {
+              "tube": "t29",
+              "t": 0.1,
+              "role": "corner",
+              "width": 2.5,
+              "corner": 0
+            },
+            {
+              "tube": "t61",
+              "t": 0.1,
+              "role": "corner",
+              "width": 2.5,
+              "corner": 1
+            },
+            {
+              "tube": "t39",
+              "t": 0.9,
+              "role": "corner",
+              "width": 2.5,
+              "corner": 2
+            },
+            {
+              "tube": "t31",
+              "t": 0.9,
+              "role": "corner",
+              "width": 2.5,
+              "corner": 3
+            }
+          ],
+          "supportTubes": [
+            "t29",
+            "t61",
+            "t39",
+            "t31"
+          ]
+        },
+        {
+          "id": "p127",
+          "a": "t56",
+          "b": "t60",
+          "t0": 0,
+          "len": 40,
+          "panelId": "panel_40x40_pocket",
+          "color": "yellow",
+          "appearanceVersion": 1,
+          "params": {
+            "id": "panel_40x40_pocket",
+            "name": "布兜",
+            "name_en": "Fabric pocket",
+            "name_de": "Stofftasche",
+            "placement": "panel",
+            "mount": "horizontal-frame",
+            "width": 40,
+            "height": 40,
+            "depth": 25
+          },
+          "mounts": [
+            {
+              "tube": "t56",
+              "t": 0.1,
+              "role": "corner",
+              "width": 2.5,
+              "corner": 0
+            },
+            {
+              "tube": "t78",
+              "t": 0.1,
+              "role": "corner",
+              "width": 2.5,
+              "corner": 1
+            },
+            {
+              "tube": "t60",
+              "t": 0.9,
+              "role": "corner",
+              "width": 2.5,
+              "corner": 2
+            },
+            {
+              "tube": "t58",
+              "t": 0.9,
+              "role": "corner",
+              "width": 2.5,
+              "corner": 3
+            }
+          ],
+          "supportTubes": [
+            "t56",
+            "t78",
+            "t60",
+            "t58"
+          ]
+        }
+      ],
+      "clamps": [],
+      "textiles": [],
+      "fittings": [
+        {
+          "id": "f126",
+          "kind": "steering_wheel",
+          "x": 60,
+          "y": 82.5,
+          "z": 80,
+          "quat": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "color": "blue",
+          "tube": "t69",
+          "appearanceVersion": 1,
+          "params": {
+            "id": "steering_wheel",
+            "name": "方向盘",
+            "name_en": "Steering wheel",
+            "name_de": "Lenkrad",
+            "placement": "fitting",
+            "mount": "horizontal",
+            "diameter": 24,
+            "clampSpacing": 8,
+            "shaft": 8,
+            "width": 24,
+            "drop": 0
+          },
+          "mounts": [
+            {
+              "tube": "t69",
+              "t": 0.4,
+              "width": 2.5,
+              "role": "clamp"
+            },
+            {
+              "tube": "t69",
+              "t": 0.6,
+              "width": 2.5,
+              "role": "clamp"
+            }
+          ],
+          "supportTubes": [
+            "t69"
+          ],
+          "facing": 1
+        },
+        {
+          "id": "f128",
+          "kind": "swing",
+          "x": 180,
+          "y": 122.5,
+          "z": 40,
+          "quat": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "color": "blue",
+          "tube": "t124",
+          "appearanceVersion": 1,
+          "params": {
+            "id": "swing",
+            "name": "秋千",
+            "name_en": "Swing",
+            "name_de": "Schaukel",
+            "placement": "fitting",
+            "mount": "horizontal",
+            "drop": 48,
+            "width": 28,
+            "depth": 15,
+            "hangerSpacing": 22
+          },
+          "mounts": [
+            {
+              "tube": "t124",
+              "t": 0.3625,
+              "width": 2.5,
+              "role": "hanger"
+            },
+            {
+              "tube": "t124",
+              "t": 0.6375,
+              "width": 2.5,
+              "role": "hanger"
+            }
+          ],
+          "supportTubes": [
+            "t124"
+          ],
+          "facing": 1
+        }
+      ],
+      "slides": [],
+      "groups": []
+    }
+  }
+}

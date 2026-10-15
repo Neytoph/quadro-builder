@@ -38,7 +38,13 @@ export function nativePanelDiagnostics(model, probe) {
   const copy = Object.create(model);
   copy.panels = new Map(model.panels);
   copy.panels.set(id, { id, a:candidate.a, b:candidate.b, t0:candidate.t0, len:candidate.len, panelId:candidate.panelId, side:candidate.side < 0 ? -1 : 1 });
-  const installed = ['nodes', 'tubes', 'panels', 'clamps', 'textiles', 'slides', 'fittings'].flatMap(group => [...copy[group].keys()]).filter(other => other !== id);
+  // 普通板可覆盖承载边管上的双管连接件或管夹，沿用普通板安装规则。
+  const coveredClamp = other => {
+    const clamp=copy.clamps.get(other);
+    if(!clamp||!['double_tube','tube_clamp'].includes(clamp.connectorId))return false;
+    return [copy._clampBaseTube(clamp)?.id,copy._clampSecondTube(clamp)?.id].some(tube=>candidate.supportTubes?.includes(tube));
+  };
+  const installed = ['nodes', 'tubes', 'panels', 'clamps', 'textiles', 'slides', 'fittings'].flatMap(group => [...copy[group].keys()]).filter(other => other !== id&&!coveredClamp(other));
   for (const other of installed) partEnvelope(model,other);
   forkAssemblyCollisionPass(model,copy,id);
   const isFrame = other => copy.nodes.has(other)||copy.tubes.has(other)||copy.clamps.has(other);

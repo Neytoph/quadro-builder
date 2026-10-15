@@ -1,0 +1,326 @@
+{
+  "format": 2,
+  "nodes": [
+    {
+      "id": "n1",
+      "x": 0,
+      "y": 42.5,
+      "z": 0
+    },
+    {
+      "id": "n2",
+      "x": 0,
+      "y": 82.5,
+      "z": 40
+    },
+    {
+      "id": "n4",
+      "x": 40,
+      "y": 42.5,
+      "z": 0
+    },
+    {
+      "id": "n5",
+      "x": 40,
+      "y": 82.5,
+      "z": 40
+    },
+    {
+      "id": "n9",
+      "x": 0,
+      "y": 42.5,
+      "z": 40
+    },
+    {
+      "id": "n12",
+      "x": 0,
+      "y": 2.5,
+      "z": 40
+    },
+    {
+      "id": "n14",
+      "x": 40,
+      "y": 42.5,
+      "z": 40
+    },
+    {
+      "id": "n17",
+      "x": 40,
+      "y": 2.5,
+      "z": 40
+    }
+  ],
+  "tubes": [
+    {
+      "id": "t3",
+      "a": "n1",
+      "b": "n2",
+      "tubeId": "TC1",
+      "color": "yellow",
+      "length": null,
+      "bow": true,
+      "bowCenter": [
+        0,
+        42.5,
+        40
+      ]
+    },
+    {
+      "id": "t6",
+      "a": "n4",
+      "b": "n5",
+      "tubeId": "TC1",
+      "color": "yellow",
+      "length": null,
+      "bow": true,
+      "bowCenter": [
+        40,
+        42.5,
+        40
+      ]
+    },
+    {
+      "id": "t7",
+      "a": "n1",
+      "b": "n4",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t8",
+      "a": "n2",
+      "b": "n5",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t10",
+      "a": "n1",
+      "b": "n9",
+      "tubeId": "T35",
+      "color": "red",
+      "length": 35
+    },
+    {
+      "id": "t11",
+      "a": "n9",
+      "b": "n2",
+      "tubeId": "T35",
+      "color": "blue",
+      "length": 35
+    },
+    {
+      "id": "t13",
+      "a": "n12",
+      "b": "n9",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t15",
+      "a": "n4",
+      "b": "n14",
+      "tubeId": "T35",
+      "color": "red",
+      "length": 35
+    },
+    {
+      "id": "t16",
+      "a": "n14",
+      "b": "n5",
+      "tubeId": "T35",
+      "color": "blue",
+      "length": 35
+    },
+    {
+      "id": "t18",
+      "a": "n17",
+      "b": "n14",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    }
+  ],
+  "panels": [],
+  "clamps": [],
+  "textiles": [],
+  "fittings": [
+    {
+      "id": "f19",
+      "kind": "textile_round_fourway",
+      "x": 20,
+      "y": 62.5,
+      "z": 20,
+      "quat": [
+        0.3827,
+        0,
+        0,
+        0.9239
+      ],
+      "color": "blue",
+      "tube": "t3",
+      "appearanceVersion": 2,
+      "params": {
+        "id": "textile_round_fourway",
+        "name": "弯管四通布",
+        "mountType": "curved-frame",
+        "feature": "cloth-fourway",
+        "width": 40,
+        "height": 40,
+        "depth": 1.2,
+        "placement": "fitting",
+        "verifiedLoad": false,
+        "appearanceVersion": 2,
+        "kitContents": [
+          "component",
+          "retainers"
+        ],
+        "name_en": "Curved fabric with joint clearance",
+        "name_de": "Gebogener Stoff mit Anschlussfreiheit",
+        "fixedColor": null,
+        "mount": "curved-frame",
+        "designAssumption": true,
+        "assumption": "frame-grid-unmeasured",
+        "qdfSupported": false,
+        "qdfSimplified": false
+      },
+      "mounts": [
+        {
+          "tube": "t3",
+          "t": 0.125,
+          "role": "curve-lacing",
+          "width": 0.8
+        },
+        {
+          "tube": "t3",
+          "t": 0.25,
+          "role": "curve-lacing",
+          "width": 0.8
+        },
+        {
+          "tube": "t3",
+          "t": 0.375,
+          "role": "curve-lacing",
+          "width": 0.8
+        },
+        {
+          "tube": "t3",
+          "t": 0.5,
+          "role": "curve-lacing",
+          "width": 0.8
+        },
+        {
+          "tube": "t3",
+          "t": 0.625,
+          "role": "curve-lacing",
+          "width": 0.8
+        },
+        {
+          "tube": "t3",
+          "t": 0.75,
+          "role": "curve-lacing",
+          "width": 0.8
+        },
+        {
+          "tube": "t3",
+          "t": 0.875,
+          "role": "curve-lacing",
+          "width": 0.8
+        },
+        {
+          "tube": "t6",
+          "t": 0.125,
+          "role": "curve-lacing",
+          "width": 0.8
+        },
+        {
+          "tube": "t6",
+          "t": 0.25,
+          "role": "curve-lacing",
+          "width": 0.8
+        },
+        {
+          "tube": "t6",
+          "t": 0.375,
+          "role": "curve-lacing",
+          "width": 0.8
+        },
+        {
+          "tube": "t6",
+          "t": 0.5,
+          "role": "curve-lacing",
+          "width": 0.8
+        },
+        {
+          "tube": "t6",
+          "t": 0.625,
+          "role": "curve-lacing",
+          "width": 0.8
+        },
+        {
+          "tube": "t6",
+          "t": 0.75,
+          "role": "curve-lacing",
+          "width": 0.8
+        },
+        {
+          "tube": "t6",
+          "t": 0.875,
+          "role": "curve-lacing",
+          "width": 0.8
+        },
+        {
+          "tube": "t7",
+          "t": 0.25,
+          "role": "end-sleeve",
+          "width": 0.8
+        },
+        {
+          "tube": "t7",
+          "t": 0.5,
+          "role": "end-sleeve",
+          "width": 0.8
+        },
+        {
+          "tube": "t7",
+          "t": 0.75,
+          "role": "end-sleeve",
+          "width": 0.8
+        },
+        {
+          "tube": "t8",
+          "t": 0.25,
+          "role": "end-sleeve",
+          "width": 0.8
+        },
+        {
+          "tube": "t8",
+          "t": 0.5,
+          "role": "end-sleeve",
+          "width": 0.8
+        },
+        {
+          "tube": "t8",
+          "t": 0.75,
+          "role": "end-sleeve",
+          "width": 0.8
+        }
+      ],
+      "supportTubes": [
+        "t3",
+        "t6",
+        "t7",
+        "t8"
+      ],
+      "partId": "textile_round_fourway",
+      "a": "t3",
+      "b": "t6",
+      "curveReverse": false
+    }
+  ],
+  "slides": [],
+  "groups": []
+}

@@ -1,0 +1,121 @@
+{
+  "generator": "scripts/complete-part-images.mjs",
+  "sizes": [
+    128,
+    256
+  ],
+  "photos": [
+    {
+      "id": "reinforce80",
+      "type": "official-product-photo",
+      "product": "https://quadroshop.com/products/wood-tube-core",
+      "image": "https://cdn.shopify.com/s/files/1/0365/2576/8749/products/QuadroWoodenTubeCore.png?v=1653416652",
+      "width": 4000,
+      "height": 2644
+    },
+    {
+      "id": "safety_clamp",
+      "type": "official-product-photo",
+      "product": "https://quadroshop.com/products/safety-clamp",
+      "image": "https://cdn.shopify.com/s/files/1/0365/2576/8749/products/QuadroSafetyClampYTC.png?v=1656348163",
+      "width": 4000,
+      "height": 2770
+    },
+    {
+      "id": "acrylic_glass",
+      "type": "official-product-photo",
+      "product": "https://quadroshop.com/products/acrylic-glass",
+      "image": "https://cdn.shopify.com/s/files/1/0365/2576/8749/products/QuadroAcrylicGlassPXG.png?v=1664468561",
+      "width": 4000,
+      "height": 2528
+    },
+    {
+      "id": "TS7",
+      "type": "official-product-photo",
+      "product": "https://quadroshop.com/products/curved-tube-135deg-3hole",
+      "image": "https://cdn.shopify.com/s/files/1/0365/2576/8749/products/QuadroCurvedTube135deg3holeTS7classicblue.png?v=1644318155",
+      "width": 4000,
+      "height": 2048
+    },
+    {
+      "id": "screw_tube",
+      "type": "official-product-photo",
+      "product": "https://quadroshop.com/collections/screws/products/tube-screws-20pcs",
+      "image": "https://cdn.shopify.com/s/files/1/0365/2576/8749/products/QuadroTubeScrewSTUclassic.png?v=1642537340",
+      "width": 4000,
+      "height": 3140
+    },
+    {
+      "id": "screw_panel",
+      "type": "official-product-photo",
+      "product": "https://quadroshop.com/collections/screws/products/panel-screw",
+      "image": "https://cdn.shopify.com/s/files/1/0365/2576/8749/products/QuadroPanelScrewSPAgroup.png?v=1642539986",
+      "width": 4000,
+      "height": 3120
+    },
+    {
+      "id": "screw_acrylic",
+      "type": "official-product-photo",
+      "product": "https://quadroshop.com/products/acrylic-glass-screw",
+      "image": "https://cdn.shopify.com/s/files/1/0365/2576/8749/products/spg-square_b4d1d6ec-2d4a-4c38-af1f-5950f7694d2e.png?v=1642536345",
+      "width": 4000,
+      "height": 4000
+    },
+    {
+      "id": "screw_slide_conical",
+      "type": "official-product-photo",
+      "product": "https://quadroshop.com/collections/screws/products/conical-slide-screw",
+      "image": "https://cdn.shopify.com/s/files/1/0365/2576/8749/products/QuadroConicalSlideScrewSSB.png?v=1667839515",
+      "width": 4000,
+      "height": 3884
+    },
+    {
+      "id": "screw_slide_conical_counter",
+      "type": "official-product-photo",
+      "product": "https://quadroshop.com/collections/screws/products/conical-slide-screw-counterpiece",
+      "image": "https://cdn.shopify.com/s/files/1/0365/2576/8749/products/QuadroConicalSlideScrewCounterpartSSC.png?v=1667839598",
+      "width": 3164,
+      "height": 4000
+    },
+    {
+      "id": "screw_slide",
+      "type": "official-product-photo",
+      "product": "https://quadroshop.com/collections/screws/products/slide-screw",
+      "image": "https://cdn.shopify.com/s/files/1/0365/2576/8749/products/QuadroSlideScrewSSAclassicblue.png?v=1667839475",
+      "width": 4051,
+      "height": 4000
+    }
+  ],
+  "renders": [
+    {
+      "id": "wheel_floating",
+      "type": "builder-scene-geometry",
+      "meshes": 1,
+      "sizeCm": [
+        15,
+        30.200000762939453,
+        30.200000762939453
+      ]
+    },
+    {
+      "id": "roof_large",
+      "type": "builder-scene-geometry",
+      "meshes": 1,
+      "sizeCm": [
+        166,
+        136.0049130065199,
+        136.00491300651987
+      ]
+    },
+    {
+      "id": "open_end",
+      "type": "builder-scene-geometry",
+      "meshes": 1,
+      "sizeCm": [
+        5,
+        5,
+        5
+      ]
+    }
+  ]
+}

@@ -1,0 +1,622 @@
+{
+  "format": 2,
+  "nodes": [
+    {
+      "id": "n1",
+      "x": 0,
+      "y": 42.5,
+      "z": 0
+    },
+    {
+      "id": "n2",
+      "x": 40,
+      "y": 42.5,
+      "z": 0
+    },
+    {
+      "id": "n4",
+      "x": 80,
+      "y": 42.5,
+      "z": 0
+    },
+    {
+      "id": "n6",
+      "x": 0,
+      "y": 42.5,
+      "z": 40
+    },
+    {
+      "id": "n7",
+      "x": 40,
+      "y": 42.5,
+      "z": 40
+    },
+    {
+      "id": "n9",
+      "x": 80,
+      "y": 42.5,
+      "z": 40
+    },
+    {
+      "id": "n13",
+      "x": 0,
+      "y": 2.5,
+      "z": 0
+    },
+    {
+      "id": "n15",
+      "x": 0,
+      "y": 2.5,
+      "z": 40
+    },
+    {
+      "id": "n17",
+      "x": 80,
+      "y": 2.5,
+      "z": 0
+    },
+    {
+      "id": "n19",
+      "x": 80,
+      "y": 2.5,
+      "z": 40
+    }
+  ],
+  "tubes": [
+    {
+      "id": "t3",
+      "a": "n1",
+      "b": "n2",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t5",
+      "a": "n2",
+      "b": "n4",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t8",
+      "a": "n6",
+      "b": "n7",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t10",
+      "a": "n7",
+      "b": "n9",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t11",
+      "a": "n1",
+      "b": "n6",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t12",
+      "a": "n4",
+      "b": "n9",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t14",
+      "a": "n13",
+      "b": "n1",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t16",
+      "a": "n15",
+      "b": "n6",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t18",
+      "a": "n17",
+      "b": "n4",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t20",
+      "a": "n19",
+      "b": "n9",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    }
+  ],
+  "panels": [],
+  "clamps": [],
+  "textiles": [],
+  "fittings": [
+    {
+      "id": "f21",
+      "kind": "trampoline",
+      "x": 40,
+      "y": 42.5,
+      "z": 20,
+      "quat": [
+        0,
+        0.7071,
+        0.7071,
+        0
+      ],
+      "color": "#26292b",
+      "w": 80,
+      "h": 40,
+      "tube": "t11",
+      "appearanceVersion": 2,
+      "params": {
+        "id": "trampoline",
+        "name": "蹦床",
+        "mountType": "horizontal-frame",
+        "feature": "trampoline",
+        "width": 80,
+        "height": 40,
+        "depth": 1.2,
+        "placement": "fitting",
+        "verifiedLoad": false,
+        "appearanceVersion": 2,
+        "kitContents": [
+          "component",
+          "retainers"
+        ],
+        "sizes": [
+          [
+            40,
+            40
+          ],
+          [
+            40,
+            80
+          ],
+          [
+            80,
+            40
+          ],
+          [
+            80,
+            80
+          ]
+        ],
+        "name_en": "Trampoline",
+        "name_de": "Trampolin",
+        "fixedColor": "#26292b",
+        "mount": "horizontal-frame",
+        "designAssumption": true,
+        "assumption": "frame-grid-unmeasured",
+        "qdfSupported": false,
+        "qdfSimplified": false
+      },
+      "mounts": [
+        {
+          "tube": "t11",
+          "t": 0.1,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 0
+        },
+        {
+          "tube": "t11",
+          "t": 0.2,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 0
+        },
+        {
+          "tube": "t11",
+          "t": 0.3,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 0
+        },
+        {
+          "tube": "t11",
+          "t": 0.4,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 0
+        },
+        {
+          "tube": "t11",
+          "t": 0.5,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 0
+        },
+        {
+          "tube": "t11",
+          "t": 0.6,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 0
+        },
+        {
+          "tube": "t11",
+          "t": 0.7,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 0
+        },
+        {
+          "tube": "t11",
+          "t": 0.8,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 0
+        },
+        {
+          "tube": "t11",
+          "t": 0.9,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 0
+        },
+        {
+          "tube": "t8",
+          "t": 0.1,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 1
+        },
+        {
+          "tube": "t8",
+          "t": 0.2,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 1
+        },
+        {
+          "tube": "t8",
+          "t": 0.3,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 1
+        },
+        {
+          "tube": "t8",
+          "t": 0.4,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 1
+        },
+        {
+          "tube": "t8",
+          "t": 0.5,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 1
+        },
+        {
+          "tube": "t8",
+          "t": 0.6,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 1
+        },
+        {
+          "tube": "t8",
+          "t": 0.7,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 1
+        },
+        {
+          "tube": "t8",
+          "t": 0.8,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 1
+        },
+        {
+          "tube": "t8",
+          "t": 0.9,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 1
+        },
+        {
+          "tube": "t8",
+          "t": 1,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 1
+        },
+        {
+          "tube": "t10",
+          "t": 0.1,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 1
+        },
+        {
+          "tube": "t10",
+          "t": 0.2,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 1
+        },
+        {
+          "tube": "t10",
+          "t": 0.3,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 1
+        },
+        {
+          "tube": "t10",
+          "t": 0.4,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 1
+        },
+        {
+          "tube": "t10",
+          "t": 0.5,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 1
+        },
+        {
+          "tube": "t10",
+          "t": 0.6,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 1
+        },
+        {
+          "tube": "t10",
+          "t": 0.7,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 1
+        },
+        {
+          "tube": "t10",
+          "t": 0.8,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 1
+        },
+        {
+          "tube": "t10",
+          "t": 0.9,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 1
+        },
+        {
+          "tube": "t12",
+          "t": 0.9,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 2
+        },
+        {
+          "tube": "t12",
+          "t": 0.8,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 2
+        },
+        {
+          "tube": "t12",
+          "t": 0.7,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 2
+        },
+        {
+          "tube": "t12",
+          "t": 0.6,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 2
+        },
+        {
+          "tube": "t12",
+          "t": 0.5,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 2
+        },
+        {
+          "tube": "t12",
+          "t": 0.4,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 2
+        },
+        {
+          "tube": "t12",
+          "t": 0.3,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 2
+        },
+        {
+          "tube": "t12",
+          "t": 0.2,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 2
+        },
+        {
+          "tube": "t12",
+          "t": 0.1,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 2
+        },
+        {
+          "tube": "t5",
+          "t": 0.9,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 3
+        },
+        {
+          "tube": "t5",
+          "t": 0.8,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 3
+        },
+        {
+          "tube": "t5",
+          "t": 0.7,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 3
+        },
+        {
+          "tube": "t5",
+          "t": 0.6,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 3
+        },
+        {
+          "tube": "t5",
+          "t": 0.5,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 3
+        },
+        {
+          "tube": "t5",
+          "t": 0.4,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 3
+        },
+        {
+          "tube": "t5",
+          "t": 0.3,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 3
+        },
+        {
+          "tube": "t5",
+          "t": 0.2,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 3
+        },
+        {
+          "tube": "t5",
+          "t": 0.1,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 3
+        },
+        {
+          "tube": "t5",
+          "t": 0,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 3
+        },
+        {
+          "tube": "t3",
+          "t": 0.9,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 3
+        },
+        {
+          "tube": "t3",
+          "t": 0.8,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 3
+        },
+        {
+          "tube": "t3",
+          "t": 0.7,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 3
+        },
+        {
+          "tube": "t3",
+          "t": 0.6,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 3
+        },
+        {
+          "tube": "t3",
+          "t": 0.5,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 3
+        },
+        {
+          "tube": "t3",
+          "t": 0.4,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 3
+        },
+        {
+          "tube": "t3",
+          "t": 0.3,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 3
+        },
+        {
+          "tube": "t3",
+          "t": 0.2,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 3
+        },
+        {
+          "tube": "t3",
+          "t": 0.1,
+          "role": "lacing",
+          "width": 0.8,
+          "edge": 3
+        }
+      ],
+      "supportTubes": [
+        "t11",
+        "t8",
+        "t10",
+        "t12",
+        "t5",
+        "t3"
+      ],
+      "facing": 1,
+      "partId": "trampoline",
+      "a": "t11",
+      "b": "t12",
+      "t0": 0,
+      "len": 40
+    }
+  ],
+  "slides": [],
+  "groups": []
+}

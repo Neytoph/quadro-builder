@@ -1,0 +1,218 @@
+import { beforeAll, describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { storeState } from 'y-indexeddb'
+import * as Y from 'yjs'
+import { BuildModel, buildableTubes, docs, geometry, loadCatalog, panels, parseQDF, storage } from '../engine-api'
+import { createTabDoc, dropTabDoc, memoryDoc, openTabDoc, readPersonalState, writePersonalState } from '../collab/localDocs'
+import type { ModelJSON } from '../collab/ymodel'
+import { displaySaveState, modelContent, personalDecision, personalRecordUnconfirmed, personalSaveBaseline, readPersonalBinding, restorePersonalBinding, savedGenerationUnchanged, savedRecordState } from './personalTabs'
+
+// 隔离单元夹具使用真实官方模型；IndexedDB 由测试环境提供，浏览器验收另行执行。
+let original: ModelJSON
+let changed: ModelJSON
+beforeAll(async () => {
+  await loadCatalog()
+  const model = new BuildModel()
+  const qdf = readFileSync(join(process.cwd(), 'src/data/A0128.qdf'), 'utf8')
+  const parsed = parseQDF(qdf, { tubes: buildableTubes(), panels: panels(), connectorSize: geometry().connectorSize, mergeEps: 2 })
+  expect(model.loadJSON(parsed).ok).toBe(true)
+  original = model.toJSON() as ModelJSON
+  changed = structuredClone(original)
+  const first = changed.nodes[0] as Record<string, unknown>
+  first.x = Number(first.x || 0) + 10
+})
+
+describe('personal tab working baseline', () => {
+  it('refreshes a clean saved tab when another device has updated it', () => {
+    const state = { baseRev: 1, savedContent: modelContent(original) }
+    expect(personalDecision(state, false, original, { rev: 2, data: changed })).toBe('refresh')
+  })
+
+  it('protects unknown historical content even when dirty is false', () => {
+    expect(personalDecision({}, false, original, { rev: 2, data: changed })).toBe('protect')
+    expect(personalDecision({}, false, original, { rev: 2, data: original })).toBe('same')
+  })
+
+  it('protects unsaved work but does not create a conflict for the unchanged baseline', () => {
+    const state = { baseRev: 1, savedContent: modelContent(original) }
+    expect(personalDecision(state, true, changed, { rev: 2, data: original })).toBe('protect')
+    expect(personalDecision(state, true, changed, { rev: 1, data: original })).toBe('same')
+    expect(personalDecision(state, false, changed, { rev: 2, data: original })).toBe('protect')
+  })
+
+  it('does not trust same-revision content or an unconfirmed legacy record as the canvas baseline', () => {
+    const poisoned = { baseRev: 31, savedContent: modelContent(original) }
+    expect(personalDecision(poisoned, true, original, { rev: 31, data: changed })).toBe('protect')
+    expect(personalDecision(poisoned, false, original, { rev: 31, data: changed, legacyRecoveryId: 'copy' })).toBe('protect')
+    expect(personalDecision({}, false, original, { rev: 31, data: original, dirty: true })).toBe('protect')
+    expect(personalDecision(poisoned, false, original, { rev: 31, data: original, legacyPending: true, saveId: 'renamed' })).toBe('protect')
+    expect(personalRecordUnconfirmed({ rev: 31, dirty: true })).toBe(true)
+    expect(personalRecordUnconfirmed({ rev: 31, legacyPending: true, saveId: 'renamed' })).toBe(true)
+    expect(personalRecordUnconfirmed({ rev: 31, dirty: true, saveId: 'known' })).toBe(false)
+    // 新打开云端V2后修改的标签有真实V2基线，可以继续原设计。
+    expect(personalDecision({ baseRev: 31, savedContent: modelContent(changed) }, true, original,
+      { rev: 31, data: changed, legacyRecoveryId: 'copy' })).toBe('same')
+  })
+
+  it.each(['pending', 'accepted'] as const)('freezes the old canvas baseline and atomically saves to its stable recovery copy after legacy %s', async phase => {
+    storage.setAccountScope(`frontend-legacy-${phase}`)
+    const legacy = { id: `legacy-${phase}`, name: 'Old design', data: original, rev: 31,
+      createdAt: 1, updatedAt: 2, dirty: true }
+    await storage.dbTx(storage.DB_STORES.docs, 'readwrite', (store: IDBObjectStore) => store.put(legacy))
+    const protection = await docs.protectLegacyDoc(legacy)
+    const poisoned = { baseRev: 31, savedContent: modelContent(original) }
+    const frozen = personalSaveBaseline(poisoned)
+    if (phase === 'accepted') await docs.resolveDocConflict(legacy,
+      { ...legacy, name: 'Cloud V2', data: changed, dirty: false }, true)
+    const current = await docs.getDoc(legacy.id)
+    expect(personalDecision(poisoned, false, original, current)).toBe('protect')
+    // 冻结后标签/存档变更不能让保存请求临时借到新云端基线。
+    poisoned.savedContent = modelContent(changed)
+    expect(frozen.baseContent).toBe(modelContent(original))
+    expect(frozen.parentSaveId).toBeUndefined()
+    const saved = await docs.saveDoc({ docId: legacy.id, name: 'Recovered', data: original, ...frozen })
+    expect(saved.id).toBe(protection.copyId)
+    expect(saved.id).not.toBe(legacy.id)
+    expect(modelContent(saved.data as ModelJSON)).toBe(modelContent(original))
+    const kept = await docs.getDoc(legacy.id)
+    expect(modelContent(kept.data as ModelJSON)).toBe(modelContent(phase === 'pending' ? original : changed))
+    if (phase === 'pending') expect(kept.legacyPending).toBe(true)
+    else {
+      const fresh = await docs.saveDoc({ docId: legacy.id, name: 'Fresh cloud edit', data: original,
+        ...personalSaveBaseline({ baseRev: 31, savedContent: modelContent(changed) }) })
+      expect(fresh.id).toBe(legacy.id)
+    }
+    storage.setAccountScope(null)
+  })
+
+  it('preserves work when the remote design was deleted', () => {
+    expect(personalDecision({ baseRev: 1, savedContent: modelContent(original) }, false, original, null)).toBe('protect')
+  })
+
+  it('a save receipt clears only the generation and content actually saved', () => {
+    expect(savedGenerationUnchanged({ editGeneration: 4 }, 4, original, original)).toBe(true)
+    expect(savedGenerationUnchanged({ editGeneration: 5 }, 4, original, original)).toBe(false)
+    expect(savedGenerationUnchanged({ editGeneration: 4 }, 4, original, changed)).toBe(false)
+  })
+
+  it('a delayed conflict-copy read cannot rebind a tab after a newer save', async () => {
+    const tab = { docId: 'original', saveId: 'save-1' }
+    let finish!: (copy: { id: string }) => void
+    const read = readPersonalBinding(tab, { docId: 'original', saveId: 'save-1' }, () => true,
+      () => new Promise<{ id: string }>(resolve => { finish = resolve }))
+    tab.saveId = 'save-2'
+    finish({ id: 'old-conflict-copy' })
+    expect(await read).toBeNull()
+    expect(tab).toEqual({ docId: 'original', saveId: 'save-2' })
+  })
+
+  it('a closed tab rejects delayed storage results while a live matching tab accepts them', async () => {
+    const tab = { docId: 'original', saveId: 'save-1' }
+    const expected = { ...tab }
+    expect(await readPersonalBinding(tab, expected, () => false, async () => 'copy')).toBeNull()
+    expect(await readPersonalBinding(tab, expected, () => true, async () => 'copy')).toEqual({ value: 'copy' })
+  })
+
+  it('JSON acknowledgement remains synced while its cover is pending; edits and gestures have their own status', () => {
+    expect(savedRecordState({ rev: 2, dirty: true, saveId: 's2', syncedSaveId: 's2' })).toBe('synced')
+    expect(savedRecordState({ rev: 2, dirty: true, saveId: 's3', syncedSaveId: 's2' })).toBe('local')
+    expect(displaySaveState({ saveState: 'synced' }, true)).toBe('unsaved')
+    expect(displaySaveState({ saveState: 'waiting' }, true)).toBe('waiting')
+    expect(displaySaveState({ saveState: 'conflict' }, true)).toBe('conflict')
+  })
+
+  it('persists the baseline with the Yjs document before session debounce and clears obsolete conflict links', async () => {
+    storage.setAccountScope('frontend-test')
+    const id = `baseline-${Date.now()}`
+    const local = createTabDoc(id, original)
+    await local.persistence!.whenSynced
+    let externalChanges = 0
+    local.history.onExternal(() => externalChanges++)
+    writePersonalState(local, { baseRev: 1, savedContent: modelContent(original), editGeneration: 4, saveId: 'save-4', saveState: 'syncing', conflictDocId: 'old' })
+    writePersonalState(local, { baseRev: 1, savedContent: modelContent(original), editGeneration: 4, saveId: 'save-4', saveState: 'syncing', conflictDocId: undefined })
+    expect(externalChanges).toBe(0)
+    expect(local.history.canUndo()).toBe(false)
+    await storeState(local.persistence!, true)
+    await local.persistence!.destroy()
+    local.history.destroy()
+    local.doc.destroy()
+    const restored = await openTabDoc(id, null)
+    expect(readPersonalState(restored)).toEqual({ baseRev: 1, savedContent: modelContent(original), editGeneration: 4, saveId: 'save-4', saveState: 'syncing' })
+    expect(modelContent(restored.history.toJSON())).toBe(modelContent(original))
+    await dropTabDoc(id, restored)
+    storage.setAccountScope(null)
+  })
+
+  it.each(['saveAs', 'conflict'] as const)('restores the complete %s binding when the persisted session still points to the original', async kind => {
+    storage.setAccountScope(`frontend-binding-${kind}`)
+    const tabId = `binding-${kind}-${Date.now()}`
+    const oldDoc = { id: 'original-design', name: 'Original', data: original, rev: 7, createdAt: 1, updatedAt: 2, saveId: 'old-save' }
+    await docs.putRemoteDoc(oldDoc)
+    const oldSession = { tabId, docId: oldDoc.id, name: oldDoc.name, dirty: false, baseRev: 7,
+      savedContent: modelContent(original), editGeneration: 3, saveId: 'old-save', saveState: 'synced' as const }
+    await docs.saveSession({ tabs: [oldSession], activeTabId: tabId })
+    const local = createTabDoc(tabId, original)
+    await local.persistence!.whenSynced
+    local.history.commit(JSON.stringify(original), JSON.stringify(changed))
+    const current = local.history.toJSON()
+    const copy = await docs.saveDoc({ docId: null, name: kind === 'saveAs' ? 'New design' : 'Recovery copy', data: current, baseRev: 0 })
+    writePersonalState(local, { bindingVersion: 1, docId: copy.id, name: copy.name, dirty: kind === 'conflict',
+      baseRev: 0, savedContent: modelContent(current), editGeneration: 4, saveId: copy.saveId,
+      saveState: kind === 'saveAs' ? 'local' : 'conflict', conflictDocId: kind === 'conflict' ? oldDoc.id : undefined })
+    // 只等待 Yjs 落库，不更新会话：模拟400ms会话防抖窗口内关闭页面。
+    await storeState(local.persistence!, true)
+    await local.persistence!.destroy()
+    local.history.destroy()
+    local.doc.destroy()
+    const session = await docs.loadSession()
+    expect(session.tabs[0].docId).toBe(oldDoc.id)
+    const reopened = await openTabDoc(tabId, null)
+    const restored = restorePersonalBinding(session.tabs[0], readPersonalState(reopened))
+    expect(restored.docId).toBe(copy.id)
+    expect(restored.name).toBe(copy.name)
+    expect(restored.baseRev).toBe(0)
+    expect(restored.saveId).toBe(copy.saveId)
+    expect(restored.dirty).toBe(kind === 'conflict')
+    expect(restored.saveState).toBe(kind === 'saveAs' ? 'local' : 'conflict')
+    expect(restored.conflictDocId).toBe(kind === 'conflict' ? oldDoc.id : undefined)
+    expect(modelContent(reopened.history.toJSON())).toBe(modelContent(current))
+    const boundDoc = await docs.getDoc(restored.docId)
+    expect(modelContent(boundDoc.data)).toBe(modelContent(current))
+    await dropTabDoc(tabId, reopened)
+    storage.setAccountScope(null)
+  })
+
+  it('an explicit unbound Yjs record clears the older session identity and baseline; missing or partial metadata preserves the session', () => {
+    const session = { docId: 'original', name: 'Original', dirty: false, baseRev: 7, saveId: 'old', savedContent: modelContent(original) }
+    const restored = restorePersonalBinding(session, { bindingVersion: 1, docId: null, name: 'Draft', dirty: true })
+    expect(restored).toEqual({ docId: null, name: 'Draft', dirty: true, baseRev: undefined, saveId: undefined,
+      savedContent: undefined, editGeneration: undefined, saveState: undefined, conflictDocId: undefined })
+    expect(restorePersonalBinding(session, {})).toBe(session)
+    expect(restorePersonalBinding(session, { baseRev: 0, saveId: 'unknown-binding' })).toBe(session)
+  })
+
+  it('repeating identical full state creates no Yjs items or changed keys, while an explicit null binding remains a real update', () => {
+    const local = memoryDoc(original)
+    const state = { bindingVersion: 1 as const, docId: 'original', name: 'Original', dirty: false,
+      baseRev: 7, savedContent: modelContent(original), editGeneration: 3, saveId: 'save-3', saveState: 'synced' as const }
+    writePersonalState(local, state)
+    const before = Y.encodeStateVector(local.doc)
+    const changed: number[] = []
+    let updates = 0
+    local.doc.on('afterTransaction', transaction => changed.push(transaction.changed.size))
+    local.doc.on('update', () => updates++)
+    writePersonalState(local, state)
+    writePersonalState(local, state)
+    expect(changed).toEqual([0, 0])
+    expect(updates).toBe(0)
+    // 公开state vector没有推进，证明savedContent等字段未生成新Yjs Item。
+    expect(Y.encodeStateVector(local.doc)).toEqual(before)
+    writePersonalState(local, { ...state, docId: null })
+    expect(readPersonalState(local).docId).toBeNull()
+    expect(updates).toBe(1)
+    expect(Y.encodeStateVector(local.doc)).not.toEqual(before)
+    local.history.destroy()
+    local.doc.destroy()
+  })
+})

@@ -29,6 +29,16 @@ function frame(fragmented=false) {
 }
 
 describe('普通板真实网格安装复核',()=>{
+  it('允许覆盖承载边管上的双管连接件与管夹，板内无承载关系的连接件仍拒绝',()=>{
+    for(const connectorId of ['double_tube','tube_clamp']){
+      const {model,probe}=frame()
+      Object.assign(model.addClamp(22.5,42.5,2.5,connectorId),{dir:[1,0,0],off:[0,0,5]})
+      expect(model.nativePanelDiagnostics(probe).valid).toBe(true)
+    }
+    const {model,probe}=frame()
+    const obstacle=Object.assign(model.addClamp(22.5,62.5,2.5,'double_tube'),{dir:[1,0,0],off:[0,0,5]})
+    expect(model.nativePanelDiagnostics(probe)).toMatchObject({valid:false,reason:'component_space',obstacle:{id:obstacle.id}})
+  })
   it('四边都由短管连接时仍能寻找整板，缺边后不能套用透明板对边规则',()=>{
     const {model,probe}=frame(true)
     const corners=model.panelCorners(probe)!.map((p:number[])=>p.join(',')).sort().join('|')

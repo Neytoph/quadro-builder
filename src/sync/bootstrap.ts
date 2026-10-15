@@ -1,0 +1,141 @@
+import { track } from '../analytics/track'
+import { storage } from '../engine-api'
+import { createSync, QuotaError } from './index'
+import type { SavedDocSyncResult, StatsSnapshot, SyncEvent } from './types'
+
+let started = false
+let initialized = false
+let live: ReturnType<typeof createSync> | null = null
+const waiting = new Set<() => void>()
+const subscribers = new Set<(e: SyncEvent) => void>()
+let recentEvent: SyncEvent | undefined
+const pendingWarnings: SyncEvent[] = []
+function publish(e: SyncEvent): void {
+  recentEvent = e
+  if (!subscribers.size && (e.type === 'error' || e.type === 'quota' || e.type === 'legacy-deletion')) pendingWarnings.push(e)
+  for (const cb of subscribers) {
+    try { cb(e) } catch (error) { console.warn('[sync] event subscriber', error) }
+  }
+}
+export function onSyncEvent(cb: (e: SyncEvent) => void): () => void {
+  subscribers.add(cb)
+  const warnings = pendingWarnings.splice(0)
+  for (const warning of warnings) cb(warning)
+  if (recentEvent && !warnings.includes(recentEvent)) cb(recentEvent)
+  return () => { subscribers.delete(cb) }
+}
+let probeDone: (ok: boolean | null) => void = () => {}
+const probed = new Promise<boolean | null>(resolve => { probeDone = resolve })
+let initialIdentity: Promise<string | null> | null = null
+// 房间选择器复用启动时已发出的身份请求，不另发一次 whoami。
+export function confirmedSyncAccount(): Promise<string | null> | null { return initialIdentity }
+
+export function syncProbe(): Promise<boolean | null> {
+  return import.meta.env.VITE_SYNC_BASE ? probed : Promise.resolve(null)
+}
+export function syncNow(): Promise<void> {
+  return started && live ? live.syncNow() : Promise.resolve()
+}
+export function syncSavedDoc(id: string, saveId: string): Promise<SavedDocSyncResult> {
+  return started && live ? live.syncSavedDoc(id, saveId) : Promise.resolve({ status: 'pending', id, saveId })
+}
+export function syncDocStats(snapshot: StatsSnapshot): Promise<boolean> {
+  return started && live ? live.syncDocStats(snapshot) : Promise.resolve(false)
+}
+export function syncConfigured(): boolean { return Boolean(import.meta.env.VITE_SYNC_BASE) }
+export function syncStarted(): boolean { return started }
+export function onSyncStart(cb: () => void): () => void {
+  waiting.add(cb)
+  return () => { waiting.delete(cb) }
+}
+
+/** 读取文档之前确认账户；离线/未登录只使用独立匿名库，旧库保留给明确文件导入。 */
+export function startSyncIfConfigured(onEvent?: (e: SyncEvent) => void, onUnauthenticated?: () => void, enableSync = true): ReturnType<typeof createSync> | null {
+  const baseUrl = import.meta.env.VITE_SYNC_BASE
+  if (!baseUrl || initialized) return live
+  initialized = true
+  storage.setAccountScope(null)
+  let initialId: string | null = null
+  const resetIdentity = () => {
+    window.dispatchEvent(new Event('quadro-account-invalidated'))
+    live?.stop()
+    started = false
+    // 活着的旧文档保持旧命名空间；重新初始化先确认新账户，再恢复它的会话。
+    location.reload()
+  }
+  const identity = async (): Promise<string | null> => {
+    const early = takeEarlyIdentity(baseUrl)
+    let response: Response
+    try {
+      response = early
+        ? await early
+        : await fetch(`${baseUrl}/identity`, { credentials: 'include', cache: 'no-store', headers: { Accept: 'application/json' } })
+    } catch (error) {
+      if (!early) throw error
+      response = await fetch(`${baseUrl}/identity`, { credentials: 'include', cache: 'no-store', headers: { Accept: 'application/json' } })
+    }
+    if (response.status === 401 || response.status === 403) return null
+    if (!response.ok) throw new Error(`GET /identity → ${response.status}`)
+    const value = await response.json() as { userId?: unknown }
+    if (typeof value.userId !== 'string' || !/^\d+$/.test(value.userId)) throw new Error('invalid stable account ID')
+    return value.userId
+  }
+  initialIdentity = identity()
+  void (async () => {
+    try {
+      initialId = await initialIdentity
+      if (initialId) {
+        storage.setAccountScope(initialId)
+        sessionStorage.removeItem('quadro.sync.gate-recheck')
+        if (enableSync) live = createSync({ baseUrl, accountId: initialId, onIdentityChange: resetIdentity, onEvent: e => {
+          if (e.type === 'error') console.warn('[sync]', e.error)
+          if (e.type === 'quota') track('builder.sync.quota', { feature: e.feature, limit: e.limit })
+          onEvent?.(e)
+          publish(e)
+        } })
+        started = Boolean(live)
+        live?.start()
+        waiting.forEach(cb => cb())
+        waiting.clear()
+        probeDone(true)
+      } else {
+        probeDone(false)
+        const key = 'quadro.sync.gate-recheck'
+        if (!sessionStorage.getItem(key) && onUnauthenticated) {
+          sessionStorage.setItem(key, '1')
+          onUnauthenticated()
+        }
+      }
+    } catch (error) {
+      console.warn('[sync] identity unavailable', error)
+      probeDone(null)
+      onEvent?.({ type: 'error', error })
+      publish({ type: 'error', error })
+    }
+    const recheck = async () => {
+      if (document.visibilityState !== 'visible') return
+      try {
+        if (await identity() !== initialId) { resetIdentity(); return }
+        await syncNow()
+      }
+      catch (error) { onEvent?.({ type: 'error', error }); publish({ type: 'error', error }) }
+    }
+    document.addEventListener('visibilitychange', recheck)
+    window.addEventListener('focus', recheck)
+    window.addEventListener('online', recheck)
+    window.addEventListener('pagehide', () => { live?.stop() })
+    window.addEventListener('pageshow', event => { if (event.persisted) resetIdentity() })
+  })()
+  return live
+}
+
+function takeEarlyIdentity(baseUrl: string): Promise<Response> | null {
+  if (baseUrl !== '/quadro' && !baseUrl.endsWith('/quadro')) return null
+  const bag = globalThis as typeof globalThis & { __qhIdentity?: Promise<Response> }
+  const pending = bag.__qhIdentity
+  if (!pending) return null
+  delete bag.__qhIdentity
+  return pending
+}
+
+export { QuotaError }
