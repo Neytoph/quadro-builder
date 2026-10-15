@@ -7,10 +7,11 @@ const local=(frame,p)=>frame.axes.map(a=>dot(sub(p,frame.pos),a));
 
 export function hasInsetScrews(part) {return INSET_PANEL_IDS.has(part.panelId) && part.params?.mountLayout===INSET_MOUNT_LAYOUT;}
 
-// 仅内嵌安装使用连续对边探针；每根短管都仍是实际模型管件。
-export function insetPanelProbes(model,width,height) {
+// 连续框边探针保留每根短管的实际模型引用。
+export function insetPanelProbes(model,width,height,{segmentedOnly=false}={}) {
   const rails=[...model.tubes.values()].flatMap(t=>{const rail=model._rail(t.id);return rail?[{...rail,id:t.id}]:[];}),out=[],seen=new Set();
   for(const rail of rails){
+    if(segmentedOnly && rail.len>=height-.35)continue;
     const starts=new Set(),intervals=[];
     for(const span of rails){
       if(Math.abs(dot(span.dir,rail.dir))<.999)continue;
