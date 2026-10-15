@@ -13,6 +13,7 @@ import { nodeClampOffset, isHolePart, HOLE_MASKS, holeArmDirs, BLACK_FITTINGS,
   isBoltPart, boltAxis, boltShift, hingeDir, hingeKey, POOL_KINDS, fixedFittingColor,
   ARM_FITTINGS, SLIDE_HOOK_LIFT, SLIDE_SPECS, SLIDE_PARTS } from "./model.js";
 import { reinforcementProfiles } from "./qdfexport.js";
+import { ALUMINIUM_CONNECTOR, aluminiumConnectorDisplay } from './reinforcement.js';
 import { assemblyProfilePosition, assemblyProfileFallbackVisible } from './assemblyProfilePresentation.js';
 import { loadConnectorMeshes, loadSlideMeshes, loadFittingMeshes,
   loadSurfaceMeshes } from "./meshes.js";
@@ -1814,10 +1815,15 @@ export class SceneManager {
    */
   _fittingMeshes(f) {
     if (f.kind === 'alu-connector2') {
-      const geo = new THREE.BoxGeometry(f.w || 40, 0.65, 0.25);
-      geo.translate((f.w || 40) / 2, 6, -8);
-      return [this._placeFitting(new THREE.Mesh(geo, this._fittingMaterial('#bcc2c7', false)), f,
-        new THREE.Quaternion(...(f.quat || [0, 0, 0, 1])).normalize())];
+      const display = aluminiumConnectorDisplay(f), limits = display.bounds;
+      const size = limits.map(([low, high]) => high - low), center = limits.map(([low, high]) => (low + high) / 2);
+      const geo = new THREE.BoxGeometry(...size);
+      geo.translate(...center);
+      const mesh = this._placeFitting(new THREE.Mesh(geo, this._fittingMaterial('#e0e5e9', false)), display,
+        new THREE.Quaternion(...display.quat).normalize());
+      if (!this._materials.aluConnectorEdge) this._materials.aluConnectorEdge = new THREE.LineBasicMaterial({ color: 0x596975 });
+      mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo), this._materials.aluConnectorEdge));
+      return [mesh];
     }
     if ((f.appearanceVersion === 2 && f.kind !== 'multi-wheel2') || (ACCESSORY_IDS.has(f.kind) && !confirmedSpec(f.kind))) return accessoryMeshes(this, this._renderModel, f, this._look(f.color || 'yellow'));
     const q = f.quat && f.quat.length === 4
@@ -3944,6 +3950,7 @@ export class SceneManager {
     const tints = opts.tints && opts.tints.size ? opts.tints : null;
     const matFor = (id, base, keepOpaque = false) => {
       if (invalid && id != null && invalid.has(id)) return this._invalidMaterial(base);
+      if (opts.reinforce && opts.suggest?.has(id)) return this._suggestMaterial(base);
       if (focusId != null && id === focusId) return this._focusMaterial(base);
       if (highlight && id != null && highlight.has(id)) {
         return focusId != null ? this._partnerMaterial(base) : this._selectedMaterial(base);
@@ -4157,7 +4164,7 @@ export class SceneManager {
 
     // Verstaerkungsprofile als ganze Laeufe. Sie liegen NEBEN dem Rohr, mit
     // Pfeilen darauf -- genau so zeigt sie die Herstellersoftware.
-    if (aluModelle && !reinforce) {
+    if (aluModelle && (!reinforce || opts.reinforcementPartId === ALUMINIUM_CONNECTOR)) {
       for (const lauf of reinforcementProfiles(model)) {
         const profilePosition = assemblyProfilePosition(asm, lauf);
         if (!profilePosition) continue;
@@ -4478,7 +4485,7 @@ export class SceneManager {
       // 2,4 cm vor ihrer Kupplung.
       const drawLen = t.geom && !t.bow && t.geom.len
         ? Math.max(1, t.geom.len + (t.geom.pad || 0)) : Math.max(1, len - cs);
-      const isReinforceActive = reinforce && t.reinforced;
+      const isReinforceActive = reinforce && t.reinforced && opts.reinforcementPartId !== ALUMINIUM_CONNECTOR;
       const effectiveRadius = isReinforceActive ? tubeRadius * 1.08 : tubeRadius;
       const geo = this._tubeGeometry(tubeRadius, drawLen, qual.tube, true);
       const geo2 = isReinforceActive

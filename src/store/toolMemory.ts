@@ -1,8 +1,8 @@
 import type { CatalogueChoice, CatalogueTool } from './installationCatalogue'
 import { installationActive } from './installationCatalogue'
 
-export type BuilderTool = CatalogueTool | 'reinforce'
-export const CATALOGUE_TOOLS: CatalogueTool[] = ['tubes', 'panels', 'connectors', 'wheels', 'textiles', 'pools', 'slides', 'accessories']
+export type BuilderTool = CatalogueTool
+export const CATALOGUE_TOOLS: CatalogueTool[] = ['tubes', 'panels', 'connectors', 'wheels', 'textiles', 'pools', 'slides', 'accessories', 'reinforce']
 export const TOOL_LABELS: Record<BuilderTool, string> = {
   tubes: 'tool.tubes', panels: 'tool.panels', connectors: 'tool.connections', wheels: 'tool.wheels',
   textiles: 'tool.textiles', pools: 'tool.pools', slides: 'tool.slides', accessories: 'tool.accessories', reinforce: 'tool.reinforce',

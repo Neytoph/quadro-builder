@@ -15,6 +15,7 @@ import { componentVolumes } from './accessoryPack.js';
 import { curvePoint } from './confirmedComponentModel.js';
 import { C45_SLEEVE_LEN, C45_ARM_LEN } from './config.js';
 import { structuralBearingSupport } from './assemblyStructuralBearings.js';
+import { aluminiumConnectorDisplay } from './reinforcement.js';
 import { xAxisOf, yAxisOf, zAxisOf, panelNormal, modelMiddle } from './util.js';
 
 const xyz = p => [p.x, p.y, p.z];
@@ -95,7 +96,7 @@ function computeEnvelope(model,id) {
   }
   const f=model.fittings?.get(id)||model.slides?.get(id);
   if(f) {
-    if (f.kind === 'alu-connector2') return [nativeBox(f, [[0, f.w || 40], [5.675, 6.325], [-8.125, -7.875]])];
+    if (f.kind === 'alu-connector2') { const display = aluminiumConnectorDisplay(f); return [nativeBox(display, display.bounds)]; }
     if(f.appearanceVersion)return componentVolumes(model,f).map(b=>({...b,kind:'box'}));
     if(['pool2','pool-small2'].includes(f.kind)){
       const [width,depth]=f.kind==='pool2'?[120,160]:[80,120];

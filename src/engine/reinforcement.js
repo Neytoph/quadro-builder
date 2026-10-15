@@ -13,6 +13,44 @@ const dot = (a, b) => a.reduce((sum, v, i) => sum + v * b[i], 0);
 const norm = d => d.map(v => v / (Math.hypot(...d) || 1));
 const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 
+// 旁置示意的连接条紧邻铝管外缘；渲染与安装路径共用同一包络。
+export function aluminiumConnectorDisplay(fitting) {
+  const width = fitting.w || 40, axis = xAxisOf(fitting.quat || [0, 0, 0, 1]);
+  const dominant = axis.findIndex(v => Math.abs(v) === Math.max(...axis.map(Math.abs)));
+  const flip = axis[dominant] < 0, dir = axis.map(v => flip ? -v : v);
+  const up = Math.abs(dir[1]) > 0.9 ? [0, 0, 1] : [0, 1, 0];
+  const ey = norm(up.map((v, i) => v - dir[i] * dot(up, dir)));
+  return {
+    x: fitting.x + (flip ? axis[0] * width : 0),
+    y: fitting.y + (flip ? axis[1] * width : 0),
+    z: fitting.z + (flip ? axis[2] * width : 0),
+    quat: quatFromBasis(dir, ey, cross(dir, ey)),
+    bounds: [[0, width], [4.1, 5.9], [-7.25, -6.55]],
+  };
+}
+
+export function aluminiumConnectorTargets(model, mount) {
+  return [mount.nodeId, ...mount.supportTubes.filter(id => {
+    const tube = model.tubes.get(id);
+    return tube && (tube.a === mount.nodeId || tube.b === mount.nodeId);
+  })];
+}
+
+/** @param {string | null} firstId */
+export function reinforcementGuide(model, partId, firstId = null) {
+  const installable = new Set();
+  const mounts = partId === ALUMINIUM_CONNECTOR ? aluminiumConnectorMounts(model) : [];
+  if (partId === ALUMINIUM_CONNECTOR) {
+    for (const mount of mounts) for (const id of aluminiumConnectorTargets(model, mount)) installable.add(id);
+  } else {
+    const candidates = firstId ? [firstId] : [...model.tubes.keys()];
+    for (const id of candidates) for (const path of reinforcementPaths(model, id, partId)) {
+      for (const tube of path.tubeIds) if (tube !== firstId) installable.add(tube);
+    }
+  }
+  return { installable, mounts };
+}
+
 export function reinforcementPaths(model, firstId, partId = 'reinforce80') {
   const spec = REINFORCEMENT_SPECS[partId], first = model.tubes.get(firstId);
   if (!spec || !first || first.arm || first.link || first.bow || first.reinforced) return [];

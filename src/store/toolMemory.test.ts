@@ -7,7 +7,7 @@ import type { useEngine } from './EngineContext'
 beforeAll(async () => { await loadCatalog() })
 const state = (changes: Partial<ToolState> = {}): ToolState => ({ mode: 'select', panelId: 'panel_40x40', tubeId: 'T35', slideKind: 'slide-new2',
   clampPart: 'double_tube', placingConnector: null, fittingKind: 'multi-wheel2', fittingPart: null, poolLinerId: null,
-  pasting: false, color: 'red', insetScrewAxis: 'horizontal', ...changes })
+  pasting: false, color: 'red', insetScrewAxis: 'horizontal', reinforcementPartId: 'reinforce80', ...changes })
 const entries = () => installationChoices({ catalog: { tubes: buildableTubes(), curved: buildableCurvedTubes(), panels: buildablePanels(),
   connectors: allConnectors(), accessories: accessories() } } as ReturnType<typeof useEngine>, key => key)
 
@@ -17,6 +17,7 @@ it('记住真实连接件身份、跨分类面板和安装参数，临时状态�
   expect(captureTool(state({ mode: 'panel', panelId: 'panel_40x40_pocket' }), choices)).toMatchObject({ tool: 'textiles', partId: 'panel_40x40_pocket', insetScrewAxis: 'horizontal' })
   expect(captureTool(state({ mode: 'fitting', fittingKind: 'textil2', fittingPart: 'textile_rainbow' }), choices)).toMatchObject({ tool: 'textiles', partId: 'textile_rainbow', fittingPart: 'textile_rainbow' })
   expect(captureTool(state({ mode: 'slide', slideKind: 'curved-slide-domestic80' }), choices)).toMatchObject({ tool: 'slides', partId: 'curved-slide-domestic80' })
+  expect(captureTool(state({ mode: 'reinforce', reinforcementPartId: 'reinforce55' }), choices)).toMatchObject({ tool: 'reinforce', partId: 'reinforce55' })
   for (const mode of ['select', 'delete', 'assembly']) expect(captureTool(state({ mode }), choices)).toBeNull()
   expect(captureTool(state({ mode: 'add', pasting: true }), choices)).toBeNull()
 })
