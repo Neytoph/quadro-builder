@@ -11,7 +11,6 @@ import { validHomeContext } from '../home/context.js';
 import { isSoftPart } from './softParts.js';
 import { nativePanelDiagnostics, nativePanelMounts } from './nativePanelDiagnostics.js';
 import { reinforcementPaths, aluminiumConnectorMounts, aluminiumConnectorSupport, isAluminiumConnector, validReinforcementRecords, explicitReinforcementGroups } from './reinforcement.js';
-import { nativePanelDiagnostics, nativePanelMounts } from './nativePanelDiagnostics.js';
 
 // Zellweite des Rasters, mit dem die Kollisionspruefung Nachbarn sucht. Etwas
 // groesser als das laengste Rohr (75 cm + Kupplung): ein Rohr liegt damit in
