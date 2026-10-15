@@ -8,7 +8,7 @@ const local=(frame,p)=>frame.axes.map(a=>dot(sub(p,frame.pos),a));
 export function hasInsetScrews(part) {return INSET_PANEL_IDS.has(part.panelId) && part.params?.mountLayout===INSET_MOUNT_LAYOUT;}
 
 // 连续框边探针保留每根短管的实际模型引用。
-export function insetPanelProbes(model,width,height,{segmentedOnly=false}={}) {
+export function insetPanelProbes(model,width,height,{segmentedOnly=false,deduplicate=true}={}) {
   const rails=[...model.tubes.values()].flatMap(t=>{const rail=model._rail(t.id);return rail?[{...rail,id:t.id}]:[];}),out=[],seen=new Set();
   for(const rail of rails){
     if(segmentedOnly && rail.len>=height-.35)continue;
@@ -33,7 +33,7 @@ export function insetPanelProbes(model,width,height,{segmentedOnly=false}={}) {
       for(const t0 of complete){
         const start=rail.p0.map((v,i)=>v+rail.dir[i]*t0),end=start.map((v,i)=>v+rail.dir[i]*height);
         const key=[start,end,start.map((v,i)=>v+across[i]),end.map((v,i)=>v+across[i])].map(p=>p.map(v=>v.toFixed(2)).join(',')).sort().join('|');
-        if(seen.has(key))continue;seen.add(key);out.push({a:rail.id,b:partner.id,t0,len:height});
+        if(deduplicate&&seen.has(key))continue;seen.add(key);out.push({a:rail.id,b:partner.id,t0,len:height});
       }
     }
   }

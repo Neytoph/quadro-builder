@@ -44,6 +44,8 @@ const envelopeCache=new WeakMap();
 const portDepthCache=new WeakMap();
 const pathResultCache=new WeakMap();
 export function beginAssemblyCollisionPass(model,queryCache=new Map()){envelopeCache.set(model,new Map());portDepthCache.set(model,new Map());pathResultCache.set(model,queryCache);}
+export function forkAssemblyCollisionPass(source,target,excludedId){beginAssemblyCollisionPass(target);const cache=new Map(envelopeCache.get(source));cache.delete(excludedId);envelopeCache.set(target,cache);}
+export function invalidateAssemblyEnvelope(model,id){envelopeCache.get(model)?.delete(id);}
 export function partEnvelope(model,id){useMeshes();const cache=envelopeCache.get(model);if(cache?.has(id))return cache.get(id);const shapes=computeEnvelope(model,id);cache?.set(id,shapes);return shapes;}
 function computeEnvelope(model,id) {
   const radius=geometry().tubeRadius||2.45, cs=geometry().connectorSize||5;

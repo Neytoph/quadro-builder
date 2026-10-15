@@ -233,6 +233,10 @@ function occupiedMount(model, candidate, ignoreId) {
   return null;
 }
 
+export function componentMountObstacle(model,candidate,ignoreId=candidate.id) {
+  return occupiedMount(model,candidate,ignoreId);
+}
+
 export function accessoryDiagnostics(model, kind, tubeId, opts = {}) {
   if (confirmedSpec(kind)) {
     const candidate = confirmedCandidates(model, kind).find(p => p.tube === tubeId || p.supportTubes.includes(tubeId));
