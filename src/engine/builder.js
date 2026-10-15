@@ -2,8 +2,10 @@
 
 import { DIRECTIONS, DIAGONAL_DIRECTIONS, DIR_ALIGN_TOL, ARM_ALIGN_TOL, CLAMP_LINK_DIST, C45_SLEEVE_LEN, C45_ARM_LEN, CONN_TYPE_MASK } from "./config.js";
 import { Vector3 } from "three";
+import { ALUMINIUM_CONNECTOR } from './reinforcement.js';
 import { buildableTubes, geometry, getTube, spacingFor, getPanel, defaultPanel, diagonalTubeId, slideKindLabel, slideKindName, isCurvedTube, gridSpacing, partName, partForFitting, getPartById, getConnector, poolLinerFor, reinforcementPart, textilePart } from "./catalog.js";
 import { CLASSIC_COLOR_IDS, officialColorId } from "./colors.js";
+import { colorPreviewModel, normalizeColor } from './customColors.js';
 import { connectorLabelInfo } from "./buildplan.js";
 import { computeAssemblyPlan, assemblyState } from "./assemblyPlan.js";
 import { infeasibleConnectors, inferConnectorType, resolveNodeConnection } from "./bom.js";
@@ -104,6 +106,7 @@ export class Builder {
     // Verstaerken-Modus: erstes angeklicktes 35er-Rohr, das noch seinen Partner
     // sucht (ein Profil deckt immer 80 cm).
     this.reinforceRail = null;
+    this.reinforcementPartId = 'reinforce80';
     this.color = RANDOM_COLOR;
     // Schrittweite beim Verschieben (Pfeiltasten, Ziehen, Einfuegen).
     this.moveStep = DEFAULT_MOVE_STEP;
@@ -163,6 +166,7 @@ export class Builder {
    * 读出来的内容）时从文档重新读出整座；拖动或粘贴进行中就等它收尾。
    */
   setHistory(history) {
+    this._colorPreview = null;
     if (this.history !== history) this._cancelHingeDrag();
     if (this.history !== history) this._rotationDirections = new Map();
     if (this.history && this.history !== history) {
@@ -192,6 +196,7 @@ export class Builder {
 
   /** 从文档读出来的整座造型换进模型，选择里已经不存在的零件去掉。 */
   applyExternal(json) {
+    this._colorPreview = null;
     const res = this.model.loadJSON(json);
     if (!res.ok) throw new Error(`Yjs document does not load: ${res.reason}`);
     if (this.selectedNodeId && !this.model.nodes.has(this.selectedNodeId)) {
@@ -204,6 +209,7 @@ export class Builder {
   }
 
   setReadOnly(on) {
+    if (on) this._colorPreview = null;
     if (on) this._cancelHingeDrag();
     this.readOnly = !!on;
     if (this.readOnly && this.mode !== "select" && this.mode !== "assembly") this.setMode("select");
@@ -220,6 +226,7 @@ export class Builder {
   // Fuehrt eine Modell-Aenderung aus und gibt sie an die Bearbeitungshistorie
   // weiter (nur wenn sich wirklich etwas geaendert hat).
   recordHistory(mutateFn) {
+    this._colorPreview = null;
     const before = JSON.stringify(this.model.toJSON());
     const ret = mutateFn();
     const after = JSON.stringify(this.model.toJSON());
@@ -276,6 +283,7 @@ export class Builder {
 
   // --- oeffentliche Steuerung --------------------------------------------
   setMode(mode) {
+    this._colorPreview = null;
     this._cancelHingeDrag();
     this._ropeFirst = null;
     this._installationPart = null; this.installationPreview = null;
@@ -504,8 +512,33 @@ export class Builder {
   // Farbe der Toolbar. Im Cursor-Modus faerbt sie ausserdem die aktuelle
   // Auswahl um -- im Platzier-Modus gilt sie nur fuer NEUE Teile.
   setColor(colorId) {
+    this._colorPreview = null;
     this.color = colorId;
     if (this.mode === "select" && this.selection.size) this.colorSelection(colorId);
+  }
+
+  beginColorPreview() {
+    if (this.readOnly || this.busy() || this.mode === 'assembly') return false;
+    this._runSelectFlip();
+    this._colorPreview = { hex: null, selection: this.mode === 'select' ? new Map(this.selection) : new Map() };
+    return true;
+  }
+
+  previewColor(value) {
+    const hex = normalizeColor(value);
+    if (!hex || !this._colorPreview || this.readOnly) return false;
+    this._colorPreview.hex = hex;
+    this.refresh();
+    return true;
+  }
+
+  finishColorPreview(value = null) {
+    if (!this._colorPreview) return false;
+    this._colorPreview = null;
+    const hex = normalizeColor(value);
+    if (hex && !this.readOnly) this.setColor(hex);
+    this.refresh();
+    return !!hex && !this.readOnly;
   }
 
   /**
@@ -547,20 +580,20 @@ export class Builder {
         if (t.arm || t.link) continue;
         if (fixedTubeColor(t.tubeId)) continue;
         const next = pick();
-        if (t.color !== next) { t.color = next; changed++; }
+        if (this.model.setColorOf('tube', t.id, next)) changed++;
       }
-      for (const map of [this.model.panels, this.model.textiles, this.model.slides]) {
+      for (const [kind, map] of [['panel', this.model.panels], ['textile', this.model.textiles], ['slide', this.model.slides]]) {
         for (const el of map.values()) {
           if (el.appearanceVersion === 2 && confirmedSpec(el.panelId || el.partId || el.kind)?.fixedColor) continue;
           const next = pick();
-          if (el.color !== next) { el.color = next; changed++; }
+          if (this.model.setColorOf(kind, el.id, next)) changed++;
         }
       }
       for (const f of this.model.fittings.values()) {
         if (f.appearanceVersion === 2 && confirmedSpec(f.partId || f.kind)?.fixedColor) continue;
         if (fixedFittingColor(f.kind)) continue;
         const next = pick();
-        if (f.color !== next) { f.color = next; changed++; }
+        if (this.model.setColorOf('fitting', f.id, next)) changed++;
       }
     });
     if (changed) this.onNotice(t("notice_color_changed"));
@@ -1485,6 +1518,7 @@ export class Builder {
    * Zaehler starten wieder bei 1) -- _pruneSelection findet das nicht.
    */
   modelReplaced() {
+    this._colorPreview = null;
     if (this._hingeDrag) {
       this._hingeDrag = null;
       this._down = null;
@@ -1882,7 +1916,7 @@ export class Builder {
     const labelIds = this.manualLabels ? null : (labelAn != null ? new Set([labelAn]) : null);
     const soloLabel = soloId != null
       ? { id: labelAn, text: profil != null
-        ? (reinforcementPart() ? partName(reinforcementPart()) : null)
+        ? partName(getPartById(this.model.tubes.get(profil)?.reinforcement?.partId || 'reinforce80'))
         : this._partLabel(soloId, this.selection.get(soloId)) } : null;
     // Vorschlaege, welche Rohre ein Verstaerkungsprofil gebrauchen koennten --
     // sichtbar genau dann, wenn man verstaerkt.
@@ -1899,12 +1933,15 @@ export class Builder {
     // 面板 / 布件两步点选的第一步：还没选第一根管时，能当第一根的管先亮出来，
     // 其余零件退后；选了第一根，照旧只亮它（琥珀）和能配的对面管（绿）。
     const firstRails = this._firstRailCandidates();
-    this.scene.renderModel(this.model, this.selectedNodeId,
+    const displayModel = this._colorPreview?.hex
+      ? colorPreviewModel(this.model, this._colorPreview.selection, this._colorPreview.hex) : this.model;
+    this.scene.renderModel(displayModel, this.selectedNodeId,
       { labelFor, slideNameFor, labelIds, soloId, soloLabel, assembly, suggest, reinforce,
-        selected, highlight: this.highlight || firstRails, invalid, tints: this.tints,
+        selected: this._colorPreview ? null : selected,
+        highlight: this._colorPreview ? null : this.highlight || firstRails, invalid, tints: this.tints,
         focusId: this.panelRail ? this.panelRail.id : null,
         keepPanelFacesOpaque: this.mode === 'panel',
-        preview: !!(this._paste || this._clampDrag || this._hingeDrag) });
+        preview: !!(this._paste || this._clampDrag || this._hingeDrag || this._colorPreview) });
     this._buildHandles();
     if (this._installationPart) this.scene.showInstallationPreview(this.model, this._installationPart, this.installationPreview.valid);
     this.scene.requestRender();
@@ -1913,7 +1950,7 @@ export class Builder {
     // mit, obwohl der Stand noch gar nicht gilt. Beim Absetzen wird ohnehin neu
     // gezeichnet -- dann laeuft es einmal. Nur die Knoepfe, die vom Zustand
     // abhaengen (Drehen), werden nachgezogen.
-    if (!this._paste && !this._clampDrag && !this._hingeDrag) this.onChange();
+    if (!this._paste && !this._clampDrag && !this._hingeDrag && !this._colorPreview) this.onChange();
     else this.onPreview();
   }
 
@@ -3418,19 +3455,28 @@ export class Builder {
     this.refresh();
   }
 
-  /**
-   * Klick auf ein Rohr schiebt ein Holz-Profil ein oder zieht es heraus. Zu
-   * kaufen gibt es nur die 80-cm-Laenge: sie fuellt entweder ein 75er-Rohr oder
-   * zwei 35er in einer Linie. Beim 35er wartet der zweite Klick auf das
-   * Partnerrohr -- die moeglichen sind so lange hervorgehoben (wie bei der
-   * Platte).
-   */
+  /** 选择规格后沿连续直管安装，已有铝管可再次点击取出。 */
   _clickReinforce(e) {
-    // Ist das erste Rohr gewaehlt, zaehlen zuerst die hervorgehobenen Partner --
-    // auch wenn ein anderes Teil davor liegt.
+    if (this.readOnly) return;
     const pick = (this.reinforceRail && this.highlight
       && this.scene.pickAmong(e.clientX, e.clientY, this.highlight))
       || this.scene.pickBuild(e.clientX, e.clientY);
+    if (this.reinforcementPartId === ALUMINIUM_CONNECTOR) {
+      const fitting = pick?.data.kind === 'fitting' && this.model.fittings.get(pick.data.id);
+      if (fitting?.kind === 'alu-connector2') {
+        this.recordHistory(() => this.model.removeFitting(fitting.id));
+        this.refresh(); return;
+      }
+      const mounts = this.model.aluminiumConnectorMounts().filter(mount =>
+        pick && (mount.nodeId === pick.data.id || mount.supportTubes.includes(pick.data.id)));
+      if (!mounts.length) { this.onNotice(t('notice_alu_connector_no_mount'), 'warn'); return; }
+      mounts.sort((a, b) => {
+        const distance = mount => { const node = this.model.nodes.get(mount.nodeId); return Math.hypot(node.x - pick.point.x, node.y - pick.point.y, node.z - pick.point.z); };
+        return distance(a) - distance(b);
+      });
+      this.recordHistory(() => this.model.addAluminiumConnector(mounts[0]));
+      this.onNotice(t('notice_reinforce_added')); this.refresh(); return;
+    }
     if (!pick || pick.data.kind !== "tube") { this._clearReinforceRail(); return; }
     const tube = this.model.tubes.get(pick.data.id);
     if (!tube) { this._clearReinforceRail(); return; }
@@ -3439,9 +3485,9 @@ export class Builder {
     if (this.reinforceRail) {
       const erste = this.reinforceRail;
       if (tube.id === erste) { this._clearReinforceRail(); return; }
-      const partner = this.model.reinforcePartners(erste).some((o) => o.id === tube.id);
-      if (!partner) { this.onNotice(t("notice_reinforce_no_fit"), "warn"); return; }
-      this.recordHistory(() => { this.model.addReinforcement([erste, tube.id]); });
+      const path = this.model.reinforcementPaths(erste, this.reinforcementPartId).find(path => path.tubeIds.includes(tube.id));
+      if (!path) { this.onNotice(t("notice_reinforce_no_fit"), "warn"); return; }
+      this.recordHistory(() => { this.model.addReinforcement(path.tubeIds, this.reinforcementPartId); });
       this._clearReinforceRail();
       this.onNotice(t("notice_reinforce_added"));
       this.refresh();
@@ -3455,20 +3501,18 @@ export class Builder {
       this.refresh();
       return;
     }
-    // Ein 75er nimmt das Profil allein auf.
-    if (this.model.takesReinforcementAlone(tube)) {
-      this.recordHistory(() => { this.model.addReinforcement([tube.id]); });
+    const paths = this.model.reinforcementPaths(tube.id, this.reinforcementPartId);
+    const alone = paths.find(path => path.tubeIds.length === 1);
+    if (alone) {
+      this.recordHistory(() => { this.model.addReinforcement(alone.tubeIds, this.reinforcementPartId); });
       this.onNotice(t("notice_reinforce_added"));
       this.refresh();
       return;
     }
-    // Ein 35er braucht ein zweites in derselben Linie.
-    if (this.model.takesReinforcementPaired(tube)) {
-      const partner = this.model.reinforcePartners(tube.id);
-      if (!partner.length) { this.onNotice(t("notice_reinforce_no_partner"), "warn"); return; }
+    if (paths.length) {
       this.reinforceRail = tube.id;
-      this.highlight = new Set(partner.map((o) => o.id));
-      this.onNotice(t("notice_reinforce_pick_second", partner.length), "info");
+      this.highlight = new Set(paths.flatMap(path => path.tubeIds).filter(id => id !== tube.id));
+      this.onNotice(t("notice_reinforce_pick_second", this.highlight.size), "info");
       this.refresh();
       return;
     }
@@ -3479,11 +3523,10 @@ export class Builder {
   _reinforceUsable(id) {
     const tube = this.model.tubes.get(id);
     if (!tube || tube.arm || tube.link || tube.bow) return false;
+    if (this.reinforcementPartId === ALUMINIUM_CONNECTOR) return this.model.aluminiumConnectorMounts().some(mount => mount.supportTubes.includes(id));
     if (this.reinforceRail) return this.highlight ? this.highlight.has(id) : false;
     if (tube.reinforced) return true;
-    if (this.model.takesReinforcementAlone(tube)) return true;
-    return this.model.takesReinforcementPaired(tube)
-      && this.model.reinforcePartners(id).length > 0;
+    return this.model.reinforcementPaths(id, this.reinforcementPartId).length > 0;
   }
 
   _clearReinforceRail() {

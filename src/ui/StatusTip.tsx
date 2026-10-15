@@ -45,6 +45,7 @@ export default function StatusTip({ menuOpen }: { menuOpen: boolean }) {
     : api.placingConnector ? 'tip.placeConnector'
     : api.assembly.active ? 'status.assembly'
     : adjusting ? 'tip.adjustSelected'
+    : api.mode === 'reinforce' && api.reinforcementPartId === 'alu_connector' ? 'status.aluConnector'
     : (BY_MODE[api.mode] || 'tip.select')
   const text = t(key, { h: api.pasteHeightCm ?? 0 })
 

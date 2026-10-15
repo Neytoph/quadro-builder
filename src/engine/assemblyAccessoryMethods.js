@@ -1,5 +1,6 @@
 import {xAxisOf as rawXAxisOf,yAxisOf as rawYAxisOf,zAxisOf as rawZAxisOf} from './util.js';
 import { structuralBearingSupport } from './assemblyStructuralBearings.js';
+import { aluminiumConnectorSupport } from './reinforcement.js';
 export const normalizedAssemblyQuaternion=q=>{const value=q||[0,0,0,1],length=Math.hypot(...value);return length?value.map(v=>v/length):[0,0,0,1];};
 const xAxisOf=q=>rawXAxisOf(normalizedAssemblyQuaternion(q)),yAxisOf=q=>rawYAxisOf(normalizedAssemblyQuaternion(q)),zAxisOf=q=>rawZAxisOf(normalizedAssemblyQuaternion(q));
 const xyz=p=>[p.x,p.y,p.z],sub=(a,b)=>a.map((v,i)=>v-b[i]),dot=(a,b)=>a.reduce((sum,v,i)=>sum+v*b[i],0),unit=d=>d.map(v=>v/(Math.hypot(...d)||1));
@@ -8,6 +9,11 @@ const sameRoofSlopes=(a,b)=>{const leaf=q=>[zAxisOf(q),yAxisOf(q).map(v=>-v)],[a
 export function nativeAccessorySupport(model,id){
   const fitting=model.fittings.get(id),slide=model.slides.get(id);
   if(fitting){
+    if (fitting.kind === 'alu-connector2') {
+      const mount = aluminiumConnectorSupport(model, fitting);
+      return { valid: !!mount, supportIds: mount?.supportTubes || [], basis: 'adjacent-collinear-aluminium-profiles',
+        ...(mount ? { mount: { position: mount.pos, direction: mount.dir } } : {}) };
+    }
     if(fitting.kind==='bearing-connector4')return structuralBearingSupport(model,fitting);
     const virtual=Object.assign(Object.create(Object.getPrototypeOf(model)),model,{fittings:new Map(model.fittings)});virtual.fittings.delete(id);
     const axis=xAxisOf(fitting.quat||[0,0,0,1]),point=xyz(fitting);

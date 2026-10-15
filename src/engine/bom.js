@@ -521,6 +521,8 @@ export function reinforcementRuns(model) {
       const d1 = dirOf(list[i]);
       if (!d1) continue;
       for (let j = i + 1; j < list.length; j++) {
+        const a = list[i].reinforcement, b = list[j].reinforcement;
+        if ((a || b) && (!a || !b || a.group !== b.group || a.partId !== b.partId)) continue;
         const d2 = dirOf(list[j]);
         if (!d2) continue;
         const dot = d1[0] * d2[0] + d1[1] * d2[1] + d1[2] * d2[2];
@@ -532,7 +534,8 @@ export function reinforcementRuns(model) {
   const runs = new Map(); // Wurzel -> { segments, length }
   for (const t of reinforced) {
     const r = find(t.id);
-    if (!runs.has(r)) runs.set(r, { segments: 0, length: 0, tubeIds: [] });
+    if (!runs.has(r)) runs.set(r, { segments: 0, length: 0, tubeIds: [],
+      ...(t.reinforcement ? { partId: t.reinforcement.partId, explicit: true } : {}) });
     const run = runs.get(r);
     run.segments++;
     run.tubeIds.push(t.id);
@@ -722,6 +725,7 @@ export function computeBOM(model) {
     // wird dafuer nichts -- es steht deshalb weder in der Stueckliste noch in
     // der Aufbau-Liste.
     if (f.kind === "open-connector2") continue;
+    if (f.kind === 'alu-connector2') continue;
     // 软包滚筒按管长分行：35 的和 75 的是两种东西
     if (f.kind === "sleeve") {
       const tb = model.tubes.get(f.tube);
@@ -789,33 +793,24 @@ export function computeBOM(model) {
   const slideCount = slides.reduce((s, r) => s + r.count, 0);
 
   // --- Verstaerkungen ---
-  // Zu kaufen gibt es nur EINE Laenge: das Holz-Profil mit 80 cm. Es deckt
-  // 80 cm Knotenabstand -- ein 75er-Rohr oder zwei 35er in einer Linie.
-  // Gezaehlt wird deshalb nicht nach Laufllaenge, sondern in Profilen: ein Lauf
-  // von 160 cm braucht zwei. (Aus Herstellerdateien kommen auch andere Laengen
-  // verstaerkt herein; die werden auf ganze Profile aufgerundet.)
+  // 铝管实际长 75 cm，每根对应 80 cm 节点间距；数量按节点间距计算。
   const runs = reinforcementRuns(model);
   const reinforcements = [];
   const part = reinforcementPart();
-  const profilLaenge = (part && part.length_cm) || 80;
-  const profileCount = runs.reduce(
-    (s, run) => s + Math.max(1, Math.round(run.length / profilLaenge)), 0);
-
-  if (profileCount > 0 && part) {
-    reinforcements.push({
-      key:      part.id,
-      id:       part.id,
-      len:      profilLaenge,
-      name:     partName(part),
-      count:    profileCount,
-      pieces:   profileCount,
-      price:    part.price,
-      subtotal: round2(part.price * profileCount),
-    });
+  const counts = new Map();
+  for (const run of runs) {
+    const def = run.partId ? getPartById(run.partId) : part;
+    if (!def) throw new Error(`Unknown reinforcement: ${run.partId}`);
+    const count = run.explicit ? 1 : Math.max(1, Math.round(run.length / (def.coverage_cm || 80)));
+    counts.set(def.id, (counts.get(def.id) || 0) + count);
   }
-
-  // Gesamtzahl der Profile (erscheint im Summen-Footer).
-  const reinfCount = profileCount;
+  for (const fitting of model.fittings?.values() || []) if (fitting.kind === 'alu-connector2') counts.set('alu_connector', (counts.get('alu_connector') || 0) + 1);
+  for (const [id, count] of counts) {
+    const def = getPartById(id);
+    reinforcements.push({ key: id, id, len: def.length_cm, name: partName(def), count,
+      pieces: count, price: def.price || 0, subtotal: round2((def.price || 0) * count) });
+  }
+  const reinfCount = reinforcements.reduce((sum, row) => sum + row.count, 0);
 
   const price = round2(
     tubes.reduce((s, r) => s + r.subtotal, 0) +
@@ -914,7 +909,7 @@ export function compareInventory(bom, inv) {
     rows.push({ group: "fittings", key: id, name: partName(def), need: count, owned, ok, soft });
   }
   for (const [id, count] of need.reinforcements) {
-    const def = reinforcementPart() || { name: id };
+    const def = getPartById(id) || { name: id };
     const owned = (inv.reinforcements && inv.reinforcements[id]) || 0;
     const ok = owned >= count;
     if (!ok) feasible = false;

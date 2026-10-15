@@ -29,7 +29,7 @@ const ctx = await browser.newContext({ viewport: { width: 1000, height: 800 }, l
 await ctx.addInitScript(() => { localStorage.setItem('quadro.builder.onboarded.v2', '1') })
 const page = await ctx.newPage()
 page.on('pageerror', e => console.log('pageerror', e.message))
-await page.goto(process.env.BASE || 'http://127.0.0.1:5199/', { waitUntil: 'networkidle' })
+await page.goto(process.env.BASE || 'http://127.0.0.1:5199/', { waitUntil: 'domcontentloaded' })
 await page.waitForFunction(() => window.__quadroDev, null, { timeout: 30000 })
 await page.waitForTimeout(1500)
 // Capture finished geometry, independent of the editor's appearance animation.
@@ -77,6 +77,7 @@ const items = await page.evaluate(async (files) => {
   }
   // 官方造型里一次都没出现过的：现场搭一个小场景
   const recipes = [
+    ['reinforcements', 'reinforce35'], ['reinforcements', 'reinforce55'], ['reinforcements', 'reinforce80'], ['reinforcements', 'alu_connector'],
     ['connectors', '6way'], ['tubes', 'T52'], ['panels', 'panel_30x30'],
     ['connectors', 'hole_1'], ['connectors', 'hole_2'], ['connectors', 'hole_t'], ['connectors', 'bearing'],
     ['connectors', 'flexi_bolt'], ['connectors', 'flexi_hinge'], ['connectors', 'flexi'],
@@ -93,7 +94,7 @@ const items = await page.evaluate(async (files) => {
     found.set(key, { key, group, rid, recipe: rid, name: rid })
   }
   return [...found.values()]
-}, qdfs)
+}, onlyIds.size && [...onlyIds].every(id => ['reinforce35', 'reinforce55', 'reinforce80', 'alu_connector'].includes(id)) ? [] : qdfs)
 const names = await page.evaluate(async () => (await import('/src/names.ts')).PART_ZH)
 for (const it of items) if (names[it.rid]) it.name = names[it.rid]
 const renderItems = onlyIds.size ? items.filter(it => onlyIds.has(it.rid)) : items
@@ -133,7 +134,17 @@ for (const it of renderItems) {
       const one = (x) => (x && x.id ? [x.id] : [])
       const r = it.recipe
       let ids = []
-      if (r === '6way') { const c = node(0, 0, 0); for (const d of [[40,0,0],[-40,0,0],[0,40,0],[0,-40,0],[0,0,40],[0,0,-40]]) tube(c, node(...d)); ids = [c.id] }
+      if (r.startsWith('reinforce') || r === 'alu_connector') {
+        const lengths = r === 'reinforce55' ? [25, 25] : r === 'reinforce80' ? [75] : r === 'alu_connector' ? [35, 35] : [35]
+        let previous = node(0, 0, 0), x = 0
+        const carriers = []
+        for (const length of lengths) { x += length + 5; const next = node(x, 0, 0); carriers.push(tube(previous, next, 'T' + length, length).id); previous = next }
+        if (r === 'alu_connector') {
+          for (const id of carriers) m.addReinforcement([id], 'reinforce35')
+          ids = one(m.addAluminiumConnector(m.aluminiumConnectorMounts()[0]))
+        } else { m.addReinforcement(carriers, r); ids = carriers }
+      }
+      else if (r === '6way') { const c = node(0, 0, 0); for (const d of [[40,0,0],[-40,0,0],[0,40,0],[0,-40,0],[0,0,40],[0,0,-40]]) tube(c, node(...d)); ids = [c.id] }
       else if (r === 'T52') ids = one(tube(node(0, 0, 0), node(57, 0, 0), 'T52', 52))
       else if (r === 'panel_30x30') {
         const a = node(0, 0, 0), b = node(30, 0, 0), c = node(0, 0, 30), d = node(30, 0, 30)
@@ -237,7 +248,7 @@ for (const it of renderItems) {
         o.instanceMatrix.needsUpdate = true
       } else if (o.isMesh || o.isLine || o.isPoints || o.isSprite) {
         const tag = tagOf(o)
-        if (tag && ids.has(tag.id) && it.group !== 'reinforcements') {
+        if (tag && ids.has(tag.id) && (it.group !== 'reinforcements' || it.rid === 'alu_connector')) {
           if (o.isMesh) box.expandByObject(o)
         } else if (o.visible) { o.visible = false; restore.push(() => { o.visible = true }) }
       }
@@ -315,6 +326,8 @@ for (const it of renderItems) {
       }
       radius = TUBE_FRAME
     }
+    // 三种铝管和连接器使用相同取景比例，保留相同截面粗细与真实长度关系。
+    if (g === 'reinforcements') radius = 40
     const fov = 28
     const cam = new THREE.PerspectiveCamera(fov, 1, 0.1, 100000)
     const dir = new THREE.Vector3().addScaledVector(ax, 1).addScaledVector(ny, 0.85).addScaledVector(bz, 1.35).normalize()

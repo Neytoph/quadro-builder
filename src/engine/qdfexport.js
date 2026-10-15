@@ -307,7 +307,7 @@ function panelMat(color, variant) {
  */
 export function reinforcementProfiles(model) {
   const nodeOf = (id) => model.nodes.get(id);
-  const list = [...model.tubes.values()].filter((t) => t.reinforced && !t.arm && !t.link
+  const list = [...model.tubes.values()].filter((t) => t.reinforced && !t.reinforcement && !t.arm && !t.link
     && nodeOf(t.a) && nodeOf(t.b));
   const abstand = (a, b) => Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
   const richtung = (a, b) => { const l = abstand(a, b) || 1;
@@ -340,6 +340,23 @@ export function reinforcementProfiles(model) {
     const a = nodeOf(t.a), b = nodeOf(t.b);
     out.push({ from: [a.x, a.y, a.z], dir: richtung(a, b),
       len: Math.min(80, abstand(a, b)), tubes: [t.id] });
+  }
+  const explicit = new Map();
+  for (const tube of model.tubes.values()) if (tube.reinforced && tube.reinforcement) {
+    const key = tube.reinforcement.group;
+    if (!explicit.has(key)) explicit.set(key, []);
+    explicit.get(key).push(tube);
+  }
+  for (const tubes of explicit.values()) {
+    const points = tubes.flatMap(tube => [nodeOf(tube.a), nodeOf(tube.b)]);
+    if (points.some(point => !point)) continue;
+    let dir = richtung(points[0], points[1]);
+    const dominant = dir.findIndex(value => Math.abs(value) === Math.max(...dir.map(Math.abs)));
+    if (dir[dominant] < 0) dir = dir.map(value => -value);
+    points.sort((a, b) => (a.x - b.x) * dir[0] + (a.y - b.y) * dir[1] + (a.z - b.z) * dir[2]);
+    const first = points[0], last = points.at(-1);
+    out.push({ from: [first.x, first.y, first.z], dir, len: abstand(first, last),
+      tubes: tubes.map(tube => tube.id), partId: tubes[0].reinforcement.partId });
   }
   return out;
 }
@@ -788,7 +805,9 @@ export function buildQDF(model, opts = {}) {
       const ex = rotateByQuat([f.quat[3], f.quat[0], f.quat[1], f.quat[2]], [1, 0, 0]);
       fx -= ex[0] * 20; fy -= ex[1] * 20; fz -= ex[2] * 20;
     }
-    if (f.kind === "lattice2" && f.w != null && f.h != null) {
+    if (f.kind === 'alu-connector2') {
+      lines.push(`alu-connector2{${ALU_MAT}, ${tuple(q, fx, fy, fz)}, 1, ${mm(f.w || 40)}, 0., 0}`);
+    } else if (f.kind === "lattice2" && f.w != null && f.h != null) {
       lines.push(`lattice2{${mat}, ${tuple(q, fx, fy, fz)}, 1, ${mm(f.w)}, 0., ${mm(f.h)}, 0., 0}`);
     } else if (f.kind === "hole-connector4") {
       const mask = f.mask || 0;

@@ -10,6 +10,7 @@ import { validAssemblyConfig } from './assemblyConfig.js';
 import { validHomeContext } from '../home/context.js';
 import { isSoftPart } from './softParts.js';
 import { nativePanelDiagnostics, nativePanelMounts } from './nativePanelDiagnostics.js';
+import { reinforcementPaths, aluminiumConnectorMounts, aluminiumConnectorSupport, isAluminiumConnector, validReinforcementRecords, explicitReinforcementGroups } from './reinforcement.js';
 
 // Zellweite des Rasters, mit dem die Kollisionspruefung Nachbarn sucht. Etwas
 // groesser als das laengste Rohr (75 cm + Kupplung): ein Rohr liegt damit in
@@ -735,6 +736,7 @@ export class BuildModel {
       if (t.a !== id && t.b !== id) continue;
       tubeNeighbors.add(t.a === id ? t.b : t.a);
       if (t.arm) armNeighbors.add(t.a === id ? t.b : t.a);
+      if (t.reinforcement) this.removeReinforcement(t.id);
       this._releaseArms(t);
       this.tubes.delete(t.id);
     }
@@ -925,11 +927,33 @@ export class BuildModel {
   }
 
   /** Profil einschieben. `ids` ist ein 75er oder zwei 35er in einer Linie. */
-  addReinforcement(ids) {
+  /** @param {string[]} ids @param {string | null} partId */
+  addReinforcement(ids, partId = null) {
     const list = ids.map((id) => this.tubes.get(id)).filter(Boolean);
-    if (!list.length) return false;
-    for (const t of list) t.reinforced = true;
+    if (!list.length || list.length !== ids.length) return false;
+    if (partId && !reinforcementPaths(this, ids[0], partId).some(path =>
+      path.tubeIds.length === ids.length && path.tubeIds.every(id => ids.includes(id)))) return false;
+    for (const t of list) {
+      t.reinforced = true;
+      if (partId) t.reinforcement = { partId, group: ids[0] };
+    }
     return true;
+  }
+
+  reinforcementPaths(id, partId) { return reinforcementPaths(this, id, partId); }
+
+  aluminiumConnectorMounts() { return aluminiumConnectorMounts(this); }
+
+  addAluminiumConnector(mount) {
+    const valid = this.aluminiumConnectorMounts().find(candidate => candidate.nodeId === mount?.nodeId);
+    if (!valid) return null;
+    const f = this.addFitting('alu-connector2', ...valid.pos, { quat: valid.quat, w: 40 });
+    f.tube = valid.supportTubes[0];
+    f.supportTubes = valid.supportTubes;
+    f.mounts = valid.supportTubes.map(tube => ({ tube }));
+    f.params = {};
+    f.appearanceVersion = 1;
+    return f;
   }
 
   /**
@@ -939,11 +963,18 @@ export class BuildModel {
   removeReinforcement(id) {
     const t = this.tubes.get(id);
     if (!t || !t.reinforced) return [];
+    if (t.reinforcement) {
+      const group = t.reinforcement.group;
+      const tubes = [...this.tubes.values()].filter(other => other.reinforcement?.group === group);
+      for (const tube of tubes) { tube.reinforced = false; delete tube.reinforcement; }
+      for (const fitting of this.fittings.values()) if (isAluminiumConnector(fitting) && !aluminiumConnectorSupport(this, fitting)) this.fittings.delete(fitting.id);
+      return tubes.map(tube => tube.id);
+    }
     const raus = [t];
     if (this.takesReinforcementPaired(t)) {
       const d1 = this._tubeDir(t);
       for (const o of this.tubes.values()) {
-        if (o.id === t.id || !o.reinforced) continue;
+        if (o.id === t.id || !o.reinforced || o.reinforcement) continue;
         if (!this.takesReinforcementPaired(o)) continue;
         if (o.a !== t.a && o.a !== t.b && o.b !== t.a && o.b !== t.b) continue;
         const d2 = this._tubeDir(o);
@@ -974,6 +1005,7 @@ export class BuildModel {
 
   removeTube(id) {
     const t = this.tubes.get(id);
+    if (t?.reinforcement) this.removeReinforcement(id);
     if (t) this._releaseArms(t);
     this.tubes.delete(id);
     this._prunePanels();
@@ -4342,7 +4374,7 @@ export class BuildModel {
         const f = this.fittings.get(id);
         if (f) {
           fittings.add(id);
-          if (ACCESSORY_IDS.has(f.kind) || (f.kind==='multi-wheel2' && f.appearanceVersion===2)) {
+          if (ACCESSORY_IDS.has(f.kind) || isAluminiumConnector(f) || (f.kind==='multi-wheel2' && f.appearanceVersion===2)) {
             for (const id of Array.isArray(f.supportTubes) ? f.supportTubes : [f.tube]) {
               const tube = this.tubes.get(id);
               if (tube) addNodes([tube.a, tube.b]);
@@ -4353,7 +4385,7 @@ export class BuildModel {
     }
     for (const f of this.fittings.values()) {
       const tube = this.tubes.get(f.tube);
-      if ((ACCESSORY_IDS.has(f.kind) || (f.kind==='multi-wheel2' && f.appearanceVersion===2)) && tube && (Array.isArray(f.supportTubes) ? f.supportTubes : [f.tube]).every(id => { const t = this.tubes.get(id); return t && nodes.has(t.a) && nodes.has(t.b); })) fittings.add(f.id);
+      if ((ACCESSORY_IDS.has(f.kind) || isAluminiumConnector(f) || (f.kind==='multi-wheel2' && f.appearanceVersion===2)) && tube && (Array.isArray(f.supportTubes) ? f.supportTubes : [f.tube]).every(id => { const t = this.tubes.get(id); return t && nodes.has(t.a) && nodes.has(t.b); })) fittings.add(f.id);
     }
     return { nodes, clamps, slides, fittings };
   }
@@ -4811,6 +4843,10 @@ export class BuildModel {
       if (drin) tubeIds.add(t.id);
       return drin;
     }).map(ohneGeom);
+    for (const tube of tubes) if (tube.reinforcement) {
+      const complete = [...this.tubes.values()].filter(other => other.reinforcement?.group === tube.reinforcement.group).every(other => tubeIds.has(other.id));
+      if (!complete) { delete tube.reinforcement; delete tube.reinforced; }
+    }
     const aufRohren = (list) => (list || [])
       .filter((p) => (Array.isArray(p.supportTubes) ? p.supportTubes : [p.a, p.b]).every(id => tubeIds.has(id))).map(ohneGeom);
 
@@ -4903,10 +4939,15 @@ export class BuildModel {
       neu.set(t.id, id);
       out.tubes.push(id);
       const rec = { ...t, id, a, b };
+      if (t.reinforcement) rec.reinforcement = { ...t.reinforcement };
       // 弯管圆心和读进来的管自带的位置，跟节点一样挪到粘贴的地方
       if (t.bowCenter) rec.bowCenter = punktVersetzt(t.bowCenter);
       if (t.geom && t.geom.p0) rec.geom = { ...t.geom, p0: punktVersetzt(t.geom.p0) };
       this.tubes.set(id, rec);
+    }
+    for (const id of out.tubes) {
+      const tube = this.tubes.get(id);
+      if (tube.reinforcement) tube.reinforcement.group = neu.get(tube.reinforcement.group) || id;
     }
     // Klemm-Kupplungen zeigen auf ihr Rohr -- der Verweis muss mitwandern.
     for (const id of out.nodes) {
@@ -4946,7 +4987,7 @@ export class BuildModel {
     for (const f of frag.fittings || []) {
       const rec = versetzt(f, "f", "fittings");
       // 软包滚筒记着管子的 id，片段里的管换了新 id；管没一起带过来就丢掉
-      if (rec.kind === "sleeve" || ACCESSORY_IDS.has(rec.kind) || (rec.kind==='multi-wheel2' && rec.tube)) {
+      if (rec.kind === "sleeve" || ACCESSORY_IDS.has(rec.kind) || isAluminiumConnector(rec) || (rec.kind==='multi-wheel2' && rec.tube)) {
         rec.tube = rec.tube ? neu.get(rec.tube) || null : null;
         if (!rec.tube) continue;
       }
@@ -5777,6 +5818,10 @@ export class BuildModel {
   }
 
   _incompleteComponentMove(tg) {
+    for (const group of explicitReinforcementGroups(this)) {
+      const nodes = [...new Set(group.tubeIds.flatMap(id => { const tube = this.tubes.get(id); return [tube.a, tube.b]; }))];
+      if (nodes.some(id => tg.nodes.has(id)) && nodes.some(id => !tg.nodes.has(id))) return group.key;
+    }
     for (const part of [...this.panels.values(), ...this.fittings.values()]) {
       if (!part.appearanceVersion || !part.supportTubes) continue;
       const supportTubes = Array.isArray(part.supportTubes) ? part.supportTubes : [part.tube, part.a, part.b].filter(Boolean);
@@ -6517,6 +6562,7 @@ export class BuildModel {
       tubes: [...this.tubes.values()].map((t) => {
         const o = { id: t.id, a: t.a, b: t.b, tubeId: t.tubeId, color: t.color, length: t.length };
         if (t.reinforced) o.reinforced = true;
+        if (t.reinforcement) o.reinforcement = { ...t.reinforcement };
         if (t.arm) o.arm = true; // C45-Adapter-Arm (kein Rohr)
         if (t.link) o.link = true; // Doppelrohrverbinder-Verbindung (kein Rohr)
         if (t.bow) { o.bow = true; o.bowCenter = t.bowCenter; } // Bogenrohr (Viertelkreis)
@@ -6596,6 +6642,7 @@ export class BuildModel {
     }
     if (data.assemblyConfig != null && !validAssemblyConfig(data.assemblyConfig)) return { ok: false, reason: 'data' };
     if (data.homeContext != null && !validHomeContext(data.homeContext)) return { ok: false, reason: 'data' };
+    if (!validReinforcementRecords(data.nodes, data.tubes || [])) return { ok: false, reason: 'data' };
     // 兼容旧 QDF 导入器保存的 id；无效卡扣引用在替换当前模型之前明确拒绝。
     const nodeIds = new Set(data.nodes.map(n => n.id));
     const tubeIds = new Set((data.tubes || []).filter(t => t.a && t.b &&
@@ -6630,6 +6677,7 @@ export class BuildModel {
       this.tubes.set(t.id, {
         id: t.id, a: t.a, b: t.b, tubeId: t.tubeId, color: t.color, length: t.length,
         reinforced: !!t.reinforced, arm: !!t.arm, link: !!t.link,
+        ...(t.reinforcement ? { reinforcement: { ...t.reinforcement } } : {}),
         bow: !!t.bow, bowCenter: t.bowCenter || null, geom: t.geom || null,
       });
       maxSeq = Math.max(maxSeq, parseSeq(t.id));

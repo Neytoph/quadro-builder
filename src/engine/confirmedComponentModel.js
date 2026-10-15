@@ -222,12 +222,17 @@ export function confirmedCandidates(model,id,options={}) {
   if(spec.placement==='panel') {
     const fake={...spec,placement:'fitting'};
     const candidates=railCandidates(model,fake,{...options,deduplicate:false}).map(p=>confirmedPanelDiagnostics(model,{a:p.a,b:p.b,t0:p.t0,len:p.len,panelId:spec.id,side:1},options));
-    if(INSET_PANEL_IDS.has(spec.id) && !options.legacyInset){
+    const inset=INSET_PANEL_IDS.has(spec.id);
+    if(!inset || !options.legacyInset){
       const seen=new Set(candidates.map(p=>model.panelCorners(p)?.map(c=>c.map(v=>v.toFixed(2)).join(',')).sort().join('|')));
       const horizontal=options.screwAxis==='horizontal';
-      for(const probe of insetPanelProbes(model,horizontal?spec.height:spec.width,horizontal?spec.width:spec.height)){
+      // 普通板也识别多根短管拼成的连续框边；实际四边及固定点仍由诊断核对。
+      let sizes=[[spec.width,spec.height]];
+      if(inset && horizontal)sizes=[[spec.height,spec.width]];
+      else if(!inset && spec.width!==spec.height)sizes.push([spec.height,spec.width]);
+      for(const [width,height] of sizes)for(const probe of insetPanelProbes(model,width,height,{segmentedOnly:!inset})){
         const key=model.panelCorners(probe)?.map(c=>c.map(v=>v.toFixed(2)).join(',')).sort().join('|');if(seen.has(key))continue;
-        const candidate=confirmedPanelDiagnostics(model,{...probe,panelId:spec.id,side:1,params:{mountLayout:INSET_MOUNT_LAYOUT,screwAxis:options.screwAxis||'vertical'}},options);
+        const candidate=confirmedPanelDiagnostics(model,{...probe,panelId:spec.id,side:1,...(inset?{params:{mountLayout:INSET_MOUNT_LAYOUT,screwAxis:options.screwAxis||'vertical'}}:{})},options);
         if(candidate.valid){candidates.push(candidate);seen.add(key);}
       }
     }

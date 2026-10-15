@@ -390,7 +390,7 @@ export function collectPositions(model, filter = null) {
     if (!(all || tubes)) continue;
     const mid = tubeMid(model, t);
     pushPos(map, `${t.tubeId}|${t.color}`, mid);
-    if (t.reinforced && reinf) pushPos(map, `reinforcements:${reinf.id}`, mid);
+    if (t.reinforced && reinf) pushPos(map, `reinforcements:${t.reinforcement?.partId || reinf.id}`, mid);
   }
 
   for (const p of model.panels.values()) {
@@ -421,6 +421,10 @@ export function collectPositions(model, filter = null) {
     if (!allowId(fittings, f.id) && !all) continue;
     if (!(all || fittings)) continue;
     const world = [f.x, f.y, f.z];
+    if (f.kind === 'alu-connector2') {
+      pushPos(map, 'reinforcements:alu_connector', world);
+      continue;
+    }
     if (POOL_KINDS.has(f.kind)) {
       const def = poolLinerFor(Math.abs(f.w || 0), Math.abs(f.d || 0));
       if (def) pushPos(map, `fittings:${def.id}`, world);
