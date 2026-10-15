@@ -5,12 +5,26 @@ import { confirmedSpec } from './componentPack.js';
 
 const geometryPasses = new WeakMap();
 
+// 面板位置不能借用远处共线管的延长线，否则铰链旋转时会留在固定框上。
+function physicalReferences(model,probe) {
+  const corners=model.panelCorners(probe);
+  if(!corners)return false;
+  return [[probe.a,corners[0],corners[1]],[probe.b,corners[3],corners[2]]].every(([id,a,b])=>{
+    const rail=model._rail(id);
+    if(!rail)return false;
+    const along=p=>p.reduce((sum,n,i)=>sum+(n-rail.p0[i])*rail.dir[i],0);
+    const lo=Math.min(along(a),along(b)),hi=Math.max(along(a),along(b));
+    return Math.min(hi,rail.len)-Math.max(lo,0)>.02;
+  });
+}
+
 export function nativePanelMounts(model, panelId) {
   if (!['panel_40x40','panel_40x20'].includes(panelId)) throw new Error('原生面板挂位只支持普通方板和半板');
   const spec=confirmedSpec(panelId);
   // 复用连续边管的几何探针；普通板的完整四边和固定点仍由诊断检查。
   const dimensions=spec.width===spec.height?[[spec.width,spec.height]]:[[spec.width,spec.height],[spec.height,spec.width]],seen=new Set();
   return dimensions.flatMap(([width,height])=>insetPanelProbes(model,width,height,{deduplicate:false})).filter(probe=>{
+    if(!physicalReferences(model,probe))return false;
     const key=model.panelCorners(probe).map(p=>p.map(n=>n.toFixed(2)).join(',')).join('|');
     if(seen.has(key))return false;seen.add(key);return true;
   }).map(probe=>({...probe,panelId,side:1}));
@@ -22,6 +36,7 @@ export function nativePanelDiagnostics(model, probe) {
   if (!assemblyMeshes()) throw new Error('原生面板检查需要先加载装配网格');
   const candidate = model.confirmedDiagnostics(probe);
   if (!candidate.valid && candidate.reason !== 'component_space') return candidate;
+  if(!physicalReferences(model,candidate))return {...candidate,valid:false,reason:'missing_support'};
   if (model.panelAt(candidate.a, candidate.b, candidate.t0, candidate.len, probe.id)) return candidate;
   const frame = JSON.stringify(['nodes','tubes','clamps'].map(group => [...model[group].values()]));
   let pass = geometryPasses.get(model);

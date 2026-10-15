@@ -29,6 +29,37 @@ function frame(fragmented=false) {
 }
 
 describe('普通板真实网格安装复核',()=>{
+  it('坡面板引用实际坡架，拒绝平台边管延长线并随铰链整体转动',()=>{
+    const model=new BuildModel(),nodes=new Map<string,ReturnType<BuildModel['addNode']>>()
+    const at=(x:number,z:number)=>{
+      const key=[x,z].join(',')
+      if(!nodes.has(key))nodes.set(key,model.addNode(x+2.5,22.5,z+2.5))
+      return nodes.get(key)!
+    }
+    const pipe=(x:number,z:number,X:number,Z:number)=>model.addTube(at(x,z).id,at(X,Z).id,'T35','blue',35)!
+    const base=[pipe(0,0,40,0),pipe(0,40,40,40),pipe(0,0,0,40),pipe(40,0,40,40)]
+    pipe(45,0,85,0);pipe(45,40,85,40);pipe(45,0,45,40);pipe(85,0,85,40)
+    const clamp=Object.assign(model.addClamp(42.5,22.5,22.5,'double_tube'),{dir:[0,0,1],off:[5,0,0]})
+    model.addLink(at(40,0).id,at(45,0).id);model.addLink(at(40,40).id,at(45,40).id)
+    const virtual={a:base[0].id,b:base[1].id,t0:45,len:40,panelId:'panel_40x40',side:1}
+    expect(model.nativePanelDiagnostics(virtual)).toMatchObject({valid:false,reason:'missing_support'})
+    const candidates=model.nativePanelMounts('panel_40x40').filter((p:{a:string})=>model.panelCorners(p)!.every((c:number[])=>c[0]>=47.49&&c[0]<=87.51&&Math.abs(c[1]-22.5)<.01))
+    expect(candidates.length).toBeGreaterThan(0)
+    const panel=model.addNativePanel(candidates.find((p:object)=>model.nativePanelDiagnostics(p).valid)!,'yellow',{nativeGeometry:true})!
+    expect(panel).toBeTruthy()
+    const before=model.panelCorners(panel)!,baseBefore=base.map(t=>structuredClone(model.nodes.get(t.a)))
+    const angle=-Math.PI/8
+    expect(model.rotateClamp(clamp.id,angle)).toBe(true)
+    const actual=model.panelCorners(panel)!
+    for(const point of before){
+      const x=point[0]-42.5,y=point[1]-22.5
+      const expected=[42.5+x*Math.cos(angle)-y*Math.sin(angle),22.5+x*Math.sin(angle)+y*Math.cos(angle),point[2]]
+      expect(actual.some((p:number[])=>Math.hypot(...p.map((n,i)=>n-expected[i]))<.02)).toBe(true)
+    }
+    expect(base.map(t=>model.nodes.get(t.a))).toEqual(baseBefore)
+    const loaded=new BuildModel();expect(loaded.loadJSON(model.toJSON()).ok).toBe(true)
+    expect(loaded.panelCorners(loaded.panels.get(panel.id))).toEqual(actual)
+  })
   it('允许覆盖承载边管上的双管连接件与管夹，板内无承载关系的连接件仍拒绝',()=>{
     for(const connectorId of ['double_tube','tube_clamp']){
       const {model,probe}=frame()
