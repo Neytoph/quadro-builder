@@ -2926,7 +2926,11 @@ export function EngineProvider({ children }: { children: ReactNode }) {
 
   function changeBackground(mode: 'grass' | 'blank' | 'home') {
     const current=eng.current,tab=tabsRef.current.find(item=>item.tabId===activeRef.current)
-    if (!current || !current.scene.setBackground(mode)) return
+    if (!current) return
+    let before='blank'
+    if (current.scene._sceneOn) before='grass'
+    else if (current.scene._homeGroup&&!current.scene._homeHidden) before='home'
+    if (before===mode || !current.scene.setBackground(mode)) return
     if (tab && !tab.readOnly && !current.builder.readOnly && !slotLocked(tab.docId,tab.libraryId,tab.planId)) {
       current.builder.recordHistory(()=>{current.model.previewBackground=mode})
     }
