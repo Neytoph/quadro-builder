@@ -117,7 +117,7 @@ export function readEntry(search: string, hash: string, collab: boolean): Entry 
 export function bootEntry(): Entry {
   if (entry) return entry
   entry = readEntry(location.search, location.hash, collab)
-  if (!entry.view) {
+  if (!entry.view && !(window.parent !== window && new URLSearchParams(location.search).get('embedded') === 'model')) {
     const q = new URLSearchParams(location.search)
     for (const k of ['src', 'origin', 'name', 'copy', 'export', 'lang', 'import', 'background']) q.delete(k)
     const rest = q.toString()
@@ -128,6 +128,11 @@ export function bootEntry(): Entry {
 
 /** 只看模式：嵌在方案页里的 3D 画面和分步手册。 */
 export const VIEW_ONLY = bootEntry().view
+
+export const EDITOR_EMBED = window.parent !== window && new URLSearchParams(location.search).get('embedded') === 'model'
+if(EDITOR_EMBED)document.documentElement.dataset.editorEmbed='true'
+const editorEntry = bootEntry()
+export const EDITOR_SESSION = EDITOR_EMBED ? `model-editor:${editorEntry.plan ? `plan:${editorEntry.plan}` : editorEntry.src}` : undefined
 
 /**
  * 只放一座、不读也不写这台设备上的标签页的打开方式：只看、交付查看、画房间。

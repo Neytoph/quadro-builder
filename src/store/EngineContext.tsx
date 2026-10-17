@@ -11,7 +11,7 @@ import { onSyncEvent, syncSavedDoc, syncNow, syncProbe, syncStarted } from '../s
 import { pushDocToServer, type PushDocOptions } from '../sync/docPublish'
 import { tabOpenedFrom, tabSavedAs } from '../sync/origin'
 import { pullDoc } from '../sync/docEntry'
-import { bootEntry, SESSIONLESS, VIEW_ONLY, type ResumeExport } from '../entry'
+import { bootEntry, SESSIONLESS, VIEW_ONLY, EDITOR_EMBED, EDITOR_SESSION, type ResumeExport } from '../entry'
 import { slotLocked, updateSlotAccess } from '../sync/slotAccess'
 import { chooseSharing, SharingCancelled } from '../shareOptions'
 import { publishSharePage, sharePagesEnabled, stampFor, type ExportKind, type Stamp } from '../sharePage'
@@ -155,6 +155,9 @@ export interface Inventory {
 }
 
 interface EngineApi {
+  editorState: () => { dirty: boolean; name: string; readOnly: boolean }
+  checkpointEditor: () => Promise<void>
+  discardEditor: () => Promise<void>
   ready: boolean
   entryReady: boolean
   completeEntry: () => void
@@ -517,8 +520,8 @@ function makeTab(seed: ModelJSON, name: string, docId: string | null): Tab {
 
 function persistPersonal(tab: Tab) {
   if (tab.planId || tab.readOnly || SESSIONLESS) return
-  const { docId, name, dirty, baseRev, savedContent, editGeneration, saveId, saveState, conflictDocId,libraryId,libraryRevision,libraryOwner } = tab
-  writePersonalState(tab.local, { bindingVersion: 1,libraryBindingVersion:1,libraryId,libraryRevision,libraryOwner, docId, name, dirty, baseRev, savedContent, editGeneration, saveId, saveState, conflictDocId })
+  const { docId, name, dirty, baseRev, savedContent, savedName, editGeneration, saveId, saveState, conflictDocId,libraryId,libraryRevision,libraryOwner } = tab
+  writePersonalState(tab.local, { bindingVersion: 1,libraryBindingVersion:1,libraryId,libraryRevision,libraryOwner, docId, name, dirty, baseRev, savedContent, savedName, editGeneration, saveId, saveState, conflictDocId })
 }
 
 /**
@@ -805,10 +808,10 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       tabs: tabsRef.current.map(tb => ({
         tabId: tb.tabId, docId: tb.docId, name: tb.name, dirty: tb.dirty, planId: tb.planId, view: tb.view,
         baseRev: tb.baseRev, savedContent: tb.savedContent, editGeneration: tb.editGeneration, saveId: tb.saveId,
-        saveState: tb.saveState, conflictDocId: tb.conflictDocId,libraryId:tb.libraryId,libraryRevision:tb.libraryRevision,libraryOwner:tb.libraryOwner,
+        saveState: tb.saveState, savedName: tb.savedName, conflictDocId: tb.conflictDocId,libraryId:tb.libraryId,libraryRevision:tb.libraryRevision,libraryOwner:tb.libraryOwner,
       })),
       activeTabId: activeRef.current,
-    }) as Promise<void>
+    }, EDITOR_SESSION) as Promise<void>
   }, [flushModel])
 
   const persistSession = useCallback(() => {
@@ -1120,7 +1123,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
         // 只看、交付、画房间：只放这一座，不读这台设备上记着的标签页。
         // 交付由 CollabProvider 取到以后 attachDoc 换进来。
         if (!SESSIONLESS) await docs.migrateOldDrafts()
-        const session = SESSIONLESS ? null : await docs.loadSession()
+        const session = SESSIONLESS ? null : await docs.loadSession(EDITOR_SESSION)
         if (dead) return
         if (session?.tabs?.length) {
           const mapped: Tab[] = []
@@ -1140,6 +1143,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
               local,
               baseRev: typeof tb.baseRev === 'number' ? tb.baseRev : undefined,
               savedContent: typeof tb.savedContent === 'string' ? tb.savedContent : undefined,
+              savedName: typeof tb.savedName === 'string' ? tb.savedName : undefined,
               editGeneration: Number(tb.editGeneration || 0),
               saveId: tb.saveId,
               saveState: tb.saveState,
@@ -1703,15 +1707,18 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     if (!e2 || !tab || tab.readOnly) return null
     if(tab.libraryId){
       if(e2.builder.busy())return null
+      if(!navigator.onLine){notify(t('sync.failed'),'err');return null}
       const data=structuredClone(exportTab(tab)),generation=tab.editGeneration||0
       const binding={id:tab.libraryId,owner:tab.libraryOwner,revision:tab.libraryRevision}
       let stats
       try{stats=await libraryStatsQueue.compute(binding.id,data)}catch(error){console.warn('[library stats]',error);notify(t('sync.localFailed'),'err');return null}
-      const res=await fetch('/quadro/library/'+encodeURIComponent(binding.id)+'/native',{method:'PUT',credentials:'include',headers:{'Content-Type':'application/json','X-Builder-User-ID':binding.owner||''},body:JSON.stringify({name:name||tab.name,data,parts:partsOfData(data),stats,revision:binding.revision})})
+      let res:Response
+      try{res=await fetch('/quadro/library/'+encodeURIComponent(binding.id)+'/native',{method:'PUT',credentials:'include',headers:{'Content-Type':'application/json','X-Builder-User-ID':binding.owner||''},body:JSON.stringify({name:name||tab.name,data,parts:partsOfData(data),stats,revision:binding.revision})})}
+      catch(error){console.warn('[library save]',error);notify(t('sync.failed'),'err');return null}
       if(!res.ok){if(res.status===423){tab.readOnly=true;e2.builder.setReadOnly(true)};notify(t('toast.srcFailed')+' ('+res.status+')','err');syncTabs();return null}
       if(tab.libraryId!==binding.id||tab.libraryOwner!==binding.owner)return null
       const result=await res.json() as {revision:number};tab.libraryRevision=result.revision
-      if((tab.editGeneration||0)===generation){tab.dirty=false;tab.savedContent=modelContent(data);tab.saveState='synced'}
+      if((tab.editGeneration||0)===generation){tab.dirty=false;tab.name=name||tab.name;tab.savedName=tab.name;tab.savedContent=modelContent(data);tab.saveState='synced'}
       syncTabs();return {docId:tab.libraryId,name:name||tab.name,data}
     }
     if (tab.planId) {
@@ -2705,16 +2712,22 @@ export function EngineProvider({ children }: { children: ReactNode }) {
         data = await decodeShare(payload)
         clearSharePayload()
       } else {
-        const res = await fetch(versionPublicSource(ent.src as string), { credentials: 'include' })
-        if (!res.ok) { track('builder.app.fail', { reason: 'source_http' }); notify(t('toast.srcFailed'), 'err'); return }
+        const expectedOwner=EDITOR_EMBED?new URLSearchParams(location.search).get('editorOwner'):null
+        const res = await fetch(versionPublicSource(ent.src as string), { credentials: 'include',...(expectedOwner?{headers:{'X-Builder-User-ID':expectedOwner}}:{}) })
+        if (!res.ok) { track('builder.app.fail', { reason: 'source_http' }); notify(t('toast.srcFailed'), 'err');if(EDITOR_EMBED){if(res.status===423)parent.postMessage({type:'xmf-model-editor:readonly'},location.origin);else setError(t('toast.srcFailed')+' ('+res.status+')')} return }
         libraryRevision=Number(res.headers.get('X-Library-Revision')||0)||undefined
         libraryOwner=res.headers.get('X-Builder-User-ID')||undefined
         try { data = designFromText(await res.text()) } catch { data = null }
       }
-      if (!data) { track('builder.app.fail', { reason: 'source_format' }); notify(t('toast.shareInvalid'), 'err'); return }
+      if (!data) { track('builder.app.fail', { reason: 'source_format' }); notify(t('toast.shareInvalid'), 'err');if(EDITOR_EMBED)setError(t('toast.shareInvalid')); return }
       const e2 = eng.current
       if (!e2) return
-      if (modelPartCount(e2.model.toJSON()) > 0) createEmptyTab()
+      const restored = tabsRef.current.find(x => x.tabId === activeRef.current)
+      const requestedLibrary=ent.src?.match(/^\/quadro\/library\/([a-f0-9]+)\/native$/)?.[1]
+      if(EDITOR_EMBED && requestedLibrary && restored?.libraryId===requestedLibrary && restored.libraryOwner===libraryOwner && restored.dirty){
+        setEntryReady(true);return
+      }
+      if (!EDITOR_EMBED && modelPartCount(e2.model.toJSON()) > 0) createEmptyTab()
       // 当前是共享方案的标签页时 applyModelJson 自己会新开一个
       if (!applyModelJson(data, { undoable: false })) { track('builder.app.fail', { reason: 'source_format' }); notify(t('toast.shareInvalid'), 'err'); return }
       if (ent.background === 'grass' || (ent.background === 'home' && e2.model.homeContext)) {
@@ -2723,7 +2736,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       }
       const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
       const library=ent.src?.match(/^\/quadro\/library\/([a-f0-9]+)\/native$/)
-      if(tab&&library&&libraryRevision){tab.libraryId=library[1];tab.libraryRevision=libraryRevision;tab.libraryOwner=libraryOwner;tab.dirty=false;tab.savedContent=modelContent(tab.local.history.toJSON());tab.saveState='synced'}
+      if(tab&&library&&libraryRevision){tab.libraryId=library[1];tab.libraryRevision=libraryRevision;tab.libraryOwner=libraryOwner;tab.dirty=false;tab.savedName=ent.name||tab.name;tab.savedContent=modelContent(tab.local.history.toJSON());tab.saveState='synced'}
       if (tab && ent.name) {
         tab.name = ent.name
         syncTabs()
@@ -2886,6 +2899,21 @@ export function EngineProvider({ children }: { children: ReactNode }) {
 
   const value: EngineApi = {
     ready, entryReady, completeEntry, error, hostRef, tick,
+    editorState: () => {
+      flushModel()
+      const tab=tabsRef.current.find(x=>x.tabId===activeRef.current)
+      const dirty=!!tab && !tab.planId && !!tab.dirty && (tab.savedContent!==modelContent(exportTab(tab)) || tab.name!==(tab.savedName??bootEntry().name))
+      if(tab&&!tab.planId&&!dirty&&tab.dirty){tab.dirty=false;syncTabs()}
+      return {dirty,name:tab?.name||'',readOnly:!!tab?.readOnly}
+    },
+    checkpointEditor: async () => { await saveSessionNow() },
+    discardEditor: async () => {
+      if(!EDITOR_EMBED)return
+      if(sessionTimer.current)window.clearTimeout(sessionTimer.current)
+      const discarded=tabsRef.current;tabsRef.current=[];activeRef.current=null;eng.current?.builder.setReadOnly(true)
+      for(const tab of discarded)await dropTabDoc(tab.tabId,tab.local)
+      await docs.saveSession({tabs:[],activeTabId:null},EDITOR_SESSION)
+    },
     mode: (builder?.mode as string) || 'select',
     color: (builder?.color as string) || 'random',
     modelColors: modelColors(model),

@@ -11,6 +11,7 @@ import { useOverflowCompact } from './useOverflowCompact'
 import { displaySaveState } from '../store/personalTabs'
 import './builderChrome.css'
 import MobileProjectBar from './MobileProjectBar'
+import {EDITOR_EMBED} from '../entry'
 
 const GROUPS: (typeof DOCK_PILLS)[] = [
   DOCK_PILLS.filter(p => p.id === 'file' || p.id === 'saves'),
@@ -57,6 +58,13 @@ export default function ProjectTabs() {
     if (dirty && !window.confirm(t('confirm.closeTab'))) return
     api.closeTab(tabId)
   }
+
+  if(EDITOR_EMBED)return <div className="qb-project-bar qb-embedded-bar fixed top-0 left-0 right-0 z-40" style={{height:projectBarHeight(vw)}}>
+    <strong>{planMode?t('collab.autoSynced'):t('sync.'+displaySaveState(api.tabs.find(tab=>tab.tabId===api.activeTabId)||{},api.tabs.find(tab=>tab.tabId===api.activeTabId)?.dirty||false))}</strong>
+    <nav aria-label={t('chrome.navigation')}>
+      {[...DOCK_PILLS.filter(p=>['file','bom','inventory','safety'].includes(p.id)),...(planMode?PLAN_PILLS:[])].map(item=><button key={item.id} type="button" data-pane={item.id} onClick={()=>toggle(item.id)} aria-expanded={pane===item.id} aria-label={t(item.labelKey)} className="qb-nav-button"><DockIcon pane={item.id}/><span>{t(item.labelKey)}</span></button>)}
+    </nav>
+  </div>
 
   return (
     <div

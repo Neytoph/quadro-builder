@@ -6,6 +6,7 @@ import TopToolbar from './ui/TopToolbar'
 import LeftStack from './ui/LeftStack'
 import RightDock from './ui/RightDock'
 import ProjectTabs from './ui/ProjectTabs'
+import EmbeddedEditorBridge from './ui/EmbeddedEditorBridge'
 import AssemblyBar from './ui/AssemblyBar'
 import AssemblyNavigation from './ui/AssemblyNavigation'
 import AssemblyPreview from './ui/AssemblyPreview'
@@ -19,7 +20,7 @@ import { PanelLayoutProvider } from './ui/panelLayout'
 import { UI_ESCAPE_EVENT } from './ui/events'
 import { DockProvider, useDock } from './ui/dock'
 import { usePresence } from './ui/motion'
-import { bootEntry, DELIVERY_EMBED, dropParam, fullBuilderUrl, VIEW_ONLY } from './entry'
+import { bootEntry, DELIVERY_EMBED, dropParam, fullBuilderUrl, VIEW_ONLY, EDITOR_EMBED } from './entry'
 import { SnapshotInfo } from './collab/ui/SnapshotInfo'
 import { syncProbe } from './sync/bootstrap'
 import { CollabProvider, useCollab } from './collab/CollabContext'
@@ -366,7 +367,7 @@ function AppInner() {
       if (meta && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); api.redo(); return }
       if (meta && (e.key === 'c' || e.key === 'C')) { e.preventDefault(); api.copy(); return }
       if (meta && (e.key === 'v' || e.key === 'V')) { e.preventDefault(); api.paste(); return }
-      if (meta && (e.key === 's' || e.key === 'S')) { e.preventDefault(); void (e.shiftKey ? api.saveCurrentAs() : api.saveCurrent()); return }
+      if (meta && (e.key === 's' || e.key === 'S')) { e.preventDefault(); void (e.shiftKey&&!EDITOR_EMBED ? api.saveCurrentAs() : api.saveCurrent()); return }
       if (meta && (e.key === 'a' || e.key === 'A')) { e.preventDefault(); api.selectAll(); return }
       if (meta && (e.key === 'g' || e.key === 'G')) { e.preventDefault(); e.shiftKey ? api.ungroup() : api.group(); return }
       if (meta) return
@@ -496,7 +497,7 @@ function AppInner() {
       <AccountDialog />
       <NameDialog />
       <ManualProgress />
-      <Onboarding autoOpen={collab.mode === 'off' && !bootEntry().plan && !bootEntry().invite && !bootEntry().createShared} />
+      <Onboarding autoOpen={!EDITOR_EMBED && collab.mode === 'off' && !bootEntry().plan && !bootEntry().invite && !bootEntry().createShared} />
       {collab.mode === 'plan' && <CollabCoach />}
       <ThumbCapture />
       <ImportOnEntry />
@@ -520,6 +521,7 @@ function EngineShell() {
   return (
     <EngineProvider>
       <CollabProvider>
+        <EmbeddedEditorBridge />
         <PanelLayoutProvider>
           <DockProvider>
             <Shell />

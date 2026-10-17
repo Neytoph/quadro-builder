@@ -1,8 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import {EDITOR_EMBED} from '../entry'
 
 const KEY_V1 = 'quadro.ui.widths.v1'
 const KEY_V2 = 'quadro.ui.layout.v2'
-const KEY = 'quadro.ui.layout.v3'
+const KEY = EDITOR_EMBED ? 'quadro.ui.model-editor.layout.v1' : 'quadro.ui.layout.v3'
 export const PANEL_GAP = 12
 export const TAB_BAR_H = 44
 export const NARROW_MAX = 767
@@ -110,6 +111,7 @@ function load(vh: number): { left: PanelBox; right: PanelBox; leftColor: boolean
     }
   }
   try {
+    if(EDITOR_EMBED&&!localStorage.getItem(KEY))return {...empty(),leftColor:window.innerWidth>NARROW_MAX,leftKeys:false}
     const raw = JSON.parse(localStorage.getItem(KEY) || localStorage.getItem(KEY_V2) || '') as StoredLayout
     if (raw && (raw.left || raw.right)) {
       return {

@@ -9,6 +9,7 @@ import { syncConfigured } from '../sync/bootstrap'
 import { displaySaveState } from '../store/personalTabs'
 import { legacyBackupWithTabs } from '../collab/legacyBackup'
 import { Modal } from '../collab/ui/Modals'
+import {EDITOR_EMBED} from '../entry'
 import { colorStrings } from './colorStrings'
 import { COLOR_HEX } from '../engine/colors.js'
 import { Box, BookOpen, ChevronDown, FileJson, FolderInput, Image, Link, Plus, Save, Sparkles, Upload } from 'lucide-react'
@@ -45,7 +46,7 @@ export default function FilePanel() {
           {active.saveState === 'failed' && <button className="qb-file-row" onClick={() => void api.retrySave(active.tabId)}>{t('sync.retry')}</button>}
         </div>}
         {!plan && <button disabled={contentReadOnly} onClick={() => void api.saveCurrent()} className={`${btn} qb-file-primary`}><Save aria-hidden="true" /><span>{t('chrome.save')}</span><kbd>{t('chrome.saveShortcut')}</kbd></button>}
-        <div className="qb-file-two">
+        {!EDITOR_EMBED && <><div className="qb-file-two">
           <button onClick={() => { api.newTab(); api.notify(t('toast.newTab')) }} className={btn}><Plus aria-hidden="true" /><span>{t('btn.new')}</span></button>
           <button onClick={() => fileRef.current?.click()} className={btn}><Upload aria-hidden="true" /><span>{t('btn.import')}</span></button>
         </div>
@@ -58,7 +59,7 @@ export default function FilePanel() {
             .catch(error => api.notify(String(error), 'err')).finally(() => setBackingUp(false))
         }}><FileJson aria-hidden="true" /><span>{t('saves.legacyBackup')}</span></button>}
         <input ref={fileRef} type="file" accept=".qdf,.json,application/json" hidden
-          onChange={e => { const f = e.target.files?.[0]; if (f) void api.importFile(f); e.target.value = '' }} />
+          onChange={e => { const f = e.target.files?.[0]; if (f) void api.importFile(f); e.target.value = '' }} /></>}
       </section>
       <section aria-labelledby="qb-file-exports" className="qb-file-separated">
         <h2 id="qb-file-exports" className="qb-file-section">{t('chrome.export')}</h2>

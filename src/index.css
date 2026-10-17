@@ -54,6 +54,7 @@
   height: 100vh;
   height: 100dvh;
 }
+html[data-editor-embed] .qh-chat-root{display:none!important}
 
 html, body, #root {
   margin: 0;

@@ -8,7 +8,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useEngine } from '../store/EngineContext'
-import { bootEntry, dropParam } from '../entry'
+import { bootEntry, dropParam, EDITOR_EMBED } from '../entry'
 import { computeMetrics, BuildModel, storage } from '../engine-api'
 import { useI18n } from '../i18n'
 import { ApiError, collabApi, collabEnabled, type Anchor, type InviteInfo, type InviteRole, type Metrics, type Plan, type Post, type Ref, type Role, type Room, type Thread, type VersionInfo } from './api'
@@ -224,7 +224,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
       if (joining && (!entry.plan || planId === entry.plan)) continue
       loading.current.add(planId)
       collabApi.plan(planId).then((plan) => {
-        if(plan.viewOnly){setTabAccess(tabId,{readOnly:true,idTag:''});if(activePlanId===planId)location.replace('/model-preview.html?plan='+encodeURIComponent(planId));return}
+        if(plan.viewOnly){setTabAccess(tabId,{readOnly:true,idTag:''});if(EDITOR_EMBED)parent.postMessage({type:'xmf-model-editor:readonly',plan:planId,name:plan.name,coverUrl:plan.coverUrl},location.origin);else if(activePlanId===planId)location.replace('/model-preview.html?plan='+encodeURIComponent(planId));return}
         const local = tabLocal(tabId)
         if (!local) return
         const s = new PlanSession(plan, local)
@@ -279,7 +279,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
 
   // 地址栏跟着当前标签页：共享方案显示它的地址，刷新以后还是这个方案
   useEffect(() => {
-    if (!enabled || !api.ready || joining || joinAsk || mode === 'delivery' || mode === 'room' || mode === 'snapshot') return
+    if (EDITOR_EMBED || !enabled || !api.ready || joining || joinAsk || mode === 'delivery' || mode === 'room' || mode === 'snapshot') return
     const q = new URLSearchParams(location.search)
     if (activePlanId) {
       if (q.get('plan') === activePlanId) return
@@ -341,7 +341,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
         }
         if (!entry.plan) return
         const plan = await collabApi.plan(entry.plan)
-        if(plan.viewOnly){location.replace('/model-preview.html?plan='+encodeURIComponent(plan.id));return}
+        if(plan.viewOnly){if(EDITOR_EMBED)parent.postMessage({type:'xmf-model-editor:readonly',plan:plan.id,name:plan.name,coverUrl:plan.coverUrl},location.origin);else location.replace('/model-preview.html?plan='+encodeURIComponent(plan.id));return}
         api.openPlanTab(plan.id, plan.name)
       } catch (err) {
         setJoining(false)

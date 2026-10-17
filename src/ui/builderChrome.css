@@ -9,6 +9,11 @@
 .qb-project-name { display: flex; align-items: center; gap: 6px; min-height: 44px; min-width: 0; padding: 0 8px; text-align: left; font-size: 13px; font-weight: 500; cursor: pointer; }
 .qb-project-name > span:first-of-type { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .qb-tab-close, .qb-project-new { display: flex; align-items: center; justify-content: center; min-width: 32px; min-height: 44px; border-radius: 9px; cursor: pointer; flex-shrink: 0; color: #6b7380; }
+.qb-embedded-bar{display:flex;align-items:center;gap:16px;padding:8px 16px;box-sizing:border-box}
+.qb-embedded-bar>strong{min-width:0;max-width:30%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
+.qb-embedded-bar>nav{display:flex;align-items:center;gap:4px;min-width:0;overflow:auto;margin-left:auto}
+.qb-embedded-bar .qb-nav-button{flex:none;min-height:44px}
+@media(max-width:767px){.qb-embedded-bar{gap:0;padding:4px 8px}.qb-embedded-bar>strong{display:none}.qb-embedded-bar>nav{width:100%;margin:0}.qb-embedded-bar .qb-nav-button{font-size:11px;padding:4px 8px}}
 .qb-project-new { min-width: 44px; }
 .qb-project-bar :is(.qb-project-name,.qb-tab-close,.qb-project-new) > svg { color: #000; }
 .qb-project-bar :is(.qb-tab-close,.qb-project-new):hover { color: #9a3412; background: #fff1e6; }
