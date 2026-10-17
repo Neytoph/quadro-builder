@@ -25,6 +25,8 @@ function isLang(v: string | null): v is Lang {
 type Dict = Record<string, string>
 
 const zh: Dict = {
+  'capacity.cloudFull': '保存容量已满。仍可临时创作、保留本机草稿和导出；云端新增保存前请先整理我的造型。',
+  'capacity.collaborationFull': '没有空闲协作容量。仍可免费接受邀请，参与他人的协作造型。',
   'sync.unsaved': '未保存',
   'sync.viewLatest': '查看最新设计',
   'sync.retry': '重试同步',
@@ -796,6 +798,8 @@ const zh: Dict = {
 }
 
 const en: Dict = {
+  'capacity.cloudFull': 'Storage is full. You can still create, keep local drafts and export. Make room in My models before saving a new cloud model.',
+  'capacity.collaborationFull': 'No collaboration capacity is available. You can still join someone else’s model for free with an invitation.',
   'sync.unsaved': 'Unsaved',
   'sync.viewLatest': 'View latest design',
   'sync.retry': 'Retry sync',
@@ -1567,6 +1571,8 @@ const en: Dict = {
 }
 
 const de: Dict = {
+  'capacity.cloudFull': 'Der Speicher ist voll. Du kannst weiterhin entwerfen, lokale Entwürfe behalten und exportieren. Für ein neues Cloud-Modell zuerst unter Meine Modelle Platz schaffen.',
+  'capacity.collaborationFull': 'Keine freie Kapazität für eigene gemeinsame Modelle. Per Einladung kannst du kostenlos an Modellen anderer teilnehmen.',
   'sync.unsaved': 'Nicht gespeichert',
   'sync.viewLatest': 'Aktuellen Entwurf ansehen',
   'sync.retry': 'Synchronisierung wiederholen',

@@ -12,7 +12,7 @@ import { pushDocToServer, type PushDocOptions } from '../sync/docPublish'
 import { tabOpenedFrom, tabSavedAs } from '../sync/origin'
 import { pullDoc } from '../sync/docEntry'
 import { bootEntry, SESSIONLESS, VIEW_ONLY, EDITOR_EMBED, EDITOR_SESSION, type ResumeExport } from '../entry'
-import { slotLocked, updateSlotAccess } from '../sync/slotAccess'
+import { clearSlotAccess, slotLocked, slotAccess, saveCapacityFull, updateSlotAccess } from '../sync/slotAccess'
 import { chooseSharing, SharingCancelled } from '../shareOptions'
 import { publishSharePage, sharePagesEnabled, stampFor, type ExportKind, type Stamp } from '../sharePage'
 import { statsOfModel } from '../designStats'
@@ -707,6 +707,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
 
   const [ready, setReady] = useState(false)
   const libraryStatsQueue=useMemo(()=>createStatsQueue(),[])
+  const capacityNotice = useRef(false)
   useEffect(()=>()=>libraryStatsQueue.cancel(),[libraryStatsQueue])
   const [entryReady, setEntryReady] = useState(false)
   const completeEntry = useCallback(() => setEntryReady(true), [])
@@ -723,12 +724,15 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       if(pending||closed)return;pending=true
       try{
         const scope=String(storage.getAccountScope()),owner=scope.startsWith('user:')?scope.slice(5):null
-        if(!owner){updateSlotAccess([]);return}
+        if(!owner){clearSlotAccess();return}
         const response=await fetch('/quadro/library',{credentials:'include',cache:'no-store',headers:{'X-Builder-User-ID':owner}})
         if(!response.ok)throw new Error('Slot permissions '+response.status)
         const result=await response.json()
         if(closed||String(storage.getAccountScope())!==scope)return
         updateSlotAccess(result.slots)
+        const draft=tabsRef.current.find(tab=>tab.tabId===activeRef.current)
+        if(saveCapacityFull()&&draft&&!draft.docId&&!draft.libraryId&&!draft.planId&&!capacityNotice.current){capacityNotice.current=true;notifyRef.current(t('capacity.cloudFull'),'warn')}
+        else if(!saveCapacityFull())capacityNotice.current=false
         for(const tab of tabsRef.current){
           if(tab.planId)continue
           const locked=slotLocked(tab.docId,tab.libraryId)
@@ -1045,7 +1049,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
           if (tab.saveState === 'syncing' || tab.saveState === 'local') tab.saveState = 'failed'
         }
         syncTabsRef.current()
-        notifyRef.current(t('sync.failed'), 'warn')
+        notifyRef.current(t(event.type === 'quota' && ['save','designs'].includes(event.feature) ? 'capacity.cloudFull' : 'sync.failed'), 'warn')
       }
       if (event.type === 'pulled' || event.type === 'idle' || event.type === 'conflict') reconcile()
     })
@@ -1701,6 +1705,22 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  const allowCloudSave = useCallback(async (docId?: string | null) => {
+    const scope=String(storage.getAccountScope())
+    if(!import.meta.env.VITE_SYNC_BASE||!scope.startsWith('user:')||!navigator.onLine)return true
+    try{
+      const response=await fetch('/quadro/library',{credentials:'include',cache:'no-store',headers:{'X-Builder-User-ID':scope.slice(5)}})
+      if(!response.ok)throw new Error('Capacity check '+response.status)
+      const result=await response.json()
+      if(String(storage.getAccountScope())!==scope)return false
+      updateSlotAccess(result.slots)
+      if((docId&&slotAccess(docId))||!saveCapacityFull())return true
+      await saveSessionNow()
+      notify(t('capacity.cloudFull'),'warn')
+      return false
+    }catch(error){console.warn('[capacity check]',error);notify(t('sync.failed'),'warn');return false}
+  },[notify,saveSessionNow,t])
+
   const saveCurrent = useCallback(async (name?: string) => {
     const e2 = eng.current
     const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
@@ -1737,6 +1757,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       notify(t('sync.waiting'), 'warn')
       return null
     }
+    if(!await allowCloudSave(tab.docId))return null
+    if(!tabsRef.current.includes(tab))return null
     let saveName = name || tab.name
     if (!name && !tab.docId && isUntitledName(tab.name)) {
       const typed = await askName(t('saves.saveTitle'), t('saves.saveOk'), '')
@@ -1782,7 +1804,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     return { docId: String(saved.id), name: String(saved.name), data }
     // coverSaved、pushSaved 每次渲染重建，只在回调里调用，不进依赖表
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [askName, exportTab, notify, syncTabs, t])
+  }, [allowCloudSave, askName, exportTab, notify, syncTabs, t])
 
   /**
    * 使用独立场景给已保存快照生成封面；JSON 无需等待，晚到封面按 saveId 核对内容。
@@ -1861,6 +1883,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     if (!e2 || !tab) return
     if(tab.readOnly||slotLocked(tab.docId,tab.libraryId,tab.planId)){notify(t('toast.srcFailed')+' (423)','err');return}
     if (e2.builder.busy()) { notify(t('sync.waiting'), 'warn'); return }
+    if(!await allowCloudSave())return
+    if(!tabsRef.current.includes(tab))return
     const suggested = isUntitledName(tab.name) ? '' : await freeDocName(tab.name)
     const typed = await askName(t('saves.saveAsTitle'), t('saves.saveOk'), suggested)
     if (typed == null) return
@@ -1900,7 +1924,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     })
     // coverSaved、pushSaved 每次渲染重建，只在回调里调用，不进依赖表
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [askName, freeDocName, notify, syncTabs, t])
+  }, [allowCloudSave, askName, freeDocName, notify, syncTabs, t])
 
   const duplicateDoc = useCallback(async (docId: string) => {
     if(slotLocked(docId)){notify(t('toast.srcFailed')+' (423)','err');return}
