@@ -3232,7 +3232,7 @@ export class SceneManager {
     return [Math.max(1, w / 2 - frame), Math.max(1, d / 2 - frame)];
   }
 
-  /** Scheibe der Acrylglasplatte: flache Box im Fenster, duenner als der Rahmen. */
+  /** 透明窗片与板框使用相同板身厚度。 */
   _acrylicPaneGeometry(wSpan, dSpan, thickness) {
     const w = Math.max(1, wSpan - PANEL_GAP);
     const d = Math.max(1, dSpan - PANEL_GAP);
@@ -3240,7 +3240,7 @@ export class SceneManager {
     const hit = this._panelGeos.get(key);
     if (hit) return hit;
     const [ix, iy] = this._acrylicInner(w, d);
-    const geo = new THREE.BoxGeometry(ix * 2 + 0.6, thickness * 0.5, iy * 2 + 0.6);
+    const geo = new THREE.BoxGeometry(ix * 2 + 0.6, thickness, iy * 2 + 0.6);
     this._panelGeos.set(key, geo);
     this._keepGeos.add(geo);
     return geo;
@@ -4537,7 +4537,7 @@ export class SceneManager {
     }
 
     // Platten (flache Box in der Feld-Ebene) – im Verstaerken-/Kollisions-Modus ausgeblendet.
-    const thickness = geometry().panelThickness || 1.6;
+    const thickness = geometry().panelThickness;
     const middle = modelMiddle(model.nodes.values());
     for (const p of model.panels.values()) {
       if (hideFlat) continue;

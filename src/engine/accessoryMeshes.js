@@ -4,6 +4,7 @@ import { ParametricGeometry } from 'three/examples/jsm/geometries/ParametricGeom
 import { accessorySpec, componentFrame, mountPoint } from './accessoryPack.js';
 import { confirmedComponentMeshes } from './confirmedComponentMeshes.js';
 import { insetScrewMeshes } from './insetPanelMeshes.js';
+import { geometry } from './catalog.js';
 
 const PALETTE = { blue: '#238fe4', yellow: '#ffd33c', cream: '#eee5d0', orange: '#f88929', green: '#48af63', red: '#eb4641', dark: '#363a3f', metal: '#b8bec2', rope: '#cdbc96', cloth: '#d8c8a9' };
 
@@ -76,8 +77,9 @@ function busyMeshes(scene, model, panel) {
   const frame = componentFrame(model, panel);
   if (!frame) return [];
   const f = meshFactory(scene, frame), { box, disc, add } = f;
-  box('busy-green-outline', [35.4, 35.4, 1.8], 'green', [0, 0, 0], 2.3);
-  box('busy-cream-board', [33.4, 33.4, 1.6], 'cream', [0, 0, 0.45], 1.8);
+  const thickness=geometry().panelThickness,center=1.25-thickness/2;
+  box('busy-green-outline', [35.4, 35.4, thickness], 'green', [0, 0, center], 2.3);
+  box('busy-cream-board', [33.4, 33.4, thickness], 'cream', [0, 0, center+0.01], 1.8);
   add('busy-blue-gear', () => gearGeometry(6.5, 12), 'plastic', 'blue', [-7.5, 7, 1.3]);
   add('busy-yellow-gear', () => gearGeometry(4.5, 10), 'plastic', 'yellow', [3.3, 7, 1.3]);
   disc('busy-gear-center-big', 1.1, 0.7, 'metal', [-7.5, 7, 3.2], 'metal');
