@@ -17,6 +17,8 @@ import { TUBE_FITTINGS, POOL_KINDS, isHolePart, holeArmDirs, holeClampDirsAt, HO
 import { CONNECTOR_ARM_BITS } from "./qdfimport.js";
 import { ACCESSORY_IDS, PANEL_ACCESSORY_IDS, componentFrame } from './accessoryPack.js';
 import { confirmedSpec } from './componentPack.js';
+import { supportsPanelFixing, panelRailScrewAxis } from './confirmedComponentModel.js';
+import { insetPanelProbes } from './insetPanelMounts.js';
 import { installationReason, installationFacingNotice } from './installationReason.js';
 import { panelInstallationFacing } from './panelInstallationFacing.js';
 import { pickStepAnchor, stepCandidates, stepCandidatesFromSelection, stepNeighbor } from "./stepAnchor.js";
@@ -100,7 +102,7 @@ export class Builder {
     // Platten-Modus: erstes angeklicktes Tragrohr + Stelle entlang davon.
     this.panelRail = null;
     this.installationPreview = null;
-    this.insetScrewAxis='vertical';
+    this.insetScrewAxis='auto';
     this._installationPart = null;
     this._installationFacingConflict = null;
     // Verstaerken-Modus: erstes angeklicktes 35er-Rohr, das noch seinen Partner
@@ -465,7 +467,7 @@ export class Builder {
   }
   setPanel(panelId) { this._ropeFirst = null; this._installationPart = null; this.installationPreview = null; this.scene.clearInstallationPreview?.(); this.panelId = panelId; if (this.mode === "panel") this.refresh(); }
   setInsetScrewAxis(axis) {
-    if(!['vertical','horizontal'].includes(axis) || this.readOnly)return false;
+    if(!['auto','vertical','horizontal'].includes(axis) || this.readOnly)return false;
     this.insetScrewAxis=axis;this._installationPart=null;this.installationPreview=null;
     this.scene.clearInstallationPreview?.();this._clearPanelRail();this.refresh();return true;
   }
@@ -1405,6 +1407,9 @@ export class Builder {
   /**
    * 还能和 railId 配成一块的对面管：只留中间还有空段的。`at` 给了（第一根管上点的
    * 位置），就只看板会落的那一段；没给，任意一段空着就算。已经有板 / 布的地方不再亮。
+   * @param {string} railId
+   * @param {number|null} at
+   * @param {boolean} lattice
    */
   _freePartners(railId, at = null, lattice = this.mode === "fitting" && RAIL_FITTINGS.has(this.fittingKind)) {
     const kind = lattice ? this.fittingKind : null;
@@ -1413,6 +1418,14 @@ export class Builder {
     else {
       const dims = this._panelDims();
       partners = dims ? this.model.panelPartners(railId, dims) : [];
+      const rail=this.model._rail(railId);
+      if(dims && rail && supportsPanelFixing(this.panelId) && Math.max(...dims)>rail.len+.35){
+        const sizes=dims[0]===dims[1]?[dims]:[dims,[dims[1],dims[0]]];
+        for(const [width,height] of sizes)for(const probe of insetPanelProbes(this.model,width,height,{deduplicate:false,segmentedOnly:true,onlyRailId:railId})){
+          if(probe.a!==railId || at!=null && (at<probe.t0-.35 || at>probe.t0+probe.len+.35))continue;
+          if(!partners.some(p=>p.id===probe.b && Math.abs(p.lo-probe.t0)<.01 && p.len===probe.len))partners.push({id:probe.b,gap:width,len:probe.len,lo:probe.t0,hi:probe.t0+probe.len});
+        }
+      }
     }
     return partners.filter((p) => {
       if (at != null) {
@@ -1967,7 +1980,7 @@ export class Builder {
     if (this.highlight && !this.panelRail && !this.reinforceRail) return;
     // Im Platten-Modus klickt man zwei Rohre an -- keine Flaechen-Handles.
     if (this.mode === "panel") {
-      if (PANEL_ACCESSORY_IDS.has(this.panelId)) for (const mount of this.model.panelAccessoryMounts(this.panelId,{screwAxis:this.insetScrewAxis||'vertical'})) this.scene.addHandle(mount.pos, { panelAccessoryMount: mount }, 'place');
+      if (!this.panelRail && PANEL_ACCESSORY_IDS.has(this.panelId)) for (const mount of this.model.panelAccessoryMounts(this.panelId,{screwAxis:this.insetScrewAxis||'auto',oppositeRetainers:true})) this.scene.addHandle(mount.pos, { panelAccessoryMount: mount }, 'place');
       return;
     }
     if (this.mode === "slide") { this._buildSlideHandles(); return; }
@@ -4737,7 +4750,7 @@ export class Builder {
    * Klicks. Ein Klick auf eine liegende Platte legt sie auf die andere Seite.
    */
   _clickPanel(e) {
-    if (PANEL_ACCESSORY_IDS.has(this.panelId)) {
+    if (!this.panelRail && PANEL_ACCESSORY_IDS.has(this.panelId)) {
       const handle = this.scene.pickHandle(e.clientX, e.clientY);
       if (handle?.data?.panelAccessoryMount) { this._previewInstallation(handle.data.panelAccessoryMount, this.panelId); return; }
     }
@@ -4793,7 +4806,8 @@ export class Builder {
 
   _placePanelOnRails(aId, bId, t0, len) {
     if (PANEL_ACCESSORY_IDS.has(this.panelId)) {
-      const probe = { a: aId, b: bId, t0, len, panelId: this.panelId, color: this.colorFor('panel'), side: 1,params:{screwAxis:this.insetScrewAxis||'vertical'} };
+      const probe = { a: aId, b: bId, t0, len, panelId: this.panelId, color: this.colorFor('panel'), side: 1 };
+      if(supportsPanelFixing(this.panelId))probe.params={screwAxis:panelRailScrewAxis(this.model,probe,confirmedSpec(this.panelId)?undefined:componentFrame(this.model,probe))};
       if (this.panelId !== 'panel_40x40_pocket') probe.side = this._panelSideFromCorners(this.model.panelCorners(probe));
       this.panelRail = null; this.highlight = null;
       this._previewInstallation(this.model.panelAccessoryDiagnostics(probe), this.panelId);
@@ -4863,6 +4877,22 @@ export class Builder {
 
   canFlipSelectedAccessory() {
     return !this.readOnly && this.selection.size > 0 && [...this.selection.entries()].every(([id, kind]) => kind === 'fitting' && this.model.fittings.get(id)?.kind === 'steering_wheel');
+  }
+
+  selectedPanelFixing() {
+    if(this.mode!=='select' || this.selection.size!==1)return null;
+    const [id,kind]=[...this.selection][0],part=this.model.panels.get(id);
+    if(kind!=='panel' || !part || !supportsPanelFixing(part.panelId))return null;
+    return {partId:part.panelId,axis:part.params?.screwAxis || null};
+  }
+
+  setSelectedPanelFixing(axis) {
+    if(this.readOnly || !this.selectedPanelFixing())return false;
+    const id=[...this.selection.keys()][0],candidate=this.model.panelFixingDiagnostics(id,axis);
+    if(!candidate.valid){this.onNotice(installationReason(this.model,candidate),'warn');return false;}
+    if(this.model.panels.get(id).params?.screwAxis===axis)return true;
+    this.recordHistory(()=>this.model.setPanelFixing(id,axis));
+    this.refresh();return true;
   }
 
   flipSelectedAccessory() {

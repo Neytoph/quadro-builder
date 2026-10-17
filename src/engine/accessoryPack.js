@@ -1,7 +1,8 @@
 import { quatFromBasis, xAxisOf, yAxisOf, zAxisOf } from './util.js';
 import { CONFIRMED_COMPONENTS, CONFIRMED_PANEL_IDS, CONFIRMED_FITTING_IDS, confirmedSpec } from './componentPack.js';
 import { confirmedCandidates, confirmedPanelDiagnostics, confirmedStructuralValid, confirmedFrame, confirmedVolumes, curvePoint, ropeCandidate, trampolineCandidate } from './confirmedComponentModel.js';
-import { INSET_MOUNT_LAYOUT, hasInsetScrews, oppositeScrewSupports, insetFrameTubeIds, insetScrewVolumes, insetPanelReference } from './insetPanelMounts.js';
+import { INSET_MOUNT_LAYOUT, INSET_PANEL_EDGE_INSET, hasInsetScrews, oppositeScrewSupports, insetFrameTubeIds, insetScrewVolumes, insetPanelReference } from './insetPanelMounts.js';
+import { geometry } from './catalog.js';
 import { isSoftPart } from './softParts.js';
 
 export const ACCESSORY_PACK = [
@@ -101,7 +102,11 @@ export function componentVolumes(model, part, { sweep = false } = {}) {
     volume(frame, [-5.25, -3.6, 2], [5.25, 3.6, 4.4]),
     volume(frame, [-1.45, -1.45, 3.4], [1.45, 1.45, 9]),
   ];
-  if (kind === 'panel_40x40_busy') return [volume(frame, [-17.5, -17.5, -1], [17.5, 17.5, 6]), ...(hasInsetScrews(part)?insetScrewVolumes(model,part,frame):[])];
+  if (kind === 'panel_40x40_busy') {
+    if(!hasInsetScrews(part))return [volume(frame,[-17.5,-17.5,-1],[17.5,17.5,6])];
+    const edge=20-INSET_PANEL_EDGE_INSET;
+    return [volume(frame,[-edge,-edge,-geometry().panelThickness/2],[edge,edge,3.45]),...insetScrewVolumes(model,part,frame)];
+  }
   if (kind === 'panel_40x40_pocket') return [volume(frame, [-17.5, -27, -17.5], [17.5, -1, 17.5])];
   const spec = accessorySpec(kind), drop = part.params?.drop || spec.drop;
   if (kind === 'gym_rings') return [volume(frame, [-15, -drop, -2], [15, -5, 2])];

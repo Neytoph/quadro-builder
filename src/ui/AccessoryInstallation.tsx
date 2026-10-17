@@ -6,6 +6,7 @@ import { builderComponents, componentForTool, componentHintKey, componentDimensi
 import { NARROW_MAX, statusTipBox, usePanelLayout } from './panelLayout'
 import { useDock } from './dock'
 import PartThumbnail from './PartThumbnail'
+import { supportsPanelFixing } from '../engine/confirmedComponentModel.js'
 
 export default function AccessoryInstallation({ menuOpen }: { menuOpen: boolean }) {
   const api = useEngine()
@@ -14,7 +15,9 @@ export default function AccessoryInstallation({ menuOpen }: { menuOpen: boolean 
   const { pane } = useDock()
   const narrow = vw <= NARROW_MAX
   const preview = api.installationPreview
-  const part = preview ? builderComponents().find(p => p.id === preview.partId || p.kind === preview.partId) : componentForTool(api)
+  const selected = api.selectedPanelFixing
+  const partId = preview?.partId || selected?.partId
+  const part = partId ? builderComponents().find(p => p.id === partId || p.kind === partId) : componentForTool(api)
   if (menuOpen || (narrow && pane) || (!preview && !part && !api.canFlipAccessory)) return null
   const box = narrow ? null : statusTipBox(left, vw, toolbarW, pane ? right : null)
   if (!narrow && !box) return null
@@ -27,12 +30,12 @@ export default function AccessoryInstallation({ menuOpen }: { menuOpen: boolean 
           <span className="qb-material-name flex-1 min-w-0">{labelOf(part.id, part.name)}</span>
           {preview && <span className="text-gray-300 shrink-0">{t(preview.mountCount === 1 ? 'accessory.mountOne' : 'accessory.mounts', { n: preview.mountCount })}</span>}
         </div>
-        <p className="mt-1 text-gray-300" role="status">{preview?.reason || t(componentHintKey(part), { size: componentDimensions(part) })}</p>
-        {api.mode === 'panel' && part.mountLayout === 'opposite-transparent-screws' && <div className="flex items-center flex-wrap gap-1.5 mt-2" role="group" aria-label={t('accessory.fixingEdges')}>
+        <p className="mt-1 text-gray-300" role="status">{selected ? t('accessory.fixingHelp') : preview?.reason || t(componentHintKey(part), { size: componentDimensions(part) })}</p>
+        {(selected || api.mode === 'panel' && supportsPanelFixing(part.id)) && <div className="flex items-center flex-wrap gap-1.5 mt-2" role="group" aria-label={t('accessory.fixingEdges')}>
           <span className="mr-1 text-[11px] text-gray-300">{t('accessory.fixingEdges')}</span>
-          {(['vertical', 'horizontal'] as const).map(axis => <button type="button" key={axis} className={`qb-btn qb-btn-sm ${api.insetScrewAxis === axis ? '' : 'qb-btn-ghost'}`} data-ui="inset-screw-axis" data-axis={axis} aria-pressed={api.insetScrewAxis === axis} disabled={api.readOnly} onClick={() => api.setInsetScrewAxis(axis)}>{t(`accessory.fixing.${axis}`)}</button>)}
+          {(selected ? ['vertical', 'horizontal'] as const : ['auto', 'vertical', 'horizontal'] as const).map(axis => <button type="button" key={axis} className={`qb-btn qb-btn-sm ${(selected ? selected.axis : api.insetScrewAxis) === axis ? '' : 'qb-btn-ghost'}`} data-ui="inset-screw-axis" data-axis={axis} aria-pressed={(selected ? selected.axis : api.insetScrewAxis) === axis} disabled={api.readOnly} onClick={() => selected && axis !== 'auto' ? api.setSelectedPanelFixing(axis) : api.setInsetScrewAxis(axis)}>{t(`accessory.fixing.${axis}`)}</button>)}
         </div>}
-        {part.mountLayout === 'opposite-transparent-screws' && <p className="mt-1 text-[11px] text-gray-300">{t('accessory.fixingHelp')}</p>}
+        {!selected && part.mountLayout === 'opposite-transparent-screws' && <p className="mt-1 text-[11px] text-gray-300">{t('accessory.fixingHelp')}</p>}
         {part.placement === 'panel' && part.id !== 'panel_40x40_pocket' && <p className="mt-1 text-[11px] text-gray-300">{t('accessory.panelFlipHint')}</p>}
         {part.fixedColor && <p className="mt-1 text-[11px] text-gray-300">{t('accessory.fixedColor', { color: colorLabel(part.fixedColor) })}</p>}
         {(part.assumption || part.id === 'steering_wheel' || part.id === 'panel_40x40_busy' || part.id === 'panel_40x40_pocket' || preview?.assumption) && <p className="mt-1 text-[11px] text-[#9a5b16]">{t('accessory.assumption')}</p>}

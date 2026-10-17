@@ -9,12 +9,12 @@ export const TOOL_LABELS: Record<BuilderTool, string> = {
 }
 export const NUMBER_TUBES: Record<string, string> = { '1': 'T15', '2': 'T25', '3': 'T35' }
 
-export type ToolState = Parameters<typeof installationActive>[1] & { color: string; insetScrewAxis: 'vertical' | 'horizontal' }
+export type ToolState = Parameters<typeof installationActive>[1] & { color: string; insetScrewAxis: 'auto' | 'vertical' | 'horizontal' }
 export type ToolSnapshot = {
   tool: BuilderTool
   partId: string
   color: string
-  insetScrewAxis: 'vertical' | 'horizontal'
+  insetScrewAxis: 'auto' | 'vertical' | 'horizontal'
   fittingPart?: string | null
 }
 

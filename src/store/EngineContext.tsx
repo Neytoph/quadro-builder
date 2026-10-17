@@ -166,8 +166,10 @@ interface EngineApi {
   canRedo: boolean
   selectionCount: number
   installationPreview: InstallationPreview | null
-  insetScrewAxis: 'vertical' | 'horizontal'
-  setInsetScrewAxis: (axis: 'vertical' | 'horizontal') => void
+  insetScrewAxis: 'auto' | 'vertical' | 'horizontal'
+  setInsetScrewAxis: (axis: 'auto' | 'vertical' | 'horizontal') => void
+  selectedPanelFixing: { partId: string; axis: string | null } | null
+  setSelectedPanelFixing: (axis: 'vertical' | 'horizontal') => void
   canFlipAccessory: boolean
   confirmInstallation: () => void
   cancelInstallation: () => void
@@ -832,7 +834,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     // 引擎的旧界面快照不含具体布件、连接件和安装方向；用本页会话记录恢复，避免串页。
     const remembered = toolMemory.current.get(tab.tabId)
     e.builder.fittingPart = remembered?.fittingPart || null
-    e.builder.insetScrewAxis = remembered?.insetScrewAxis || 'vertical'
+    e.builder.insetScrewAxis = remembered?.insetScrewAxis || 'auto'
     e.builder.placeConnectorId = tab.view?.mode === 'add' && remembered?.tool === 'connectors' ? remembered.partId : null
     e.builder.setMode((tab.view?.mode as string) || 'select')
     const home = tabHomeContext(tab, e.model.homeContext)
@@ -2830,8 +2832,10 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     canRedo: !!builder?.canRedo?.(),
     selectionCount: builder?.selection?.size ?? 0,
     installationPreview: builder?.installationPreview ?? null,
-    insetScrewAxis: builder?.insetScrewAxis || 'vertical',
+    insetScrewAxis: builder?.insetScrewAxis || 'auto',
     setInsetScrewAxis: axis => { if (!builder || builder.readOnly) return; builder.setInsetScrewAxis(axis); bump() },
+    selectedPanelFixing: builder?.selectedPanelFixing?.() ?? null,
+    setSelectedPanelFixing: axis => { if (!builder || builder.readOnly) return; builder.setSelectedPanelFixing(axis); bump() },
     canFlipAccessory: !builder?.readOnly && !!builder?.canFlipSelectedAccessory?.(),
     confirmInstallation: () => { if (!builder || builder.readOnly) return; builder.confirmInstallation(); bump() },
     cancelInstallation: () => { if (!builder) return; builder.cancelInstallation(); bump() },

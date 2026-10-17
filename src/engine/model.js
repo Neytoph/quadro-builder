@@ -2,10 +2,10 @@
 // Bewusst ohne Three.js-Abhaengigkeit, damit es testbar und Backend-tauglich bleibt.
 
 import { MERGE_EPS, FORMAT_VERSION, DIAGONAL_SNAP_TOL, DIRECTIONS, DIAGONAL_DIRECTIONS, DIR_ALIGN_TOL, ARM_ALIGN_TOL, CONN_TYPE_MASK, anchorGap } from "./config.js";
-import { ACCESSORY_IDS, PANEL_ACCESSORY_IDS, accessoryMount, accessoryDiagnostics, panelAccessoryDiagnostics, componentMountsValid, componentVolumes, confirmedDiagnostics, nativeWheelComponentObstacle } from './accessoryPack.js';
+import { ACCESSORY_IDS, PANEL_ACCESSORY_IDS, accessoryMount, accessoryDiagnostics, panelAccessoryDiagnostics, componentMountsValid, componentVolumes, componentFrame, confirmedDiagnostics, nativeWheelComponentObstacle } from './accessoryPack.js';
 import { confirmedSpec } from './componentPack.js';
-import { confirmedCandidates, ropeCandidate } from './confirmedComponentModel.js';
-import { insetPanelProbes } from './insetPanelMounts.js';
+import { confirmedCandidates, ropeCandidate, supportsPanelFixing } from './confirmedComponentModel.js';
+import { insetPanelProbes, INSET_PANEL_IDS, INSET_MOUNT_LAYOUT, oppositeScrewSupports, insetPanelReference } from './insetPanelMounts.js';
 import { validAssemblyConfig } from './assemblyConfig.js';
 import { validHomeContext } from '../home/context.js';
 import { isSoftPart } from './softParts.js';
@@ -1143,6 +1143,7 @@ export class BuildModel {
     const p = this.panels.get(id);
     if (!p) return false;
     if (PANEL_ACCESSORY_IDS.has(p.panelId) && !['panel_40x40', 'panel_40x20', 'panel_30x30', 'hole_panel_40x40'].includes(p.panelId)) return false;
+    if(p.params?.screwAxis && supportsPanelFixing(p.panelId))return this.setPanelFixing(id,p.params.screwAxis==='horizontal'?'vertical':'horizontal');
     p.turned = !p.turned;
     // Eine eingelesene Platte behaelt ihre Lage aus der Datei -- die Drehung um
     // die Normale gehoert dann mitgedreht, sonst schriebe der Export weiter die
@@ -1389,8 +1390,19 @@ export class BuildModel {
     this.panels.set(record.id,record);return record;
   }
 
-  panelAccessoryMounts(panelId,{screwAxis='vertical'}={}) {
-    if (confirmedSpec(panelId)) return this.confirmedMounts(panelId,{screwAxis}).filter(p => p.valid);
+  panelAccessoryMounts(panelId,{screwAxis='vertical',oppositeRetainers=false}={}) {
+    if(screwAxis==='auto'){
+      const seen=new Set();
+      return ['vertical','horizontal'].flatMap(axis=>this._panelAccessoryMounts(panelId,axis,true)).filter(part=>{
+        const key=this.panelCorners(part)?.map(p=>p.map(round).join(',')).sort().join('|');
+        if(!key || seen.has(key))return false;seen.add(key);return true;
+      });
+    }
+    return this._panelAccessoryMounts(panelId,screwAxis,oppositeRetainers);
+  }
+
+  _panelAccessoryMounts(panelId,screwAxis,oppositeRetainers) {
+    if (confirmedSpec(panelId)) return this.confirmedMounts(panelId,{screwAxis,oppositeRetainers}).filter(p => p.valid);
     const mounts = [], seen = new Set();
     for (const tube of this.tubes.values()) for (const partner of this.panelPartners(tube.id, [40, 40])) {
       const count = Math.max(1, Math.floor((partner.hi - partner.lo + 0.5) / 40));
@@ -1426,6 +1438,31 @@ export class BuildModel {
   confirmedDiagnostics(probe) { return confirmedDiagnostics(this, probe); }
   nativePanelDiagnostics(probe) { return nativePanelDiagnostics(this, probe); }
   nativePanelMounts(panelId) { return nativePanelMounts(this,panelId); }
+
+  panelFixingDiagnostics(id,screwAxis) {
+    const part=this.panels.get(id);
+    if(!part || !supportsPanelFixing(part.panelId) || !['vertical','horizontal'].includes(screwAxis))return {valid:false,reason:'missing_support'};
+    const probe={...part,params:{...part.params,screwAxis}};
+    // 显式编辑旧内嵌板时采用当前对边螺丝，加载旧存档时保持原记录。
+    if(INSET_PANEL_IDS.has(part.panelId)){
+      const frame=componentFrame(this,part),spec=confirmedSpec(part.panelId) || {width:40,height:40};
+      const supports=oppositeScrewSupports(this,frame,spec.width,spec.height,{screwAxis});
+      if(!supports)return {valid:false,reason:'opposite_edges'};
+      probe.params.mountLayout=INSET_MOUNT_LAYOUT;
+      Object.assign(probe,insetPanelReference(this,frame,spec.width,spec.height,supports,{screwAxis}));
+      probe.side=1;
+      const normal=componentFrame(this,probe)?.axes[2];
+      if(normal && normal.reduce((sum,v,i)=>sum+v*frame.axes[2][i],0)<0)probe.side=-1;
+    }
+    return this.panelAccessoryDiagnostics(probe);
+  }
+
+  setPanelFixing(id,screwAxis) {
+    const candidate=this.panelFixingDiagnostics(id,screwAxis),part=this.panels.get(id);
+    if(!candidate.valid || !part)return false;
+    for(const key of ['a','b','t0','len','side','params','mounts','supportTubes','appearanceVersion'])part[key]=structuredClone(candidate[key]);
+    return true;
+  }
 
   // 普通方板与半高围板使用工厂原生形状；安装前仍检查四边及固定位。
   addNativePanel(probe, color, { nativeGeometry = false } = {}) {

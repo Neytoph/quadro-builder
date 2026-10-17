@@ -1212,10 +1212,10 @@ export class SceneManager {
         sh.mapSize.set(size, size);
         if (sh.map) { sh.map.dispose(); sh.map = null; }
       }
-      // 按阴影像素的世界尺寸沿法线偏移，避免平板表面出现自身阴影斜纹。
+      // PCF会取周围阴影像素，偏移覆盖两像素足迹，避免薄板及管面出现自身阴影斜纹。
       const camera = sh.camera;
       const texel = Math.max(camera.right - camera.left, camera.top - camera.bottom) / size;
-      sh.normalBias = Math.max(0.08, texel * 0.5);
+      sh.normalBias = Math.max(0.08, texel * 2);
     }
     this._shadowsDirty();
   }

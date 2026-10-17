@@ -83,9 +83,9 @@ const MOUNT_COPY = {
     de: ['Elastische Seile und mehrere Befestigungen an allen vier Seiten', 'Tatsächliche Rahmenmaße, durchgehende Trägerrohre an allen vier Seiten und Freiraum darunter prüfen. Jedes elastische Seil befestigen, Verbinder freihalten sowie alle Befestigungen und die Spannung prüfen.'],
   },
   'opposite-transparent-screws': {
-    zh: ['每套含4颗透明螺丝，对边各2颗', '检查框格尺寸及两条对边的连续承载管，放入内嵌板，分别拧紧两边各2颗透明螺丝，检查板面方向及周围净空。'],
-    en: ['Each kit includes 4 clear screws, 2 on each opposite edge', 'Check the frame dimensions and continuous support tubes on two opposite edges, insert the inset panel, tighten two clear screws on each edge, and check its facing and clearance.'],
-    de: ['Je Set: 4 transparente Schrauben, je 2 an gegenüberliegenden Kanten', 'Rahmenmaße und durchgehende Trägerrohre an zwei gegenüberliegenden Kanten prüfen, die Einlegeplatte einsetzen, je zwei transparente Schrauben festziehen sowie Ausrichtung und Freiraum prüfen.'],
+    zh: ['每套含4颗米白色卡槽螺丝，对边各2颗', '检查框格尺寸及两条对边的连续承载管，将米白色卡槽螺丝固定在管子内侧中心线处，把板边卡入两片夹口之间，检查板面方向及周围净空。'],
+    en: ['Each kit includes 4 ivory slotted screws, 2 on each opposite edge', 'Check the frame dimensions and continuous support tubes on two opposite edges. Fix the ivory slotted screws on the inward centreline of the tubes, fit the panel edges between their two jaws, and check facing and clearance.'],
+    de: ['Je Set: 4 elfenbeinfarbene Schlitzschrauben, je 2 an gegenüberliegenden Kanten', 'Rahmenmaße und durchgehende Trägerrohre prüfen. Die elfenbeinfarbenen Schlitzschrauben an der inneren Mittellinie der Rohre befestigen, die Plattenkanten zwischen die beiden Backen einsetzen sowie Ausrichtung und Freiraum prüfen.'],
   },
   frame: {
     zh: ['四边支撑与角部固定', '检查框格尺寸及全部边管，放入组件并逐一固定角部，检查板面方向和周围净空。'],
@@ -138,6 +138,12 @@ function confirmedCopy(partId) {
 }
 
 function copy(partId, part) {
+  if(part?.params?.screwAxis && part.params.mountLayout!=='opposite-transparent-screws'){
+    const lang=getLang(),name=partName(getPartById(partId)) || partId;
+    if(lang==='zh')return ['四边支撑，背面两条对边各两颗黑色内嵌螺丝',`${name}安装`,'检查完整框格与全部边管，在板背面的两条安装唇边上朝承载管拧紧螺丝，检查板面和周围净空。'];
+    if(lang==='de')return ['Vier Rahmenkanten, je zwei schwarze versenkte Schrauben an den rückseitigen Montagelippen',`${name} montieren`,'Den vollständigen Rahmen und alle Randrohre prüfen. Die Schrauben an den beiden rückseitigen Montagelippen in Richtung der Trägerrohre festziehen und Freiraum prüfen.'];
+    return ['Four frame edges, two black recessed screws on each rear mounting lip',`Install ${name}`,'Check the complete frame and every edge tube. Tighten the screws through the two rear mounting lips toward the support tubes and check clearance.'];
+  }
   if (part?.params?.mountLayout === 'opposite-transparent-screws') {
     const lang = getLang();
     const text = MOUNT_COPY['opposite-transparent-screws'][lang] || MOUNT_COPY['opposite-transparent-screws'].en;
@@ -161,9 +167,9 @@ export function componentKitFields(partId, designCount, total = designCount, ins
   const qualifier = total === designCount ? '' : lang === 'zh' ? `（其中新版${designCount}套）`
     : lang === 'de' ? ` (${designCount} neue Sets)` : ` (${designCount} new kits)`;
   const mountQualifier = insetCount && insetCount !== designCount
-    ? lang === 'zh' ? `（其中${insetCount}套改为4颗透明螺丝，对边各2颗，其余保留原固定方式）`
-      : lang === 'de' ? ` (${insetCount} Sets mit 4 transparenten Schrauben, je 2 gegenüberliegend; übrige Befestigungen unverändert)`
-        : ` (${insetCount} kits use 4 clear screws, 2 per opposite edge; other kits retain their original fixings)`
+    ? lang === 'zh' ? `（其中${insetCount}套使用4颗米白色卡槽螺丝，对边各2颗，其余保留原固定方式）`
+      : lang === 'de' ? ` (${insetCount} Sets mit 4 elfenbeinfarbenen Schlitzschrauben, je 2 gegenüberliegend; übrige Befestigungen unverändert)`
+        : ` (${insetCount} kits use 4 ivory slotted screws, 2 per opposite edge; other kits retain their original fixings)`
     : '';
   return { kitContents: text[0] + mountQualifier + qualifier, designAssumption: true, loadVerified: false };
 }
@@ -177,7 +183,7 @@ export function componentInstallCopy(partId, part) {
       : 'Installation dimensions follow the frame grid; physical dimensions and load capacity are unverified.';
   const size = componentSizeLabel(part);
   let instructions = text[2];
-  if (part?.params?.mountLayout === 'opposite-transparent-screws') {
+  if (part?.params?.screwAxis || part?.params?.mountLayout === 'opposite-transparent-screws') {
     const horizontal = part.params.screwAxis === 'horizontal';
     instructions += lang === 'zh' ? ` 螺丝固定在板面${horizontal ? '上下' : '左右'}两边，每边两颗。`
       : lang === 'de' ? ` Je zwei Schrauben befestigen die ${horizontal ? 'obere und untere' : 'linke und rechte'} Plattenkante.`

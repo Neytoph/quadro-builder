@@ -4,6 +4,7 @@ import { ParametricGeometry } from 'three/examples/jsm/geometries/ParametricGeom
 import { accessorySpec, componentFrame, mountPoint } from './accessoryPack.js';
 import { confirmedComponentMeshes } from './confirmedComponentMeshes.js';
 import { insetScrewMeshes } from './insetPanelMeshes.js';
+import { hasInsetScrews, INSET_PANEL_EDGE_INSET } from './insetPanelMounts.js';
 import { geometry } from './catalog.js';
 
 const PALETTE = { blue: '#238fe4', yellow: '#ffd33c', cream: '#eee5d0', orange: '#f88929', green: '#48af63', red: '#eb4641', dark: '#363a3f', metal: '#b8bec2', rope: '#cdbc96', cloth: '#d8c8a9' };
@@ -78,8 +79,9 @@ function busyMeshes(scene, model, panel) {
   if (!frame) return [];
   const f = meshFactory(scene, frame), { box, disc, add } = f;
   const thickness=geometry().panelThickness,center=1.25-thickness/2;
-  box('busy-green-outline', [35.4, 35.4, thickness], 'green', [0, 0, center], 2.3);
-  box('busy-cream-board', [33.4, 33.4, thickness], 'cream', [0, 0, center+0.01], 1.8);
+  const inset=hasInsetScrews(panel),width=inset?40-2*INSET_PANEL_EDGE_INSET:35.4;
+  box('busy-green-outline', [width, width, thickness], 'green', [0, 0, center], 2.3);
+  box('busy-cream-board', [width-2, width-2, thickness], 'cream', [0, 0, center+0.01], 1.8);
   add('busy-blue-gear', () => gearGeometry(6.5, 12), 'plastic', 'blue', [-7.5, 7, 1.3]);
   add('busy-yellow-gear', () => gearGeometry(4.5, 10), 'plastic', 'yellow', [3.3, 7, 1.3]);
   disc('busy-gear-center-big', 1.1, 0.7, 'metal', [-7.5, 7, 3.2], 'metal');
@@ -94,6 +96,7 @@ function busyMeshes(scene, model, panel) {
   disc('busy-crank-pivot', 0.6, 0.45, 'metal', [8, -8.2, 4.3], 'metal');
   disc('busy-crank-tip', 0.45, 0.45, 'metal', [10.5, -11.3, 4.3], 'metal');
   for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4; box(`busy-disc-mark:${i}`, [0.32, 0.8, 0.16], '#066caf', [8 + Math.sin(a) * 3.1, -8.2 + Math.cos(a) * 3.1, 3.1], 0.12, new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -a)); }
+  if(inset)for(const mesh of f.result)mesh.position.addScaledVector(new THREE.Vector3(...frame.axes[2]),-center);
   return [...f.result,...insetScrewMeshes(scene,model,panel,frame)];
 }
 

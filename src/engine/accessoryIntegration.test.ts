@@ -124,7 +124,7 @@ describe('原创组件清单与导出集成', () => {
       setLang(lang)
       const row = computeBOM(model).panels.find(part => part.panelId === panel.panelId)!
       const step = computeBuildPlan(model).steps.find(step => step.panelIds?.includes(panel.id))!
-      expect(row.kitContents).toMatch(/透明螺丝|clear screws|transparente Schrauben/)
+      expect(row.kitContents).toMatch(/米白色卡槽螺丝|ivory slotted screws|elfenbeinfarbene Schlitzschrauben/)
       expect(step.instructions.join(' ')).toMatch(/对边|opposite|gegenüberliegenden/)
       const old = componentInstallCopy(panel.panelId)
       expect(old.instructions.join(' ')).toMatch(/四角|four corners|vier Ecken/)
