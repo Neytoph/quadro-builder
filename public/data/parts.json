@@ -14,7 +14,7 @@
     "defaultTube": "T35",
     "diagonalTube": "T35",
     "defaultPanel": "panel_40x40",
-    "panelThickness": 1.6,
+    "panelThickness": 0.3,
     "comment": "Masse echt: Kupplung 50 mm, Rohr-Aussen 49 mm (tubeRadius 2.45), Kupplungs-Arme ~50 mm lang, ~42 mm Durchmesser (armRadius 2.1) -> duenner als das Rohr, greifen IN die Rohre. Knoten-Abstand (Mitte zu Mitte) = Rohrlaenge + connectorSize. 35er-Rohr -> 40 cm Raster (passend zu Platte 40x40); 15er -> 20 cm (Platte 40x20). Schraegen/Rampen/Daecher: das Bau-Werkzeug baut immer 45 Grad mit 35er-Rohr (T35). Beim Import werden nur Schraegen auf 45 Grad gezwungen, die an einer 45-Grad-Winkelkupplung (connector45_2) andocken; Doppelrohr-Verbinder-Rampen und andere Rampenformen behalten ihre Original-Geometrie."
   },
   "colors": {

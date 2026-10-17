@@ -8,6 +8,7 @@ import fontData from 'three/examples/fonts/helvetiker_regular.typeface.json';
 import { confirmedSpec, confirmedColor, legoStudHeight } from './componentPack.js';
 import { insetScrewMeshes } from './insetPanelMeshes.js';
 import { COLOR_HEX } from './colors.js';
+import { geometry } from './catalog.js';
 import { confirmedFrame, curvePoint, worldToLocal, rungPositions } from './confirmedComponentModel.js';
 const font=new FontLoader().parse(fontData);
 const colors=['#e64343','#ffcf3d','#f09cbc','#74b166','#318dde','#9c75cb'];
@@ -88,7 +89,8 @@ function outline(w,h,feature) {
   }
   shape.lineTo(-x+n,y);shape.absarc(-x,y,n,0,-Math.PI/2,true);shape.lineTo(-x,-y+n);shape.absarc(-x,-y,n,Math.PI/2,0,true);shape.closePath();return shape;
 }
-function plateGeometry(w,h,feature,depth=1.2) {
+function plateGeometry(w,h,feature) {
+  const depth=geometry().panelThickness,bevel=feature==='acrylic'?0:Math.min(0.06,depth/4);
   const shape=outline(w,h,feature);
   if(feature==='holes' || feature==='acrylic_holes')for(const x of [-w*0.28,0,w*0.28])for(const y of [-h*0.28,0,h*0.28])shape.holes.push(new THREE.Path().absarc(x,y,3.2,0,Math.PI*2,true));
   if(feature==='honeycomb')for(let row=-7;row<=7;row++)for(let col=-7;col<=7;col++) {
@@ -99,7 +101,9 @@ function plateGeometry(w,h,feature,depth=1.2) {
     const p=new THREE.Path();p.moveTo(x-0.32,y-0.6);p.lineTo(x-0.32,y+0.6);p.absarc(x,y+0.6,0.32,Math.PI,0,true);p.lineTo(x+0.32,y-0.6);p.absarc(x,y-0.6,0.32,0,-Math.PI,true);p.closePath();shape.holes.push(p);
   }
   if(feature==='castle'){const p=new THREE.Path();p.moveTo(-12,-3);p.lineTo(-12,0);p.lineTo(12,0);p.lineTo(12,-3);p.closePath();shape.holes.push(p);}
-  return new THREE.ExtrudeGeometry(shape,{depth,bevelEnabled:feature!=='acrylic',bevelThickness:feature==='honeycomb'?0.06:0.12,bevelSize:feature==='honeycomb'?0.06:0.12,bevelSegments:2,curveSegments:16});
+  const mesh=new THREE.ExtrudeGeometry(shape,{depth:depth-2*bevel,bevelEnabled:bevel>0,bevelThickness:bevel,bevelSize:bevel,bevelSegments:2,curveSegments:16});
+  mesh.translate(0,0,bevel);
+  return mesh;
 }
 function clips(f,model,part,color='#343a3e') {
   const frame=confirmedFrame(model,part);
@@ -133,9 +137,13 @@ function panelMeshes(scene,model,part,spec,frame) {
   const clear=['acrylic','acrylic_holes','capsule'].includes(feature);
   if(standard) {
     // 网格加载期间及低画质使用同样外宽和管顶高度，避免加载前后板面跳变。
-    const mesh=f.add(`plate:standard:${spec.id}`,()=>plateGeometry(spec.width-0.24,spec.height-0.24,feature),color,[0,0,1.19]);
+    const mesh=f.add(`plate:standard:${spec.id}`,()=>plateGeometry(spec.width-0.24,spec.height-0.24,feature),color,[0,0,2.51-geometry().panelThickness]);
     if(scene._panelMaterial)mesh.material=scene._panelMaterial(part.color,false,false);
-  } else if(feature!=='basin' && feature!=='grid' && feature!=='sensory')f.add(`plate:${w}:${h}:${feature}`,()=>plateGeometry(w,h,feature,clear?0.45:1.2),clear?'#eaf7fa':color,[0,0,1.8],null,clear?'glass':feature==='magnet'?'coated-metal':feature==='felt'?'cloth':'plastic');
+  } else if(feature!=='basin' && feature!=='grid' && feature!=='sensory') {
+    const faceHeight=({acrylic:2.25,acrylic_holes:2.37,capsule:2.37})[feature] ?? 3.12;
+    const materialType=clear?'glass':(({magnet:'coated-metal',felt:'cloth'})[feature] || 'plastic');
+    f.add(`plate:${w}:${h}:${feature}`,()=>plateGeometry(w,h,feature),clear?'#eaf7fa':color,[0,0,faceHeight-geometry().panelThickness],null,materialType);
+  }
   if(clear)f.meshes.push(...insetScrewMeshes(scene,model,part,frame));
   if(clear){
     const points=outline(w,h,feature).getPoints(64).map(p=>[p.x,p.y,2.2]);
@@ -232,7 +240,7 @@ function panelMeshes(scene,model,part,spec,frame) {
     const seam=outline(w-1.3,h-1.3,'felt').getPoints(80).map(p=>[p.x,p.y,3.08]);f.tube('felt-binding-seam',seam,.055,'#f6df85','cloth');
   }
   if(feature==='grid') {
-    for(let x=-17;x<=17;x+=3.4)f.box('grid-vertical',[0.5,34,0.65],'#f6f2e7',[x,0,2]);for(let y=-17;y<=17;y+=3.4)f.box('grid-horizontal',[34,0.5,0.65],'#f6f2e7',[0,y,2]);f.meshes.push(...insetScrewMeshes(scene,model,part,frame));
+    for(let x=-17;x<=17;x+=3.4)f.box('grid-vertical',[0.5,34,geometry().panelThickness],'#f6f2e7',[x,0,2]);for(let y=-17;y<=17;y+=3.4)f.box('grid-horizontal',[34,0.5,geometry().panelThickness],'#f6f2e7',[0,y,2]);f.meshes.push(...insetScrewMeshes(scene,model,part,frame));
   }
   return f.meshes;
 }
@@ -241,7 +249,7 @@ export function confirmedComponentMeshes(scene,model,part) {
   const spec=confirmedSpec(part.panelId||part.kind||part.partId),frame=confirmedFrame(model,part);if(!spec || !frame)return [];
   if(spec.placement==='panel')return panelMeshes(scene,model,part,spec,frame);
   const f=factory(scene,frame);
-  if(spec.feature==='sector') {f.add('sector-panel',()=>plateGeometry(40,40,'sector'),part.color||'#348ddd');clips(f,model,part);return f.meshes;}
+  if(spec.feature==='sector') {f.add('sector-panel',()=>plateGeometry(40,40,'sector'),part.color||'#348ddd',[0,0,1.32-geometry().panelThickness]);clips(f,model,part);return f.meshes;}
   if(spec.feature==='roller') {
     const rail=model._rail(part.tube),length=rail.len-12,r=spec.radius;
     f.add(`roller:${length}:${r}`,()=>{const g=new THREE.CylinderGeometry(r,r,length,48);g.rotateZ(Math.PI/2);return g;},'#f0d33f',[0,0,0],null,'cloth');
