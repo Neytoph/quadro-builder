@@ -14,6 +14,7 @@ import { geometry } from './catalog.js';
 import { confirmedFrame, curvePoint, worldToLocal, rungPositions } from './confirmedComponentModel.js';
 const font=new FontLoader().parse(fontData);
 const colors=['#e64343','#ffcf3d','#f09cbc','#74b166','#318dde','#9c75cb'];
+const clearPanelFeatures=new Set(['acrylic','acrylic_holes','capsule']);
 const vec=p=>new THREE.Vector3(...p);
 const resolveColor=color=>COLOR_HEX[color] || color;
 
@@ -84,6 +85,7 @@ function factory(scene,frame) {
 function outline(w,h,feature) {
   const shape=new THREE.Shape(),x=w/2,y=h/2,n=2.7;
   if(feature==='sector') {shape.moveTo(0,0);shape.lineTo(40,0);shape.absarc(0,0,40,0,Math.PI/2,false);shape.lineTo(0,0);return shape;}
+  if(clearPanelFeatures.has(feature)) {shape.moveTo(-x,-y);shape.lineTo(x,-y);shape.lineTo(x,y);shape.lineTo(-x,y);shape.closePath();return shape;}
   shape.moveTo(-x+n,-y);shape.lineTo(x-n,-y);shape.absarc(x,-y,n,Math.PI,Math.PI/2,true);
   shape.lineTo(x,y-n);shape.absarc(x,y,n,-Math.PI/2,-Math.PI,true);
   if(feature==='castle') {
@@ -92,7 +94,7 @@ function outline(w,h,feature) {
   shape.lineTo(-x+n,y);shape.absarc(-x,y,n,0,-Math.PI/2,true);shape.lineTo(-x,-y+n);shape.absarc(-x,-y,n,Math.PI/2,0,true);shape.closePath();return shape;
 }
 function plateGeometry(w,h,feature) {
-  const depth=geometry().panelThickness,bevel=feature==='acrylic'?0:Math.min(0.06,depth/4);
+  const depth=geometry().panelThickness,bevel=clearPanelFeatures.has(feature)?0:Math.min(0.06,depth/4);
   const shape=outline(w,h,feature);
   if(feature==='holes' || feature==='acrylic_holes')for(const x of [-w*0.28,0,w*0.28])for(const y of [-h*0.28,0,h*0.28])shape.holes.push(new THREE.Path().absarc(x,y,3.2,0,Math.PI*2,true));
   if(feature==='honeycomb')for(let row=-7;row<=7;row++)for(let col=-7;col<=7;col++) {
@@ -179,7 +181,7 @@ function panelMeshes(scene,model,part,spec,frame) {
   const inset=hasInsetScrews(part),edgeInset=inset?INSET_PANEL_EDGE_INSET:1.5;
   const f=factory(scene,frame),w=spec.width-2*edgeInset,h=spec.height-2*edgeInset,feature=spec.feature;
   const color=confirmedColor(part)||'#398ddb';
-  const clear=['acrylic','acrylic_holes','capsule'].includes(feature);
+  const clear=clearPanelFeatures.has(feature);
   if(part.params?.screwAxis && !hasInsetScrews(part) && feature!=='basketball')panelScrews(f,model,part,frame);
   if(standard) {
     // 网格加载期间及低画质使用同样外宽和管顶高度，避免加载前后板面跳变。
@@ -193,7 +195,7 @@ function panelMeshes(scene,model,part,spec,frame) {
   if(clear)f.meshes.push(...insetScrewMeshes(scene,model,part,frame));
   if(clear){
     const points=outline(w,h,feature).getPoints(64).map(p=>[p.x,p.y,inset?0:2.2]);
-    f.tube('acrylic-polished-edge',points,0.065,'#bdcdd1','glass-edge');
+    for(let i=1;i<points.length;i++)f.tube('acrylic-polished-edge',[points[i-1],points[i]],0.065,'#bdcdd1','glass-edge');
     if(feature==='acrylic_holes')for(const x of [-w*.28,0,w*.28])for(const y of [-h*.28,0,h*.28])f.torus('acrylic-hole-edge',3.2,0.06,'#beced3',[x,y,inset?0:2.2],null,'glass-edge');
   }
   if(feature==='capsule') {
