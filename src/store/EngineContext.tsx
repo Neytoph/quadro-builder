@@ -731,7 +731,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
         if(closed||String(storage.getAccountScope())!==scope)return
         updateSlotAccess(result.slots)
         const draft=tabsRef.current.find(tab=>tab.tabId===activeRef.current)
-        if(saveCapacityFull()&&draft&&!draft.docId&&!draft.libraryId&&!draft.planId&&!capacityNotice.current){capacityNotice.current=true;notifyRef.current(t('capacity.cloudFull'),'warn')}
+        const entry=bootEntry()
+        if(saveCapacityFull()&&draft&&!draft.docId&&!draft.libraryId&&!draft.planId&&!entry.plan&&!entry.src&&!entry.doc&&!capacityNotice.current){capacityNotice.current=true;notifyRef.current(t('capacity.cloudFull'),'warn')}
         else if(!saveCapacityFull())capacityNotice.current=false
         for(const tab of tabsRef.current){
           if(tab.planId)continue
