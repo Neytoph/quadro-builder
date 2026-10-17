@@ -890,7 +890,9 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     else e.scene.resetCamera(e.model, { animate: true, swoop: true })
     e.builder.refresh()
     e.scene.setHomeContext(home)
-    if (home) { e.scene.setBackground('home'); if (!restoreCamera) e.scene.frameHomeProduct() }
+    const background=e.model.previewBackground || (home ? 'home' : 'grass')
+    e.scene.setBackground(background==='home'&&!home?'grass':background)
+    if (home && !restoreCamera) e.scene.frameHomeProduct()
     switching.current = false
     bump()
   }, [bump])
@@ -1238,7 +1240,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     if (tab.planId) {
       tab.view = { ...tab.view, homeContext: context }
       persistSession()
-    } else current.builder.recordHistory(() => { current.model.homeContext = context })
+    } else current.builder.recordHistory(() => { current.model.homeContext = context; current.model.previewBackground = context ? 'home' : 'blank' })
     current.scene.setHomeContext(context)
     current.scene.setBackground(context ? 'home' : 'blank')
     if (context) current.scene.frameHomeProduct()
@@ -2922,6 +2924,15 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [endThumbBatch, startThumbBatch])
 
+  function changeBackground(mode: 'grass' | 'blank' | 'home') {
+    const current=eng.current,tab=tabsRef.current.find(item=>item.tabId===activeRef.current)
+    if (!current || !current.scene.setBackground(mode)) return
+    if (tab && !tab.readOnly && !current.builder.readOnly && !slotLocked(tab.docId,tab.libraryId,tab.planId)) {
+      current.builder.recordHistory(()=>{current.model.previewBackground=mode})
+    }
+    bump()
+  }
+
   const value: EngineApi = {
     ready, entryReady, completeEntry, error, hostRef, tick,
     editorState: () => {
@@ -3021,18 +3032,18 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     toggleGrass: () => {
       const next = !scene?._sceneOn
       track('builder.scene.grass', { on: next })
-      scene?.setBackground(next ? 'grass' : homeContext ? 'home' : 'blank')
+      changeBackground(next ? 'grass' : homeContext ? 'home' : 'blank')
       try { localStorage.setItem('quadro.scene.v1', next ? '1' : '0') } catch { /* ignore */ }
       bump()
     },
     grassOn: !!scene?._sceneOn,
     background: scene?._sceneOn ? 'grass' : homeContext && !scene?._homeHidden ? 'home' : 'blank',
-    setBackground: mode => { scene?.setBackground(mode); bump() },
+    setBackground: changeBackground,
     homeZones: { obstacles: scene?._homeObstaclesVisible !== false, usable: scene?._homeUsableVisible !== false },
     setHomeZones: (kind, visible) => { scene?.setHomeZones(kind, visible); bump() },
     homeContext,
     bindHome,
-    frameHome: () => { scene?.setBackground('home'); scene?.frameHome(); bump() },
+    frameHome: () => { changeBackground('home'); scene?.frameHome(); bump() },
     highlight, highlightIds, safety, setInv, newTab, closeTab, activateTab, renameTab, setTabName, saveCurrent, saveCurrentAs, askName, answerName, nameAsk, openDoc, retrySave,
     listDocs: async () => (await docs.listDocs()).map((d: AnyRec) => ({ id: String(d.id), name: String(d.name), updatedAt: Number(d.updatedAt || 0), local: !Number(d.rev) || !!d.dirty || (!!d.saveId && d.syncedSaveId !== d.saveId) })),
     removeDoc: async (id) => { await docs.removeDoc(id); bump() },

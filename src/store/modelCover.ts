@@ -1,5 +1,5 @@
 import { BuildModel, SceneManager, loadCatalog } from '../engine-api'
-import { takeModelThumb, waitSceneReady } from '../engine/thumbShot.js'
+import { waitSceneReady } from '../engine/thumbShot.js'
 import { applyFrameHex, loadTune } from '../engine/colorTune.js'
 
 let queue: Promise<unknown> = Promise.resolve()
@@ -12,7 +12,6 @@ export function renderModelCover(data: unknown): Promise<string | null> {
     const model = new BuildModel()
     const loaded = model.loadJSON(snapshot)
     if (!loaded.ok) throw new Error(`cover model load failed: ${loaded.reason}`)
-    if (!model.nodes.size) return null
     const host = document.createElement('div')
     host.style.cssText = 'position:fixed;left:-10000px;top:0;width:480px;height:360px;pointer-events:none'
     host.setAttribute('aria-hidden', 'true')
@@ -22,7 +21,9 @@ export function renderModelCover(data: unknown): Promise<string | null> {
       scene = new SceneManager(host)
       scene.setMotion(false)
       scene.setTheme(false)
-      scene.setScene(false)
+      scene.setHomeContext(model.homeContext)
+      const background = model.previewBackground || (model.homeContext ? 'home' : 'grass')
+      scene.setBackground(background === 'home' && !model.homeContext ? 'grass' : background)
       const tune = loadTune()
       applyFrameHex(tune.frame)
       scene.applyColorTune(tune)
@@ -31,7 +32,12 @@ export function renderModelCover(data: unknown): Promise<string | null> {
       scene.renderModel(model, null)
       if (!await waitSceneReady(scene)) throw new Error('cover meshes timed out')
       scene.renderModel(model, null)
-      return await takeModelThumb(scene, model)
+      const bounds = scene.homeProductBounds()
+      if (bounds) scene.frameFromYaw(model, 0, { silent: true, aspect: 4 / 3, margin: 1.2,
+        bounds: { ...bounds, size: bounds.max.map((n: number, axis: number) => n - bounds.min[axis]) } })
+      else if (model.homeContext) scene.frameHome()
+      return scene.snapshot({ hideGrid: true, hideLabels: true, hideRoom: false,
+        width: 480, height: 360, pixelRatio: 2, mime: 'image/jpeg', quality: .88 })
     } finally {
       if (scene) {
         scene.onMeshesReady = () => {}

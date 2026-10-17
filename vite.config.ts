@@ -46,6 +46,7 @@ export default defineConfig({
       buildStart() {
         this.emitFile({ type: 'chunk', fileName: 'home/outdoor.js', id: path.join(rootDir, 'src/engine/outdoor.js'), preserveSignature: 'strict' })
         this.emitFile({ type: 'chunk', fileName: 'home/thumbnail.js', id: path.join(rootDir, 'src/home/thumbnail.js'), preserveSignature: 'strict' })
+        this.emitFile({ type: 'chunk', fileName: 'home/model-cover.js', id: path.join(rootDir, 'src/store/modelCover.ts'), preserveSignature: 'strict' })
       },
       generateBundle() {
         this.emitFile({ type: 'asset', fileName: 'home/visuals.js', source: fs.readFileSync(path.join(rootDir, 'src/home/visuals.js'), 'utf8') })

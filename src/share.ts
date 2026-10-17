@@ -3,6 +3,7 @@ const LIMIT = 28000
 export function productOnly(data: unknown): unknown {
   if (!data || typeof data !== 'object' || Array.isArray(data)) return data
   const { homeContext: _home, ...product } = data as Record<string, unknown>
+  if (product.previewBackground === 'home') product.previewBackground = 'grass'
   return product
 }
 

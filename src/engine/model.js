@@ -670,6 +670,7 @@ export class BuildModel {
     this.groups = new Map();
     this.assemblyConfig = null;
     this.homeContext = null;
+    this.previewBackground = null;
     this._seq = 1;
     // 共享方案里几个人同时加零件：每个编辑端一个标记夹在前缀和序号中间，
     // 各端新建的 id 不会撞上。标记以非数字结尾，id 末尾仍是序号。
@@ -6516,6 +6517,7 @@ export class BuildModel {
 
   clear() {
     this.homeContext = null;
+    this.previewBackground = null;
     this.nodes.clear();
     this.tubes.clear();
     this.panels.clear();
@@ -6536,6 +6538,7 @@ export class BuildModel {
       format: FORMAT_VERSION,
       ...(this.assemblyConfig ? { assemblyConfig: structuredClone(this.assemblyConfig) } : {}),
       ...(this.homeContext ? { homeContext: structuredClone(this.homeContext) } : {}),
+      ...(this.previewBackground ? { previewBackground: this.previewBackground } : {}),
       nodes: [...this.nodes.values()].map((n) => {
         const o = { id: n.id, x: round(n.x), y: round(n.y), z: round(n.z) };
         if (n.c45) o.c45 = true; // Knoten traegt eine 45-Grad-Winkelkupplung
@@ -6642,6 +6645,7 @@ export class BuildModel {
     }
     if (data.assemblyConfig != null && !validAssemblyConfig(data.assemblyConfig)) return { ok: false, reason: 'data' };
     if (data.homeContext != null && !validHomeContext(data.homeContext)) return { ok: false, reason: 'data' };
+    if (data.previewBackground != null && !['grass', 'blank', 'home'].includes(data.previewBackground)) return { ok: false, reason: 'data' };
     if (!validReinforcementRecords(data.nodes, data.tubes || [])) return { ok: false, reason: 'data' };
     // 兼容旧 QDF 导入器保存的 id；无效卡扣引用在替换当前模型之前明确拒绝。
     const nodeIds = new Set(data.nodes.map(n => n.id));
@@ -6654,6 +6658,7 @@ export class BuildModel {
     this.clear();
     this.assemblyConfig = data.assemblyConfig == null ? null : structuredClone(data.assemblyConfig);
     this.homeContext = data.homeContext == null ? null : structuredClone(data.homeContext);
+    this.previewBackground = data.previewBackground ?? null;
     let maxSeq = 0;
     for (const n of data.nodes) {
       this.nodes.set(n.id, { id: n.id, x: n.x, y: n.y, z: n.z, c45: !!n.c45, c45body: !!n.c45body,
