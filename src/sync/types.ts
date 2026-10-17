@@ -39,6 +39,7 @@ export type DesignParts = Record<string, Record<string, number>>
 
 /** 服务端下发的记录。 */
 export interface RemoteDoc {
+	locked?: boolean
   id: string
   name: string
   data: unknown | null

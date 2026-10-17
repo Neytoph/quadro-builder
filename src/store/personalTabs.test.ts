@@ -24,6 +24,16 @@ beforeAll(async () => {
 })
 
 describe('personal tab working baseline', () => {
+  it('恢复统一造型绑定，并在另存为后用同次持久化信息解除旧绑定',()=>{
+    const local=memoryDoc(original)
+    const session={docId:null,name:'统一造型',dirty:false,libraryId:'old',libraryRevision:2,libraryOwner:'1'}
+    writePersonalState(local,{bindingVersion:1,libraryBindingVersion:1,...session,libraryRevision:3})
+    expect(restorePersonalBinding(session,readPersonalState(local)).libraryRevision).toBe(3)
+    writePersonalState(local,{bindingVersion:1,libraryBindingVersion:1,docId:'new-personal',name:'独立保存',dirty:false,libraryId:undefined,libraryRevision:undefined,libraryOwner:undefined})
+    const restored=restorePersonalBinding(session,readPersonalState(local))
+    expect(restored.docId).toBe('new-personal');expect(restored.libraryId).toBeUndefined();expect(restored.libraryRevision).toBeUndefined();expect(restored.libraryOwner).toBeUndefined()
+    local.history.destroy();local.doc.destroy()
+  })
   it('refreshes a clean saved tab when another device has updated it', () => {
     const state = { baseRev: 1, savedContent: modelContent(original) }
     expect(personalDecision(state, false, original, { rev: 2, data: changed })).toBe('refresh')

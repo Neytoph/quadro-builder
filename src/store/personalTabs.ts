@@ -2,6 +2,9 @@ import type { ModelJSON } from '../collab/ymodel'
 
 export type SaveState = 'unsaved' | 'local' | 'syncing' | 'synced' | 'failed' | 'conflict' | 'waiting'
 export interface PersonalState {
+  libraryId?: string
+  libraryRevision?: number
+  libraryOwner?: string
   baseRev?: number
   savedContent?: string
   editGeneration?: number
@@ -11,6 +14,7 @@ export interface PersonalState {
 }
 
 export interface PersonalTabBinding extends PersonalState {
+  libraryBindingVersion?: 1
   bindingVersion: 1
   docId: string | null
   name: string
@@ -23,6 +27,7 @@ export function restorePersonalBinding<T extends PersonalState & { docId: string
   if (persisted.bindingVersion !== 1 || !(persisted.docId === null || typeof persisted.docId === 'string')
     || typeof persisted.name !== 'string' || typeof persisted.dirty !== 'boolean') return session
   return { ...session, docId: persisted.docId, name: persisted.name, dirty: persisted.dirty,
+    ...(persisted.libraryBindingVersion===1?{libraryId:persisted.libraryId,libraryRevision:persisted.libraryRevision,libraryOwner:persisted.libraryOwner}:{}),
     baseRev: persisted.baseRev, savedContent: persisted.savedContent, editGeneration: persisted.editGeneration,
     saveId: persisted.saveId, saveState: persisted.saveState, conflictDocId: persisted.conflictDocId }
 }

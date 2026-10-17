@@ -4,6 +4,7 @@ import { LoaderCircle, RefreshCw } from 'lucide-react'
 import { useEngine } from '../store/EngineContext'
 import { useI18n } from '../i18n'
 import { readRooms, readRoom, onRoomAccountInvalidated, type RoomData, type Room } from '../home/rooms'
+import { registerRoomThumbnails } from '../home/thumbnail.js'
 
 function GrassThumb({ blank = false }: { blank?: boolean }) {
   return <svg viewBox="0 0 48 48" className={'h-full w-full ' + (blank ? 'opacity-45 grayscale' : '')} aria-hidden="true">
@@ -16,11 +17,15 @@ function GrassThumb({ blank = false }: { blank?: boolean }) {
 }
 
 function RoomThumb({ data }: { data: RoomData }) {
-  const room = data.room
-  return <svg viewBox={`-10 -10 ${room.w + 20} ${room.d + 20}`} className="h-full w-full" aria-hidden="true">
-    <rect width={room.w} height={room.d} fill="#FFF8EF" stroke="#D8BCA0" strokeWidth="5" />
-    {data.items.map(item => <rect key={item.id} x={item.x} y={item.z} width={item.w} height={item.d} fill={{ furniture: '#D9C3A2', usable: '#A8D9B6', reserved: '#EFC78F' }[item.kind]} stroke="#A98B6C" strokeWidth="2" />)}
-  </svg>
+  const host = useRef<HTMLSpanElement>(null)
+  useEffect(() => {
+    registerRoomThumbnails()
+    const preview = document.createElement('xmf-room-preview')
+    preview.setAttribute('size', '160'); preview.setAttribute('data-room', JSON.stringify(data))
+    host.current?.replaceChildren(preview)
+    return () => preview.remove()
+  }, [data])
+  return <span ref={host} className="h-full w-full" aria-hidden="true" />
 }
 
 export default function HomeRoomPanel({ tile = 40 }: { tile?: number }) {

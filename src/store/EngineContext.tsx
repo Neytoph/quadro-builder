@@ -4,7 +4,7 @@ import {
   BuildModel, Builder, SceneManager, loadCatalog, computeBOM, compareInventory, connectorsForNode, computeSafety,
   parseQDF, parseDesign, designEntry, buildQDF, buildableTubes, buildableCurvedTubes, buildablePanels, tubeColors, allConnectors, accessories,
   panels, geometry, RANDOM_COLOR, docs, storage, setLang as setEngineLang, t as engineT,
-  computeBuildPlan, partsOfModel, textilePart,
+  computeBuildPlan, partsOfModel, partsOfData, textilePart,
 } from '../engine-api'
 import { useI18n } from '../i18n'
 import { onSyncEvent, syncSavedDoc, syncNow, syncProbe, syncStarted } from '../sync/bootstrap'
@@ -12,11 +12,14 @@ import { pushDocToServer, type PushDocOptions } from '../sync/docPublish'
 import { tabOpenedFrom, tabSavedAs } from '../sync/origin'
 import { pullDoc } from '../sync/docEntry'
 import { bootEntry, SESSIONLESS, VIEW_ONLY, type ResumeExport } from '../entry'
+import { slotLocked, updateSlotAccess } from '../sync/slotAccess'
+import { chooseSharing, SharingCancelled } from '../shareOptions'
 import { publishSharePage, sharePagesEnabled, stampFor, type ExportKind, type Stamp } from '../sharePage'
 import { statsOfModel } from '../designStats'
+import { createStatsQueue } from '../sync/statsQueue'
 import { geometricPreset, jsonToFragment } from '../data/presets'
 import pyramidQdf from '../data/A0128.qdf?raw'
-import { clearSharePayload, decodeShare, peekSharePayload, shareUrl } from '../share'
+import { clearSharePayload, decodeShare, peekSharePayload, shareUrl, productOnly } from '../share'
 import { isUntitledName, labelOf as nameLabel } from '../names'
 import { fetchOfficialQdf, officialCacheVersion, cachedOfficialQdf, officialLibId, OFFICIAL_BY_ID, parseOfficialId } from '../data/official'
 import { versionPublicSource } from '../engine/publicResources.js'
@@ -79,6 +82,11 @@ export interface SafetyResult {
 export type ThumbJob = { kind: 'official' | 'preset'; id: string } | { kind: 'model'; data: unknown }
 
 export interface TabInfo extends PersonalState {
+	 readOnly?: boolean
+	 slotLocked?: boolean
+	 libraryId?: string
+	 libraryRevision?: number
+	 libraryOwner?: string
   statsPending?: boolean
   tabId: string
   docId: string | null
@@ -454,6 +462,7 @@ type Tab = TabInfo & {
   idTag?: string
   /** 共享方案里的评论者和访客、交付查看：只能看 */
   readOnly?: boolean
+	 slotLocked?: boolean
 }
 
 // 只在内存中核对修改与成功快照；模型、名称和文档ID均不发送给统计服务。
@@ -508,8 +517,8 @@ function makeTab(seed: ModelJSON, name: string, docId: string | null): Tab {
 
 function persistPersonal(tab: Tab) {
   if (tab.planId || tab.readOnly || SESSIONLESS) return
-  const { docId, name, dirty, baseRev, savedContent, editGeneration, saveId, saveState, conflictDocId } = tab
-  writePersonalState(tab.local, { bindingVersion: 1, docId, name, dirty, baseRev, savedContent, editGeneration, saveId, saveState, conflictDocId })
+  const { docId, name, dirty, baseRev, savedContent, editGeneration, saveId, saveState, conflictDocId,libraryId,libraryRevision,libraryOwner } = tab
+  writePersonalState(tab.local, { bindingVersion: 1,libraryBindingVersion:1,libraryId,libraryRevision,libraryOwner, docId, name, dirty, baseRev, savedContent, editGeneration, saveId, saveState, conflictDocId })
 }
 
 /**
@@ -694,6 +703,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const [ready, setReady] = useState(false)
+  const libraryStatsQueue=useMemo(()=>createStatsQueue(),[])
+  useEffect(()=>()=>libraryStatsQueue.cancel(),[libraryStatsQueue])
   const [entryReady, setEntryReady] = useState(false)
   const completeEntry = useCallback(() => setEntryReady(true), [])
   const [error, setError] = useState<string | null>(null)
@@ -702,6 +713,34 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const [tabs, setTabs] = useState<TabInfo[]>([])
   const [activeTabId, setActiveTabId] = useState<string | null>(null)
   const [inventory, setInventory] = useState<Inventory>(loadInv)
+  useEffect(()=>{
+    if(!ready||!import.meta.env.VITE_SYNC_BASE||SESSIONLESS)return
+    let closed=false,pending=false
+    const refresh=async()=>{
+      if(pending||closed)return;pending=true
+      try{
+        const scope=String(storage.getAccountScope()),owner=scope.startsWith('user:')?scope.slice(5):null
+        if(!owner){updateSlotAccess([]);return}
+        const response=await fetch('/quadro/library',{credentials:'include',cache:'no-store',headers:{'X-Builder-User-ID':owner}})
+        if(!response.ok)throw new Error('Slot permissions '+response.status)
+        const result=await response.json()
+        if(closed||String(storage.getAccountScope())!==scope)return
+        updateSlotAccess(result.slots)
+        for(const tab of tabsRef.current){
+          if(tab.planId)continue
+          const locked=slotLocked(tab.docId,tab.libraryId)
+          if(locked){tab.slotLocked=true;tab.readOnly=true}
+          else if(tab.slotLocked){tab.slotLocked=false;tab.readOnly=false}
+        }
+        const tab=tabsRef.current.find(x=>x.tabId===activeRef.current)
+        if(tab)eng.current?.builder.setReadOnly(!!tab.readOnly)
+        syncTabsRef.current()
+      }catch(error){console.warn('[slot permissions]',error)}finally{pending=false}
+    }
+    void refresh();const timer=window.setInterval(()=>void refresh(),5000)
+    window.addEventListener('focus',refresh)
+    return()=>{closed=true;window.clearInterval(timer);window.removeEventListener('focus',refresh)}
+  },[ready])
   useEffect(() => {
     const refresh = () => setInventory(loadInv())
     const stop = storage.onInventoryChange(refresh)
@@ -742,7 +781,9 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
     if (!e || !tab || switching.current || thumbBatch.current || e.builder.busy()) return
     if (e.builder.history !== tab.local.history) return
-    tab.local.history.commit(JSON.stringify(tab.local.history.toJSON()), JSON.stringify(e.model.toJSON()))
+    const before=tab.local.history.toJSON(),after=e.model.toJSON() as ModelJSON
+    if(tab.libraryId&&modelContent(before)===modelContent(after))return
+    tab.local.history.commit(JSON.stringify(before), JSON.stringify(after))
   }, [])
 
   /**
@@ -764,7 +805,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       tabs: tabsRef.current.map(tb => ({
         tabId: tb.tabId, docId: tb.docId, name: tb.name, dirty: tb.dirty, planId: tb.planId, view: tb.view,
         baseRev: tb.baseRev, savedContent: tb.savedContent, editGeneration: tb.editGeneration, saveId: tb.saveId,
-        saveState: tb.saveState, conflictDocId: tb.conflictDocId,
+        saveState: tb.saveState, conflictDocId: tb.conflictDocId,libraryId:tb.libraryId,libraryRevision:tb.libraryRevision,libraryOwner:tb.libraryOwner,
       })),
       activeTabId: activeRef.current,
     }) as Promise<void>
@@ -778,8 +819,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
 
   const syncTabs = useCallback(() => {
     for (const tab of tabsRef.current) persistPersonal(tab)
-    setTabs(tabsRef.current.map(({ tabId, docId, name, dirty, planId, baseRev, savedContent, editGeneration, saveId, saveState, conflictDocId, statsPending }) =>
-      ({ tabId, docId, name, dirty, planId, baseRev, savedContent, editGeneration, saveId, saveState, conflictDocId, statsPending })))
+    setTabs(tabsRef.current.map(({ tabId, docId, name, dirty, planId, baseRev, savedContent, editGeneration, saveId, saveState, conflictDocId, statsPending,libraryId,libraryRevision,libraryOwner,readOnly,slotLocked }) =>
+      ({ tabId, docId, name, dirty, planId, baseRev, savedContent, editGeneration, saveId, saveState, conflictDocId, statsPending,libraryId,libraryRevision,libraryOwner,readOnly,slotLocked })))
     setActiveTabId(activeRef.current)
     persistSession()
   }, [persistSession])
@@ -864,7 +905,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   }, [flushModel, rememberTool])
 
   const reconcilePersonalNow = useCallback(async (tab: Tab, supplied?: AnyRec | null) => {
-    if (!tab.docId || tab.planId || tab.readOnly || SESSIONLESS) return
+    if (!tab.docId || tab.libraryId || tab.planId || tab.readOnly || SESSIONLESS) return
     if (tab.tabId === activeRef.current && eng.current?.builder.busy()) return
     if (tab.tabId === activeRef.current) snapshotActive()
     const originalId = tab.docId
@@ -1103,6 +1144,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
               saveId: tb.saveId,
               saveState: tb.saveState,
               conflictDocId: tb.conflictDocId,
+              libraryId:tb.libraryId,libraryRevision:tb.libraryRevision,libraryOwner:tb.libraryOwner,
             }
             mapped.push(restored.planId || restored.readOnly || SESSIONLESS ? restored
               : restorePersonalBinding(restored, readPersonalState(local)))
@@ -1659,6 +1701,19 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const e2 = eng.current
     const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
     if (!e2 || !tab || tab.readOnly) return null
+    if(tab.libraryId){
+      if(e2.builder.busy())return null
+      const data=structuredClone(exportTab(tab)),generation=tab.editGeneration||0
+      const binding={id:tab.libraryId,owner:tab.libraryOwner,revision:tab.libraryRevision}
+      let stats
+      try{stats=await libraryStatsQueue.compute(binding.id,data)}catch(error){console.warn('[library stats]',error);notify(t('sync.localFailed'),'err');return null}
+      const res=await fetch('/quadro/library/'+encodeURIComponent(binding.id)+'/native',{method:'PUT',credentials:'include',headers:{'Content-Type':'application/json','X-Builder-User-ID':binding.owner||''},body:JSON.stringify({name:name||tab.name,data,parts:partsOfData(data),stats,revision:binding.revision})})
+      if(!res.ok){if(res.status===423){tab.readOnly=true;e2.builder.setReadOnly(true)};notify(t('toast.srcFailed')+' ('+res.status+')','err');syncTabs();return null}
+      if(tab.libraryId!==binding.id||tab.libraryOwner!==binding.owner)return null
+      const result=await res.json() as {revision:number};tab.libraryRevision=result.revision
+      if((tab.editGeneration||0)===generation){tab.dirty=false;tab.savedContent=modelContent(data);tab.saveState='synced'}
+      syncTabs();return {docId:tab.libraryId,name:name||tab.name,data}
+    }
     if (tab.planId) {
       notify(t('collab.autoSynced'))
       return null
@@ -1797,6 +1852,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const e2 = eng.current
     const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
     if (!e2 || !tab) return
+    if(tab.readOnly||slotLocked(tab.docId,tab.libraryId,tab.planId)){notify(t('toast.srcFailed')+' (423)','err');return}
     if (e2.builder.busy()) { notify(t('sync.waiting'), 'warn'); return }
     const suggested = isUntitledName(tab.name) ? '' : await freeDocName(tab.name)
     const typed = await askName(t('saves.saveAsTitle'), t('saves.saveOk'), suggested)
@@ -1813,6 +1869,9 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     // 共享方案另存一份到「我的设计」：标签页还是那个方案
     const attached = !tab.planId && stillCurrent()
     if (attached) {
+      tab.libraryId = undefined
+      tab.libraryRevision = undefined
+      tab.libraryOwner = undefined
       tab.docId = saved.id
       if ((tab.editGeneration || 0) === generation) tab.name = saved.name
       tab.baseRev = Number(saved.rev || 0)
@@ -1837,6 +1896,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   }, [askName, freeDocName, notify, syncTabs, t])
 
   const duplicateDoc = useCallback(async (docId: string) => {
+    if(slotLocked(docId)){notify(t('toast.srcFailed')+' (423)','err');return}
     const doc = await docs.getDoc(docId) as AnyRec | null
     if (!doc) return
     const saved = await docs.saveDoc({ docId: null, name: await freeDocName(String(doc.name)), data: doc.data })
@@ -2069,6 +2129,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   }
 
   const copy = useCallback(() => {
+    if(builder?.readOnly){notify(t('toast.srcFailed')+' (423)','err');return}
     const frag = builder?.copySelection?.()
     if (!frag) { notify(t('toast.copyEmpty'), 'warn'); return }
     clipboard.current = frag
@@ -2205,6 +2266,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
    * 返回 true 表示这次导出先停下。开源本地版不设注册页，永远放行。
    */
   function needAccount(kind: ResumeExport) {
+    const tab=tabsRef.current.find(x=>x.tabId===activeRef.current)
+    if(tab?.readOnly||tab?.slotLocked||tab&&slotLocked(tab.docId,tab.libraryId,tab.planId)){notify(t('toast.srcFailed')+' (423)','err');return true}
     if (!import.meta.env.VITE_REGISTER_URL || syncStarted()) return false
     track('builder.export.gate', { kind })
     setAccountAsk({ kind, phase: 'register' })
@@ -2238,22 +2301,28 @@ export function EngineProvider({ children }: { children: ReactNode }) {
    * 导出前把这一座存成方案页，拿到印在文件上的网址和二维码。部署没接方案页就是 null。
    * 存不上就抛错：印一个打不开的二维码没有意义，这次导出跟着停下。
    */
-  async function makeStamp(kind: ExportKind, cover: string, preview?: ManualPreview): Promise<Stamp | null> {
+  async function makeStamp(kind: ExportKind, _cover: string, preview?: ManualPreview): Promise<Stamp | null> {
+    if(kind!=='link')return null
     if (!sharePagesEnabled()) return null
     const e2 = eng.current
     const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
     if (!e2 || !tab) throw new Error('no design')
+    const data=structuredClone(preview?.data||e2.model.toJSON()),title=preview?.name||tab.name
     await ensureAssemblyMeshes()
-    const stampModel = preview ? new BuildModel() : e2.model
-    if (preview && !stampModel.loadJSON(preview.data).ok) throw new Error('invalid frozen design')
+    const stampModel = new BuildModel()
+    if (!stampModel.loadJSON(data).ok) throw new Error('invalid frozen design')
     const b = stampModel.bounds(geometry().connectorSize / 2) as { size: number[] }
+    const sharing=await chooseSharing(!!stampModel.homeContext,lang)
+    const cover=await renderModelCover(sharing.attachRoom?data:productOnly(data))
+    if(!cover)throw new Error('cover shot failed')
     const url = await publishSharePage({
+      ...sharing,
       key: preview ? `${preview.tabId || 'manual'}-manual` : tab.docId || tab.tabId,
-      title: preview?.name || tab.name,
+      title,
       model: stampModel.toJSON(),
       parts: partsOfModel(stampModel) as Record<string, Record<string, number>>,
       size: [Math.round(b.size[0]), Math.round(b.size[2]), Math.round(b.size[1])],
-      steps: preview ? createAssemblyReadingPlan(stampModel, preview.plan).steps.length : (computeBuildPlan(e2.model, 'y+') as { steps: unknown[] }).steps.length,
+      steps: preview ? createAssemblyReadingPlan(stampModel, preview.plan).steps.length : (computeBuildPlan(stampModel, 'y+') as { steps: unknown[] }).steps.length,
       cover,
       stats: statsOfModel(stampModel),
     })
@@ -2554,8 +2623,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       let url: string
       try {
         url = await link
-      } catch {
-        notify(t('toast.linkFailed'), 'err')
+      } catch (error) {
+        if(!(error instanceof SharingCancelled))notify(t('toast.linkFailed'), 'err')
         // 已经说过没存上；剪贴板那头随后被拒是同一件事，不再另报
         void wrote.then(() => undefined, () => undefined)
         return
@@ -2593,6 +2662,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const e2 = eng.current
     const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
     if (!e2 || !tab) return
+    if(tab.readOnly||slotLocked(tab.docId,tab.libraryId,tab.planId)){notify(t('toast.srcFailed')+' (423)','err');return}
     if (e2.builder.busy()) { notify(t('sync.waiting'), 'warn'); return }
     const data = exportTab(tab)
     const generation = tab.editGeneration || 0
@@ -2602,6 +2672,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     tabSavedAs(tab.tabId, saved.id)
     const attached = stillCurrent()
     if (attached) {
+      tab.libraryId=undefined;tab.libraryRevision=undefined;tab.libraryOwner=undefined
       tab.docId = saved.id
       if ((tab.editGeneration || 0) === generation) tab.name = saved.name
       tab.baseRev = Number(saved.rev || 0)
@@ -2629,12 +2700,15 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     entryOpened.current = true
     void (async () => {
       let data: unknown = null
+      let libraryRevision:number|undefined,libraryOwner:string|undefined
       if (payload) {
         data = await decodeShare(payload)
         clearSharePayload()
       } else {
         const res = await fetch(versionPublicSource(ent.src as string), { credentials: 'include' })
         if (!res.ok) { track('builder.app.fail', { reason: 'source_http' }); notify(t('toast.srcFailed'), 'err'); return }
+        libraryRevision=Number(res.headers.get('X-Library-Revision')||0)||undefined
+        libraryOwner=res.headers.get('X-Builder-User-ID')||undefined
         try { data = designFromText(await res.text()) } catch { data = null }
       }
       if (!data) { track('builder.app.fail', { reason: 'source_format' }); notify(t('toast.shareInvalid'), 'err'); return }
@@ -2648,6 +2722,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
         bump()
       }
       const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
+      const library=ent.src?.match(/^\/quadro\/library\/([a-f0-9]+)\/native$/)
+      if(tab&&library&&libraryRevision){tab.libraryId=library[1];tab.libraryRevision=libraryRevision;tab.libraryOwner=libraryOwner;tab.dirty=false;tab.savedContent=modelContent(tab.local.history.toJSON());tab.saveState='synced'}
       if (tab && ent.name) {
         tab.name = ent.name
         syncTabs()

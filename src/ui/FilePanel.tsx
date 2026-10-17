@@ -33,22 +33,23 @@ export default function FilePanel() {
   // 共享方案随改随同步，没有「保存」；「另存为」存一份到自己的设计里
   const plan = collab.mode === 'plan'
   const active = api.tabs.find(tab => tab.tabId === api.activeTabId)
+  const locked=!!active?.slotLocked,contentReadOnly=locked||api.readOnly
 
   return (
     <div className="qb-file-panel">
       <section aria-labelledby="qb-file-start">
         <h2 id="qb-file-start" className="qb-file-section">{t('chrome.start')}</h2>
         {!plan && active && <div role="status" data-ui="file-save-status" className="text-xs text-amber-800 px-2 pb-2 leading-relaxed">
-          {t(`sync.${displaySaveState(active, active.dirty)}`)}
+          {locked?(lang==='de'?'Kapazität abgelaufen · schreibgeschützt':lang==='en'?'Capacity expired · read only':'容量已到期 · 只读'):t(`sync.${displaySaveState(active, active.dirty)}`)}
           {active.saveState === 'conflict' && active.conflictDocId && <button className="qb-file-row" onClick={() => void api.openDoc(active.conflictDocId!)}>{t('sync.viewLatest')}</button>}
           {active.saveState === 'failed' && <button className="qb-file-row" onClick={() => void api.retrySave(active.tabId)}>{t('sync.retry')}</button>}
         </div>}
-        {!plan && <button onClick={() => void api.saveCurrent()} className={`${btn} qb-file-primary`}><Save aria-hidden="true" /><span>{t('chrome.save')}</span><kbd>{t('chrome.saveShortcut')}</kbd></button>}
+        {!plan && <button disabled={contentReadOnly} onClick={() => void api.saveCurrent()} className={`${btn} qb-file-primary`}><Save aria-hidden="true" /><span>{t('chrome.save')}</span><kbd>{t('chrome.saveShortcut')}</kbd></button>}
         <div className="qb-file-two">
           <button onClick={() => { api.newTab(); api.notify(t('toast.newTab')) }} className={btn}><Plus aria-hidden="true" /><span>{t('btn.new')}</span></button>
           <button onClick={() => fileRef.current?.click()} className={btn}><Upload aria-hidden="true" /><span>{t('btn.import')}</span></button>
         </div>
-        <button onClick={() => void api.saveCurrentAs()} className="qb-file-row"><Save aria-hidden="true" /><span>{t('chrome.saveAs')}</span><kbd>{t('chrome.saveAsShortcut')}</kbd></button>
+        <button disabled={contentReadOnly} onClick={() => void api.saveCurrentAs()} className="qb-file-row"><Save aria-hidden="true" /><span>{t('chrome.saveAs')}</span><kbd>{t('chrome.saveAsShortcut')}</kbd></button>
         <button onClick={() => setBatch(true)} className="qb-file-row" data-ui="batch-open"><FolderInput aria-hidden="true" /><span>{t('batch.open')}<small>QDF</small></span></button>
         {syncConfigured() && <button disabled={backingUp} className="qb-file-row" onClick={() => {
           if (!window.confirm(t('saves.legacyBackupConfirm'))) return
@@ -62,13 +63,13 @@ export default function FilePanel() {
       <section aria-labelledby="qb-file-exports" className="qb-file-separated">
         <h2 id="qb-file-exports" className="qb-file-section">{t('chrome.export')}</h2>
         <div className="qb-file-export-grid">
-          <button onClick={api.exportPng} className="qb-file-export" title={t('btn.exportPng')}><Image aria-hidden="true" /><strong>{t('chrome.image')}</strong><small>{t('chrome.imageHint')}</small></button>
-          <button onClick={api.exportJson} className="qb-file-export" title={t('btn.exportJson')}><FileJson aria-hidden="true" /><strong>{t('chrome.backup')}</strong><small>{t('chrome.backupHint')}</small></button>
-          <button onClick={api.exportQdf} className="qb-file-export" title={t('btn.exportQdf')}><Box aria-hidden="true" /><strong>{t('chrome.original')}</strong><small>{t('chrome.originalHint')}</small></button>
-          <button onClick={() => void api.exportAssemblyPdf()} disabled={!!api.exportingManual} aria-busy={!!api.exportingManual} className="qb-file-export" title={t('btn.exportManual')}><BookOpen aria-hidden="true" /><strong>{t('chrome.manual')}</strong><small>{t('chrome.manualHint')}</small></button>
+          <button disabled={contentReadOnly} onClick={api.exportPng} className="qb-file-export" title={t('btn.exportPng')}><Image aria-hidden="true" /><strong>{t('chrome.image')}</strong><small>{t('chrome.imageHint')}</small></button>
+          <button disabled={contentReadOnly} onClick={api.exportJson} className="qb-file-export" title={t('btn.exportJson')}><FileJson aria-hidden="true" /><strong>{t('chrome.backup')}</strong><small>{t('chrome.backupHint')}</small></button>
+          <button disabled={contentReadOnly} onClick={api.exportQdf} className="qb-file-export" title={t('btn.exportQdf')}><Box aria-hidden="true" /><strong>{t('chrome.original')}</strong><small>{t('chrome.originalHint')}</small></button>
+          <button onClick={() => void api.exportAssemblyPdf()} disabled={contentReadOnly||!!api.exportingManual} aria-busy={!!api.exportingManual} className="qb-file-export" title={t('btn.exportManual')}><BookOpen aria-hidden="true" /><strong>{t('chrome.manual')}</strong><small>{t('chrome.manualHint')}</small></button>
         </div>
         {api.modelColors.some(hex => !officialHexes.has(hex)) && <p className="text-xs text-gray-300 leading-relaxed px-2 mt-2">{colorStrings[lang].export}</p>}
-        <button onClick={() => void api.shareCurrent()} className="qb-file-row"><Link aria-hidden="true" /><span>{t('btn.share')}</span></button>
+        <button disabled={contentReadOnly} onClick={() => void api.shareCurrent()} className="qb-file-row"><Link aria-hidden="true" /><span>{t('btn.share')}</span></button>
       </section>
       {batch && <BatchImport onClose={() => setBatch(false)} />}
       {legacy && <Modal onClose={() => setLegacy(null)} label={t('saves.legacyBackup')}>

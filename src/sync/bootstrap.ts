@@ -2,6 +2,7 @@ import { track } from '../analytics/track'
 import { storage } from '../engine-api'
 import { createSync, QuotaError } from './index'
 import type { SavedDocSyncResult, StatsSnapshot, SyncEvent } from './types'
+import { clearSlotAccess } from './slotAccess'
 
 let started = false
 let initialized = false
@@ -55,6 +56,7 @@ export function startSyncIfConfigured(onEvent?: (e: SyncEvent) => void, onUnauth
   if (!baseUrl || initialized) return live
   initialized = true
   storage.setAccountScope(null)
+  clearSlotAccess()
   let initialId: string | null = null
   const resetIdentity = () => {
     window.dispatchEvent(new Event('quadro-account-invalidated'))
@@ -86,6 +88,7 @@ export function startSyncIfConfigured(onEvent?: (e: SyncEvent) => void, onUnauth
       initialId = await initialIdentity
       if (initialId) {
         storage.setAccountScope(initialId)
+        clearSlotAccess()
         sessionStorage.removeItem('quadro.sync.gate-recheck')
         if (enableSync) live = createSync({ baseUrl, accountId: initialId, onIdentityChange: resetIdentity, onEvent: e => {
           if (e.type === 'error') console.warn('[sync]', e.error)

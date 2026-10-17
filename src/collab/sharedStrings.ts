@@ -1,5 +1,6 @@
 export const sharedStrings = {
   zh: {
+    'collab.create.attachRoom':'附带房间快照',
     'collab.join.invited': '{who}邀请你加入「{name}」',
     'collab.readOnly.guest': '{owner}的共享方案。通过创建人的邀请链接登录加入后，可按授权参与。',
     'collab.readOnly.login': '登录',
@@ -63,6 +64,7 @@ export const sharedStrings = {
     'collab.create.joined': '你已加入，权限：{role}',
   },
   en: {
+    'collab.create.attachRoom':'Attach room snapshot',
     'collab.join.invited': '{who} invited you to join “{name}”',
     'collab.readOnly.guest': '{owner}’s shared plan. Sign in through the creator’s invitation to join with the granted permission.',
     'collab.readOnly.login': 'Sign in',
@@ -126,6 +128,7 @@ export const sharedStrings = {
     'collab.create.joined': 'You have joined with permission: {role}',
   },
   de: {
+    'collab.create.attachRoom':'Raumschnappschuss beifügen',
     'collab.join.invited': '{who} lädt dich ein, „{name}“ beizutreten',
     'collab.readOnly.guest': 'Gemeinsamer Plan von {owner}. Über die Einladung des Erstellers anmelden und mit der erteilten Berechtigung beitreten.',
     'collab.readOnly.login': 'Anmelden',

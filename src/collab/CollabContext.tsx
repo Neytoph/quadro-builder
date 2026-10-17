@@ -17,6 +17,8 @@ import { memoryDoc } from './localDocs'
 import { docToJSON, type ModelJSON } from './ymodel'
 import { diffBom, diffModels, type BomDiffRow, type ModelDiff } from './compare'
 import { ScopedRequests } from './scopedRequests'
+import { renderModelCover } from '../store/modelCover'
+import { slotLocked } from '../sync/slotAccess'
 
 export type CollabMode = 'off' | 'plan' | 'delivery' | 'room' | 'snapshot'
 
@@ -107,7 +109,7 @@ interface CollabApi {
   room: RoomState | null
   saveRoom: (room: Room) => Promise<void>
   /** 点击时复制当前实际造型，服务端创建独立方案。 */
-  enableSharing: (name: string, blank: boolean) => Promise<void>
+  enableSharing: (name: string, blank: boolean, attachRoom?: boolean) => Promise<void>
   createdPlan: { id: string; name: string; coverError?: string } | null
   recoverCreatedPlan: () => void
   retryCover: () => Promise<void>
@@ -222,6 +224,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
       if (joining && (!entry.plan || planId === entry.plan)) continue
       loading.current.add(planId)
       collabApi.plan(planId).then((plan) => {
+        if(plan.viewOnly){setTabAccess(tabId,{readOnly:true,idTag:''});if(activePlanId===planId)location.replace('/model-preview.html?plan='+encodeURIComponent(planId));return}
         const local = tabLocal(tabId)
         if (!local) return
         const s = new PlanSession(plan, local)
@@ -243,7 +246,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
   useEffect(() => () => { for (const s of sessions.current.values()) s.destroy() }, [])
 
   // 角色变了（重连后取到新的方案信息）：能不能编辑跟着变
-  const canEdit = !!session && canEditRole(session.plan.myRole)
+  const canEdit = !!session && !session.plan.viewOnly && canEditRole(session.plan.myRole)
   useEffect(() => {
     if (!session || !activeTab) return
     setTabAccess(activeTab.tabId, { readOnly: !canEdit, idTag: session.idTag })
@@ -296,6 +299,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
       try {
         if (entry.version && entry.plan) {
           const v = await collabApi.version(entry.plan, entry.version)
+          if(v.viewOnly){location.replace('/model-preview.html?plan='+encodeURIComponent(entry.plan)+'&version='+encodeURIComponent(entry.version));return}
           const m = new BuildModel()
           if (!m.loadJSON(v.data).ok) throw new Error(t('collab.badModel'))
           const scene = engine()?.scene
@@ -307,6 +311,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
         }
         if (entry.delivery) {
           const d = await collabApi.delivery(entry.delivery)
+          if(d.viewOnly){location.replace('/model-preview.html?delivery='+encodeURIComponent(entry.delivery));return}
           const m = new BuildModel()
           if (!m.loadJSON(d.data).ok) throw new Error(t('collab.badModel'))
           api.attachDoc({ local: memoryDoc(m.toJSON() as ModelJSON), name: String(d.planName || ''), readOnly: true })
@@ -336,6 +341,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
         }
         if (!entry.plan) return
         const plan = await collabApi.plan(entry.plan)
+        if(plan.viewOnly){location.replace('/model-preview.html?plan='+encodeURIComponent(plan.id));return}
         api.openPlanTab(plan.id, plan.name)
       } catch (err) {
         setJoining(false)
@@ -673,19 +679,21 @@ export function CollabProvider({ children }: { children: ReactNode }) {
     notify(t('collab.create.coverSaved'))
   }, [notify, t])
 
-  const enableSharing = useCallback(async (name: string, blank: boolean) => {
+  const enableSharing = useCallback(async (name: string, blank: boolean, attachRoom=false) => {
     if (creating.current) return
     if (createdRef.current) { recoverCreatedPlan(); return }
     const current = engine()
     if (!activeTab || !current || !api.entryReady) throw new Error(t('collab.loading'))
+    if(api.readOnly||slotLocked(activeTab.docId,activeTab.libraryId,activeTab.planId))throw new Error(t('collab.readOnly.guestTitle'))
     const trimmed = name.trim()
     if (!trimmed || Array.from(trimmed).length > 40) throw new Error(t('collab.create.nameLimit'))
     // 任何 await 之前锁定实际引擎画面，包含未保存的编辑。
     const data = structuredClone((blank ? new BuildModel() : current.model).toJSON()) as ModelJSON
+    if(!attachRoom)delete data.homeContext
     const body = exportOf(data, trimmed)
     creating.current = true
     try {
-      const cover = blank ? null : await shotRef.current.coverShot()
+      const cover = blank ? null : await renderModelCover(data)
       const result = await collabApi.createPlan({ ...body, ...(blank ? {} : { sourceName: activeTab.name }), ...(cover ? { cover } : {}) })
       const created = { id: result.id, name: trimmed, ...(result.coverError ? { coverError: result.coverError } : {}) }
       createdRef.current = created

@@ -59,6 +59,7 @@ export function EnableShareModal({ onClose }: { onClose: () => void }) {
   const [busy, setBusy] = useState(false)
   const source = api.tabs.find(tab => tab.tabId === api.activeTabId)?.name || ''
   const [blank, setBlank] = useState(bootEntry().blank)
+  const [attachRoom,setAttachRoom]=useState(false)
   const initialName = (isBlank: boolean) => Array.from(isBlank ? t('collab.create.blankName') : t('collab.create.copyName', { name: source })).slice(0, 40).join('')
   const [name, setName] = useState(() => initialName(bootEntry().blank))
   const [failure, setFailure] = useState('')
@@ -68,7 +69,7 @@ export function EnableShareModal({ onClose }: { onClose: () => void }) {
     setBusy(true)
     setFailure('')
     try {
-      await collab.enableSharing(name, blank)
+      await collab.enableSharing(name, blank,attachRoom&&!blank)
       onClose()
     } catch (err) {
       setFailure(errText(err))
@@ -86,6 +87,7 @@ export function EnableShareModal({ onClose }: { onClose: () => void }) {
         </div>
         {!blank && <div className="cb-source"><Copy /><div><b>{source}</b><p>{t('collab.create.sourceHint')}</p></div></div>}
         <form onSubmit={e => { e.preventDefault(); void go() }}>
+          {!blank&&<label className="cb-independent"><input type="checkbox" checked={attachRoom} onChange={event=>setAttachRoom(event.target.checked)} disabled={busy||!api.engine()?.model.homeContext}/>{t('collab.create.attachRoom')}</label>}
           <label className="cb-field"><span>{t('collab.create.name')}</span><input autoFocus value={name} onChange={e => setName(Array.from(e.target.value).slice(0, 40).join(''))} disabled={busy} required data-ui="create-name" autoComplete="off" /></label>
           <p className="cb-independent"><Copy />{t('collab.create.independent')}</p>
           {failure && <p className="cb-action-error" role="alert">{failure}</p>}

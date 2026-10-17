@@ -11,6 +11,7 @@ import { docs, storage, partsOfData } from '../engine-api'
 import { cachedStats, rememberStats } from '../designStats'
 import { ENGINE_VERSION } from '../engine/publicResources.js'
 import { createStatsQueue } from './statsQueue'
+import { slotLocked } from './slotAccess'
 import { forgetOrigin, originOf } from './origin'
 import type {
   DesignParts, DocRecord, PullResponse, PushResponse, RemoteDoc, RemoteInventory,
@@ -220,7 +221,7 @@ export function createSync(opts: SyncOptions = {}) {
    */
   async function push(): Promise<void> {
     const all = (await docs.allRecords()) as DocRecord[]
-    const queue = all.filter((d) => d.dirty)
+    const queue = all.filter((d) => d.dirty && !slotLocked(d.id))
     const queued = new Set(queue.map(doc => doc.id))
     for (const doc of queue) {
       active()
@@ -308,7 +309,8 @@ export function createSync(opts: SyncOptions = {}) {
     active()
     if (!Number.isSafeInteger(rev) || rev < since || !Array.isArray(items)
       || items.some(item => !item.id || !Number.isSafeInteger(item.rev) || item.rev > rev || item.rev <= since)) throw new Error('invalid models pull snapshot')
-    const n = await docs.applyRemoteBatch(items, rev)
+    // 锁定记录不替换本地模型或未提交草稿；续租后由新修订重新拉取。
+    const n = await docs.applyRemoteBatch(items.filter(item=>!item.locked), rev)
     active()
     emit({ type: 'pulled', count: n, rev })
   }

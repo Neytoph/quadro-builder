@@ -32,6 +32,8 @@ export interface Stamp {
 }
 
 export interface SharePageInput {
+	allowImport?: boolean
+	attachRoom?: boolean
   key: string
   title: string
   model: unknown
@@ -52,7 +54,7 @@ export async function publishSharePage(input: SharePageInput): Promise<string> {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({ ...input, model: productOnly(input.model) }),
+    body: JSON.stringify({ ...input, model: input.attachRoom ? input.model : productOnly(input.model) }),
   })
   if (!res.ok) throw new Error(`share page → ${res.status}`)
   const body = (await res.json()) as { url?: string }

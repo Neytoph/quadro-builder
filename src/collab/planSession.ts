@@ -5,7 +5,7 @@
 // 断网时的修改先存着，连上以后自动合并。
 //
 // 服务端还没有任何更新记录（新建的方案）时，第一次连上以后编辑者用 quadro_plans.data
-// 生成文档交上去；访客和评论者在自己这边生成一份用来查看，服务端会丢掉他们的更新。
+// 生成文档交上去；访客和评论者通过独立展示资源查看，不建立模型同步连接。
 
 import * as Y from 'yjs'
 import { WebsocketProvider } from 'y-websocket'
@@ -109,12 +109,14 @@ export class PlanSession {
    */
   activity: Array<{ key: string; user: PeerUser; s: EditSummary; shown: boolean }> = []
   private activityTimers = new Map<string, number>()
+  private permissionTimer: number | null = null
 
   /** 连上一个共享方案。文档是它那个标签页的（存在本机），这里只管连接和在线状态。 */
   constructor(plan: Plan, local: LocalDoc) {
     this.plan = plan
     this.id = plan.id
     this.local = local
+    this.permissionTimer=window.setInterval(()=>void this.refresh().catch(()=>{this.plan={...this.plan,myRole:'guest',viewOnly:true};this.provider.disconnect();this.emit()}),5000)
     this.idTag = `c${local.doc.clientID.toString(36)}_`
     this.provider = new WebsocketProvider(wsServerUrl(), 'ws', local.doc, {
       params: { plan: plan.id },
@@ -155,7 +157,7 @@ export class PlanSession {
     // 连上时交给服务器的是完整状态，断网期间的修改一起合并进去。
     // 不等 y-websocket 自己 30 秒收不到消息才发现
     this.onOffline = () => this.provider.disconnect()
-    this.onOnline = () => this.provider.connect()
+    this.onOnline = () => { void this.refresh().then(() => { if(this.canEdit)this.provider.connect() }).catch(() => { this.provider.disconnect();this.emit() }) }
     window.addEventListener('offline', this.onOffline)
     window.addEventListener('online', this.onOnline)
     this.setUser()
@@ -207,7 +209,7 @@ export class PlanSession {
     })
   }
 
-  get canEdit() { return canEditRole(this.plan.myRole) }
+  get canEdit() { return !this.plan.viewOnly&&canEditRole(this.plan.myRole) }
 
   get canDeliver() {
     const me = this.plan.me
@@ -270,7 +272,10 @@ export class PlanSession {
 
   /** 方案和自己的角色再取一遍（重连以后、角色调整以后）。 */
   async refresh() {
+    const wasLocked=!!this.plan.viewOnly
     this.plan = await collabApi.plan(this.id)
+    if(this.plan.viewOnly||!canEditRole(this.plan.myRole))this.provider.disconnect()
+    else if(wasLocked)this.provider.connect()
     this.setUser()
     this.emit()
   }
@@ -320,6 +325,7 @@ export class PlanSession {
 
   /** 断开（标签页关了）。文档归标签页管，这里不动。 */
   destroy() {
+    if(this.permissionTimer)window.clearInterval(this.permissionTimer)
     window.removeEventListener('offline', this.onOffline)
     window.removeEventListener('online', this.onOnline)
     metaMap(this.local.doc).unobserve(this.onMeta)
