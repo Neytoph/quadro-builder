@@ -1,8 +1,39 @@
 import { BuildModel, SceneManager, loadCatalog } from '../engine-api'
 import { waitSceneReady } from '../engine/thumbShot.js'
 import { applyFrameHex, loadTune } from '../engine/colorTune.js'
+import { Raycaster, Vector2, type Mesh, type Object3D } from 'three'
 
 let queue: Promise<unknown> = Promise.resolve()
+
+function frameCover(scene: InstanceType<typeof SceneManager>, model: InstanceType<typeof BuildModel>, bounds: {min:number[];max:number[]}) {
+  const options={silent:true,aspect:4/3,margin:1.2,bounds:{...bounds,size:bounds.max.map((n,axis)=>n-bounds.min[axis])}}
+  if (!scene._homeGroup?.visible) {scene.frameFromYaw(model,0,options);return}
+  const ray=new Raycaster(),point=new Vector2()
+  // 用真实几何检查家具遮挡，只调整取景方向，不改变造型与房间的位置。
+  let bestYaw=0,bestScore=-1
+  for (const yaw of [0,Math.PI/2,Math.PI,Math.PI*1.5]) {
+    scene.frameFromYaw(model,yaw,options)
+    scene._homeGroup.userData.updateWalls(scene.camera)
+    scene.scene.updateMatrixWorld(true);scene.camera.updateMatrixWorld(true)
+    let score=0
+    for(let x=0;x<10;x++)for(let y=0;y<10;y++){
+      ray.setFromCamera(point.set((x+.5)/10*1.6-.8,(y+.5)/10*1.6-.8),scene.camera)
+      for(const hit of ray.intersectObjects([scene.buildGroup,scene._homeGroup],true)){
+        const mesh=hit.object as Mesh
+        if(!mesh.isMesh)continue
+        let visible=true,isModel=false
+        for(let object:Object3D|null=mesh;object;object=object.parent){if(!object.visible)visible=false;if(object===scene.buildGroup)isModel=true}
+        const material=Array.isArray(mesh.material)?mesh.material[hit.face?.materialIndex||0]:mesh.material
+        if(!visible || material?.transparent&&material.opacity<.95)continue
+        if(isModel)score++
+        break
+      }
+    }
+    if(score>bestScore){bestScore=score;bestYaw=yaw}
+  }
+  scene.frameFromYaw(model,bestYaw,options)
+  scene._homeGroup.userData.updateWalls(scene.camera)
+}
 
 /** 独立模型与场景生成保存快照封面；标签切换与实时编辑不会改变这次截图。 */
 export function renderModelCover(data: unknown): Promise<string | null> {
@@ -33,8 +64,7 @@ export function renderModelCover(data: unknown): Promise<string | null> {
       if (!await waitSceneReady(scene)) throw new Error('cover meshes timed out')
       scene.renderModel(model, null)
       const bounds = scene.homeProductBounds()
-      if (bounds) scene.frameFromYaw(model, 0, { silent: true, aspect: 4 / 3, margin: 1.2,
-        bounds: { ...bounds, size: bounds.max.map((n: number, axis: number) => n - bounds.min[axis]) } })
+      if (bounds) frameCover(scene,model,bounds)
       else if (model.homeContext) scene.frameHome()
       return scene.snapshot({ hideGrid: true, hideLabels: true, hideRoom: false,
         width: 480, height: 360, pixelRatio: 2, mime: 'image/jpeg', quality: .88 })
