@@ -709,7 +709,7 @@ export function buildQDF(model, opts = {}) {
     }
     // Eingelesene Platte: sie liegt da, wo die Datei sie hinschreibt. Auf
     // Schraegen weicht die aus dem Rohrpaar gerechnete Mitte um bis zu 1,2 cm ab.
-    if (p.geom && p.geom.p && p.geom.quat) {
+    if (p.geom && p.geom.p && p.geom.quat && !p.params?.screwAxis) {
       const g = p.geom;
       // Reihenfolge wie in der Datei: `w` ist das ERSTE Mass (lokale Y-Achse),
       // `h` das zweite -- so hat der Import sie gelesen. Andersherum kam jede
@@ -719,8 +719,10 @@ export function buildQDF(model, opts = {}) {
       continue;
     }
     const def = getPanel(p.panelId);
+    const rail=model._rail(p.a),fixing=p.params?.screwAxis && model._rail(p.mounts?.[0]?.tube);
+    const turned=fixing && rail ? Math.abs(fixing.dir.reduce((sum,v,i)=>sum+v*rail.dir[i],0))<.999 : !!p.turned;
     const line = rectLine("panel2", model.panelCorners(p), panelMat(color, lochplatte(p)),
-      def ? [def.w, def.h] : null, p.side, !!p.turned);
+      def ? [def.w, def.h] : null, p.side, turned);
     if (line) { lines.push(line); stats.panels++; }
   }
   for (const x of (model.textiles ? model.textiles.values() : [])) {

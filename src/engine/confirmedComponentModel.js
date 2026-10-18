@@ -1,6 +1,8 @@
 import { confirmedSpec, legoStudHeight } from './componentPack.js';
-import { INSET_PANEL_IDS, INSET_MOUNT_LAYOUT, hasInsetScrews, oppositeScrewSupports, insetScrewVolumes, insetPanelReference, insetPanelProbes } from './insetPanelMounts.js';
+import { INSET_PANEL_IDS, INSET_MOUNT_LAYOUT, INSET_PANEL_EDGE_INSET, hasInsetScrews, oppositeScrewSupports, insetScrewVolumes, insetPanelReference, insetPanelProbes } from './insetPanelMounts.js';
+import { geometry } from './catalog.js';
 import { quatFromBasis, xAxisOf, yAxisOf, zAxisOf } from './util.js';
+import { panelScrewPose, panelScrewAxes, panelLipSegments, PANEL_SCREW_RADIUS, PANEL_SCREW_HEAD_DEPTH, PANEL_SCREW_SHAFT_RADIUS, PANEL_SCREW_SHAFT_LENGTH, PANEL_OUTER_FACE, PANEL_CORNER_RELIEF } from './panelScrewMounts.js';
 
 export const cSub = (a, b) => a.map((v, i) => v - b[i]);
 export const cDot = (a, b) => a.reduce((s, v, i) => s + v * b[i], 0);
@@ -44,7 +46,7 @@ export function confirmedFrame(model, part) {
   let z=unit(cross(x,y));
   if(Math.abs(z[1])<0.01) {
     // 竖直平面内的斜框保留实际框边；方板选更朝上的边作为高度轴。
-    if(Math.abs(spec.width-spec.height)<0.5 && !hasInsetScrews(part) && Math.abs(x[1])>Math.abs(y[1]))[x,y]=[y,x];
+    if(Math.abs(spec.width-spec.height)<0.5 && Math.abs(x[1])>Math.abs(y[1]))[x,y]=[y,x];
     if(y[1]<0)y=y.map(v=>-v);
     z=unit(cross(unit(cSub(cor[1],cor[0])),unit(cSub(cor[3],cor[0]))));
     x=unit(cross(y,z));
@@ -62,13 +64,18 @@ export function cVolume(frame,lo,hi) {return {pos:localToWorld(frame,lo.map((v,i
 
 function edgeSupports(model, corners, density=0, coverage=null) {
   const supportTubes=new Set(),mounts=[];
+  const rails=[];
+  for(const tube of model.tubes.values()){
+    const rail=model._rail(tube.id);if(rail)rails.push({rail,tube});
+  }
   for(let i=0;i<4;i++) {
     const a=corners[i],b=corners[(i+1)%4],d=unit(cSub(b,a)),L=Math.hypot(...cSub(b,a)),spans=[];
-    for(const tube of model.tubes.values()) {
-      const rail=model._rail(tube.id);if(!rail || Math.abs(cDot(rail.dir,d))<0.999)continue;
-      const delta=cSub(rail.p0,a),start=cDot(delta,d);
-      if(Math.hypot(...cSub(delta,d.map(v=>v*start)))>0.35)continue;
-      const end=start+rail.len*cDot(rail.dir,d),lo=Math.max(0,Math.min(start,end)),hi=Math.min(L,Math.max(start,end));
+    for(const {rail,tube} of rails) {
+      const alignment=rail.dir[0]*d[0]+rail.dir[1]*d[1]+rail.dir[2]*d[2];
+      if(Math.abs(alignment)<0.999)continue;
+      const dx=rail.p0[0]-a[0],dy=rail.p0[1]-a[1],dz=rail.p0[2]-a[2],start=dx*d[0]+dy*d[1]+dz*d[2];
+      if(Math.hypot(dx-d[0]*start,dy-d[1]*start,dz-d[2]*start)>0.35)continue;
+      const end=start+rail.len*alignment,lo=Math.max(0,Math.min(start,end)),hi=Math.min(L,Math.max(start,end));
       if(hi>lo+0.01)spans.push({rail,tube,lo,hi});
     }
     spans.sort((a,b)=>a.lo-b.lo);let reach=0;
@@ -89,6 +96,17 @@ export function panelEdgeCoverage(model,corners) {
   const coverage=[];edgeSupports(model,corners,0,coverage);return coverage;
 }
 
+export function supportsPanelFixing(panelId) {
+  const spec=confirmedSpec(panelId);
+  return panelId==='panel_40x40_busy' || spec?.placement==='panel' && spec.feature!=='basketball';
+}
+
+export function panelRailScrewAxis(model,probe,frame=confirmedFrame(model,probe)) {
+  const rail=model._rail(probe.a);
+  if(!frame || !rail)return null;
+  return Math.abs(cDot(rail.dir,frame.axes[0]))>.999 ? 'horizontal' : 'vertical';
+}
+
 export function confirmedPanelDiagnostics(model,probe,{legacyInset=false,screwAxis=probe.params?.screwAxis || 'vertical'}={}) {
   const spec=confirmedSpec(probe.panelId); if(!spec)return bad('frame_size',probe);
   const cor=model.panelCorners(probe);if(!cor)return bad('missing_support',probe);
@@ -97,11 +115,18 @@ export function confirmedPanelDiagnostics(model,probe,{legacyInset=false,screwAx
   const normal=unit(cross(cSub(cor[1],cor[0]),cSub(cor[3],cor[0])));
   if(spec.mountType==='horizontal-frame' && Math.abs(normal[1])<0.999)return bad('horizontal_frame',probe);
   const inset=INSET_PANEL_IDS.has(spec.id),legacy=legacyInset || (probe.appearanceVersion===2 && Array.isArray(probe.mounts) && probe.params?.mountLayout==null);
-  if(inset && !['vertical','horizontal'].includes(screwAxis))return bad('missing_support',probe);
+  if((inset || probe.params?.screwAxis!=null) && !['vertical','horizontal'].includes(screwAxis))return bad('missing_support',probe);
   const frameForSupports=confirmedFrame(model,probe);
-  const supports=inset && !legacy ? oppositeScrewSupports(model,frameForSupports,spec.width,spec.height,{screwAxis}) : edgeSupports(model,cor);
+  let supports=inset && !legacy ? oppositeScrewSupports(model,frameForSupports,spec.width,spec.height,{screwAxis}) : edgeSupports(model,cor);
   if(!supports)return bad(inset && !legacy?'opposite_edges':'four_edges',probe);
+  // 外扣板仍检查完整四边，扣件只落在用户选中的两条对边。
+  if(!inset && supportsPanelFixing(spec.id) && probe.params?.screwAxis!=null){
+    const opposite=oppositeScrewSupports(model,frameForSupports,spec.width,spec.height,{screwAxis});
+    if(!opposite)return bad('opposite_edges',probe);
+    supports={...supports,mounts:opposite.mounts.map(m=>({...m,role:'retainer',width:2}))};
+  }
   const result={...probe,...supports,appearanceVersion:2,params:{...spec},valid:true,reason:null};
+  if(!inset && probe.params?.screwAxis!=null)result.params.screwAxis=screwAxis;
   if(inset && !legacy){
     Object.assign(result,insetPanelReference(model,frameForSupports,spec.width,spec.height,supports,{screwAxis}));
     if(probe.appearanceVersion!==2 || probe.params?.screwAxis!=null)result.params.screwAxis=screwAxis;
@@ -221,7 +246,8 @@ export function confirmedCandidates(model,id,options={}) {
   const spec=confirmedSpec(id);if(!spec)return [];
   if(spec.placement==='panel') {
     const fake={...spec,placement:'fitting'};
-    const candidates=railCandidates(model,fake,{...options,deduplicate:false}).map(p=>confirmedPanelDiagnostics(model,{a:p.a,b:p.b,t0:p.t0,len:p.len,panelId:spec.id,side:1},options));
+    const fixing=options.screwAxis && (options.oppositeRetainers || INSET_PANEL_IDS.has(id)) && supportsPanelFixing(id) ? {params:{screwAxis:options.screwAxis}} : {};
+    const candidates=railCandidates(model,fake,{...options,deduplicate:false}).map(p=>confirmedPanelDiagnostics(model,{a:p.a,b:p.b,t0:p.t0,len:p.len,panelId:spec.id,side:1,...fixing},options));
     const inset=INSET_PANEL_IDS.has(spec.id);
     if(!inset || !options.legacyInset){
       const seen=new Set(candidates.map(p=>model.panelCorners(p)?.map(c=>c.map(v=>v.toFixed(2)).join(',')).sort().join('|')));
@@ -232,7 +258,7 @@ export function confirmedCandidates(model,id,options={}) {
       else if(!inset && spec.width!==spec.height)sizes.push([spec.height,spec.width]);
       for(const [width,height] of sizes)for(const probe of insetPanelProbes(model,width,height,{segmentedOnly:!inset})){
         const key=model.panelCorners(probe)?.map(c=>c.map(v=>v.toFixed(2)).join(',')).sort().join('|');if(seen.has(key))continue;
-        const candidate=confirmedPanelDiagnostics(model,{...probe,panelId:spec.id,side:1,...(inset?{params:{mountLayout:INSET_MOUNT_LAYOUT,screwAxis:options.screwAxis||'vertical'}}:{})},options);
+        const candidate=confirmedPanelDiagnostics(model,{...probe,panelId:spec.id,side:1,...fixing,...(inset?{params:{mountLayout:INSET_MOUNT_LAYOUT,screwAxis:options.screwAxis||'vertical'}}:{})},options);
         if(candidate.valid){candidates.push(candidate);seen.add(key);}
       }
     }
@@ -292,7 +318,7 @@ export function confirmedStructuralValid(model,part) {
     if((key==='width'||key==='height'?size[key]:spec[key])!==part.params?.[key])return false;
   }
   if(INSET_PANEL_IDS.has(spec.id) && part.params?.mountLayout!=null && part.params.mountLayout!==INSET_MOUNT_LAYOUT)return false;
-  if(INSET_PANEL_IDS.has(spec.id) && part.params?.screwAxis!=null && !['vertical','horizontal'].includes(part.params.screwAxis))return false;
+  if(part.params?.screwAxis!=null && !['vertical','horizontal'].includes(part.params.screwAxis))return false;
   if(spec.feature==='lego' && part.params?.studHeight!=null && part.params.studHeight!==spec.studHeight)return false;
   if(spec.feature==='rope') {
     if(part.mounts.length!==2 || part.mounts.some(m=>m.role!=='knot' || m.width!==1))return false;
@@ -310,13 +336,44 @@ export function confirmedStructuralValid(model,part) {
 export function confirmedVolumes(model,part) {
   const body=componentBodyVolumes(model,part),frame=confirmedFrame(model,part),spec=confirmedSpec(part.panelId||part.kind||part.partId);
   if(hasInsetScrews(part))return [...body,...insetScrewVolumes(model,part,frame)];
-  if(!frame || !spec || !['acrylic','acrylic_holes','capsule','basketball','grid','sector','bridge'].includes(spec.feature))return body;
+  if(frame && part.params?.screwAxis && supportsPanelFixing(part.panelId)){
+    const worldAxes=axes=>axes.map(axis=>frame.axes[0].map((_,i)=>frame.axes.reduce((sum,a,k)=>sum+a[i]*axis[k],0)));
+    for(const segment of panelLipSegments(part))body.push({pos:localToWorld(frame,segment.point),axes:worldAxes(segment.axes),half:segment.half});
+    for(const mount of part.mounts || []){
+      const pose=panelScrewPose(model,part,frame,mount);if(!pose)continue;
+      const {normal}=pose,axes=worldAxes(panelScrewAxes(pose));
+      const at=distance=>localToWorld(frame,pose.point.map((v,i)=>v+normal[i]*distance));
+      body.push({pos:at(-.033),axes,half:[PANEL_SCREW_RADIUS,PANEL_SCREW_RADIUS,PANEL_SCREW_HEAD_DEPTH/2+.002]});
+      body.push({pos:at(-.1-PANEL_SCREW_SHAFT_LENGTH/2),axes,half:[PANEL_SCREW_SHAFT_RADIUS,PANEL_SCREW_SHAFT_RADIUS,PANEL_SCREW_SHAFT_LENGTH/2]});
+    }
+    return body;
+  }
+  if(!frame || !spec || !(part.params?.screwAxis || ['acrylic','acrylic_holes','capsule','basketball','grid','sector','bridge'].includes(spec.feature)))return body;
   // 外露扣体和螺丝也占空间；承载管由调用方排除，但邻近其他管不能穿过扣体。
   for(const mount of Array.isArray(part.mounts)?part.mounts:[]) {
     if(!mount)continue;const point=curvePoint(model,mount.tube,mount.t);if(!point)continue;
     const p=worldToLocal(frame,point);body.push(cVolume(frame,[p[0]-1.5,p[1]-1.5,p[2]+2.25],[p[0]+1.5,p[1]+1.5,p[2]+4.3]));
   }
   return body;
+}
+
+function outerPanelBodyVolumes(frame,spec) {
+  const x=spec.width/2,y=spec.height/2,r=PANEL_CORNER_RELIEF,z=PANEL_OUTER_FACE,boxes=[];
+  const add=(x0,y0,x1,y1)=>boxes.push({...cVolume(frame,[x0,y0,z-geometry().panelThickness],[x1,y1,z]),roundTubeClearance:true});
+  add(-x+r,-y,x-r,y);add(-x,-y+r,x,y-r);
+  // 在原16条保守盒体内继续切分，避免扩大任何旧碰撞区域。
+  // 每段平方跨度至多r²/32，到角心至少r*sqrt(31/32)，保留49mm圆管的让位间隙。
+  const bands=16,maxSquaredSpan=r*r/32;
+  for(const sx of [-1,1])for(const sy of [-1,1])for(let i=0;i<bands;i++){
+    const lo=r*i/bands,hi=r*(i+1)/bands,span=hi*hi-lo*lo;
+    const steps=Math.ceil(span/maxSquaredSpan-1e-10);
+    for(let j=0;j<steps;j++){
+      const a=Math.sqrt(lo*lo+span*j/steps),b=Math.sqrt(lo*lo+span*(j+1)/steps),c=Math.sqrt(Math.max(0,r*r-b*b));
+      const xx=[sx*(x-a),sx*(x-b)].sort((a,b)=>a-b),yy=[sy*(y-c),sy*(y-r)].sort((a,b)=>a-b);
+      add(xx[0],yy[0],xx[1],yy[1]);
+    }
+  }
+  return boxes;
 }
 
 function componentBodyVolumes(model,part) {
@@ -335,10 +392,16 @@ function componentBodyVolumes(model,part) {
     const x=unit(cSub(cor[1],cor[0])),y=unit(cSub(cor[3],cor[0])),z=cross(x,y);
     return rungPositions(part.len).map(position=>({pos:center([cor[0],cor[3]]).map((v,i)=>v+x[i]*position),axes:[x,y,z],half:[3,Math.hypot(...cSub(cor[3],cor[0]))/2-3,3]}));
   }
-  if(spec.feature==='basketball')return [cVolume(frame,[-17.5,-17.5,1],[17.5,17.5,3]),cVolume(frame,[-10,-32,5],[10,1,30])];
+  if(spec.feature==='basketball')return [...outerPanelBodyVolumes(frame,spec),cVolume(frame,[-10,-32,5],[10,1,30])];
+  if(hasInsetScrews(part)){
+    const x=spec.width/2-INSET_PANEL_EDGE_INSET,y=spec.height/2-INSET_PANEL_EDGE_INSET,z=geometry().panelThickness/2;
+    const body=[cVolume(frame,[-x-.06,-y-.06,-z],[x+.06,y+.06,z])];
+    if(spec.feature==='capsule')body.push(cVolume(frame,[-16.18,-16.18,-.18],[16.18,16.18,16]));
+    return body;
+  }
   if(spec.feature==='capsule')return [cVolume(frame,[-16,-16,1.7],[16,16,18.3])];
   if(spec.feature==='basin')return [cVolume(frame,[-17,-17,-8],[17,17,2.4]),cVolume(frame,[-20.5,-15,1.2],[20.5,15,2.4]),cVolume(frame,[-15,-20.5,1.2],[15,20.5,2.4])];
   if(spec.placement==='fitting')return [cVolume(frame,[-spec.width/2+3,-spec.height/2+3,-1],[spec.width/2-3,spec.height/2-3,1])];
   const depth=spec.feature==='lego' ? (legoStudHeight(part)>0.7?4.5:3.7) : ({clock:5.9,maze:5.9,climbing:5.8,felt:3.9,magnet:6.2,sensory:3.2})[spec.feature] || 3.3;
-  return [cVolume(frame,[-spec.width/2+5,-spec.height/2+1.3,1.5],[spec.width/2-5,spec.height/2-1.3,depth]),cVolume(frame,[-spec.width/2+1.3,-spec.height/2+5,1.5],[spec.width/2-1.3,spec.height/2-5,depth])];
+  return [...(spec.feature==='sensory'?[]:outerPanelBodyVolumes(frame,spec)),cVolume(frame,[-spec.width/2+5,-spec.height/2+1.3,1.5],[spec.width/2-5,spec.height/2-1.3,depth]),cVolume(frame,[-spec.width/2+1.3,-spec.height/2+5,1.5],[spec.width/2-1.3,spec.height/2-5,depth])];
 }

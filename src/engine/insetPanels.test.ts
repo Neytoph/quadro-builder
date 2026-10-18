@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import * as THREE from 'three'
 import { BuildModel } from './model.js'
-import { loadCatalog, buildableTubes } from './catalog.js'
+import { loadCatalog, buildableTubes, geometry } from './catalog.js'
 import { createConfirmedComponentFixture } from './confirmedComponentExample.js'
 import { createOriginalAccessoryExample } from './accessoryExample.js'
 import { confirmedColor } from './componentPack.js'
@@ -10,10 +10,12 @@ import { confirmedFrame, localToWorld } from './confirmedComponentModel.js'
 import { componentMountsValid, componentObstacle, componentVolumes, componentFrame, mountPoint } from './accessoryPack.js'
 import { confirmedComponentMeshes } from './confirmedComponentMeshes.js'
 import { insetScrewMeshes } from './insetPanelMeshes.js'
-import { INSET_PANEL_IDS, INSET_MOUNT_LAYOUT } from './insetPanelMounts.js'
+import { INSET_PANEL_IDS, INSET_MOUNT_LAYOUT, INSET_PANEL_EDGE_INSET, insetScrewPose } from './insetPanelMounts.js'
+import { panelAccessoryMeshes } from './accessoryMeshes.js'
 import { computeSafety } from './safety.js'
 
 beforeAll(async()=>{await loadCatalog()})
+// JavaScript模型仍使用动态记录；any只用于核对其尚未声明的测试字段。
 const scene=()=>({_materials:{},_cachedGeo:(_key:string,make:()=>THREE.BufferGeometry)=>make()})
 const fixture=(id:string)=>{
   if(id!=='panel_40x40_busy')return createConfirmedComponentFixture(id)
@@ -22,6 +24,57 @@ const fixture=(id:string)=>{
 }
 const selection=(model:BuildModel)=>new Map([...model.nodes.keys()].map(id=>[id,'node']))
 const record=(model:BuildModel,id:string)=>[...model.panels.values()].find((p:any)=>p.panelId===id) as any
+describe('内嵌板卡在管子中心平面的米白色窄夹口中',()=>{
+  it.each([...INSET_PANEL_IDS].flatMap(id=>['vertical','horizontal'].map(axis=>[id,axis])))('%s %s固定边的板面、夹口及碰撞位置一致',(id,axis)=>{
+    const {model,part:raw}=fixture(id),part=raw as any
+    expect(model.setPanelFixing(part.id,axis)).toBe(true)
+    const frame=componentFrame(model,part)!,cache=scene(),clips=insetScrewMeshes(cache,model,part,frame)
+    const local=(v:THREE.Vector3)=>frame.axes.map(a=>v.clone().sub(new THREE.Vector3(...frame.pos)).dot(new THREE.Vector3(...a)))
+    expect(clips.some(m=>m.name.startsWith('inset-screw-slot:') || m.name.startsWith('inset-screw-tab:'))).toBe(false)
+    const jaws=clips.filter(m=>m.name.startsWith('inset-screw-jaw-'))
+    expect(jaws).toHaveLength(8)
+    expect(clips.some(m=>m.name.startsWith('inset-screw-head:'))).toBe(false)
+    for(const jaw of jaws){
+      jaw.geometry.computeBoundingBox()
+      expect(jaw.geometry.boundingBox!.getSize(new THREE.Vector3()).y).toBeCloseTo(1.2)
+    }
+    for(const clip of clips){
+      const material=clip.material as THREE.MeshPhysicalMaterial
+      expect(material.color.getHexString()).toBe('eee5d0');expect(material.transparent).toBe(false)
+      const volume=componentVolumes(model,part).find(box=>clip.position.distanceTo(new THREE.Vector3(...box.pos))<.001)!
+      expect(volume).toBeTruthy()
+      const vertices=clip.geometry.getAttribute('position')
+      for(let i=0;i<vertices.count;i++){
+        const delta=new THREE.Vector3().fromBufferAttribute(vertices,i).applyQuaternion(clip.quaternion).add(clip.position).sub(new THREE.Vector3(...volume.pos))
+        volume.axes.forEach((a:number[],k:number)=>expect(Math.abs(delta.dot(new THREE.Vector3(...a)))).toBeLessThanOrEqual(volume.half[k]+.001))
+      }
+    }
+    const thickness=geometry().panelThickness
+    for(const mount of part.mounts){
+      const pose=insetScrewPose(model,frame,mount)!
+      expect(pose.position[2]).toBeCloseTo(0)
+      const pair=jaws.filter(m=>m.name.endsWith(`${mount.tube}:${mount.t}`))
+      const limits=pair.map(mesh=>{
+        const position=local(mesh.position);mesh.geometry.computeBoundingBox()
+        return [position[2]+mesh.geometry.boundingBox!.min.z,position[2]+mesh.geometry.boundingBox!.max.z]
+      }).sort((a,b)=>a[0]-b[0])
+      expect(limits[0][1]).toBeLessThan(-thickness/2)
+      expect(limits[1][0]).toBeGreaterThan(thickness/2)
+    }
+    const meshes=id==='panel_40x40_busy'?panelAccessoryMeshes(cache,model,part):confirmedComponentMeshes(cache,model,part)
+    const boards=id==='panel_40x40_busy'?meshes.slice(0,1):meshes.filter(m=>m.name.startsWith('plate:') || m.name.startsWith('grid-'))
+    expect(boards.length).toBeGreaterThan(0)
+    const bounds=new THREE.Box3()
+    for(const mesh of boards){
+      const vertices=mesh.geometry.getAttribute('position')
+      for(let i=0;i<vertices.count;i++)bounds.expandByPoint(new THREE.Vector3(...local(new THREE.Vector3().fromBufferAttribute(vertices,i).applyQuaternion(mesh.quaternion).add(mesh.position))))
+    }
+    expect(bounds.min.z).toBeCloseTo(-thickness/2,3);expect(bounds.max.z).toBeCloseTo(thickness/2,3)
+    expect(bounds.max.x).toBeLessThanOrEqual(part.params.width/2-INSET_PANEL_EDGE_INSET+.061)
+    expect(bounds.max.y).toBeLessThanOrEqual(part.params.height/2-INSET_PANEL_EDGE_INSET+.061)
+    expect(componentMountsValid(model,part)).toBe(true);expect(componentObstacle(model,part)).toBeNull()
+  })
+})
 describe('八类内嵌件两边四螺丝与原生兼容',()=>{
   it.each([...INSET_PANEL_IDS])('%s 新安装真实两条对边、四固定点及生命周期',id=>{
     const {model,part:raw}=fixture(id),part=raw as any,frame=componentFrame(model,part)!
@@ -35,7 +88,7 @@ describe('八类内嵌件两边四螺丝与原生兼容',()=>{
     expect(new Set(part.supportTubes)).toEqual(new Set(part.mounts.map((m:any)=>m.tube)))
     expect(componentMountsValid(model,part)).toBe(true);expect(componentObstacle(model,part)).toBeNull()
     const fasteners=insetScrewMeshes(scene(),model,part,frame)
-    expect(fasteners.filter(m=>m.name.startsWith('inset-screw-head:'))).toHaveLength(4)
+    expect(fasteners.filter(m=>m.name.startsWith('inset-screw-head:'))).toHaveLength(0)
     for(const mesh of fasteners){
       mesh.geometry.computeBoundingBox();expect(mesh.geometry.boundingBox!.max.z).toBeLessThan(1.3)
     }

@@ -1,4 +1,15 @@
+import {geometry} from './catalog.js';
+
+// 保存键兼容已有模型；当前固定件为管内侧的米白色卡槽螺丝。
 export const INSET_MOUNT_LAYOUT='opposite-transparent-screws';
+export const INSET_PANEL_EDGE_INSET=2.8;
+export function insetClipParts() {
+  const gap=geometry().panelThickness+.04,flange=.4;
+  return [
+    {name:'shaft',shape:'cylinder',pos:[2,0,0],half:[.7,.48,.48]},
+    ...[-1,1].map(side=>({name:side<0?'jaw-back':'jaw-front',shape:'box',pos:[3.4,0,side*(gap+flange)/2],half:[.75,.6,flange/2]})),
+  ];
+}
 export const INSET_PANEL_IDS=new Set(['acrylic_panel_40x40','acrylic_panel_40x20','acrylic_panel_40x60','acrylic_hole_panel_40x40','acrylic_platform_40x40','panel_40x40_capsule','panel_40x40_grid','panel_40x40_busy']);
 const sub=(a,b)=>a.map((v,i)=>v-b[i]);
 const dot=(a,b)=>a.reduce((n,v,i)=>n+v*b[i],0);
@@ -8,9 +19,10 @@ const local=(frame,p)=>frame.axes.map(a=>dot(sub(p,frame.pos),a));
 export function hasInsetScrews(part) {return INSET_PANEL_IDS.has(part.panelId) && part.params?.mountLayout===INSET_MOUNT_LAYOUT;}
 
 // 连续边管用于查找矩形候选；调用方分别核对普通板四边或内嵌板安装条件。
-export function insetPanelProbes(model,width,height,{deduplicate=true,segmentedOnly=false}={}) {
+export function insetPanelProbes(model,width,height,{deduplicate=true,segmentedOnly=false,onlyRailId=null}={}) {
   const rails=[...model.tubes.values()].flatMap(t=>{const rail=model._rail(t.id);return rail?[{...rail,id:t.id}]:[];}),out=[],seen=new Set();
   for(const rail of rails){
+    if(onlyRailId && rail.id!==onlyRailId)continue;
     if(segmentedOnly && rail.len>=height-.35)continue;
     const starts=new Set(),intervals=[];
     for(const span of rails){
@@ -99,11 +111,11 @@ export function insetScrewPose(model,frame,mount) {
 }
 
 export function insetScrewVolumes(model,part,frame) {
-  const lower=part.panelId==='panel_40x40_busy' ? .9 : 1.95,out=[];
+  const out=[];
   for(const mount of part.mounts || []){
     const pose=insetScrewPose(model,frame,mount);if(!pose)continue;
-    const {position,inward,tangent}=pose,front=(lower+3.25)/2;
-    out.push({pos:at(frame,position.map((v,i)=>v+inward[i]*1.2+(i===2?front:0))),axes:[inward,tangent,[0,0,1]].map(axis=>frame.axes[0].map((_,i)=>frame.axes.reduce((n,a,k)=>n+a[i]*axis[k],0))),half:[2,.95,(3.25-lower)/2]});
+    const {position,inward,tangent}=pose,axes=[inward,tangent,[0,0,1]].map(axis=>frame.axes[0].map((_,i)=>frame.axes.reduce((n,a,k)=>n+a[i]*axis[k],0)));
+    for(const clip of insetClipParts())out.push({pos:at(frame,position.map((v,i)=>v+inward[i]*clip.pos[0]+tangent[i]*clip.pos[1]+(i===2?clip.pos[2]:0))),axes,half:clip.half});
   }
   return out;
 }

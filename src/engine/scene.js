@@ -1,6 +1,9 @@
 // 3D-Szene + Rendering (Three.js). Kennt das Modell nur zum Zeichnen.
 
 import * as THREE from "three";
+import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
+import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import { createHomeEnvironment, disposeHome, setHomeZonesVisible } from '../home/environment.js';
 import { HOME_STYLE } from '../home/visuals.js';
 import { ACCESSORY_IDS, PANEL_ACCESSORY_IDS, componentVolumes } from './accessoryPack.js';
@@ -22,6 +25,8 @@ import { preferPanelCell } from "./pickcell.js";
 import { resolveNodeConnection, hasStandaloneFileC45 } from "./bom.js";
 import { DEFAULT_TUNE, DEFAULT_GRADE, gradeHex, displayHex } from "./colorTune.js";
 import { createOutdoorVisuals, OUTDOOR_AREA } from './outdoor.js';
+import { PanelPlacementGuides } from './panelPlacementGuides.js';
+import { PANEL_OUTER_FACE, PANEL_CORNER_RELIEF } from './panelScrewMounts.js';
 
 const outdoor = createOutdoorVisuals(THREE);
 
@@ -456,6 +461,7 @@ export class SceneManager {
   _renderMainScene() {
     // 模型、家具和地面共用当前场景的灯光、色调映射与阴影。
     // 室内使用房间灯光；切换背景及隐藏房间导出由 _applyHomeStyle 统一处理。
+    this._panelPlacementGuides?.update(this.camera, this._appearing, this._sceneOn ? 'grass' : 'home');
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -591,6 +597,7 @@ export class SceneManager {
     this.scene.add(this.labelGroup);
     this.scene.add(this._hoverPartGroup);
     this.scene.add(this._roomGroup);
+    this._panelPlacementGuides = new PanelPlacementGuides(this.scene);
     // 动效：删掉的零件在这里退场；_appearing 按零件记着还没长完的入场，
     // 中途重画（点一下选中也会重画）时接着原来的进度走，不会一下跳到终点。
     this._motion = false;
@@ -630,6 +637,9 @@ export class SceneManager {
     this._hoverPartExtra = null;
     this._hoverPartExtraKey = "";
     this._hoverPartMode = null;
+    this._hoverPartKind = null;
+    this._hoverPartHinge = null;
+    this._hoverPartProfile = false;
     this._hoverMat = new THREE.Matrix4();
     this._panning = false;
 
@@ -676,6 +686,10 @@ export class SceneManager {
 
   /** 不再用的画面（版本对照关掉时）：停下渲染循环，放掉渲染器和画布。 */
   dispose() {
+    this._clearHoverOverlay();
+    this.clearPanelPlacementPreview();
+    this._clearPanelPlacementFlash();
+    this._panelPlacementGuides.dispose();
     this._disposed = true;
     for (const controller of this._meshRequests.values()) controller.abort();
     this._meshRequests.clear();
@@ -1212,10 +1226,10 @@ export class SceneManager {
         sh.mapSize.set(size, size);
         if (sh.map) { sh.map.dispose(); sh.map = null; }
       }
-      // 按阴影像素的世界尺寸沿法线偏移，避免平板表面出现自身阴影斜纹。
+      // PCF会取周围阴影像素，偏移覆盖两像素足迹，避免薄板及管面出现自身阴影斜纹。
       const camera = sh.camera;
       const texel = Math.max(camera.right - camera.left, camera.top - camera.bottom) / size;
-      sh.normalBias = Math.max(0.08, texel * 0.5);
+      sh.normalBias = Math.max(0.08, texel * 2);
     }
     this._shadowsDirty();
   }
@@ -1714,17 +1728,18 @@ export class SceneManager {
   // mit ausgestanzten Kreisen extrudiert.
   // Wichtig: Der Cache muss in _disposeGroup ausgenommen werden, sonst gibt der
   // naechste Render-Durchlauf die noch benutzte Geometrie frei.
-  // 标准板边缘到达管轴；特殊板保留原有间隙，接头位置仍由角部让位避开。
+  // 旧版外扣功能板也沿普通板的外宽与接头让位，内嵌件保留独立轮廓。
   _panelGeometry(panelId, wSpan, dSpan, thickness) {
     const standard = ['panel_40x40', 'panel_40x20', 'panel_30x30', 'hole_panel_40x40'].includes(panelId);
-    const gap = standard ? 0 : PANEL_GAP;
+    const squareCorners = !standard && !!confirmedSpec(panelId)?.mountLayout;
+    const gap = squareCorners ? PANEL_GAP : 0;
     const w = Math.max(1, wSpan - gap);
     const d = Math.max(1, dSpan - gap);
     const def = getPanel(panelId);
     const holes = (def && def.holes) || 0;
     const acrylic = !!(def && def.acrylic);
     const seg = this._q().notch;
-    const key = `${holes}:${acrylic ? "a" : ""}:${seg}:${w.toFixed(2)}x${d.toFixed(2)}x${thickness}`;
+    const key = `${holes}:${acrylic ? "a" : ""}:${squareCorners ? 'square' : 'notched'}:${seg}:${w.toFixed(2)}x${d.toFixed(2)}x${thickness}`;
     const hit = this._panelGeos.get(key);
     if (hit) return hit;
 
@@ -1732,7 +1747,7 @@ export class SceneManager {
     // connectorSize und steht mit seiner halben Kantenlaenge um den Knoten --
     // genau so gross ist die quadratische Aussparung. Bei sehr kleinen Platten
     // gedeckelt, damit nicht mehr Ecke fehlt als Platte bleibt.
-    const notch = Math.min((geometry().connectorSize || 5) / 2, Math.min(w, d) / 4);
+    const notch = Math.min(PANEL_CORNER_RELIEF, Math.min(w, d) / 4);
     const x0 = -w / 2, x1 = w / 2, y0 = -d / 2, y1 = d / 2;
     // Die Aussparung ist ein Viertelkreis um den Eckpunkt. Der Umriss laeuft
     // gegen den Uhrzeigersinn, die Boegen dagegen -- so schneiden sie in die
@@ -1747,15 +1762,19 @@ export class SceneManager {
       shape.lineTo(sx + (ex - cx), sy + (ey - cy));   // innere Ecke des Quadrats
       shape.lineTo(ex, ey);
     };
-    shape.moveTo(x0 + notch, y0);
-    shape.lineTo(x1 - notch, y0);
-    corner(x1, y0, Math.PI);
-    shape.lineTo(x1, y1 - notch);
-    corner(x1, y1, -HALF);
-    shape.lineTo(x0 + notch, y1);
-    corner(x0, y1, 0);
-    shape.lineTo(x0, y0 + notch);
-    corner(x0, y0, HALF);
+    if (squareCorners) {
+      shape.moveTo(x0, y0);shape.lineTo(x1, y0);shape.lineTo(x1, y1);shape.lineTo(x0, y1);
+    } else {
+      shape.moveTo(x0 + notch, y0);
+      shape.lineTo(x1 - notch, y0);
+      corner(x1, y0, Math.PI);
+      shape.lineTo(x1, y1 - notch);
+      corner(x1, y1, -HALF);
+      shape.lineTo(x0 + notch, y1);
+      corner(x0, y1, 0);
+      shape.lineTo(x0, y0 + notch);
+      corner(x0, y0, HALF);
+    }
     shape.closePath();
     if (holes === 9) {
       const r = Math.min(w, d) * 0.105;   // Lochradius ~4 cm im 40er-Feld
@@ -2466,6 +2485,62 @@ export class SceneManager {
     });
     this._installationGroup = null;
     this.requestRender();
+  }
+
+  clearPanelPlacementPreview() {
+    if (this._panelPlacementPreview) {
+      this._panelPlacementPreview.removeFromParent();
+      this._panelPlacementPreview.traverse(o => { if (o.material) o.material.dispose(); });
+      this._panelPlacementPreview = null;
+      this.requestRender();
+    }
+    if (this._panelPlacementGuides.setHover(null)) this.requestRender();
+  }
+
+  showPanelPlacementPreview(model, part, railId) {
+    this.clearPanelPlacementPreview();
+    this._panelPlacementGuides.setHover(railId);
+    if (!part?.mounts?.length) { this.requestRender(); return; }
+    const group = new THREE.Group();
+    group.name = 'panel-placement-preview';
+    for (const mesh of panelAccessoryMeshes(this, model, part)) {
+      mesh.material = mesh.material.clone();
+      mesh.material.transparent = true;
+      mesh.material.opacity = .32;
+      mesh.material.depthWrite = false;
+      mesh.material.depthTest = false;
+      mesh.renderOrder = 1000;
+      mesh.castShadow = false; mesh.receiveShadow = false;
+      if (!part.valid) mesh.material.color.set('#e03131');
+      group.add(mesh);
+    }
+    this._panelPlacementPreview = group;
+    this.scene.add(group);
+    this.requestRender();
+  }
+
+  flashPlacedPanel(model, id) {
+    if (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const corners = model.panelCorners(model.panels.get(id));
+    if (!corners) return;
+    this._clearPanelPlacementFlash();
+    const center = new THREE.Vector3(...corners[0]).add(new THREE.Vector3(...corners[2])).multiplyScalar(.5);
+    const points = corners.map(p => new THREE.Vector3(...p).sub(center).multiplyScalar(.91).add(center));
+    points.push(points[0]);
+    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), new THREE.LineBasicMaterial({
+      color: '#f88929', transparent: true, opacity: 1, depthTest: false, depthWrite: false, toneMapped: false,
+    }));
+    line.name = 'panel-placement-success'; line.renderOrder = 1002;
+    this.scene.add(line);
+    this._panelPlacementFlash = { id, line, start: performance.now() };
+    this.requestRender();
+  }
+
+  _clearPanelPlacementFlash() {
+    if (!this._panelPlacementFlash) return;
+    const { line } = this._panelPlacementFlash;
+    line.removeFromParent(); line.geometry.dispose(); line.material.dispose();
+    this._panelPlacementFlash = null;
   }
 
   showInstallationPreview(model, part, valid = true) {
@@ -3905,6 +3980,13 @@ export class SceneManager {
   // assembly.transforms 只移动场景碎片，保存的模型位置保持不变。
   renderModel(model, selectedNodeId, opts = {}) {
     this._renderModel = model;   // 有的配件要回头看模型（软包滚筒套在哪根管上）
+    if (opts.interactionMode) {
+      if (opts.interactionMode === 'select' || opts.interactionMode === 'delete') this._hoverPartMode = opts.interactionMode;
+      else this._clearHoverOverlay();
+    }
+    this.clearPanelPlacementPreview();
+    if (this._panelPlacementFlash && (!opts.panelPlacementMode || !model.panels.has(this._panelPlacementFlash.id))) this._clearPanelPlacementFlash();
+    this._panelPlacementGuides.setRails(model, opts.panelPlacementRails, opts.focusId);
     // 开着动效的时候旧零件先摘下来不释放：画完新的才知道哪些被删了，要给它们留影子。
     const vorher = this._motion ? this.buildGroup.children.slice() : null;
     if (vorher) for (const c of vorher) this.buildGroup.remove(c);
@@ -3951,12 +4033,15 @@ export class SceneManager {
     const matFor = (id, base, keepOpaque = false) => {
       if (invalid && id != null && invalid.has(id)) return this._invalidMaterial(base);
       if (opts.reinforce && opts.suggest?.has(id)) return this._suggestMaterial(base);
-      if (focusId != null && id === focusId) return this._focusMaterial(base);
+      if (!opts.panelPlacementRails && focusId != null && id === focusId) return this._focusMaterial(base);
       if (highlight && id != null && highlight.has(id)) {
         return focusId != null ? this._partnerMaterial(base) : this._selectedMaterial(base);
       }
       if (marked) {
-        if (id != null && marked.has(id)) return this._selectedMaterial(base);
+        if (id != null && marked.has(id)) {
+          if (!highlight && opts.preserveSelectionAppearance) return base;
+          return this._selectedMaterial(base);
+        }
         if (dimOthers) return keepOpaque ? base : this._dimmedMaterial(base);
       }
       if (tints && id != null && tints.has(id)) {
@@ -4613,7 +4698,7 @@ export class SceneManager {
           "panel", p.id, this.pickPanels);
         continue;
       }
-      const lift = (geometry().tubeRadius || 2.45) - thickness / 2;
+      const lift = (confirmedSpec(p.panelId)?.mountLayout ? geometry().tubeRadius : PANEL_OUTER_FACE) - thickness / 2;
       const sgn = (p.side || 1) < 0 ? -1 : 1;
       center.add(new THREE.Vector3(nrm[0], nrm[1], nrm[2]).multiplyScalar(lift * sgn));
       const geo = this._panelGeometry(p.panelId, u.length(), w.length(), thickness);
@@ -4880,6 +4965,7 @@ export class SceneManager {
     this._applyZoomLimits(model);
 
     if (vorher) this._motionAfterRender(vorher, opts);
+    if (opts.preserveSelectionAppearance && selected && !highlight) this._outlineSelectedParts(selected, opts.profileSelection);
     if (this._homeFramePending && this._homeFramePending === this._homeKey) this.frameHomeProduct();
 
     // Der Szenegraph ist neu -> Schattenkarte einmal nachziehen.
@@ -5848,7 +5934,7 @@ export class SceneManager {
       this._clipList = this._clipPlane ? [this._clipPlane] : [];
     }
     for (const key of Object.keys(this._materials)) this._clipMaterial(this._materials[key]);
-    for (const group of [this.buildGroup, this.handleGroup, this.labelGroup, this._hoverPartGroup]) {
+    for (const group of [this.buildGroup, this.handleGroup, this.labelGroup, this._hoverPartGroup, this._panelPlacementGuides?.group].filter(Boolean)) {
       group.traverse((o) => { if (o.material) this._clipMaterial(o.material); });
     }
   }
@@ -6153,14 +6239,21 @@ export class SceneManager {
     const id = pick && pick.data && pick.data.id != null ? pick.data.id : null;
     const extra = extraIds && extraIds.length ? extraIds : null;
     const extraKey = extra ? extra.join(",") : "";
-    if (id !== this._hoverPartId || extraKey !== this._hoverPartExtraKey) {
+    const kind = pick?.data?.kind || null;
+    const hinge = pick?.data?.hinge ?? null;
+    const profile = !!pick?.data?.tubes?.length;
+    const modeChanged = mode !== this._hoverPartMode;
+    this._hoverPartMode = mode || null;
+    if (id !== this._hoverPartId || extraKey !== this._hoverPartExtraKey || modeChanged || kind !== this._hoverPartKind || hinge !== this._hoverPartHinge || profile !== this._hoverPartProfile) {
       this._hoverPartId = id;
+      this._hoverPartKind = kind;
+      this._hoverPartHinge = hinge;
+      this._hoverPartProfile = profile;
       this._hoverPartExtra = extra;
       this._hoverPartExtraKey = extraKey;
       this._rebuildHoverOverlay(id, extra);
       this._needsRender = true;
     }
-    this._hoverPartMode = mode || null;
     if (mode === "delete" && id != null) {
       this.setCursor("delete-x");
       this._setDeleteX(true, clientX, clientY);
@@ -6174,12 +6267,15 @@ export class SceneManager {
   _clearHoverOverlay() {
     const g = this._hoverPartGroup;
     if (!g) return;
-    while (g.children.length) g.remove(g.children[0]);
+    this._clearHoverGeometry();
     if (this._hoverPartId != null) this._needsRender = true;
     this._hoverPartId = null;
     this._hoverPartExtra = null;
     this._hoverPartExtraKey = "";
     this._hoverPartMode = null;
+    this._hoverPartKind = null;
+    this._hoverPartHinge = null;
+    this._hoverPartProfile = false;
     this.container.classList.remove("qb-cursor-delete");
     this._setDeleteX(false);
   }
@@ -6187,13 +6283,22 @@ export class SceneManager {
   _rebuildHoverOverlay(id, extraIds) {
     const g = this._hoverPartGroup;
     if (!g) return;
-    while (g.children.length) g.remove(g.children[0]);
+    this._clearHoverGeometry();
     if (id == null) return;
     const ids = new Set([id, ...(extraIds || [])]);
+    const matches = data => {
+      if (!data || !ids.has(data.id)) return false;
+      if (data.id !== id) return true;
+      if (this._hoverPartKind && data.kind !== this._hoverPartKind) return false;
+      if (data.kind === 'tube' && !!data.tubes?.length !== this._hoverPartProfile) return false;
+      return (data.hinge ?? null) === this._hoverPartHinge;
+    };
     const tmp = this._hoverMat;
     const add = (geo, mat, world) => {
       if (!geo || !mat) return;
-      const m = new THREE.Mesh(geo, this._hoverMaterial(mat));
+      const m = this._hoverPartMode === 'select'
+        ? this._partOutline(geo, false) : new THREE.Mesh(geo, this._hoverMaterial(mat));
+      if (!m) return;
       m.matrix.copy(world);
       m.matrixAutoUpdate = false;
       m.raycast = () => {};
@@ -6202,21 +6307,98 @@ export class SceneManager {
       m.renderOrder = 8;
       g.add(m);
     };
+    const pieces = [];
     this.buildGroup.traverse((o) => {
       if (o.isInstancedMesh) {
         const list = (o.userData && o.userData.instances) || [];
         for (let i = 0; i < list.length; i++) {
-          if (!list[i] || !ids.has(list[i].id)) continue;
+          if (!matches(list[i])) continue;
           o.getMatrixAt(i, tmp);
-          add(o.geometry, o.material, tmp.clone().premultiply(o.matrixWorld));
+          pieces.push({ geo: o.geometry, mat: o.material, world: tmp.clone().premultiply(o.matrixWorld) });
         }
         return;
       }
-      if (o.isMesh && o.userData && ids.has(o.userData.id) && o.userData.role !== "water") {
-        add(o.geometry, o.material, o.matrixWorld);
+      if (o.isMesh && matches(o.userData) && o.userData.role !== "water") {
+        pieces.push({ geo: o.geometry, mat: o.material, world: o.matrixWorld });
       }
     });
+    const minSize = this._hoverPartMode === 'select'
+      ? Math.max(0, ...pieces.map(p => this._partOutlineSize(p.geo, p.world))) * .1 : 0;
+    for (const piece of pieces) {
+      if (this._partOutlineSize(piece.geo, piece.world) >= minSize) add(piece.geo, piece.mat, piece.world);
+    }
     this._applyClip();
+  }
+
+  _clearHoverGeometry() {
+    const group = this._hoverPartGroup;
+    for (const child of [...group.children]) {
+      if (child.userData.partOutline) child.geometry.dispose();
+      group.remove(child);
+    }
+  }
+
+  // 选中和悬停只描绘实际几何的边缘，透明、纹理与功能件颜色保留。
+  _partOutline(geometry, selected) {
+    let edges = new THREE.EdgesGeometry(geometry, 35);
+    if (!edges.getAttribute('position').count) {
+      edges.dispose();
+      edges = new THREE.EdgesGeometry(geometry, 10);
+    }
+    const position = edges.getAttribute('position');
+    if (!position.count) { edges.dispose(); return null; }
+    const outlineGeometry = new LineSegmentsGeometry().setPositions(position.array);
+    edges.dispose();
+    const key = selected ? 'part-outline-selected' : 'part-outline-hover';
+    const material = this._materials[key] ||= new LineMaterial({
+      color: selected ? '#f88929' : '#f2d28a', linewidth: selected ? 1.8 : 1.3,
+      transparent: true, opacity: selected ? .95 : .8, depthWrite: false,
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, toneMapped: false,
+    });
+    const line = new LineSegments2(outlineGeometry, material);
+    line.userData.partOutline = true;
+    line.raycast = () => {};
+    line.renderOrder = 8;
+    return line;
+  }
+
+  // 小凸点、螺丝等细节保留原貌，避免细碎描边遮住配件样式。
+  _partOutlineSize(geometry, world) {
+    if (!geometry.boundingBox) geometry.computeBoundingBox();
+    const size = geometry.boundingBox.getSize(new THREE.Vector3());
+    const scale = new THREE.Vector3().setFromMatrixScale(world);
+    return size.multiply(scale).length();
+  }
+
+  /** @param {Map<string, string>} selected
+   * @param {Set<string> | null} [profileSelection]
+   */
+  _outlineSelectedParts(selected, profileSelection = null) {
+    const parent = this.buildGroup;
+    parent.updateWorldMatrix(true, true);
+    const inverse = parent.matrixWorld.clone().invert();
+    for (const [partKey, rec] of this._indexParts(parent.children)) {
+      const pieces = [];
+      for (const piece of rec.pieces) {
+        const data = piece.index >= 0 ? piece.obj.userData.instances[piece.index] : piece.obj.userData;
+        const key = data.hinge != null ? hingeKey(rec.id, data.hinge) : rec.id;
+        const kind = data.hinge != null ? 'hinge' : partKey.split(':')[0];
+        if (!selected.has(key) || (selected instanceof Map && selected.get(key) !== kind)) continue;
+        if (kind === 'tube' && !!data.tubes?.length !== !!profileSelection) continue;
+        const world = this._pieceWorld(piece, new THREE.Matrix4()).premultiply(inverse);
+        pieces.push({ piece, key, world, size: this._partOutlineSize(piece.obj.geometry, world) });
+      }
+      const minSize = Math.max(0, ...pieces.map(p => p.size)) * .1;
+      for (const { piece, key, world, size } of pieces) {
+        if (size < minSize) continue;
+        const line = this._partOutline(piece.obj.geometry, true);
+        if (!line) continue;
+        world.decompose(line.position, line.quaternion, line.scale);
+        line.userData.partOutlineFor = key;
+        parent.add(line);
+        this._clipMaterial(line.material);
+      }
+    }
   }
 
   // --- 动效 ----------------------------------------------------------------
@@ -6488,9 +6670,11 @@ export class SceneManager {
   _poseAppear(a, now) {
     const ap = MOTION.appear;
     const k = a.t0 === null || a.t0 === Infinity ? 0 : Math.min(1, Math.max(0, (now - a.t0 - a.delay) / a.dur));
-    if (k >= 1) { this._posePieces(a.center, a.pieces, 1, 0); return true; }
+    if (k >= 1) { a.scale = 1; a.dy = 0; this._posePieces(a.center, a.pieces, 1, 0); return true; }
     const e = ap.ease(k);
-    this._posePieces(a.center, a.pieces, ap.from + (1 - ap.from) * e, ap.drop * (1 - e));
+    a.scale = ap.from + (1 - ap.from) * e;
+    a.dy = ap.drop * (1 - e);
+    this._posePieces(a.center, a.pieces, a.scale, a.dy);
     return false;
   }
 
@@ -7522,6 +7706,12 @@ export class SceneManager {
     if (this._stepCameraAnimation()) this._needsRender = true;
     if (this._stepCameraFly()) this._needsRender = true;
     if (this._stepMotion()) this._needsRender = true;
+    if (this._panelPlacementFlash) {
+      const progress = (performance.now() - this._panelPlacementFlash.start) / 650;
+      if (progress >= 1) this._clearPanelPlacementFlash();
+      else this._panelPlacementFlash.line.material.opacity = 1 - progress;
+      this._needsRender = true;
+    }
     // controls.update() liefert true, solange das Damping noch nachlaeuft.
     if (this.controls.update()) this._needsRender = true;
     if (this._updateTreeCamera()) this._needsRender = true;

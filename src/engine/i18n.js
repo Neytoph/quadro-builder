@@ -33,7 +33,7 @@ const de = {
   notice_panel_flip_ground: 'Die umgedrehte Platte würde den Boden berühren. Den Rahmen höher setzen.',
   notice_panel_flip_blocked: (reason) => 'Die Platte kann nicht umgedreht werden: ' + reason,
   notice_panel_flip_pocket: 'Die Öffnung der Stofftasche muss oben bleiben. Sie kann nicht umgedreht werden.',
-  notice_panel_pick_second: (n) => `Rohr gewählt – jetzt eines der ${n} grün hervorgehobenen Gegenrohre anklicken.`,
+  notice_panel_pick_second: (n) => `Rohr gewählt – jetzt eines der ${n} hervorgehobenen Gegenrohre anklicken.`,
   notice_panel_no_partner: 'Zu diesem Rohr passt kein Gegenrohr für die gewählte Platte.',
   notice_panel_no_fit: 'Diese beiden Rohre tragen die gewählte Platte nicht.',
   notice_reinforce_pick_second: (n) => n === 1
@@ -652,7 +652,7 @@ const en = {
   notice_panel_flip_ground: 'Cannot flip: the panel would hit the ground. Raise the frame.',
   notice_panel_flip_blocked: (reason) => 'Cannot flip the panel: ' + reason,
   notice_panel_flip_pocket: 'The fabric pocket must keep its opening facing up and cannot be flipped.',
-  notice_panel_pick_second: (n) => `Tube selected – now click one of the ${n} green highlighted counterparts.`,
+  notice_panel_pick_second: (n) => `Tube selected – now click one of the ${n} highlighted counterparts.`,
   notice_panel_no_partner: 'No counterpart fits this tube for the selected panel.',
   notice_panel_no_fit: 'These two tubes do not carry the selected panel.',
   notice_reinforce_pick_second: (n) => n === 1
@@ -1275,7 +1275,7 @@ const zh = {
   notice_panel_flip_ground: '无法翻面：翻转后会碰到地面，请把框架抬高。',
   notice_panel_flip_blocked: (reason) => '无法翻面：' + reason,
   notice_panel_flip_pocket: '布兜需要保持开口朝上，不能翻面。',
-  notice_panel_pick_second: (n) => `已选承重管，再点 ${n} 根绿色对面管里的一根。`,
+  notice_panel_pick_second: (n) => `已选承重管，再点 ${n} 根高亮对面管中的一根。`,
   notice_panel_no_partner: '这根管配不上当前这块板。',
   notice_panel_no_fit: '这两根管撑不住这块板。',
   notice_reinforce_pick_second: (n) => n === 1

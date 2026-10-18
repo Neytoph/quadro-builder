@@ -69,7 +69,7 @@ export default function StatusTip({ menuOpen }: { menuOpen: boolean }) {
     return <div data-ui="flexi-guide" className="fixed z-40 flex justify-center pointer-events-none" style={box}><FlexiGuide /></div>
   }
 
-  if (adjustment === 'panel' && !menuOpen && !api.toast && !api.canFlipAccessory && !api.installationPreview && !componentForTool(api)) {
+  if (adjustment === 'panel' && !menuOpen && !api.toast && !api.canFlipAccessory && !api.selectedPanelFixing && !api.installationPreview && !componentForTool(api)) {
     const box = narrow ? { left: 8, right: 8, bottom: 68 } : statusTipBox(left, vw, toolbarW, pane ? right : null)
     if (!box || (narrow && pane)) return null
     return <div data-ui="panel-adjustment" className="fixed z-40 flex justify-center pointer-events-none" style={box}>
@@ -80,7 +80,7 @@ export default function StatusTip({ menuOpen }: { menuOpen: boolean }) {
     </div>
   }
 
-  if ((mobile && KEYBOARD_TIPS.has(key)) || api.installationPreview || api.canFlipAccessory || componentForTool(api)) return null
+  if ((mobile && KEYBOARD_TIPS.has(key)) || api.installationPreview || api.canFlipAccessory || api.selectedPanelFixing || componentForTool(api)) return null
 
   if (narrow && pane) return null
   if (narrow) {

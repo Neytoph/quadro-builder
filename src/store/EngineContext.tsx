@@ -179,8 +179,10 @@ interface EngineApi {
   canRedo: boolean
   selectionCount: number
   installationPreview: InstallationPreview | null
-  insetScrewAxis: 'vertical' | 'horizontal'
-  setInsetScrewAxis: (axis: 'vertical' | 'horizontal') => void
+  insetScrewAxis: 'auto' | 'vertical' | 'horizontal'
+  setInsetScrewAxis: (axis: 'auto' | 'vertical' | 'horizontal') => void
+  selectedPanelFixing: { partId: string; axis: string | null } | null
+  setSelectedPanelFixing: (axis: 'vertical' | 'horizontal') => void
   canFlipAccessory: boolean
   confirmInstallation: () => void
   cancelInstallation: () => void
@@ -884,7 +886,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     // 引擎的旧界面快照不含具体布件、连接件和安装方向；用本页会话记录恢复，避免串页。
     const remembered = toolMemory.current.get(tab.tabId)
     e.builder.fittingPart = remembered?.fittingPart || null
-    e.builder.insetScrewAxis = remembered?.insetScrewAxis || 'vertical'
+    e.builder.insetScrewAxis = remembered?.insetScrewAxis || 'auto'
     e.builder.placeConnectorId = tab.view?.mode === 'add' && remembered?.tool === 'connectors' ? remembered.partId : null
     e.builder.setMode((tab.view?.mode as string) || 'select')
     const home = tabHomeContext(tab, e.model.homeContext)
@@ -1386,7 +1388,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const setPanel = useCallback((id: string) => {
     pickPart('panels', id)
     clearBomHighlight()
-    builder?.setPanel(id)
+    builder?.setPanel(id, { refresh: false })
     builder?.setMode('panel')
     bump()
   }, [builder, bump, clearBomHighlight])
@@ -1400,14 +1402,14 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const setFitting = useCallback((kind: string, partId?: string) => {
     pickPart('fittings', partId || kind)
     clearBomHighlight()
-    builder?.setFitting(kind, partId)
+    builder?.setFitting(kind, partId, { refresh: false })
     builder?.setMode('fitting')
     bump()
   }, [builder, bump, clearBomHighlight])
   const setClamp = useCallback((id: string) => {
     pickPart('clamps', id)
     clearBomHighlight()
-    builder?.setClampPart(id)
+    builder?.setClampPart(id, { refresh: false })
     builder?.setMode('clamp')
     bump()
   }, [builder, bump, clearBomHighlight])
@@ -1426,7 +1428,6 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const selected = partId || builder.reinforcementPartId || 'reinforce80'
     pickPart('reinforcements', selected)
     clearBomHighlight()
-    builder._clearReinforceRail()
     builder.reinforcementPartId = selected
     builder.setMode('reinforce')
     bump()
@@ -3023,8 +3024,10 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     canRedo: !!builder?.canRedo?.(),
     selectionCount: builder?.selection?.size ?? 0,
     installationPreview: builder?.installationPreview ?? null,
-    insetScrewAxis: builder?.insetScrewAxis || 'vertical',
+    insetScrewAxis: builder?.insetScrewAxis || 'auto',
     setInsetScrewAxis: axis => { if (!builder || builder.readOnly) return; builder.setInsetScrewAxis(axis); bump() },
+    selectedPanelFixing: builder?.selectedPanelFixing?.() ?? null,
+    setSelectedPanelFixing: axis => { if (!builder || builder.readOnly) return; builder.setSelectedPanelFixing(axis); bump() },
     canFlipAccessory: !builder?.readOnly && !!builder?.canFlipSelectedAccessory?.(),
     confirmInstallation: () => { if (!builder || builder.readOnly) return; builder.confirmInstallation(); bump() },
     cancelInstallation: () => { if (!builder) return; builder.cancelInstallation(); bump() },
