@@ -12,6 +12,7 @@ import { displaySaveState } from '../store/personalTabs'
 import './builderChrome.css'
 import MobileProjectBar from './MobileProjectBar'
 import {EDITOR_EMBED} from '../entry'
+import MyModelsLink from './MyModelsLink'
 
 const GROUPS: (typeof DOCK_PILLS)[] = [
   DOCK_PILLS.filter(p => p.id === 'file' || p.id === 'saves'),
@@ -75,6 +76,7 @@ export default function ProjectTabs() {
       <a href="/" title={t('nav.home')} aria-label={t('nav.home')} className="qb-project-home shrink-0 flex items-center justify-center w-8 h-8 rounded-[9px] overflow-hidden">
         <img src={`${import.meta.env.BASE_URL}favicon.svg`} alt="" width={32} height={32} draggable={false} />
       </a>
+      <MyModelsLink toolbar />
       {narrow ? <MobileProjectBar onShare={() => shareRef.current?.click()} /> : <>
       <div ref={tabsRef} className="qb-project-tabs scrollbar-none">
       {api.tabs.map(tab => {

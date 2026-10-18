@@ -5,6 +5,7 @@ import { bootEntry } from './entry'
 import { sharedStrings } from './collab/sharedStrings'
 import { accessoryStrings } from './ui/accessoryStrings'
 import { builderChromeStrings } from './ui/builderChromeStrings'
+import { modelGuideStrings } from './ui/modelGuideStrings'
 
 export type Lang = 'zh' | 'en' | 'de'
 
@@ -566,7 +567,7 @@ const zh: Dict = {
   'onboard.s5title': '按步骤讲给别人听',
   'onboard.s5body': '左上这三个：草地开关、框住整个模型、导出拼装说明书（每步正反两面）。搭出零件后，画布底下还会出现「逐层拼装」，可以自己先过一遍。',
   'onboard.s6title': '存下来，或发给别人',
-  'onboard.s6body': '「文件」里可以保存、导出给原厂软件用的 QDF，也可以复制分享链接。对方打开链接就能看到，不用注册。',
+  'onboard.s6body': '保存设计后可以下次继续。登录后，在「我的造型」集中管理保存、分享和协作；「文件」里也能导出 QDF 或本机备份。',
   'onboard.s6hint': '{save} 也能保存。',
   'coach.kicker': '共享方案',
   'coach.done': '知道了',
@@ -1339,7 +1340,7 @@ const en: Dict = {
   'onboard.s5title': 'Show someone how to build it',
   'onboard.s5body': 'These three buttons: grass on/off, frame the model, and export a step-by-step manual (front and back each step). After you add parts, Assembly appears at the bottom so you can walk through the order first.',
   'onboard.s6title': 'Save it, or send it',
-  'onboard.s6body': 'File lets you save, export QDF for the official software, or copy a share link. The other person just opens the link — no account.',
+  'onboard.s6body': 'Save your design to continue later. When signed in, manage saved, shared and collaborative designs in My designs. File also exports QDF or a local backup.',
   'onboard.s6hint': '{save} saves too.',
   'coach.kicker': 'Shared plan',
   'coach.done': 'Got it',
@@ -2112,7 +2113,7 @@ const de: Dict = {
   'onboard.s5title': 'Anderen den Aufbau zeigen',
   'onboard.s5body': 'Diese drei Knöpfe: Wiese ein/aus, Modell einrahmen, Aufbauanleitung exportieren (jede Stufe von vorn und hinten). Sobald Teile da sind, erscheint unten „Lage für Lage“, damit du die Reihenfolge selbst durchgehen kannst.',
   'onboard.s6title': 'Speichern oder weiterschicken',
-  'onboard.s6body': 'Unter Datei speicherst du, exportierst QDF für die Originalsoftware oder kopierst einen Teillink. Die andere Person öffnet einfach den Link — ohne Konto.',
+  'onboard.s6body': 'Speichere deinen Entwurf, um später weiterzubauen. Nach der Anmeldung verwaltest du gespeicherte, geteilte und gemeinsam bearbeitete Modelle unter „Meine Modelle“. Unter Datei kannst du auch QDF oder eine lokale Sicherung exportieren.',
   'onboard.s6hint': '{save} speichert ebenfalls.',
   'coach.kicker': 'Geteilter Plan',
   'coach.done': 'Verstanden',
@@ -2343,7 +2344,7 @@ const de: Dict = {
   'room.closeFirst': 'Erst den Umriss schließen, dann Türen und Fenster setzen',
 }
 
-export const dicts: Record<Lang, Dict> = { zh: { ...zh, ...sharedStrings.zh, ...accessoryStrings.zh, ...builderChromeStrings.zh }, en: { ...en, ...sharedStrings.en, ...accessoryStrings.en, ...builderChromeStrings.en }, de: { ...de, ...sharedStrings.de, ...accessoryStrings.de, ...builderChromeStrings.de } }
+export const dicts: Record<Lang, Dict> = { zh: { ...zh, ...sharedStrings.zh, ...accessoryStrings.zh, ...builderChromeStrings.zh, ...modelGuideStrings.zh }, en: { ...en, ...sharedStrings.en, ...accessoryStrings.en, ...builderChromeStrings.en, ...modelGuideStrings.en }, de: { ...de, ...sharedStrings.de, ...accessoryStrings.de, ...builderChromeStrings.de, ...modelGuideStrings.de } }
 
 /** 打开时用哪种语言：网址里带了的优先，其次是用户选过的，都没有按浏览器语言。 */
 export function detect(): Lang {

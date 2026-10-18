@@ -1,23 +1,25 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useI18n } from '../i18n'
+import { storage } from '../engine-api'
+import { useEngine } from '../store/EngineContext'
+import { EDITOR_EMBED } from '../entry'
+import { syncConfigured } from '../sync/bootstrap'
 import { UI_ESCAPE_EVENT } from './events'
 import { useDock, type DockPane } from './dock'
 import { usePanelLayout } from './panelLayout'
 import { track } from '../analytics/track'
 import { CoachFrame, useCoachMeasure, type Prefer } from './CoachFrame'
+import { usePresence } from './motion'
+import { myModelsURL } from './MyModelsLink'
 
 const KEY = 'quadro.builder.onboarded.v2'
+const MANAGEMENT_KEY = 'quadro.builder.models-guide.v1:'
 export const ONBOARDING_EVENT = 'quadro:onboarding'
 
-const STEPS: Array<{
-  title: string
-  body: string
-  hint?: string
-  tour: string
-  pane: DockPane | null
-  color?: boolean
-  prefer: Prefer
-}> = [
+type Step = { title: string; body: string; hint?: string; tour: string; pane: DockPane | null; color?: boolean; prefer: Prefer }
+type Session = { account: string | null; management: boolean; short: boolean }
+const MANAGEMENT_STEP: Step = { title: 'models.guideTitle', body: 'models.guideBody', hint: 'models.guideHint', tour: 'my-models', pane: null, prefer: 'bottom' }
+const STEPS: Step[] = [
   { title: 'onboard.s1title', body: 'onboard.s1body', hint: 'onboard.s1hint', tour: 'dock-panel', pane: 'library', prefer: 'left' },
   { title: 'onboard.s2title', body: 'onboard.s2body', hint: 'onboard.s2hint', tour: 'tool-tubes', pane: null, prefer: 'bottom' },
   { title: 'onboard.s3title', body: 'onboard.s3body', tour: 'left-color', pane: null, color: true, prefer: 'right' },
@@ -26,76 +28,108 @@ const STEPS: Array<{
   { title: 'onboard.s6title', body: 'onboard.s6body', hint: 'onboard.s6hint', tour: 'dock-panel', pane: 'file', prefer: 'left' },
 ]
 
-function shouldOpen(): boolean {
-  try { return localStorage.getItem(KEY) !== '1' } catch { return true }
+function account(): string | null {
+  const scope = String(storage.getAccountScope())
+  return syncConfigured() && scope.startsWith('user:') ? scope.slice(5) : null
 }
 
-function markDone() {
-  try { localStorage.setItem(KEY, '1') } catch { /* ignore */ }
+function guideSteps(session: Session | null): Step[] {
+  if (!session?.management) return STEPS
+  if (session.short) return [MANAGEMENT_STEP]
+  return [MANAGEMENT_STEP, ...STEPS]
 }
 
 export default function Onboarding({ autoOpen = true }: { autoOpen?: boolean } = {}) {
-  const { t } = useI18n()
+  const api = useEngine()
+  const { t, lang } = useI18n()
   const { setPane } = useDock()
   const { setLeftColor } = usePanelLayout()
-  const [open, setOpen] = useState(() => autoOpen && shouldOpen())
+  const attempted = useRef(false)
+  const [session, setSession] = useState<Session | null>(null)
+  const [shown, leaving] = usePresence(session)
   const [i, setI] = useState(0)
 
-  const step = STEPS[i]
-  const last = i >= STEPS.length - 1
-  const { hole, cardRef, cardH } = useCoachMeasure(open, i, step.tour)
+  const steps = guideSteps(shown)
+  const step = shown ? steps[i] : STEPS[0]
+  const management = step === MANAGEMENT_STEP
+  const last = i >= steps.length - 1
+  const { hole, cardRef, cardH } = useCoachMeasure(!!session, i, step.tour)
 
-  // how: done=走到最后一步、skip=点了跳过、esc=按 Esc 关掉。
-  // 三者分开记，因为它们说明的事完全不同——skip 是引导没用，
-  // esc 多半是挡着视线了。
-  const finish = (how: 'done' | 'skip' | 'esc') => {
-    track('builder.onboard.end', { how, step: i + 1, of: STEPS.length })
+  // 身份和来源模型准备完毕后再决定是否展示；内嵌编辑由父页面管理。
+  useEffect(() => {
+    if (!autoOpen || !api.ready || !api.entryReady || attempted.current) return
+    attempted.current = true
+    const owner = account(), seen = localStorage.getItem(KEY) === '1'
+    const management = !!owner && localStorage.getItem(MANAGEMENT_KEY + owner) !== '1'
+    if (management || !seen) setSession({ account: owner, management, short: management && seen })
+  }, [autoOpen, api.ready, api.entryReady])
+
+  const markDone = () => {
+    localStorage.setItem(KEY, '1')
+    if (shown?.management && shown.account) localStorage.setItem(MANAGEMENT_KEY + shown.account, '1')
+  }
+  const finish = (how: 'done' | 'skip' | 'esc' | 'models') => {
+    track('builder.onboard.end', { how, step: i + 1, of: steps.length })
     markDone()
-    setOpen(false)
-    setI(0)
+    setSession(null)
     setPane(null)
   }
 
-  // 引导开着的时候人离开了页面（关掉、刷新、跳走），也算看过。
-  // 只在走完、跳过、按 Esc 的时候才记的话，看到一半就走的人下次进来引导又从头弹一遍，
-  // 第一步还把右边的模型库打开——每次进来都得先把它关掉。想再看一遍，文件面板里有重看引导的入口。
-  // 不在引导一出现就记：启动的时候这个组件会挂上不止一次，第一次一记，第二次就不弹了
   useEffect(() => {
-    if (!open) return
+    if (!session) return
     window.addEventListener('pagehide', markDone)
     return () => window.removeEventListener('pagehide', markDone)
-  }, [open])
+  }, [session])
 
   useEffect(() => {
-    const replay = () => { track('builder.onboard.replay'); setI(0); setOpen(true) }
+    const replay = () => {
+      attempted.current = true
+      track('builder.onboard.replay')
+      setI(0)
+      const owner = account()
+      setSession({ account: owner, management: !!owner && !EDITOR_EMBED, short: false })
+    }
     window.addEventListener(ONBOARDING_EVENT, replay)
     return () => window.removeEventListener(ONBOARDING_EVENT, replay)
   }, [])
 
-  // deps 里要带上 i：finish 现在会把"停在第几步"发出去，只依赖 open 的话
-  // 这里闭包住的是引导刚打开那一刻的 i，按 Esc 永远报第 1 步。
   useEffect(() => {
-    if (!open) return
+    if (!session) return
     const onEsc = () => finish('esc')
     window.addEventListener(UI_ESCAPE_EVENT, onEsc)
     return () => window.removeEventListener(UI_ESCAPE_EVENT, onEsc)
-  }, [open, i])
+  }, [session, i])
 
   useEffect(() => {
-    if (!open || !step) return
+    if (!session || !management) return
+    const onOpen = (event: MouseEvent) => {
+      if (event.target instanceof Element && event.target.closest('[data-tour="my-models"]')) finish('models')
+    }
+    document.addEventListener('click', onOpen)
+    return () => document.removeEventListener('click', onOpen)
+  }, [session, i])
+
+  useEffect(() => {
+    if (!session) return
     setPane(step.pane)
     if (step.color) setLeftColor(true)
-  }, [open, i, step, setPane, setLeftColor])
+  }, [session, i, step, setPane, setLeftColor])
 
-  if (!open || !step) return null
+  if (!shown) return null
+  let nextLabel = 'onboard.next'
+  if (shown.short) nextLabel = 'models.continue'
+  else if (last) nextLabel = 'onboard.done'
 
   return (
     <CoachFrame
-      hole={hole} prefer={step.prefer} cardRef={cardRef} cardH={cardH}
-      ui="onboard" kicker={t('onboard.kicker')} step={i} count={STEPS.length}
-      title={t(step.title)} body={t(step.body)} hint={step.hint ? t(step.hint) : undefined} tryLine={t('onboard.try')}
-      skipLabel={t('onboard.skip')} backLabel={t('onboard.back')} nextLabel={last ? t('onboard.done') : t('onboard.next')}
-      onSkip={() => finish('skip')}
+      hole={hole} prefer={step.prefer} cardRef={cardRef} cardH={cardH} leaving={leaving}
+      ui="onboard" kicker={t(management ? 'models.guideKicker' : 'onboard.kicker')} step={i} count={steps.length}
+      title={t(step.title)} body={t(step.body)} hint={step.hint ? t(step.hint) : undefined}
+      tryLine={management ? undefined : t('onboard.try')}
+      action={management ? { label: t('models.open'), href: myModelsURL(lang), onClick: () => finish('models') } : undefined}
+      skipLabel={t('onboard.skip')} backLabel={t('onboard.back')}
+      nextLabel={t(nextLabel)}
+      onSkip={() => finish('skip')} onDismiss={() => finish('esc')}
       onBack={() => setI(i - 1)}
       onNext={() => { if (last) finish('done'); else { track('builder.onboard.step', { i: i + 2 }); setI(i + 1) } }}
     />

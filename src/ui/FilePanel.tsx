@@ -12,6 +12,7 @@ import { Modal } from '../collab/ui/Modals'
 import {EDITOR_EMBED} from '../entry'
 import {saveCapacityFull} from '../sync/slotAccess'
 import { colorStrings } from './colorStrings'
+import MyModelsLink from './MyModelsLink'
 import { COLOR_HEX } from '../engine/colors.js'
 import { Box, BookOpen, ChevronDown, FileJson, FolderInput, Image, Link, Plus, Save, Sparkles, Upload } from 'lucide-react'
 
@@ -41,6 +42,7 @@ export default function FilePanel() {
     <div className="qb-file-panel">
       <section aria-labelledby="qb-file-start">
         <h2 id="qb-file-start" className="qb-file-section">{t('chrome.start')}</h2>
+        <MyModelsLink />
         {saveCapacityFull()&&<p className="text-xs px-2 pb-2 leading-relaxed" role="status" data-ui="capacity-guidance">{t('capacity.cloudFull')}</p>}
         {!plan && active && <div role="status" data-ui="file-save-status" className="text-xs text-amber-800 px-2 pb-2 leading-relaxed">
           {locked?(lang==='de'?'Kapazität abgelaufen · schreibgeschützt':lang==='en'?'Capacity expired · read only':'容量已到期 · 只读'):t(`sync.${displaySaveState(active, active.dirty)}`)}

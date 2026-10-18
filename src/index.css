@@ -394,6 +394,15 @@ html[data-motion] .m-backdrop.m-leave .m-modal { animation: m-out-up var(--m-out
 
 /* 新手引导：遮罩和光圈、卡片在步骤之间滑过去，卡片里的字换一遍 */
 html[data-motion] .m-onb { animation: m-fade-in var(--m-in) ease-out both; }
+html[data-motion] .m-onb.m-leave { animation: m-fade-out var(--m-out) ease-in both; }
+html[data-motion] .m-onb.m-leave .m-card { animation: m-out-up var(--m-out) ease-in both; }
+.qb-coach-spot { box-shadow: 0 0 0 2px #bc8b5e, 0 0 0 6px #bc8b5e26; }
+.qb-coach-card { max-height: calc(100dvh - 24px); overflow-y: auto; }
+.qb-coach-card .qb-coach-kicker { color: #965526; }
+.qb-coach-card .qb-coach-hint { color: #6c655e; }
+.qb-coach-card :focus { outline: none; }
+.qb-coach-card :focus-visible { outline: 1.5px solid #8f877d; outline-offset: 3px; }
+.qb-coach-action { display: flex; align-items: center; justify-content: center; gap: 8px; text-decoration: none; min-height: 44px; }
 html[data-motion] .m-spot {
   transition: top var(--m-glide) var(--m-glide-ease), left var(--m-glide) var(--m-glide-ease),
     width var(--m-glide) var(--m-glide-ease), height var(--m-glide) var(--m-glide-ease);

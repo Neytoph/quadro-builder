@@ -4,6 +4,10 @@
   box-shadow: 0 2px 9px #543e2510;
 }
 .qb-project-tabs { display: flex; gap: 4px; align-items: center; min-width: 88px; max-width: 30%; flex: 1 1 220px; overflow-x: auto; }
+.qb-models-link { flex-shrink: 0; text-decoration: none; }
+.qb-models-file-link { color: #9a3412; text-decoration: none; margin-bottom: 8px; }
+.qb-project-bar[data-mobile=true] .qb-models-link { width: 44px; min-width: 44px; padding: 0; justify-content: center; }
+.qb-project-bar[data-mobile=true] .qb-models-link span { display: none; }
 .qb-project-tab { display: flex; align-items: center; gap: 2px; flex-shrink: 0; border-radius: 10px; color: #5a6270; }
 .qb-project-tab[data-active=true] { background: #fff1e6; color: #9a3412; }
 .qb-project-name { display: flex; align-items: center; gap: 6px; min-height: 44px; min-width: 0; padding: 0 8px; text-align: left; font-size: 13px; font-weight: 500; cursor: pointer; }

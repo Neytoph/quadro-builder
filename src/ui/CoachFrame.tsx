@@ -99,6 +99,9 @@ export function CoachFrame(p: {
   onSkip: () => void
   onBack: () => void
   onNext: () => void
+  onDismiss?: () => void
+  leaving?: boolean
+  action?: { label: string; href: string; onClick: () => void }
 }) {
   const { hole, step } = p
   const spot = hole
@@ -113,7 +116,14 @@ export function CoachFrame(p: {
   const titleId = `${p.ui}-title`
 
   return (
-    <div className="m-onb fixed inset-0 z-[80] pointer-events-none" role="dialog" aria-modal="true" aria-labelledby={titleId} data-ui={p.ui} data-step={step + 1}>
+    <div className={`m-onb fixed inset-0 z-[80] pointer-events-none ${p.leaving ? 'm-leave' : ''}`} inert={p.leaving} role="dialog" aria-modal="true" aria-labelledby={titleId} data-ui={p.ui} data-step={step + 1} onClick={p.onDismiss || p.onSkip}
+      onKeyDown={event => {
+        if (event.key !== 'Tab' || !p.action) return
+        const controls = Array.from(p.cardRef.current!.querySelectorAll<HTMLElement>('button:not(:disabled), a[href]'))
+        const first = controls[0], last = controls[controls.length - 1]
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+      }}>
       {spot ? (
         <>
           {/* 这五块在步骤之间滑过去（m-spot），四块遮罩和光圈用同一条曲线，接缝不会裂开 */}
@@ -122,7 +132,7 @@ export function CoachFrame(p: {
           <div className="m-spot absolute bg-black/50 pointer-events-auto" style={{ top: spot.top, left: 0, width: Math.max(0, spot.left), height: spot.height }} />
           <div className="m-spot absolute bg-black/50 pointer-events-auto" style={{ top: spot.top, left: spot.left + spot.width, right: 0, height: spot.height }} />
           <div
-            className="m-spot absolute rounded-2xl pointer-events-none shadow-[0_0_0_2px_#2dd4bf,0_0_0_6px_rgba(45,212,191,0.28)]"
+            className="m-spot qb-coach-spot absolute rounded-2xl pointer-events-none"
             style={spot}
           />
         </>
@@ -132,13 +142,13 @@ export function CoachFrame(p: {
 
       <div
         ref={p.cardRef}
-        className="m-card qb-card absolute w-[min(21.25rem,calc(100vw-1.5rem))] text-gray-100 p-4 pointer-events-auto"
+        className="m-card qb-card qb-coach-card absolute w-[min(21.25rem,calc(100vw-1.5rem))] text-gray-100 p-4 pointer-events-auto"
         style={{ top: card.top, left: card.left }}
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-2">
-          <div className="text-[11px] tracking-wide text-teal-400">
-            {p.kicker} · {step + 1}/{p.count}
+          <div className="qb-coach-kicker text-[11px] tracking-wide text-teal-400">
+            {p.kicker}{p.count > 1 ? ` · ${step + 1}/${p.count}` : ''}
           </div>
           <button type="button" onClick={p.onSkip} className="text-gray-400 hover:text-teal-300 text-sm cursor-pointer" data-ui="coach-skip">
             {p.skipLabel}
@@ -148,13 +158,14 @@ export function CoachFrame(p: {
           <div id={titleId} className="text-base font-semibold mb-1.5">{p.title}</div>
           <p className="text-sm text-gray-300 leading-relaxed">{p.body}</p>
           {p.hint && (
-            <p className="text-[12px] text-teal-300/90 leading-relaxed mt-2">{p.hint}</p>
+            <p className="qb-coach-hint text-[12px] text-teal-300/90 leading-relaxed mt-2">{p.hint}</p>
           )}
           {p.tryLine && <p className="text-[11px] text-gray-500 mt-2">{p.tryLine}</p>}
         </div>
+        {p.action && <a href={p.action.href} target="_blank" rel="noopener" onClick={p.action.onClick} className="qb-btn qb-coach-action mt-4">{p.action.label}<span aria-hidden="true">↗</span></a>}
         <div className="flex items-center gap-2 mt-4">
           <div className="flex-1 flex gap-1" aria-hidden="true">
-            {Array.from({ length: p.count }, (_, k) => (
+            {p.count > 1 && Array.from({ length: p.count }, (_, k) => (
               <div key={k} className={`h-1 flex-1 rounded-full ${k <= step ? 'bg-teal-400' : 'bg-gray-700'}`} />
             ))}
           </div>
@@ -163,7 +174,7 @@ export function CoachFrame(p: {
               {p.backLabel}
             </button>
           )}
-          <button type="button" autoFocus onClick={p.onNext} className="qb-btn qb-btn-sm" data-ui="coach-next">
+          <button type="button" autoFocus onClick={p.onNext} className={`qb-btn qb-btn-sm ${p.action ? 'qb-btn-ghost' : ''}`} data-ui="coach-next">
             {p.nextLabel}
           </button>
         </div>
