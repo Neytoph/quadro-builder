@@ -36,7 +36,7 @@ function account(): string | null {
 function guideSteps(session: Session | null): Step[] {
   if (!session?.management) return STEPS
   if (session.short) return [MANAGEMENT_STEP]
-  return [MANAGEMENT_STEP, ...STEPS]
+  return [...STEPS, MANAGEMENT_STEP]
 }
 
 export default function Onboarding({ autoOpen = true }: { autoOpen?: boolean } = {}) {
@@ -60,13 +60,13 @@ export default function Onboarding({ autoOpen = true }: { autoOpen?: boolean } =
     if (!autoOpen || !api.ready || !api.entryReady || attempted.current) return
     attempted.current = true
     const owner = account(), seen = localStorage.getItem(KEY) === '1'
-    const management = !!owner && localStorage.getItem(MANAGEMENT_KEY + owner) !== '1'
+    const management = syncConfigured() && !EDITOR_EMBED && localStorage.getItem(MANAGEMENT_KEY + (owner || 'anonymous')) !== '1'
     if (management || !seen) setSession({ account: owner, management, short: management && seen })
   }, [autoOpen, api.ready, api.entryReady])
 
   const markDone = () => {
     localStorage.setItem(KEY, '1')
-    if (shown?.management && shown.account) localStorage.setItem(MANAGEMENT_KEY + shown.account, '1')
+    if (management && shown) localStorage.setItem(MANAGEMENT_KEY + (shown.account || 'anonymous'), '1')
   }
   const finish = (how: 'done' | 'skip' | 'esc' | 'models') => {
     track('builder.onboard.end', { how, step: i + 1, of: steps.length })
@@ -79,7 +79,7 @@ export default function Onboarding({ autoOpen = true }: { autoOpen?: boolean } =
     if (!session) return
     window.addEventListener('pagehide', markDone)
     return () => window.removeEventListener('pagehide', markDone)
-  }, [session])
+  }, [session, management])
 
   useEffect(() => {
     const replay = () => {
@@ -87,7 +87,7 @@ export default function Onboarding({ autoOpen = true }: { autoOpen?: boolean } =
       track('builder.onboard.replay')
       setI(0)
       const owner = account()
-      setSession({ account: owner, management: !!owner && !EDITOR_EMBED, short: false })
+      setSession({ account: owner, management: syncConfigured() && !EDITOR_EMBED, short: false })
     }
     window.addEventListener(ONBOARDING_EVENT, replay)
     return () => window.removeEventListener(ONBOARDING_EVENT, replay)
