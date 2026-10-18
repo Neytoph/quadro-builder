@@ -403,6 +403,8 @@ html[data-motion] .m-onb.m-leave .m-card { animation: m-out-up var(--m-out) ease
 .qb-coach-card :focus { outline: none; }
 .qb-coach-card :focus-visible { outline: 1.5px solid #8f877d; outline-offset: 3px; }
 .qb-coach-action { display: flex; align-items: center; justify-content: center; gap: 8px; text-decoration: none; min-height: 44px; }
+.qb-coach-secondary { display: flex; align-items: center; justify-content: center; min-height: 44px; color: #965526; font-size: 13px; text-decoration: none; margin-top: 4px; border-radius: 8px; }
+.qb-coach-secondary:hover { background: #fff2e6; }
 html[data-motion] .m-spot {
   transition: top var(--m-glide) var(--m-glide-ease), left var(--m-glide) var(--m-glide-ease),
     width var(--m-glide) var(--m-glide-ease), height var(--m-glide) var(--m-glide-ease);

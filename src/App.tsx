@@ -20,7 +20,8 @@ import { PanelLayoutProvider } from './ui/panelLayout'
 import { UI_ESCAPE_EVENT } from './ui/events'
 import { DockProvider, useDock } from './ui/dock'
 import { usePresence } from './ui/motion'
-import { bootEntry, DELIVERY_EMBED, dropParam, fullBuilderUrl, VIEW_ONLY, EDITOR_EMBED } from './entry'
+import { bootEntry, DELIVERY_EMBED, dropParam, fullBuilderUrl, VIEW_ONLY, EDITOR_EMBED, SINGLE_MODEL, RECOVERY_ONLY } from './entry'
+import DeviceDraftManager from './ui/DeviceDraftManager'
 import { SnapshotInfo } from './collab/ui/SnapshotInfo'
 import { syncProbe } from './sync/bootstrap'
 import { CollabProvider, useCollab } from './collab/CollabContext'
@@ -131,7 +132,11 @@ function AccountDialog() {
   if (!shown) return null
   const resume = shown.phase === 'resume'
   // 复制分享链接也要先有账号（链接指向存在账号下的方案页），说法跟导出文件分开
-  const k = shown.kind === 'link' ? '.link' : ''
+  const k = ['link','save'].includes(shown.kind) ? '.' + shown.kind : ''
+  let body = t(`account.body${k}`)
+  if (resume) body = shown.kind === 'save' ? t('account.resumeBody.save') : t('account.resumeBody', { what: t(`account.what.${shown.kind}`) })
+  let action = shown.kind === 'save' ? 'single.signIn' : 'account.go'
+  if (resume) action = `account.resumeGo${k}`
   return (
     <div
       className={`m-backdrop fixed inset-0 z-[75] flex items-center justify-center bg-black/45 p-4 ${leaving ? 'm-leave pointer-events-none' : ''}`}
@@ -146,11 +151,11 @@ function AccountDialog() {
       >
         <div id="account-dialog-title" className="text-base font-semibold">{t(resume ? `account.resumeTitle${k}` : `account.title${k}`)}</div>
         <p className="text-sm text-gray-300 leading-relaxed mt-2 mb-5">
-          {resume ? t('account.resumeBody', { what: t(`account.what.${shown.kind}`) }) : t(`account.body${k}`)}
+            {body}
         </p>
         <div className="flex justify-end gap-2">
           <button type="button" onClick={() => answerAccount(false)} className="qb-btn qb-btn-ghost qb-btn-sm">{t('confirm.cancel')}</button>
-          <button type="button" autoFocus onClick={() => answerAccount(true)} className="qb-btn qb-btn-sm">{t(resume ? `account.resumeGo${k}` : 'account.go')}</button>
+            <button type="button" autoFocus onClick={() => answerAccount(true)} className="qb-btn qb-btn-sm">{t(action)}</button>
         </div>
       </div>
     </div>
@@ -247,7 +252,7 @@ function DocOnEntry() {
       if (signedIn !== true) throw new Error('?doc=: sync server did not answer')
       // openDoc核对目标自身；完整同步轮次独立继续，不阻塞这座设计进入画布。
       if (!await openDoc(id)) return
-      dropParam('doc')
+      if (!SINGLE_MODEL) dropParam('doc')
       completeEntry()
     })().catch(report)
   }, [ready, openDoc, notify, completeEntry, loginUrl, report, t])
@@ -263,7 +268,7 @@ function NewOnEntry() {
   const { ready, newTab } = useEngine()
   const done = useRef(false)
   useEffect(() => {
-    if (!bootEntry().blank || !ready || done.current) return
+    if (SINGLE_MODEL || !bootEntry().blank || !ready || done.current) return
     done.current = true
     newTab()
     dropParam('new')
@@ -367,7 +372,7 @@ function AppInner() {
       if (meta && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); api.redo(); return }
       if (meta && (e.key === 'c' || e.key === 'C')) { e.preventDefault(); api.copy(); return }
       if (meta && (e.key === 'v' || e.key === 'V')) { e.preventDefault(); api.paste(); return }
-      if (meta && (e.key === 's' || e.key === 'S')) { e.preventDefault(); void (e.shiftKey&&!EDITOR_EMBED ? api.saveCurrentAs() : api.saveCurrent()); return }
+      if (meta && (e.key === 's' || e.key === 'S')) { e.preventDefault(); void (e.shiftKey&&!EDITOR_EMBED&&!SINGLE_MODEL ? api.saveCurrentAs() : api.saveCurrent()); return }
       if (meta && (e.key === 'a' || e.key === 'A')) { e.preventDefault(); api.selectAll(); return }
       if (meta && (e.key === 'g' || e.key === 'G')) { e.preventDefault(); e.shiftKey ? api.ungroup() : api.group(); return }
       if (meta) return
@@ -511,7 +516,7 @@ export default function App() {
   return (
     <LanguageProvider>
       <ErrorBoundary>
-        <EngineShell />
+        {RECOVERY_ONLY ? <DeviceDraftManager/> : <EngineShell />}
       </ErrorBoundary>
     </LanguageProvider>
   )

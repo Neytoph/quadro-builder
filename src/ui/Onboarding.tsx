@@ -13,7 +13,7 @@ import { usePresence } from './motion'
 import { myModelsURL } from './MyModelsLink'
 
 const KEY = 'quadro.builder.onboarded.v2'
-const MANAGEMENT_KEY = 'quadro.builder.models-guide.v1:'
+const MANAGEMENT_KEY = 'quadro.builder.models-guide.v2:'
 export const ONBOARDING_EVENT = 'quadro:onboarding'
 
 type Step = { title: string; body: string; hint?: string; tour: string; pane: DockPane | null; color?: boolean; prefer: Prefer }
@@ -126,7 +126,7 @@ export default function Onboarding({ autoOpen = true }: { autoOpen?: boolean } =
       ui="onboard" kicker={t(management ? 'models.guideKicker' : 'onboard.kicker')} step={i} count={steps.length}
       title={t(step.title)} body={t(step.body)} hint={step.hint ? t(step.hint) : undefined}
       tryLine={management ? undefined : t('onboard.try')}
-      action={management ? { label: t('models.open'), href: myModelsURL(lang), onClick: () => finish('models') } : undefined}
+      action={management ? { label: t('models.open'), href: myModelsURL(lang), onClick: () => finish('models'), secondary: { label: t('single.find'), href: `/builder/?recover=1&lang=${lang}` } } : undefined}
       skipLabel={t('onboard.skip')} backLabel={t('onboard.back')}
       nextLabel={t(nextLabel)}
       onSkip={() => finish('skip')} onDismiss={() => finish('esc')}

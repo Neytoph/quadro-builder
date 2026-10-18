@@ -5,6 +5,7 @@ import { useDock, type DockPane } from './dock'
 import FilePanel from './FilePanel'
 import LibraryPanel from './LibraryPanel'
 import SavesPanel from './SavesPanel'
+import { SINGLE_MODEL } from '../entry'
 import KitAdvisor from './KitAdvisor'
 import { BomPane } from './PartsList'
 import InventoryPane from './InventoryPane'
@@ -37,7 +38,7 @@ export default function RightDock() {
   const { t } = useI18n()
   const { right, left, vw, vh, toolbarW } = usePanelLayout()
   const [pane, leaving] = usePresence(live)
-  if (!pane) return null
+  if (!pane || SINGLE_MODEL && pane === 'saves') return null
   const narrow = vw <= NARROW_MAX
   // 面板宽到够着居中的工具条时，往下让到工具条底下，标题不被挡住
   const toolbarRight = (vw + toolbarW) / 2

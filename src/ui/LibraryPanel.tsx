@@ -4,6 +4,7 @@ import { useI18n } from '../i18n'
 import { storage, designEntry, checkAgainstInventory, missingCount } from '../engine-api'
 import { OFFICIAL_MODELS, officialThumbPath } from '../data/official'
 import { MODULE_GROUPS, PRESETS, presetThumbPath, type PresetDef } from '../data/presets'
+import { SINGLE_MODEL } from '../entry'
 
 export const LIBRARY_OPEN_EVENT = 'quadro:library-open'
 
@@ -172,10 +173,10 @@ export default function LibraryPanel() {
             className={`flex-1 px-2 py-1.5 md:py-1 rounded-md text-xs md:text-[11px] cursor-pointer ${tab === 'start' ? 'bg-teal-500 text-white font-semibold' : 'text-gray-300'}`}>
             {t('section.presets')}
           </button>
-          <button onClick={() => setTab('mine')}
+          {!SINGLE_MODEL && <button onClick={() => setTab('mine')}
             className={`flex-1 px-2 py-1.5 md:py-1 rounded-md text-xs md:text-[11px] cursor-pointer ${tab === 'mine' ? 'bg-teal-500 text-white font-semibold' : 'text-gray-300'}`}>
             {t('lib.mine')} · {rows.length}
-          </button>
+          </button>}
         </div>
         <p className="text-[11px] text-gray-500 leading-snug">{t('lib.hint')} {t('lib.drag')}</p>
         <input value={query} onChange={e => setQuery(e.target.value)} placeholder={t('lib.search')}

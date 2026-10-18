@@ -9,10 +9,11 @@ import { syncConfigured } from '../sync/bootstrap'
 import { displaySaveState } from '../store/personalTabs'
 import { legacyBackupWithTabs } from '../collab/legacyBackup'
 import { Modal } from '../collab/ui/Modals'
-import {EDITOR_EMBED} from '../entry'
+import {EDITOR_EMBED, SINGLE_MODEL} from '../entry'
 import {saveCapacityFull} from '../sync/slotAccess'
 import { colorStrings } from './colorStrings'
 import MyModelsLink from './MyModelsLink'
+import { DeviceDraftsLink } from './SingleModelBar'
 import { COLOR_HEX } from '../engine/colors.js'
 import { Box, BookOpen, ChevronDown, FileJson, FolderInput, Image, Link, Plus, Save, Sparkles, Upload } from 'lucide-react'
 
@@ -43,14 +44,16 @@ export default function FilePanel() {
       <section aria-labelledby="qb-file-start">
         <h2 id="qb-file-start" className="qb-file-section">{t('chrome.start')}</h2>
         <MyModelsLink />
+        {SINGLE_MODEL && !EDITOR_EMBED && <DeviceDraftsLink/>}
         {saveCapacityFull()&&<p className="text-xs px-2 pb-2 leading-relaxed" role="status" data-ui="capacity-guidance">{t('capacity.cloudFull')}</p>}
         {!plan && active && <div role="status" data-ui="file-save-status" className="text-xs text-amber-800 px-2 pb-2 leading-relaxed">
           {locked?(lang==='de'?'Kapazität abgelaufen · schreibgeschützt':lang==='en'?'Capacity expired · read only':'容量已到期 · 只读'):t(`sync.${displaySaveState(active, active.dirty)}`)}
           {active.saveState === 'conflict' && active.conflictDocId && <button className="qb-file-row" onClick={() => void api.openDoc(active.conflictDocId!)}>{t('sync.viewLatest')}</button>}
           {active.saveState === 'failed' && <button className="qb-file-row" onClick={() => void api.retrySave(active.tabId)}>{t('sync.retry')}</button>}
         </div>}
-        {!plan && <button disabled={contentReadOnly} onClick={() => void api.saveCurrent()} className={`${btn} qb-file-primary`}><Save aria-hidden="true" /><span>{t('chrome.save')}</span><kbd>{t('chrome.saveShortcut')}</kbd></button>}
-        {!EDITOR_EMBED && <><div className="qb-file-two">
+        {!plan && <button disabled={contentReadOnly || api.saving || !api.entryReady} onClick={() => void api.saveCurrent()} className={`${btn} qb-file-primary`}><Save aria-hidden="true" /><span>{t('chrome.save')}</span><kbd>{t('chrome.saveShortcut')}</kbd></button>}
+        {SINGLE_MODEL && !plan && !active?.docId && !active?.libraryId && <><button onClick={() => { if (active?.dirty && !window.confirm(t('single.replace'))) return; fileRef.current?.click() }} className="qb-file-row"><Upload aria-hidden="true"/><span>{t('btn.import')}</span></button><input ref={fileRef} type="file" accept=".qdf,.json,application/json" hidden onChange={event => { const file=event.target.files?.[0];event.target.value='';if(file)void api.importFile(file) }}/></>}
+        {!SINGLE_MODEL && !EDITOR_EMBED && <><div className="qb-file-two">
           <button onClick={() => { api.newTab(); api.notify(t('toast.newTab')) }} className={btn}><Plus aria-hidden="true" /><span>{t('btn.new')}</span></button>
           <button onClick={() => fileRef.current?.click()} className={btn}><Upload aria-hidden="true" /><span>{t('btn.import')}</span></button>
         </div>
@@ -74,7 +77,7 @@ export default function FilePanel() {
           <button onClick={() => void api.exportAssemblyPdf()} disabled={contentReadOnly||!!api.exportingManual} aria-busy={!!api.exportingManual} className="qb-file-export" title={t('btn.exportManual')}><BookOpen aria-hidden="true" /><strong>{t('chrome.manual')}</strong><small>{t('chrome.manualHint')}</small></button>
         </div>
         {api.modelColors.some(hex => !officialHexes.has(hex)) && <p className="text-xs text-gray-300 leading-relaxed px-2 mt-2">{colorStrings[lang].export}</p>}
-        <button disabled={contentReadOnly} onClick={() => void api.shareCurrent()} className="qb-file-row"><Link aria-hidden="true" /><span>{t('btn.share')}</span></button>
+        {!SINGLE_MODEL && <button disabled={contentReadOnly} onClick={() => void api.shareCurrent()} className="qb-file-row"><Link aria-hidden="true" /><span>{t('btn.share')}</span></button>}
       </section>
       {batch && <BatchImport onClose={() => setBatch(false)} />}
       {legacy && <Modal onClose={() => setLegacy(null)} label={t('saves.legacyBackup')}>

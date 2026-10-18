@@ -101,7 +101,7 @@ export function CoachFrame(p: {
   onNext: () => void
   onDismiss?: () => void
   leaving?: boolean
-  action?: { label: string; href: string; onClick: () => void }
+  action?: { label: string; href: string; onClick: () => void; secondary?: { label: string; href: string } }
 }) {
   const { hole, step } = p
   const spot = hole
@@ -163,6 +163,7 @@ export function CoachFrame(p: {
           {p.tryLine && <p className="text-[11px] text-gray-500 mt-2">{p.tryLine}</p>}
         </div>
         {p.action && <a href={p.action.href} target="_blank" rel="noopener" onClick={p.action.onClick} className="qb-btn qb-coach-action mt-4">{p.action.label}<span aria-hidden="true">↗</span></a>}
+        {p.action?.secondary && <a href={p.action.secondary.href} target="_blank" rel="noopener" onClick={p.action.onClick} className="qb-coach-secondary">{p.action.secondary.label} ↗</a>}
         <div className="flex items-center gap-2 mt-4">
           <div className="flex-1 flex gap-1" aria-hidden="true">
             {p.count > 1 && Array.from({ length: p.count }, (_, k) => (

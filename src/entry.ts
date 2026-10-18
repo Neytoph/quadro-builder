@@ -23,16 +23,19 @@
 //	?import=qdf                    打开后直接进入批量导入 .qdf
 //	?room=brief:<id>               画房间边界，画完写回需求单
 //	?doc=<doc id>                  打开自己「我的设计」里的这一座；没登录先去登录，登录完回到这个地址
-//	?new=1                         新开一个空白标签页，已开的标签页都留着（工作台「新建造型」）
+//	?new=1                         托管版新建独立草稿；离线版在原会话中新开标签页
+//	?draft=<UUID>                  托管版当前临时造型，刷新只恢复这一份
+//	?recover=1                     本机草稿列表，不启动三维编辑器或完整模型同步
 //
-// 除了只看模式，参数读完就从地址栏去掉：刷新一下不该再打开一遍、再存一份。
-// ?doc= 和 ?new= 在处理完以后才去掉：?doc= 没登录时跳去登录页，要带着它回来；
-// ?new= 要等这台设备上记着的标签页恢复出来，再在它们后面新开一个。
+// 托管版保留来源与草稿标识，按来源恢复唯一编辑会话；恢复与登录承接参数在持久化后移除。
+// 离线版处理完来源参数后移除，原有多标签会话保持。
 // 当前标签页是共享方案时，地址栏由 CollabProvider 写成这个方案的地址。
 
-export type ResumeExport = 'manual' | 'bom' | 'bompng' | 'shareimg' | 'qdf' | 'json' | 'link'
+export type ResumeExport = 'manual' | 'bom' | 'bompng' | 'shareimg' | 'qdf' | 'json' | 'link' | 'save'
 
-const RESUMES: ResumeExport[] = ['manual', 'bom', 'bompng', 'shareimg', 'qdf', 'json', 'link']
+const RESUMES: ResumeExport[] = ['manual', 'bom', 'bompng', 'shareimg', 'qdf', 'json', 'link', 'save']
+export const SINGLE_MODEL = Boolean(import.meta.env.VITE_SYNC_BASE)
+export const RECOVERY_ONLY = new URLSearchParams(location.search).get('recover') === '1'
 
 export interface Entry {
   view: boolean
@@ -117,7 +120,7 @@ export function readEntry(search: string, hash: string, collab: boolean): Entry 
 export function bootEntry(): Entry {
   if (entry) return entry
   entry = readEntry(location.search, location.hash, collab)
-  if (!entry.view && !(window.parent !== window && new URLSearchParams(location.search).get('embedded') === 'model')) {
+  if (!entry.view && !SINGLE_MODEL && !(window.parent !== window && new URLSearchParams(location.search).get('embedded') === 'model')) {
     const q = new URLSearchParams(location.search)
     for (const k of ['src', 'origin', 'name', 'copy', 'export', 'lang', 'import', 'background']) q.delete(k)
     const rest = q.toString()
@@ -132,13 +135,25 @@ export const VIEW_ONLY = bootEntry().view
 export const EDITOR_EMBED = window.parent !== window && new URLSearchParams(location.search).get('embedded') === 'model'
 if(EDITOR_EMBED)document.documentElement.dataset.editorEmbed='true'
 const editorEntry = bootEntry()
-export const EDITOR_SESSION = EDITOR_EMBED ? `model-editor:${editorEntry.plan ? `plan:${editorEntry.plan}` : editorEntry.src}` : undefined
+function singleSession(): string | undefined {
+  if (!SINGLE_MODEL || RECOVERY_ONLY || editorEntry.view || editorEntry.delivery || editorEntry.roomBrief || editorEntry.version) return undefined
+  if (editorEntry.plan) return `model-editor:plan:${editorEntry.plan}`
+  if (editorEntry.doc) return `model-editor:doc:${editorEntry.doc}`
+  if (editorEntry.src?.match(/^\/quadro\/library\/[a-f0-9]+\/native$/)) return `model-editor:${editorEntry.src}`
+  const url = new URL(location.href)
+  let draft = url.searchParams.get('draft')
+  if (!draft || !/^[a-f0-9-]{36}$/.test(draft)) { draft = crypto.randomUUID(); url.searchParams.set('draft', draft) }
+  url.searchParams.delete('new')
+  history.replaceState(null, '', url)
+  return `single-draft:${draft}`
+}
+export const EDITOR_SESSION = singleSession()
 
 /**
  * 只放一座、不读也不写这台设备上的标签页的打开方式：只看、交付查看、画房间。
  * 它们都不是这个人自己的标签页，不能盖掉。共享方案是标签页里的一个，照常读写。
  */
-export const SESSIONLESS = VIEW_ONLY || !!bootEntry().delivery || !!bootEntry().roomBrief || !!bootEntry().version
+export const SESSIONLESS = RECOVERY_ONLY || VIEW_ONLY || !!bootEntry().delivery || !!bootEntry().roomBrief || !!bootEntry().version
 
 /**
  * 交付查看嵌在交付页的 iframe 里：拖动旋转、逐层拼装、全屏和版本名都由交付页自己画，

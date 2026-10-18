@@ -11,8 +11,9 @@ import { useOverflowCompact } from './useOverflowCompact'
 import { displaySaveState } from '../store/personalTabs'
 import './builderChrome.css'
 import MobileProjectBar from './MobileProjectBar'
-import {EDITOR_EMBED} from '../entry'
+import {EDITOR_EMBED, SINGLE_MODEL} from '../entry'
 import MyModelsLink from './MyModelsLink'
+import SingleModelBar from './SingleModelBar'
 
 const GROUPS: (typeof DOCK_PILLS)[] = [
   DOCK_PILLS.filter(p => p.id === 'file' || p.id === 'saves'),
@@ -60,6 +61,7 @@ export default function ProjectTabs() {
     api.closeTab(tabId)
   }
 
+  if(SINGLE_MODEL)return <SingleModelBar/>
   if(EDITOR_EMBED)return <div className="qb-project-bar qb-embedded-bar fixed top-0 left-0 right-0 z-40" style={{height:projectBarHeight(vw)}}>
     <strong>{planMode?t('collab.autoSynced'):t('sync.'+displaySaveState(api.tabs.find(tab=>tab.tabId===api.activeTabId)||{},api.tabs.find(tab=>tab.tabId===api.activeTabId)?.dirty||false))}</strong>
     <nav aria-label={t('chrome.navigation')}>

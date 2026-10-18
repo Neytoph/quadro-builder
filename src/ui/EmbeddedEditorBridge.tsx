@@ -77,7 +77,7 @@ export default function EmbeddedEditorBridge(){
  useEffect(()=>{
   if(!EDITOR_EMBED||!announced.current)return
   const active=api.tabs.find(tab=>tab.tabId===api.activeTabId)
-  parent.postMessage({type:'xmf-model-editor:state',name:active?.name||'',busy:working.current||!!api.nameAsk||!!api.exportingManual||!!api.accountAsk},location.origin)
- },[api.activeTabId,api.tabs,api.nameAsk,api.exportingManual,api.accountAsk])
+  parent.postMessage({type:'xmf-model-editor:state',name:active?.name||'',busy:working.current||api.saving||!!api.nameAsk||!!api.exportingManual||!!api.accountAsk},location.origin)
+ },[api.activeTabId,api.tabs,api.nameAsk,api.exportingManual,api.accountAsk,api.saving])
  return null
 }

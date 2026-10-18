@@ -11,7 +11,8 @@ import { onSyncEvent, syncSavedDoc, syncNow, syncProbe, syncStarted } from '../s
 import { pushDocToServer, type PushDocOptions } from '../sync/docPublish'
 import { tabOpenedFrom, tabSavedAs } from '../sync/origin'
 import { pullDoc } from '../sync/docEntry'
-import { bootEntry, SESSIONLESS, VIEW_ONLY, EDITOR_EMBED, EDITOR_SESSION, type ResumeExport } from '../entry'
+import { bootEntry, dropParam, SESSIONLESS, VIEW_ONLY, EDITOR_EMBED, EDITOR_SESSION, SINGLE_MODEL, type ResumeExport } from '../entry'
+import { draftHandoff, entryDraft } from './draftEntry'
 import { clearSlotAccess, slotLocked, slotAccess, saveCapacityFull, updateSlotAccess } from '../sync/slotAccess'
 import { chooseSharing, SharingCancelled } from '../shareOptions'
 import { publishSharePage, sharePagesEnabled, stampFor, type ExportKind, type Stamp } from '../sharePage'
@@ -159,6 +160,7 @@ interface EngineApi {
   checkpointEditor: () => Promise<void>
   discardEditor: () => Promise<void>
   ready: boolean
+  saving: boolean
   entryReady: boolean
   completeEntry: () => void
   error: string | null
@@ -706,6 +708,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const [ready, setReady] = useState(false)
+  const [saving,setSaving]=useState(false),savingRef=useRef(false)
   const libraryStatsQueue=useMemo(()=>createStatsQueue(),[])
   const capacityNotice = useRef(false)
   useEffect(()=>()=>libraryStatsQueue.cancel(),[libraryStatsQueue])
@@ -975,7 +978,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       tab.dirty = !savedGenerationUnchanged(tab, generation, current, tab.local.history.toJSON())
       tab.saveState = 'conflict'
       tab.conflictDocId = remoteData ? originalId : undefined
-      if (remoteData && !tabsRef.current.some(x => x.docId === originalId)) {
+      if (!SINGLE_MODEL && remoteData && !tabsRef.current.some(x => x.docId === originalId)) {
         const latest = makeTab(remoteData, String(record?.name || ''), originalId)
         Object.assign(latest, { baseRev: Number(record?.rev || 0), savedContent: modelContent(remoteData), saveId: record?.saveId, saveState: 'synced' })
         tabsRef.current.push(latest)
@@ -1134,7 +1137,9 @@ export function EngineProvider({ children }: { children: ReactNode }) {
         if (dead) return
         if (session?.tabs?.length) {
           const mapped: Tab[] = []
-          for (const tb of session.tabs as AnyRec[]) {
+          const activeStored = session.tabs.find((tab: AnyRec) => tab.tabId === session.activeTabId) || session.tabs[0]
+          const restoredTabs = SINGLE_MODEL ? [activeStored] : session.tabs
+          for (const tb of restoredTabs as AnyRec[]) {
             const tabId = String(tb.tabId)
             // 旧版本把造型 JSON 记在会话里：本机还没有这一页的文档时，拿它生成一份
             const legacy = tb.model ? normalizeModel(tb.model) : null
@@ -1181,9 +1186,25 @@ export function EngineProvider({ children }: { children: ReactNode }) {
           applyTabRef.current(tabsRef.current.find(x => x.tabId === wanted)!)
         } else {
           const tab = makeTab(EMPTY_MODEL, t('tab.untitled'), null)
+          if(SINGLE_MODEL){tab.savedContent=modelContent(EMPTY_MODEL);tab.savedName=tab.name}
           tabsRef.current = [tab]
           activeRef.current = tab.tabId
           applyTabRef.current(tab)
+        }
+        if (SINGLE_MODEL && !SESSIONLESS) {
+          const scope=String(storage.getAccountScope()),owner=scope.startsWith('user:')?scope.slice(5):null
+          const seed=await entryDraft(owner,()=>window.confirm(t('single.claim')))
+          if(seed){
+            if(!session?.tabs?.length){
+              const data=normalizeModel(seed.text?designFromText(seed.text):seed.data)
+              if(!data)throw new Error(t('single.failed'))
+              const active=tabsRef.current.find(tab=>tab.tabId===activeRef.current)!
+              replaceTabModel(active,data);active.name=seed.name||t('tab.untitled');active.dirty=true
+              if(bootEntry().origin)tabOpenedFrom(active.tabId,bootEntry().origin!)
+              applyTabRef.current(active)
+            }
+            await saveSessionNow();seed.complete()
+          }
         }
         syncTabsRef.current()
         setReady(true)
@@ -1657,7 +1678,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     tab.dirty = true
     tab.saveState = 'unsaved'
     syncTabs()
-  }, [syncTabs, t])
+    if (SINGLE_MODEL) void saveSessionNow()
+  }, [saveSessionNow, syncTabs, t])
 
   /** 共享方案的标签页跟着方案的名字走：名字随文档同步，不算没保存。 */
   const setTabName = useCallback((tabId: string, name: string) => {
@@ -1724,10 +1746,13 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     }catch(error){console.warn('[capacity check]',error);notify(t('sync.failed'),'warn');return false}
   },[notify,saveSessionNow,t])
 
-  const saveCurrent = useCallback(async (name?: string) => {
+  const saveCurrentNow = useCallback(async (name?: string) => {
     const e2 = eng.current
     const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
     if (!e2 || !tab || tab.readOnly) return null
+    if(SINGLE_MODEL && String(storage.getAccountScope())==='anonymous'){
+      await saveSessionNow();needAccount('save');return null
+    }
     if(tab.libraryId){
       if(e2.builder.busy())return null
       if(!navigator.onLine){notify(t('sync.failed'),'err');return null}
@@ -1787,6 +1812,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       if ((tab.editGeneration || 0) === generation) tab.name = saved.name
       tab.baseRev = Number(saved.rev || 0)
       tab.savedContent = modelContent(data)
+      tab.savedName = saved.name
       tab.saveId = String(saved.saveId)
       tab.conflictDocId = targetId && String(saved.id) !== targetId ? targetId : undefined
       tab.dirty = !savedGenerationUnchanged(tab, generation, data, tab.local.history.toJSON())
@@ -1799,7 +1825,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     output('save')
     if (attached && tab.conflictDocId) notify(t('sync.conflictProtected'), 'warn')
     else notify(t(syncStarted() ? 'sync.syncing' : 'sync.local'))
-    void pushSaved(String(saved.id), String(saved.name), data, String(saved.saveId), attached ? tab : undefined)
+    const pushed=pushSaved(String(saved.id), String(saved.name), data, String(saved.saveId), attached ? tab : undefined)
+    if(SINGLE_MODEL){await pushed;if(tab.saveState!=='synced')return null}
     void coverSaved(String(saved.id), data, saved.updatedAt, String(saved.saveId)).catch(error => {
       console.warn('[cover]', error)
       notify(t('sync.coverFailed'), 'warn')
@@ -1807,13 +1834,20 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     return { docId: String(saved.id), name: String(saved.name), data }
     // coverSaved、pushSaved 每次渲染重建，只在回调里调用，不进依赖表
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allowCloudSave, askName, exportTab, notify, syncTabs, t])
+  }, [allowCloudSave, askName, exportTab, notify, saveSessionNow, syncTabs, t])
+
+  const saveCurrent=useCallback(async(name?:string)=>{
+    if(savingRef.current || SINGLE_MODEL && !entryReady)return null
+    savingRef.current=true;setSaving(true)
+    try{return await saveCurrentNow(name)}finally{savingRef.current=false;setSaving(false)}
+  },[entryReady,saveCurrentNow])
 
   /**
    * 使用独立场景给已保存快照生成封面；JSON 无需等待，晚到封面按 saveId 核对内容。
    */
   async function coverSaved(docId: string, data: ModelJSON, updatedAt: number, saveId: string) {
-    if (!syncStarted()) return
+    // 托管单模型封面由平台按当前内容生成，避免后台封面再次提交整份旧模型。
+    if (SINGLE_MODEL || !syncStarted()) return
     const cover = await renderModelCover(data)
     if (!cover && modelPartCount(data) > 0) throw new Error('saved cover unavailable')
     if (cover) {
@@ -2055,6 +2089,12 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     if (!json) {
       notify(t('lib.loadFailed'), 'err')
       return
+    }
+    if(SINGLE_MODEL){
+      if(!active || active.docId || active.libraryId || active.planId)return
+      if((active.dirty || modelPartCount(e2.model.toJSON())>0)&&!window.confirm(t('confirm.loadPreset')))return
+      replaceTabModel(active,json);active.name=name;active.dirty=true
+      resetTabAnalytics(active,json,official?'official:'+official:'');applyTab(active);syncTabs();return
     }
     // 共享方案的标签页不让给别的造型
     const reuse = !!active && !active.planId && !active.docId && !active.dirty && modelPartCount(e2.model.toJSON()) === 0
@@ -2751,10 +2791,10 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       if (!e2) return
       const restored = tabsRef.current.find(x => x.tabId === activeRef.current)
       const requestedLibrary=ent.src?.match(/^\/quadro\/library\/([a-f0-9]+)\/native$/)?.[1]
-      if(EDITOR_EMBED && requestedLibrary && restored?.libraryId===requestedLibrary && restored.libraryOwner===libraryOwner && restored.dirty){
+      if(SINGLE_MODEL && requestedLibrary && restored?.libraryId===requestedLibrary && restored.libraryOwner===libraryOwner && restored.dirty){
         setEntryReady(true);return
       }
-      if (!EDITOR_EMBED && modelPartCount(e2.model.toJSON()) > 0) createEmptyTab()
+      if (!SINGLE_MODEL && !EDITOR_EMBED && modelPartCount(e2.model.toJSON()) > 0) createEmptyTab()
       // 当前是共享方案的标签页时 applyModelJson 自己会新开一个
       if (!applyModelJson(data, { undoable: false })) { track('builder.app.fail', { reason: 'source_format' }); notify(t('toast.shareInvalid'), 'err'); return }
       if (ent.background === 'grass' || (ent.background === 'home' && e2.model.homeContext)) {
@@ -2773,8 +2813,9 @@ export function EngineProvider({ children }: { children: ReactNode }) {
         resetTabAnalytics(tab, e2.model.toJSON(), entryAnalyticsObject())
         setAnalyticsObject(entryAnalyticsObject())
       }
+      if (SINGLE_MODEL && !SESSIONLESS && !requestedLibrary) dropParam('src')
       track('builder.design.open', { from: payload ? 'share' : 'src', view: VIEW_ONLY, copy: ent.copy })
-      if (ent.copy && !VIEW_ONLY) await copyToAccount()
+      if (ent.copy && !VIEW_ONLY) { await copyToAccount(); dropParam('copy') }
       setEntryReady(true)
     })().catch(err => { track('builder.app.fail', { reason: 'source_load' }); notify(err instanceof Error ? err.message : String(err), 'err') })
   }, [ready, applyModelJson, copyToAccount, createEmptyTab, notify, syncTabs, t])
@@ -2791,12 +2832,12 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   // 下载要由一次点击触发，浏览器才不会拦，所以不直接开始。
   const resumed = useRef(false)
   useEffect(() => {
-    if (!ready || resumed.current || VIEW_ONLY) return
+    if (!ready || !entryReady || resumed.current || VIEW_ONLY) return
     const kind = bootEntry().resume
     if (!kind) return
     resumed.current = true
-    void syncProbe().then(ok => { if (ok) setAccountAsk({ kind, phase: 'resume' }) })
-  }, [ready])
+    void syncProbe().then(ok => { if (ok) { setAccountAsk({ kind, phase: 'resume' }); dropParam('export') } })
+  }, [ready,entryReady])
 
   const exporters = useRef<Record<ResumeExport, () => void>>({} as Record<ResumeExport, () => void>)
   exporters.current = {
@@ -2807,6 +2848,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     qdf: () => exportQdf(),
     json: () => exportJson(),
     link: () => { void shareCurrent() },
+    save: () => { void saveCurrent() },
   }
 
   const answerAccount = useCallback((go: boolean) => {
@@ -2819,11 +2861,18 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     }
     // 去注册之前把标签页记下，注册完回来还是这一座
     track('builder.export.register', { kind: ask.kind })
-    const next = `${location.pathname}?export=${ask.kind}`
     void saveSessionNow().then(() => {
+      let next = `${location.pathname}?export=${ask.kind}`
+      if(SINGLE_MODEL){
+        const tab=tabsRef.current.find(tab=>tab.tabId===activeRef.current)!
+        const draft=crypto.randomUUID(),token=draftHandoff(tab.name,exportTab(tab),draft)
+        const url=new URL(location.pathname,location.origin);url.searchParams.set('draft',draft);url.searchParams.set('handoff',token);url.searchParams.set('export',ask.kind);url.searchParams.set('lang',lang)
+        if(bootEntry().origin)url.searchParams.set('origin',bootEntry().origin!)
+        next=url.pathname+url.search
+      }
       location.href = `${import.meta.env.VITE_REGISTER_URL}?next=${encodeURIComponent(next)}`
-    })
-  }, [accountAsk, saveSessionNow])
+    }).catch(error=>{console.warn('[draft handoff]',error);notify(t('sync.localFailed'),'err')})
+  }, [accountAsk, saveSessionNow,exportTab,lang,notify,t])
 
   const setViewCubePad = useCallback((right: number, bottom: number, size?: number) => {
     eng.current?.scene?.setViewCubePad?.(right, bottom, size)
@@ -2938,7 +2987,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   }
 
   const value: EngineApi = {
-    ready, entryReady, completeEntry, error, hostRef, tick,
+    ready, saving, entryReady, completeEntry, error, hostRef, tick,
     editorState: () => {
       flushModel()
       const tab=tabsRef.current.find(x=>x.tabId===activeRef.current)

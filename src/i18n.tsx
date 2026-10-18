@@ -6,6 +6,7 @@ import { sharedStrings } from './collab/sharedStrings'
 import { accessoryStrings } from './ui/accessoryStrings'
 import { builderChromeStrings } from './ui/builderChromeStrings'
 import { modelGuideStrings } from './ui/modelGuideStrings'
+import { singleModelStrings } from './ui/singleModelStrings'
 
 export type Lang = 'zh' | 'en' | 'de'
 
@@ -2344,7 +2345,7 @@ const de: Dict = {
   'room.closeFirst': 'Erst den Umriss schließen, dann Türen und Fenster setzen',
 }
 
-export const dicts: Record<Lang, Dict> = { zh: { ...zh, ...sharedStrings.zh, ...accessoryStrings.zh, ...builderChromeStrings.zh, ...modelGuideStrings.zh }, en: { ...en, ...sharedStrings.en, ...accessoryStrings.en, ...builderChromeStrings.en, ...modelGuideStrings.en }, de: { ...de, ...sharedStrings.de, ...accessoryStrings.de, ...builderChromeStrings.de, ...modelGuideStrings.de } }
+export const dicts: Record<Lang, Dict> = { zh: { ...zh, ...sharedStrings.zh, ...accessoryStrings.zh, ...builderChromeStrings.zh, ...modelGuideStrings.zh, ...singleModelStrings.zh }, en: { ...en, ...sharedStrings.en, ...accessoryStrings.en, ...builderChromeStrings.en, ...modelGuideStrings.en, ...singleModelStrings.en }, de: { ...de, ...sharedStrings.de, ...accessoryStrings.de, ...builderChromeStrings.de, ...modelGuideStrings.de, ...singleModelStrings.de } }
 
 /** 打开时用哪种语言：网址里带了的优先，其次是用户选过的，都没有按浏览器语言。 */
 export function detect(): Lang {
