@@ -1,7 +1,7 @@
 export const singleModelStrings = {
   zh: {
     'single.collab':'协作 · 自动同步',
-    'single.drafts':'本机草稿', 'single.find':'找回旧草稿', 'single.draftIntro':'这里的草稿只保存在当前浏览器。打开后可以继续编辑，保存到「我的造型」才会占用保存容量。',
+    'single.drafts':'本机草稿', 'single.find':'打开本机草稿', 'single.draftIntro':'这里的草稿只保存在当前浏览器。打开后可以继续编辑，保存到「我的造型」才会占用保存容量。',
     'single.cloudHint':'云端设计请到「我的造型」查看。', 'single.empty':'这个浏览器中没有找到当前账号的草稿。',
     'single.legacy':'查找更多草稿', 'single.claim':'这些旧内容未记录当前账号归属，可能包含这台设备其他使用者的设计。请确认你有权查看和恢复；不会自动上传到你的账号。',
     'single.restore':'打开草稿', 'single.backup':'下载备份', 'single.unassigned':'未分账号', 'single.local':'仅本机', 'single.originals':'打开草稿会保留原记录。找不到草稿时，请使用当时的设备和浏览器查找。',
@@ -14,7 +14,7 @@ export const singleModelStrings = {
   },
   en: {
     'single.collab':'Collaborative · automatic sync',
-    'single.drafts':'Device drafts', 'single.find':'Find old drafts', 'single.draftIntro':'These drafts are stored only in this browser. Open one to keep editing. Capacity is used when you save it to My designs.',
+    'single.drafts':'Device drafts', 'single.find':'Open device drafts', 'single.draftIntro':'These drafts are stored only in this browser. Open one to keep editing. Capacity is used when you save it to My designs.',
     'single.cloudHint':'Find your cloud designs in My designs.', 'single.empty':'No drafts found for this account in this browser.',
     'single.legacy':'Find more drafts', 'single.claim':'These records have no current account owner and may belong to another person using this device. Continue only if you may view and recover them. Nothing is uploaded automatically.',
     'single.restore':'Open draft', 'single.backup':'Download backup', 'single.unassigned':'Unassigned', 'single.local':'On this device', 'single.originals':'Opening a draft keeps the original record. Missing a draft? Check the device and browser you used to create it.',
@@ -27,7 +27,7 @@ export const singleModelStrings = {
   },
   de: {
     'single.collab':'Zusammenarbeit · automatisch synchronisiert',
-    'single.drafts':'Lokale Entwürfe', 'single.find':'Alte Entwürfe finden', 'single.draftIntro':'Diese Entwürfe sind nur in diesem Browser gespeichert. Öffne einen, um weiterzuarbeiten. Erst das Speichern in „Meine Modelle“ belegt Kapazität.',
+    'single.drafts':'Lokale Entwürfe', 'single.find':'Lokale Entwürfe öffnen', 'single.draftIntro':'Diese Entwürfe sind nur in diesem Browser gespeichert. Öffne einen, um weiterzuarbeiten. Erst das Speichern in „Meine Modelle“ belegt Kapazität.',
     'single.cloudHint':'Deine Cloud-Modelle findest du unter „Meine Modelle“.', 'single.empty':'Für dieses Konto wurden in diesem Browser keine Entwürfe gefunden.',
     'single.legacy':'Weitere Entwürfe suchen', 'single.claim':'Diese Daten haben keine Zuordnung zum aktuellen Konto und können anderen Nutzern dieses Geräts gehören. Fahre nur fort, wenn du sie ansehen und wiederherstellen darfst. Es wird nichts automatisch hochgeladen.',
     'single.restore':'Entwurf öffnen', 'single.backup':'Sicherung herunterladen', 'single.unassigned':'Nicht zugeordnet', 'single.local':'Auf diesem Gerät', 'single.originals':'Beim Öffnen bleibt das Original erhalten. Suche fehlende Entwürfe auf dem Gerät und im Browser, in dem du sie erstellt hast.',
