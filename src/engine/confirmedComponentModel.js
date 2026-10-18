@@ -64,13 +64,18 @@ export function cVolume(frame,lo,hi) {return {pos:localToWorld(frame,lo.map((v,i
 
 function edgeSupports(model, corners, density=0, coverage=null) {
   const supportTubes=new Set(),mounts=[];
+  const rails=[];
+  for(const tube of model.tubes.values()){
+    const rail=model._rail(tube.id);if(rail)rails.push({rail,tube});
+  }
   for(let i=0;i<4;i++) {
     const a=corners[i],b=corners[(i+1)%4],d=unit(cSub(b,a)),L=Math.hypot(...cSub(b,a)),spans=[];
-    for(const tube of model.tubes.values()) {
-      const rail=model._rail(tube.id);if(!rail || Math.abs(cDot(rail.dir,d))<0.999)continue;
-      const delta=cSub(rail.p0,a),start=cDot(delta,d);
-      if(Math.hypot(...cSub(delta,d.map(v=>v*start)))>0.35)continue;
-      const end=start+rail.len*cDot(rail.dir,d),lo=Math.max(0,Math.min(start,end)),hi=Math.min(L,Math.max(start,end));
+    for(const {rail,tube} of rails) {
+      const alignment=rail.dir[0]*d[0]+rail.dir[1]*d[1]+rail.dir[2]*d[2];
+      if(Math.abs(alignment)<0.999)continue;
+      const dx=rail.p0[0]-a[0],dy=rail.p0[1]-a[1],dz=rail.p0[2]-a[2],start=dx*d[0]+dy*d[1]+dz*d[2];
+      if(Math.hypot(dx-d[0]*start,dy-d[1]*start,dz-d[2]*start)>0.35)continue;
+      const end=start+rail.len*alignment,lo=Math.max(0,Math.min(start,end)),hi=Math.min(L,Math.max(start,end));
       if(hi>lo+0.01)spans.push({rail,tube,lo,hi});
     }
     spans.sort((a,b)=>a.lo-b.lo);let reach=0;

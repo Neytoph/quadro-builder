@@ -1375,10 +1375,10 @@ export class BuildModel {
 
   panelAccessoryDiagnostics(probe, opts = {}) { return panelAccessoryDiagnostics(this, probe, opts); }
 
-  _panelMountCandidate(probe) {
-    const candidate = this.panelAccessoryDiagnostics(probe);
+  _panelMountCandidate(probe, options = {}) {
+    const candidate = this.panelAccessoryDiagnostics(probe, options);
     if (candidate.valid || !candidate.mounts?.length) return candidate;
-    const opposite = this.panelAccessoryDiagnostics({ ...probe, side: -(probe.side || 1) });
+    const opposite = this.panelAccessoryDiagnostics({ ...probe, side: -(probe.side || 1) }, options);
     return opposite.valid ? opposite : candidate;
   }
 
@@ -1431,8 +1431,14 @@ export class BuildModel {
   }
 
   confirmedMounts(partId,options={}) {
-    return confirmedCandidates(this,partId,{...options,isPanelCandidateValid:probe=>this._panelMountCandidate(probe).valid})
-      .map(p=>p.panelId ? this._panelMountCandidate(p) : confirmedDiagnostics(this,p));
+    // 同一次同步枚举中，承载方向筛选与返回结果共用检查；下次枚举仍读取当前模型。
+    const checked=new Map(),collisionCache=new Map(),mountCache=new Map();
+    const diagnose=probe=>{
+      if(!checked.has(probe))checked.set(probe,this._panelMountCandidate(probe,{collisionCache,mountCache}));
+      return checked.get(probe);
+    };
+    return confirmedCandidates(this,partId,{...options,isPanelCandidateValid:probe=>diagnose(probe).valid})
+      .map(p=>p.panelId ? diagnose(p) : confirmedDiagnostics(this,p,{collisionCache,mountCache}));
   }
   ropeDiagnostics(first, second) { return confirmedDiagnostics(this, ropeCandidate(this, first, second)); }
   confirmedDiagnostics(probe) { return confirmedDiagnostics(this, probe); }

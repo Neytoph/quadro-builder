@@ -465,7 +465,13 @@ export class Builder {
       this.onNotice(t("notice_connector_no_node"), "warn");
     }
   }
-  setPanel(panelId) { this._ropeFirst = null; this._installationPart = null; this.installationPreview = null; this.scene.clearInstallationPreview?.(); this.panelId = panelId; if (this.mode === "panel") this.refresh(); }
+  setPanel(panelId, { refresh = true } = {}) {
+    this._ropeFirst = null; this._installationPart = null; this.installationPreview = null;
+    this.scene.clearInstallationPreview?.();
+    if (this.panelRail) { this.panelRail = null; this.highlight = null; }
+    this.panelId = panelId;
+    if (refresh && this.mode === "panel") this.refresh();
+  }
   setInsetScrewAxis(axis) {
     if(!['auto','vertical','horizontal'].includes(axis) || this.readOnly)return false;
     this.insetScrewAxis=axis;this._installationPart=null;this.installationPreview=null;
@@ -1623,6 +1629,7 @@ export class Builder {
    * loeschbar oder umfaerbbar, und es gilt in jedem Modus.
    */
   setHighlight(ids) {
+    if (!ids?.size && !this.highlight) return;
     this.highlight = ids && ids.size ? ids : null;
     this.refresh();
   }

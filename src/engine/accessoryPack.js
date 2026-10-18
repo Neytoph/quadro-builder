@@ -153,13 +153,45 @@ function segmentHits(box, a, b, radius = 2.45) {
 }
 
 function boxesOverlap(a, b) {
-  const delta = sub(b.pos, a.pos);
-  for (const axis of [...a.axes, ...b.axes, ...a.axes.flatMap(x => b.axes.map(y => cross(x, y)))]) {
-    if (Math.hypot(...axis) < 1e-7) continue;
-    const ra = a.axes.reduce((n, x, i) => n + Math.abs(dot(x, axis)) * a.half[i], 0);
-    const rb = b.axes.reduce((n, x, i) => n + Math.abs(dot(x, axis)) * b.half[i], 0);
-    if (Math.abs(dot(delta, axis)) >= ra + rb - 0.01) return false;
+  const dx=b.pos[0]-a.pos[0],dy=b.pos[1]-a.pos[1],dz=b.pos[2]-a.pos[2];
+  const separated=(x,y,z)=>{
+    if(x*x+y*y+z*z<1e-14)return false;
+    let ra=0,rb=0;
+    for(let i=0;i<3;i++){
+      ra+=Math.abs(a.axes[i][0]*x+a.axes[i][1]*y+a.axes[i][2]*z)*a.half[i];
+      rb+=Math.abs(b.axes[i][0]*x+b.axes[i][1]*y+b.axes[i][2]*z)*b.half[i];
+    }
+    return Math.abs(dx*x+dy*y+dz*z)>=ra+rb-.01;
+  };
+  for(const axis of a.axes)if(separated(axis[0],axis[1],axis[2]))return false;
+  for(const axis of b.axes)if(separated(axis[0],axis[1],axis[2]))return false;
+  for(const x of a.axes)for(const y of b.axes)if(separated(x[1]*y[2]-x[2]*y[1],x[2]*y[0]-x[0]*y[2],x[0]*y[1]-x[1]*y[0]))return false;
+  return true;
+}
+
+function volumeBounds(box) {
+  const bounds=[];
+  for(let i=0;i<3;i++){
+    const half=box.axes.reduce((sum,axis,k)=>sum+Math.abs(axis[i])*box.half[k],0)+1e-7;
+    bounds[i]=box.pos[i]-half;bounds[i+3]=box.pos[i]+half;
   }
+  return bounds;
+}
+
+function combinedBounds(boxes) {
+  const bounds=[Infinity,Infinity,Infinity,-Infinity,-Infinity,-Infinity];
+  for(const box of boxes)for(let i=0;i<3;i++){
+    bounds[i]=Math.min(bounds[i],box.bounds[i]);bounds[i+3]=Math.max(bounds[i+3],box.bounds[i+3]);
+  }
+  return bounds;
+}
+
+function boundsOverlap(a,b) {
+  return a[0]<=b[3]&&a[3]>=b[0]&&a[1]<=b[4]&&a[4]>=b[1]&&a[2]<=b[5]&&a[5]>=b[2];
+}
+
+function segmentNearBounds(bounds,a,b,radius) {
+  for(let i=0;i<3;i++)if(Math.max(a[i],b[i])+radius<bounds[i] || Math.min(a[i],b[i])-radius>bounds[i+3])return false;
   return true;
 }
 
@@ -184,9 +216,11 @@ export function nativeWheelComponentObstacle(model, wheel) {
   return null;
 }
 
-export function componentObstacle(model, part, { sweep = false } = {}) {
+export function componentObstacle(model, part, { sweep = false, collisionCache = null } = {}) {
   if (isSoftPart(model, part)) return null;
   const volumes = componentVolumes(model, part, { sweep });
+  // 先用保守世界包围盒排除远处部件；精确盒体和圆管检查继续决定真实碰撞。
+  const bounded=volumes.map(box=>({box,bounds:volumeBounds(box)})),bounds=combinedBounds(bounded);
   const supports = new Set(Array.isArray(part.supportTubes) ? part.supportTubes : [part.tube, part.a, part.b].filter(Boolean));
   if(hasInsetScrews(part)) {
     const spec=accessorySpec(part.panelId);
@@ -202,17 +236,25 @@ export function componentObstacle(model, part, { sweep = false } = {}) {
       let prev = point(a);
       for (let k = 1; k <= 24; k++) {
         const theta = k / 24 * Math.PI / 2, next = c.map((n, i) => n + va[i] * Math.cos(theta) + vb[i] * Math.sin(theta));
-        if (volumes.some(box => segmentHits(box, prev, next))) return { kind: 'tube', id: tube.id };
+        if (segmentNearBounds(bounds,prev,next,2.45) && bounded.some(({box,bounds}) => segmentNearBounds(bounds,prev,next,2.45) && segmentHits(box, prev, next))) return { kind: 'tube', id: tube.id };
         prev = next;
       }
-    } else if (volumes.some(box => segmentHits(box, point(a), point(b)))) return { kind: 'tube', id: tube.id };
+    } else {
+      const start=point(a),end=point(b);
+      if(segmentNearBounds(bounds,start,end,2.45) && bounded.some(({box,bounds})=>segmentNearBounds(bounds,start,end,2.45) && segmentHits(box,start,end)))return {kind:'tube',id:tube.id};
+    }
   }
   for (const other of [...model.panels.values(), ...model.textiles.values(), ...model.fittings.values()]) {
     if (other.id === part.id || isSoftPart(model, other)) continue;
-    const boxes = (ACCESSORY_IDS.has(other.kind) && (!confirmedSpec(other.kind) || other.appearanceVersion === 2)) || (other.appearanceVersion && PANEL_ACCESSORY_IDS.has(other.panelId)) || ['panel_40x40', 'panel_40x20'].includes(other.panelId)
-      ? componentVolumes(model, other, { sweep: other.kind === 'swing' })
-      : other.kind==='multi-wheel2' ? componentVolumes(model,other) : (other.a && other.b ? panelVolume(model, other) : [{ pos: [other.x, other.y, other.z], axes: other.quat?.every(Number.isFinite) ? [xAxisOf(other.quat), yAxisOf(other.quat), zAxisOf(other.quat)] : [[1, 0, 0], [0, 1, 0], [0, 0, 1]], half: other.kind === 'floating-wheel2' ? [7.5, 15.1, 15.1] : [3, 3, 3] }]);
-    if (volumes.some(box => boxes.some(otherBox => boxesOverlap(box, otherBox)))) return { kind: other.panelId ? 'panel' : 'fitting', id: other.id };
+    let entry=collisionCache?.get(other);
+    if(!entry){
+      const boxes = (ACCESSORY_IDS.has(other.kind) && (!confirmedSpec(other.kind) || other.appearanceVersion === 2)) || (other.appearanceVersion && PANEL_ACCESSORY_IDS.has(other.panelId)) || ['panel_40x40', 'panel_40x20'].includes(other.panelId)
+        ? componentVolumes(model, other, { sweep: other.kind === 'swing' })
+        : other.kind==='multi-wheel2' ? componentVolumes(model,other) : (other.a && other.b ? panelVolume(model, other) : [{ pos: [other.x, other.y, other.z], axes: other.quat?.every(Number.isFinite) ? [xAxisOf(other.quat), yAxisOf(other.quat), zAxisOf(other.quat)] : [[1, 0, 0], [0, 1, 0], [0, 0, 1]], half: other.kind === 'floating-wheel2' ? [7.5, 15.1, 15.1] : [3, 3, 3] }]);
+      const bounded=boxes.map(box=>({box,bounds:volumeBounds(box)}));
+      entry={bounded,bounds:combinedBounds(bounded)};collisionCache?.set(other,entry);
+    }
+    if(boundsOverlap(bounds,entry.bounds) && bounded.some(a=>entry.bounded.some(b=>boundsOverlap(a.bounds,b.bounds) && boxesOverlap(a.box,b.box))))return {kind:other.panelId?'panel':'fitting',id:other.id};
   }
   for (const slide of model.slides.values()) {
     const origin = [slide.x, slide.y, slide.z];
@@ -237,15 +279,19 @@ function separatePanelRetainers(model, candidate, part, a, b) {
   return dot(inward(first), inward(second)) <= 0.01;
 }
 
-function occupiedMount(model, candidate, ignoreId) {
+function occupiedMount(model, candidate, ignoreId, mountCache = null) {
   if (isSoftPart(model, candidate)) return null;
   const mounts = candidate.mounts;
   const parts = [...model.fittings.values(), ...model.panels.values()];
   for (const part of parts) {
     if (part.id === ignoreId || isSoftPart(model, part)) continue;
     // 工厂普通板保留标准存档字段，固定位随当前支撑管即时计算。
-    const nativePanelMounts = ['panel_40x40', 'panel_40x20'].includes(part.panelId) && !part.appearanceVersion ? confirmedPanelDiagnostics(model, part).mounts : null;
-    const used = Array.isArray(part.mounts) ? part.mounts.filter(m => m && typeof m === 'object') : nativePanelMounts || (part.tube ? [{ tube: part.tube, t: 0.5, width: part.kind === 'sleeve' ? Infinity : 5 }] : []);
+    let used=mountCache?.get(part);
+    if(!used){
+      const nativePanelMounts = ['panel_40x40', 'panel_40x20'].includes(part.panelId) && !part.appearanceVersion ? confirmedPanelDiagnostics(model, part).mounts : null;
+      used = Array.isArray(part.mounts) ? part.mounts.filter(m => m && typeof m === 'object') : nativePanelMounts || (part.tube ? [{ tube: part.tube, t: 0.5, width: part.kind === 'sleeve' ? Infinity : 5 }] : []);
+      mountCache?.set(part,used);
+    }
     for (const a of mounts) for (const b of used) {
       if (a.tube !== b.tube) continue;
       if (separatePanelRetainers(model, candidate, part, a, b)) continue;
@@ -296,8 +342,8 @@ export function accessoryMount(model, kind, tubeId, opts = {}) {
   return mount.valid ? mount : null;
 }
 
-export function panelAccessoryDiagnostics(model, probe, { ignoreId = probe.id } = {}) {
-  if (CONFIRMED_PANEL_IDS.has(probe.panelId)) return confirmedDiagnostics(model, { ...probe, id: ignoreId });
+export function panelAccessoryDiagnostics(model, probe, { ignoreId = probe.id, collisionCache = null, mountCache = null } = {}) {
+  if (CONFIRMED_PANEL_IDS.has(probe.panelId)) return confirmedDiagnostics(model, { ...probe, id: ignoreId }, {collisionCache,mountCache});
   const spec = accessorySpec(probe.panelId), corners = model.panelCorners(probe);
   if (!corners) return invalid('missing_support');
   const e = sub(corners[1], corners[0]), v = sub(corners[3], corners[0]), normal = unit(cross(e, v));
@@ -340,11 +386,11 @@ export function panelAccessoryDiagnostics(model, probe, { ignoreId = probe.id } 
   }
   if(legacy)delete part.params.mountLayout;
   if (spec.mount === 'horizontal-frame' && Math.min(...corners.map(p => p[1])) < spec.depth + 3) return { ...part, valid: false, reason: 'ground_clearance' };
-  const occupied = occupiedMount(model, part, ignoreId);
+  const occupied = occupiedMount(model, part, ignoreId, mountCache);
   if (occupied) return { ...part, valid: false, reason: 'mount_occupied', obstacle: occupied };
   const existing = model.panelAt(probe.a, probe.b, probe.t0, probe.len);
   if (!isSoftPart(model, part) && existing && existing.id !== ignoreId) return { ...part, valid: false, reason: 'opening_occupied', obstacle: { kind: 'panel', id: existing.id } };
-  const obstacle = componentObstacle(model, part);
+  const obstacle = componentObstacle(model, part, {collisionCache});
   if (obstacle) return { ...part, valid: false, reason: 'component_space', obstacle };
   return { ...part, valid: true, reason: null, pos: componentFrame(model, part).pos };
 }
@@ -390,7 +436,7 @@ export function componentMountsValid(model, part) {
   return !['straight_tube', 'horizontal_tube', 'missing_support', 'tube_short', 'ground_clearance', 'frame_size', 'vertical_frame', 'horizontal_frame', 'four_edges', 'four_corners','opposite_edges'].includes(candidate.reason);
 }
 
-export function confirmedDiagnostics(model, probe) {
+export function confirmedDiagnostics(model, probe, {collisionCache = null,mountCache = null} = {}) {
   const spec = confirmedSpec(probe.panelId || probe.kind || probe.partId);
   if (!spec) return invalid('missing_support');
   let part;
@@ -406,9 +452,9 @@ export function confirmedDiagnostics(model, probe) {
     const existing=model.panelAt(part.a,part.b,part.t0,part.len,probe.id);
     if(existing)return {...part,valid:false,reason:'component_space',obstacle:{kind:'panel',id:existing.id}};
   }
-  const occupied = occupiedMount(model, part, probe.id);
+  const occupied = occupiedMount(model, part, probe.id, mountCache);
   if (occupied) return { ...part, valid: false, reason: 'mount_occupied', obstacle: occupied };
-  const obstacle = componentObstacle(model, part);
+  const obstacle = componentObstacle(model, part, {collisionCache});
   if (obstacle) return { ...part, valid: false, reason: 'component_space', obstacle };
   return part;
 }

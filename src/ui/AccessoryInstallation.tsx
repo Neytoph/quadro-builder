@@ -2,22 +2,22 @@ import { RotateCcw } from 'lucide-react'
 import { useEngine } from '../store/EngineContext'
 import { useI18n } from '../i18n'
 import { colorLabel, labelOf } from '../names'
-import { builderComponents, componentForTool, componentHintKey, componentDimensions } from '../store/builderComponents'
+import { builderComponents, componentHintKey, componentDimensions } from '../store/builderComponents'
 import { NARROW_MAX, statusTipBox, usePanelLayout } from './panelLayout'
 import { useDock } from './dock'
 import PartThumbnail from './PartThumbnail'
-import { supportsPanelFixing } from '../engine/confirmedComponentModel.js'
 
 export default function AccessoryInstallation({ menuOpen }: { menuOpen: boolean }) {
   const api = useEngine()
   const { t } = useI18n()
   const { left, right, vw, toolbarW } = usePanelLayout()
   const { pane } = useDock()
+  if (api.mode !== 'select') return null
   const narrow = vw <= NARROW_MAX
   const preview = api.installationPreview
   const selected = api.selectedPanelFixing
   const partId = preview?.partId || selected?.partId
-  const part = partId ? builderComponents().find(p => p.id === partId || p.kind === partId) : componentForTool(api)
+  const part = partId ? builderComponents().find(p => p.id === partId || p.kind === partId) : undefined
   if (menuOpen || (narrow && pane) || (!preview && !part && !api.canFlipAccessory)) return null
   const box = narrow ? null : statusTipBox(left, vw, toolbarW, pane ? right : null)
   if (!narrow && !box) return null
@@ -31,9 +31,9 @@ export default function AccessoryInstallation({ menuOpen }: { menuOpen: boolean 
           {preview && <span className="text-gray-300 shrink-0">{t(preview.mountCount === 1 ? 'accessory.mountOne' : 'accessory.mounts', { n: preview.mountCount })}</span>}
         </div>
         <p className="mt-1 text-gray-300" role="status">{selected ? t('accessory.fixingHelp') : preview?.reason || t(componentHintKey(part), { size: componentDimensions(part) })}</p>
-        {(selected || api.mode === 'panel' && supportsPanelFixing(part.id)) && <div className="flex items-center flex-wrap gap-1.5 mt-2" role="group" aria-label={t('accessory.fixingEdges')}>
+        {selected && <div className="flex items-center flex-wrap gap-1.5 mt-2" role="group" aria-label={t('accessory.fixingEdges')}>
           <span className="mr-1 text-[11px] text-gray-300">{t('accessory.fixingEdges')}</span>
-          {(selected ? ['vertical', 'horizontal'] as const : ['auto', 'vertical', 'horizontal'] as const).map(axis => <button type="button" key={axis} className={`qb-btn qb-btn-sm ${(selected ? selected.axis : api.insetScrewAxis) === axis ? '' : 'qb-btn-ghost'}`} data-ui="inset-screw-axis" data-axis={axis} aria-pressed={(selected ? selected.axis : api.insetScrewAxis) === axis} disabled={api.readOnly} onClick={() => selected && axis !== 'auto' ? api.setSelectedPanelFixing(axis) : api.setInsetScrewAxis(axis)}>{t(`accessory.fixing.${axis}`)}</button>)}
+          {(['vertical', 'horizontal'] as const).map(axis => <button type="button" key={axis} className={`qb-btn qb-btn-sm ${selected.axis === axis ? '' : 'qb-btn-ghost'}`} data-ui="inset-screw-axis" data-axis={axis} aria-pressed={selected.axis === axis} disabled={api.readOnly} onClick={() => api.setSelectedPanelFixing(axis)}>{t(`accessory.fixing.${axis}`)}</button>)}
         </div>}
         {!selected && part.mountLayout === 'opposite-transparent-screws' && <p className="mt-1 text-[11px] text-gray-300">{t('accessory.fixingHelp')}</p>}
         {part.placement === 'panel' && part.id !== 'panel_40x40_pocket' && <p className="mt-1 text-[11px] text-gray-300">{t('accessory.panelFlipHint')}</p>}

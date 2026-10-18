@@ -1314,7 +1314,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const setPanel = useCallback((id: string) => {
     pickPart('panels', id)
     clearBomHighlight()
-    builder?.setPanel(id)
+    builder?.setPanel(id, { refresh: false })
     builder?.setMode('panel')
     bump()
   }, [builder, bump, clearBomHighlight])
