@@ -103,10 +103,9 @@ describe('选中配件保留真实外观的轮廓', () => {
     const plane = new THREE.Plane(new THREE.Vector3(1, 0, 0), -20)
     scene._clipPlane = plane; scene._applyClip()
     expect(guides.lines.material.clippingPlanes).toEqual([plane])
-    expect(guides.hidden.material.clippingPlanes).toEqual([plane])
+    expect(guides.group.children).toHaveLength(1)
     scene._clipPlane = null; scene._applyClip()
     expect(guides.lines.material.clippingPlanes).toEqual([])
-    expect(guides.hidden.material.clippingPlanes).toEqual([])
     guides.dispose()
   })
 

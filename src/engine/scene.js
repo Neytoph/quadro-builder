@@ -461,7 +461,7 @@ export class SceneManager {
   _renderMainScene() {
     // 模型、家具和地面共用当前场景的灯光、色调映射与阴影。
     // 室内使用房间灯光；切换背景及隐藏房间导出由 _applyHomeStyle 统一处理。
-    this._panelPlacementGuides?.update(this.camera);
+    this._panelPlacementGuides?.update(this.camera, this._appearing, this._sceneOn ? 'grass' : 'home');
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -6670,9 +6670,11 @@ export class SceneManager {
   _poseAppear(a, now) {
     const ap = MOTION.appear;
     const k = a.t0 === null || a.t0 === Infinity ? 0 : Math.min(1, Math.max(0, (now - a.t0 - a.delay) / a.dur));
-    if (k >= 1) { this._posePieces(a.center, a.pieces, 1, 0); return true; }
+    if (k >= 1) { a.scale = 1; a.dy = 0; this._posePieces(a.center, a.pieces, 1, 0); return true; }
     const e = ap.ease(k);
-    this._posePieces(a.center, a.pieces, ap.from + (1 - ap.from) * e, ap.drop * (1 - e));
+    a.scale = ap.from + (1 - ap.from) * e;
+    a.dy = ap.drop * (1 - e);
+    this._posePieces(a.center, a.pieces, a.scale, a.dy);
     return false;
   }
 

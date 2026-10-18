@@ -1437,8 +1437,8 @@ export class BuildModel {
       if(!checked.has(probe))checked.set(probe,this._panelMountCandidate(probe,{collisionCache,mountCache}));
       return checked.get(probe);
     };
-    return confirmedCandidates(this,partId,{...options,isPanelCandidateValid:probe=>diagnose(probe).valid})
-      .map(p=>p.panelId ? diagnose(p) : confirmedDiagnostics(this,p,{collisionCache,mountCache}));
+    const candidates=confirmedCandidates(this,partId,{...options,isPanelCandidateValid:probe=>diagnose(probe).valid});
+    return candidates.map(p=>p.panelId ? diagnose(p) : confirmedDiagnostics(this,p,{collisionCache,mountCache,candidates}));
   }
   ropeDiagnostics(first, second) { return confirmedDiagnostics(this, ropeCandidate(this, first, second)); }
   confirmedDiagnostics(probe) { return confirmedDiagnostics(this, probe); }

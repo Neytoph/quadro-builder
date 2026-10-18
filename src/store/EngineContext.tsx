@@ -1328,14 +1328,14 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const setFitting = useCallback((kind: string, partId?: string) => {
     pickPart('fittings', partId || kind)
     clearBomHighlight()
-    builder?.setFitting(kind, partId)
+    builder?.setFitting(kind, partId, { refresh: false })
     builder?.setMode('fitting')
     bump()
   }, [builder, bump, clearBomHighlight])
   const setClamp = useCallback((id: string) => {
     pickPart('clamps', id)
     clearBomHighlight()
-    builder?.setClampPart(id)
+    builder?.setClampPart(id, { refresh: false })
     builder?.setMode('clamp')
     bump()
   }, [builder, bump, clearBomHighlight])
@@ -1354,7 +1354,6 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const selected = partId || builder.reinforcementPartId || 'reinforce80'
     pickPart('reinforcements', selected)
     clearBomHighlight()
-    builder._clearReinforceRail()
     builder.reinforcementPartId = selected
     builder.setMode('reinforce')
     bump()

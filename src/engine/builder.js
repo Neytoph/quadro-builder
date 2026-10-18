@@ -357,6 +357,13 @@ export class Builder {
       return;
     }
     if (this.mode !== "fitting") return;
+    const confirmedId = this.fittingPart || this.fittingKind;
+    if (confirmedSpec(confirmedId)?.placement === 'fitting') {
+      const mounts = this._confirmedFittingMounts?.id === confirmedId
+        ? this._confirmedFittingMounts.mounts : this.model.confirmedMounts(confirmedId);
+      if (!mounts.some(mount => mount.valid)) this.onNotice(installationReason(this.model, mounts.find(mount => mount.reason) || { reason: 'missing_support' }), 'info');
+      return;
+    }
     if (this.fittingKind === "flexi" || this.fittingKind === BOLT_PART) {
       if (!this.model.boltMounts(geometry().connectorSize).length) {
         this.onNotice(t("notice_flexi_no_end"), "info");
@@ -418,6 +425,7 @@ export class Builder {
   /** Wieviele Stellen das gewaehlte Anbauteil jetzt hat -- wie _buildFittingHandles. */
   _countFittingPlaces() {
     const kind = this.fittingKind;
+    if (confirmedSpec(this.fittingPart || kind)?.placement === 'fitting') return this.model.confirmedMounts(this.fittingPart || kind).filter(mount => mount.valid).length;
     if (ACCESSORY_IDS.has(kind)) return this.model.accessoryMounts(kind).length;
     const cs = geometry().connectorSize;
     if (RAIL_FITTINGS.has(kind)) return this.model.railFittingMounts(kind, this._railSize()).length;
@@ -485,9 +493,9 @@ export class Builder {
     return true;
   }
 
-  setClampPart(id) { this.clampPart = id; if (this.mode === "clamp") this.refresh(); }
+  setClampPart(id, { refresh = true } = {}) { this.clampPart = id; if (refresh && this.mode === "clamp") this.refresh(); }
 
-  setFitting(kind, partId = null) {
+  setFitting(kind, partId = null, { refresh = true } = {}) {
     this._installationPart = null; this.installationPreview = null; this.scene.clearInstallationPreview?.();
     const confirmed = confirmedSpec(partId || kind);
     this.fittingKind = confirmed?.placement === 'fitting' ? confirmed.kind || confirmed.id : kind === 'wheel' ? 'multi-wheel2' : kind;
@@ -495,8 +503,8 @@ export class Builder {
     this.fittingPart = partId;
     this._ropeFirst = null;
     this.poolLinerId = null;
-    this._clearPanelRail();          // Rohr-Auswahl gilt nur fuer das Netz
-    if (this.mode === "fitting") this.refresh();
+    if (this.panelRail) { this.panelRail = null; this.highlight = null; }
+    if (refresh && this.mode === "fitting") this.refresh();
   }
 
   /**
@@ -1108,8 +1116,8 @@ export class Builder {
     if (linerId === "balls") {
       if (!this._pools().length) { this.onNotice(t("notice_balls_none"), "info"); return false; }
       this.cancelPaste();
+      this.setFitting('balls', null, { refresh: false });
       this.poolLinerId = "balls";
-      this.fittingKind = "balls";
       this.setMode("fitting");
       this.onNotice(t("notice_balls_pick"), "info");
       return "mount";
@@ -1120,7 +1128,8 @@ export class Builder {
     const mounts = this.model.poolLinerMounts(spec);
     if (mounts.length) {
       this.cancelPaste();
-      this.fittingKind = spec.kind;
+      this.setFitting(spec.kind, null, { refresh: false });
+      this.poolLinerId = linerId;
       this.setMode("fitting");
       this.onNotice(t("notice_pool_pick_frame"), "info");
       return "mount";
@@ -2677,8 +2686,12 @@ export class Builder {
     // Merkt sich, an welchen Kupplungen das gewaehlte Teil sitzen darf -- der
     // Zeiger zeigt dort eine Hand, auch wenn er den Ankerpunkt knapp verfehlt.
     this._fittingMountNodes = new Set();
+    this._confirmedFittingMounts = null;
     if (confirmedSpec(this.fittingPart || this.fittingKind)?.placement === 'fitting') {
-      for (const mount of this.model.confirmedMounts(this.fittingPart || this.fittingKind)) if (mount.mounts.length) this.scene.addHandle(mount.pos, { confirmedComponent: mount, placeNode: true }, 'place');
+      const id = this.fittingPart || this.fittingKind, mounts = this.model.confirmedMounts(id);
+      // 提示紧接本次 refresh 使用同一批诊断；下一次 refresh 会重新读取模型。
+      this._confirmedFittingMounts = { id, mounts };
+      for (const mount of mounts) if (mount.mounts.length) this.scene.addHandle(mount.pos, { confirmedComponent: mount, placeNode: true }, 'place');
       return;
     }
     if (ACCESSORY_IDS.has(this.fittingKind)) {
@@ -3581,7 +3594,7 @@ export class Builder {
       const path = this.model.reinforcementPaths(erste, this.reinforcementPartId).find(path => path.tubeIds.includes(tube.id));
       if (!path) { this.onNotice(t("notice_reinforce_no_fit"), "warn"); return; }
       this.recordHistory(() => { this.model.addReinforcement(path.tubeIds, this.reinforcementPartId); });
-      this._clearReinforceRail();
+      this._clearReinforceRail({ refresh: false });
       this.onNotice(t("notice_reinforce_added"));
       this.refresh();
       return;
@@ -3622,11 +3635,11 @@ export class Builder {
     return this.model.reinforcementPaths(id, this.reinforcementPartId).length > 0;
   }
 
-  _clearReinforceRail() {
+  _clearReinforceRail({ refresh = true } = {}) {
     if (!this.reinforceRail && !this.highlight) return;
     this.reinforceRail = null;
     this.highlight = null;
-    this.refresh();
+    if (refresh) this.refresh();
   }
 
   // Klick auf ein Rohr setzt einen Doppelrohrverbinder oder eine Rohrklammer an

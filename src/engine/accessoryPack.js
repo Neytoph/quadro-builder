@@ -436,7 +436,7 @@ export function componentMountsValid(model, part) {
   return !['straight_tube', 'horizontal_tube', 'missing_support', 'tube_short', 'ground_clearance', 'frame_size', 'vertical_frame', 'horizontal_frame', 'four_edges', 'four_corners','opposite_edges'].includes(candidate.reason);
 }
 
-export function confirmedDiagnostics(model, probe, {collisionCache = null,mountCache = null} = {}) {
+export function confirmedDiagnostics(model, probe, {collisionCache = null,mountCache = null,candidates = null} = {}) {
   const spec = confirmedSpec(probe.panelId || probe.kind || probe.partId);
   if (!spec) return invalid('missing_support');
   let part;
@@ -444,7 +444,7 @@ export function confirmedDiagnostics(model, probe, {collisionCache = null,mountC
   else if(spec.feature==='trampoline')part={...trampolineCandidate(model,probe),id:probe.id,color:probe.color};
   else if (probe.panelId) part = confirmedPanelDiagnostics(model, probe);
   else {
-    const candidate = confirmedCandidates(model, spec.id).find(p => p.supportTubes.length === probe.supportTubes?.length && p.supportTubes.every(id => probe.supportTubes.includes(id)) && (p.a == null || p.a === probe.a) && (p.b == null || p.b === probe.b) && (p.t0 == null || p.t0 === probe.t0) && (p.len == null || p.len === probe.len) && (spec.feature!=='trampoline' || p.params.width===(probe.params?.width ?? probe.w ?? 40) && p.params.height===(probe.params?.height ?? probe.h ?? 40)) && (p.curveReverse == null || p.curveReverse === probe.curveReverse));
+    const candidate = (candidates || confirmedCandidates(model, spec.id)).find(p => p.supportTubes.length === probe.supportTubes?.length && p.supportTubes.every(id => probe.supportTubes.includes(id)) && (p.a == null || p.a === probe.a) && (p.b == null || p.b === probe.b) && (p.t0 == null || p.t0 === probe.t0) && (p.len == null || p.len === probe.len) && (spec.feature!=='trampoline' || p.params.width===(probe.params?.width ?? probe.w ?? 40) && p.params.height===(probe.params?.height ?? probe.h ?? 40)) && (p.curveReverse == null || p.curveReverse === probe.curveReverse));
     part = candidate ? { ...candidate, id: probe.id, color: probe.color } : invalid('missing_support');
   }
   if (!part.valid) return part;

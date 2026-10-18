@@ -361,11 +361,17 @@ function outerPanelBodyVolumes(frame,spec) {
   const x=spec.width/2,y=spec.height/2,r=PANEL_CORNER_RELIEF,z=PANEL_OUTER_FACE,boxes=[];
   const add=(x0,y0,x1,y1)=>boxes.push({...cVolume(frame,[x0,y0,z-geometry().panelThickness],[x1,y1,z]),roundTubeClearance:true});
   add(-x+r,-y,x-r,y);add(-x,-y+r,x,y-r);
-  // 角部沿普通板的接头让位切分；薄片体积不把整块角部空隙重新填回去。
-  for(const sx of [-1,1])for(const sy of [-1,1])for(let i=0;i<16;i++){
-    const a=r*i/16,b=r*(i+1)/16,c=Math.sqrt(Math.max(0,r*r-b*b));
-    const xx=[sx*(x-a),sx*(x-b)].sort((a,b)=>a-b),yy=[sy*(y-c),sy*(y-r)].sort((a,b)=>a-b);
-    add(xx[0],yy[0],xx[1],yy[1]);
+  // 在原16条保守盒体内继续切分，避免扩大任何旧碰撞区域。
+  // 每段平方跨度至多r²/32，到角心至少r*sqrt(31/32)，保留49mm圆管的让位间隙。
+  const bands=16,maxSquaredSpan=r*r/32;
+  for(const sx of [-1,1])for(const sy of [-1,1])for(let i=0;i<bands;i++){
+    const lo=r*i/bands,hi=r*(i+1)/bands,span=hi*hi-lo*lo;
+    const steps=Math.ceil(span/maxSquaredSpan-1e-10);
+    for(let j=0;j<steps;j++){
+      const a=Math.sqrt(lo*lo+span*j/steps),b=Math.sqrt(lo*lo+span*(j+1)/steps),c=Math.sqrt(Math.max(0,r*r-b*b));
+      const xx=[sx*(x-a),sx*(x-b)].sort((a,b)=>a-b),yy=[sy*(y-c),sy*(y-r)].sort((a,b)=>a-b);
+      add(xx[0],yy[0],xx[1],yy[1]);
+    }
   }
   return boxes;
 }
