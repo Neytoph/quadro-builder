@@ -1,5 +1,5 @@
 // 用户确认稿的安装口径；数值是框格设计假设，未经实测或承载认证。
-import { INSET_PANEL_IDS, INSET_MOUNT_LAYOUT } from './insetPanelMounts.js';
+import { INSET_PANEL_IDS, INSET_MOUNT_LAYOUT } from './insetPanelSpec.js';
 const panel = (id, name, feature, w = 40, h = 40, mountType = 'frame') => ({ id, name, feature, w, h, width: w, height: h, depth: 1.2, placement: 'panel', mountType, verifiedLoad: false, appearanceVersion: 2, kitContents: ['component', 'retainers'] });
 const fitting = (id, name, mountType, feature, width = 40, height = 40) => ({ id, name, mountType, feature, width, height, depth: 1.2, placement: 'fitting', verifiedLoad: false, appearanceVersion: 2, kitContents: ['component', 'retainers'] });
 const EN=['Square panel','Small panel','30 cm square panel','Quarter-circle panel','Clear panel','Small clear panel','Long acrylic panel','Perforated acrylic panel','Clock panel','Number maze panel','Green brick baseplate','Nine-hole panel','Magnetic panel','Honeycomb panel','Large climbing panel','Medium climbing panel','Small climbing panel','Flat climbing net','Curved climbing net','Basketball hoop','Rainbow bridge','Trampoline','Soft roller','Fabric panel','Long fabric panel','Curved climbing fabric','Curved fabric with joint clearance','Sensory basin','Gel sensory mat','Clear hemisphere','Clear platform','Felt activity panel','Castle panel','Rope','Grid panel'];

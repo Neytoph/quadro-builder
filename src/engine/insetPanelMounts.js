@@ -1,7 +1,8 @@
 import {geometry} from './catalog.js';
+import {INSET_PANEL_IDS, INSET_MOUNT_LAYOUT} from './insetPanelSpec.js';
+export {INSET_PANEL_IDS, INSET_MOUNT_LAYOUT} from './insetPanelSpec.js';
 
 // 保存键兼容已有模型；当前固定件为管内侧的米白色卡槽螺丝。
-export const INSET_MOUNT_LAYOUT='opposite-transparent-screws';
 export const INSET_PANEL_EDGE_INSET=2.8;
 export function insetClipParts() {
   const gap=geometry().panelThickness+.04,flange=.4;
@@ -10,7 +11,6 @@ export function insetClipParts() {
     ...[-1,1].map(side=>({name:side<0?'jaw-back':'jaw-front',shape:'box',pos:[3.4,0,side*(gap+flange)/2],half:[.75,.6,flange/2]})),
   ];
 }
-export const INSET_PANEL_IDS=new Set(['acrylic_panel_40x40','acrylic_panel_40x20','acrylic_panel_40x60','acrylic_hole_panel_40x40','acrylic_platform_40x40','panel_40x40_capsule','panel_40x40_grid','panel_40x40_busy']);
 const sub=(a,b)=>a.map((v,i)=>v-b[i]);
 const dot=(a,b)=>a.reduce((n,v,i)=>n+v*b[i],0);
 const at=(frame,p)=>frame.pos.map((v,i)=>v+frame.axes.reduce((n,a,k)=>n+a[i]*p[k],0));
