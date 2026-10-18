@@ -1453,6 +1453,37 @@ export class Builder {
     return ids.size ? ids : null;
   }
 
+  _pickPanelPlacement(x, y) {
+    const rail = this._panelGuideIds?.size && this.scene.pickAmong(x, y, this._panelGuideIds);
+    return rail || this.scene.pickForDelete(x, y);
+  }
+
+  _showPanelPlacementHover(pick) {
+    if (this._installationPart || pick?.data.kind !== 'tube' || !this._panelGuideIds?.has(pick.data.id)) {
+      this._panelHoverKey = null;
+      this.scene.clearPanelPlacementPreview?.();
+      return;
+    }
+    const first = this.panelRail?.id || pick.data.id;
+    const at = this.panelRail?.at ?? this._alongTube(first, pick.point);
+    const partners = this._freePartners(first, at);
+    const partner = this.panelRail && pick.data.id !== first ? partners.find(p => p.id === pick.data.id) : partners[0];
+    if (!partner) { this.scene.clearPanelPlacementPreview?.(); this._panelHoverKey = null; return; }
+    const sec = this.model.panelSection(partner, at);
+    const key = [this.panelId, first, partner.id, sec.t0, sec.len, pick.data.id].join(':');
+    if (key === this._panelHoverKey) return;
+    this._panelHoverKey = key;
+    let part = null;
+    if (PANEL_ACCESSORY_IDS.has(this.panelId)) {
+      const probe = { a: first, b: partner.id, t0: sec.t0, len: sec.len, panelId: this.panelId,
+        color: this.color === RANDOM_COLOR ? 'blue' : this.color, side: 1 };
+      if (supportsPanelFixing(this.panelId)) probe.params = { screwAxis: panelRailScrewAxis(this.model, probe, confirmedSpec(this.panelId) ? undefined : componentFrame(this.model, probe)) };
+      if (this.panelId !== 'panel_40x40_pocket') probe.side = this._panelSideFromCorners(this.model.panelCorners(probe));
+      part = this.model.panelAccessoryDiagnostics(probe);
+    }
+    this.scene.showPanelPlacementPreview?.(this.model, part, pick.data.id);
+  }
+
 
   // Anbauteil loeschen -- Laufrolle und ihr Adapter gehoeren zusammen und gehen
   // gemeinsam, egal welches der beiden ausgewaehlt war.
@@ -1943,19 +1974,29 @@ export class Builder {
     const invalid = this._paste && !this._paste.valid && this._paste.sel
       ? new Set(this._paste.sel.keys())
       : null;
-    // 面板 / 布件两步点选的第一步：还没选第一根管时，能当第一根的管先亮出来，
-    // 其余零件退后；选了第一根，照旧只亮它（琥珀）和能配的对面管（绿）。
+    // 安装引导独立绘制，已安装零件保留自身材质。清单高亮仍沿原来的弱化逻辑。
     const firstRails = this._firstRailCandidates();
+    const panelPlacement = this.mode === 'panel' && (!this.highlight || this.panelRail);
+    this._panelGuideIds = panelPlacement ? this.highlight || firstRails : null;
+    this._panelHoverKey = null;
     const displayModel = this._colorPreview?.hex
       ? colorPreviewModel(this.model, this._colorPreview.selection, this._colorPreview.hex) : this.model;
     this.scene.renderModel(displayModel, this.selectedNodeId,
       { labelFor, slideNameFor, labelIds, soloId, soloLabel, assembly, suggest, reinforce, reinforcementPartId: this.reinforcementPartId,
         selected: this._colorPreview ? null : selected,
-        highlight: this._colorPreview ? null : this.highlight || firstRails, invalid, tints: this.tints,
+        preserveSelectionAppearance: this.mode === 'select',
+        interactionMode: this.mode,
+        profileSelection: this._profilGewaehlt() ? this._profilAuswahl : null,
+        highlight: this._colorPreview || panelPlacement ? null : this.highlight || firstRails, invalid, tints: this.tints,
+        panelPlacementRails: this._colorPreview ? null : this._panelGuideIds,
+        panelPlacementMode: this.mode === 'panel',
         focusId: this.panelRail ? this.panelRail.id : this.reinforceRail,
         keepPanelFacesOpaque: this.mode === 'panel',
         preview: !!(this._paste || this._clampDrag || this._hingeDrag || this._colorPreview) });
     this._buildHandles();
+    if (this.mode === 'panel' && this.panelRail && this.inputType === 'touch') {
+      this._showPanelPlacementHover({ data: { kind: 'tube', id: this.panelRail.id } });
+    }
     if (this._installationPart) this.scene.showInstallationPreview(this.model, this._installationPart, this.installationPreview.valid);
     this.scene.requestRender();
     // Waehrend einer Vorschau (Ziehen, Kopie am Zeiger) bleibt die Oberflaeche
@@ -2939,7 +2980,7 @@ export class Builder {
       clearTimeout(this._panelFlipTimer);
       this._panelFlipTimer = null;
       if (this.mode !== "panel") return;
-      const pick = this.scene.pickForDelete(e.clientX, e.clientY);
+      const pick = this._pickPanelPlacement(e.clientX, e.clientY);
       if (!pick || pick.data.kind !== "panel") return;
       let ok = false;
       this.recordHistory(() => { ok = this.model.turnPanel(pick.data.id); });
@@ -2959,7 +3000,7 @@ export class Builder {
         return;
       }
       if (this.mode !== "panel") return;
-      const pick = this.scene.pickForDelete(e.clientX, e.clientY);
+      const pick = this._pickPanelPlacement(e.clientX, e.clientY);
       if (!pick || pick.data.kind !== "panel") return;
       let ok = false;
       this.recordHistory(() => { ok = this.model.turnPanel(pick.data.id); });
@@ -3050,6 +3091,11 @@ export class Builder {
     // Zeiger, die nicht zum laufenden Zug gehoeren, bleiben aussen vor.
     const fremd = (e) => this._pointerId !== null && e.pointerId !== this._pointerId;
     el.addEventListener("pointermove", (e) => { if (!fremd(e)) this._onMove(e); });
+    el.addEventListener('pointerleave', (e) => {
+      if (e.pointerType === 'touch') return;
+      this._panelHoverKey = null;
+      this.scene.clearPanelPlacementPreview?.();
+    });
     el.addEventListener("pointerup", (e) => {
       if (fremd(e)) return;
       this._pointerId = null;
@@ -3204,6 +3250,8 @@ export class Builder {
     }
     // Linke Taste gedrueckt und kein Rechteck: um den Zeigerpunkt drehen.
     if (this._down && !this._down.box && (e.buttons & 1) && this.scene.orbiting) {
+      this._panelHoverKey = null;
+      this.scene.clearPanelPlacementPreview?.();
       const dx = e.clientX - this._last.x, dy = e.clientY - this._last.y;
       this._last = { x: e.clientX, y: e.clientY };
       if (dx || dy) this.scene.orbitBy(dx, dy);
@@ -3264,8 +3312,16 @@ export class Builder {
       // Hand nur, wo die gewaehlte Platte auch hinkann: auf einem Tragrohr mit
       // passendem Gegenrohr, danach auf dem gewaehlten Rohr (Abwahl) und den
       // hervorgehobenen Gegenrohren. Eine liegende Platte laesst sich umlegen.
-      const p = (this.panelRail && this.highlight && this.scene.pickAmong(x, y, this.highlight))
-        || this.scene.pickForDelete(x, y);
+      const mount = !this.panelRail ? this.scene.pickHandle(x, y) : null;
+      const p = mount?.data?.panelAccessoryMount ? null : this._pickPanelPlacement(x, y);
+      if (mount?.data?.panelAccessoryMount) {
+        const key = `mount:${this.panelId}:${mount.data.panelAccessoryMount.pos.join(',')}`;
+        if (key !== this._panelHoverKey && !this._installationPart) {
+          this._panelHoverKey = key;
+          this.scene.showPanelPlacementPreview?.(this.model, mount.data.panelAccessoryMount, null);
+        }
+        obj = mount.object;
+      } else this._showPanelPlacementHover(p);
       const kind = p && p.data.kind;
       if (kind === "panel") obj = this.panelRail ? null : p.object;
       else if (kind === "tube") obj = this._railUsable(p.data.id) ? p.object : null;
@@ -4754,12 +4810,8 @@ export class Builder {
       const handle = this.scene.pickHandle(e.clientX, e.clientY);
       if (handle?.data?.panelAccessoryMount) { this._previewInstallation(handle.data.panelAccessoryMount, this.panelId); return; }
     }
-    // Ist ein Tragrohr gewaehlt, zaehlen zuerst die hervorgehobenen Gegenrohre --
-    // auch wenn ein anderes Teil davor liegt. Sie scheinen ohnehin durch die
-    // zurueckgeblendeten Teile hindurch.
-    const pick = (this.panelRail && this.highlight
-      && this.scene.pickAmong(e.clientX, e.clientY, this.highlight))
-      || this.scene.pickForDelete(e.clientX, e.clientY);
+    // 第一根与第二根候选管均优先响应，前方板面不会截走安装点击。
+    const pick = this._pickPanelPlacement(e.clientX, e.clientY);
     if (!pick) { this._clearPanelRail(); return; }
 
     if (pick.data.kind === "panel" && !this.panelRail) {
@@ -4802,6 +4854,7 @@ export class Builder {
     this.highlight = new Set([pick.data.id, ...partners.map((c) => c.id)]);
     this.onNotice(t("notice_panel_pick_second", partners.length), "info");
     this.refresh();
+    this._showPanelPlacementHover(pick);
   }
 
   _placePanelOnRails(aId, bId, t0, len) {
@@ -4822,6 +4875,7 @@ export class Builder {
     this.panelRail = null;
     this.highlight = null;
     this.refresh();
+    if (added) this.scene.flashPlacedPanel?.(this.model, added.id);
     return added;
   }
 
@@ -4858,6 +4912,7 @@ export class Builder {
     this._notePlaced(added.id, part.kind ? 'fitting' : 'panel');
     this.onNotice(facingConflict ? installationFacingNotice(this.model, facingConflict) : t('notice_accessory_added'), facingConflict ? 'info' : 'ok');
     this.refresh();
+    if (!part.kind) this.scene.flashPlacedPanel?.(this.model, added.id);
     return true;
   }
 

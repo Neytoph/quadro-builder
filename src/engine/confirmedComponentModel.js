@@ -2,7 +2,7 @@ import { confirmedSpec, legoStudHeight } from './componentPack.js';
 import { INSET_PANEL_IDS, INSET_MOUNT_LAYOUT, INSET_PANEL_EDGE_INSET, hasInsetScrews, oppositeScrewSupports, insetScrewVolumes, insetPanelReference, insetPanelProbes } from './insetPanelMounts.js';
 import { geometry } from './catalog.js';
 import { quatFromBasis, xAxisOf, yAxisOf, zAxisOf } from './util.js';
-import { panelScrewPose, panelScrewAxes, panelLipSegments, PANEL_SCREW_RADIUS, PANEL_SCREW_HEAD_DEPTH, PANEL_SCREW_SHAFT_RADIUS, PANEL_SCREW_SHAFT_LENGTH } from './panelScrewMounts.js';
+import { panelScrewPose, panelScrewAxes, panelLipSegments, PANEL_SCREW_RADIUS, PANEL_SCREW_HEAD_DEPTH, PANEL_SCREW_SHAFT_RADIUS, PANEL_SCREW_SHAFT_LENGTH, PANEL_OUTER_FACE, PANEL_CORNER_RELIEF } from './panelScrewMounts.js';
 
 export const cSub = (a, b) => a.map((v, i) => v - b[i]);
 export const cDot = (a, b) => a.reduce((s, v, i) => s + v * b[i], 0);
@@ -352,6 +352,19 @@ export function confirmedVolumes(model,part) {
   return body;
 }
 
+function outerPanelBodyVolumes(frame,spec) {
+  const x=spec.width/2,y=spec.height/2,r=PANEL_CORNER_RELIEF,z=PANEL_OUTER_FACE,boxes=[];
+  const add=(x0,y0,x1,y1)=>boxes.push({...cVolume(frame,[x0,y0,z-geometry().panelThickness],[x1,y1,z]),roundTubeClearance:true});
+  add(-x+r,-y,x-r,y);add(-x,-y+r,x,y-r);
+  // 角部沿普通板的接头让位切分；薄片体积不把整块角部空隙重新填回去。
+  for(const sx of [-1,1])for(const sy of [-1,1])for(let i=0;i<16;i++){
+    const a=r*i/16,b=r*(i+1)/16,c=Math.sqrt(Math.max(0,r*r-b*b));
+    const xx=[sx*(x-a),sx*(x-b)].sort((a,b)=>a-b),yy=[sy*(y-c),sy*(y-r)].sort((a,b)=>a-b);
+    add(xx[0],yy[0],xx[1],yy[1]);
+  }
+  return boxes;
+}
+
 function componentBodyVolumes(model,part) {
   const frame=confirmedFrame(model,part),base=confirmedSpec(part.panelId||part.kind||part.partId),spec=base && {...base,...componentSize(part,base)};if(!frame || !spec)return [];
   if(spec.mountType==='curved-frame') {
@@ -368,7 +381,7 @@ function componentBodyVolumes(model,part) {
     const x=unit(cSub(cor[1],cor[0])),y=unit(cSub(cor[3],cor[0])),z=cross(x,y);
     return rungPositions(part.len).map(position=>({pos:center([cor[0],cor[3]]).map((v,i)=>v+x[i]*position),axes:[x,y,z],half:[3,Math.hypot(...cSub(cor[3],cor[0]))/2-3,3]}));
   }
-  if(spec.feature==='basketball')return [cVolume(frame,[-17.5,-17.5,1],[17.5,17.5,3]),cVolume(frame,[-10,-32,5],[10,1,30])];
+  if(spec.feature==='basketball')return [...outerPanelBodyVolumes(frame,spec),cVolume(frame,[-10,-32,5],[10,1,30])];
   if(hasInsetScrews(part)){
     const x=spec.width/2-INSET_PANEL_EDGE_INSET,y=spec.height/2-INSET_PANEL_EDGE_INSET,z=geometry().panelThickness/2;
     const body=[cVolume(frame,[-x-.06,-y-.06,-z],[x+.06,y+.06,z])];
@@ -379,5 +392,5 @@ function componentBodyVolumes(model,part) {
   if(spec.feature==='basin')return [cVolume(frame,[-17,-17,-8],[17,17,2.4]),cVolume(frame,[-20.5,-15,1.2],[20.5,15,2.4]),cVolume(frame,[-15,-20.5,1.2],[15,20.5,2.4])];
   if(spec.placement==='fitting')return [cVolume(frame,[-spec.width/2+3,-spec.height/2+3,-1],[spec.width/2-3,spec.height/2-3,1])];
   const depth=spec.feature==='lego' ? (legoStudHeight(part)>0.7?4.5:3.7) : ({clock:5.9,maze:5.9,climbing:5.8,felt:3.9,magnet:6.2,sensory:3.2})[spec.feature] || 3.3;
-  return [cVolume(frame,[-spec.width/2+5,-spec.height/2+1.3,1.5],[spec.width/2-5,spec.height/2-1.3,depth]),cVolume(frame,[-spec.width/2+1.3,-spec.height/2+5,1.5],[spec.width/2-1.3,spec.height/2-5,depth])];
+  return [...(spec.feature==='sensory'?[]:outerPanelBodyVolumes(frame,spec)),cVolume(frame,[-spec.width/2+5,-spec.height/2+1.3,1.5],[spec.width/2-5,spec.height/2-1.3,depth]),cVolume(frame,[-spec.width/2+1.3,-spec.height/2+5,1.5],[spec.width/2-1.3,spec.height/2-5,depth])];
 }

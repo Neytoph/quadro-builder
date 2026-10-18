@@ -8,7 +8,7 @@ import fontData from 'three/examples/fonts/helvetiker_regular.typeface.json';
 import { confirmedSpec, confirmedColor, legoStudHeight } from './componentPack.js';
 import { insetScrewMeshes } from './insetPanelMeshes.js';
 import { hasInsetScrews, INSET_PANEL_EDGE_INSET } from './insetPanelMounts.js';
-import { panelScrewPose, panelLipProfiles, PANEL_SCREW_RADIUS, PANEL_SCREW_HEAD_DEPTH, PANEL_SCREW_SHAFT_RADIUS, PANEL_SCREW_SHAFT_LENGTH } from './panelScrewMounts.js';
+import { panelScrewPose, panelLipProfiles, PANEL_SCREW_RADIUS, PANEL_SCREW_HEAD_DEPTH, PANEL_SCREW_SHAFT_RADIUS, PANEL_SCREW_SHAFT_LENGTH, PANEL_OUTER_FACE, PANEL_CORNER_RELIEF } from './panelScrewMounts.js';
 import { COLOR_HEX } from './colors.js';
 import { geometry } from './catalog.js';
 import { confirmedFrame, curvePoint, worldToLocal, rungPositions } from './confirmedComponentModel.js';
@@ -82,10 +82,11 @@ function factory(scene,frame) {
   return {meshes,add,box,ball,tube,torus,text};
 }
 
-function outline(w,h,feature) {
-  const shape=new THREE.Shape(),x=w/2,y=h/2,n=2.7;
+function outline(w,h,feature,inset=false) {
+  const shape=new THREE.Shape(),x=w/2,y=h/2,n=PANEL_CORNER_RELIEF;
   if(feature==='sector') {shape.moveTo(0,0);shape.lineTo(40,0);shape.absarc(0,0,40,0,Math.PI/2,false);shape.lineTo(0,0);return shape;}
-  if(clearPanelFeatures.has(feature)) {shape.moveTo(-x,-y);shape.lineTo(x,-y);shape.lineTo(x,y);shape.lineTo(-x,y);shape.closePath();return shape;}
+  if(inset){shape.moveTo(-x,-y);shape.lineTo(x,-y);shape.lineTo(x,y);shape.lineTo(-x,y);shape.closePath();return shape;}
+  // 外扣板到达管轴，接头处让位与普通板一致；内嵌板使用独立的完整矩形。
   shape.moveTo(-x+n,-y);shape.lineTo(x-n,-y);shape.absarc(x,-y,n,Math.PI,Math.PI/2,true);
   shape.lineTo(x,y-n);shape.absarc(x,y,n,-Math.PI/2,-Math.PI,true);
   if(feature==='castle') {
@@ -93,9 +94,9 @@ function outline(w,h,feature) {
   }
   shape.lineTo(-x+n,y);shape.absarc(-x,y,n,0,-Math.PI/2,true);shape.lineTo(-x,-y+n);shape.absarc(-x,-y,n,Math.PI/2,0,true);shape.closePath();return shape;
 }
-function plateGeometry(w,h,feature) {
-  const depth=geometry().panelThickness,bevel=clearPanelFeatures.has(feature)?0:Math.min(0.06,depth/4);
-  const shape=outline(w,h,feature);
+function plateGeometry(w,h,feature,inset=false) {
+  const depth=geometry().panelThickness,bevel=inset&&!clearPanelFeatures.has(feature)?Math.min(0.06,depth/4):0;
+  const shape=outline(w,h,feature,inset);
   if(feature==='holes' || feature==='acrylic_holes')for(const x of [-w*0.28,0,w*0.28])for(const y of [-h*0.28,0,h*0.28])shape.holes.push(new THREE.Path().absarc(x,y,3.2,0,Math.PI*2,true));
   if(feature==='honeycomb')for(let row=-7;row<=7;row++)for(let col=-7;col<=7;col++) {
     const x=col*2.65+(Math.abs(row%2)?1.325:0),y=row*2.65*Math.sqrt(3)/2;if(Math.abs(x)>w/2-2.3 || Math.abs(y)>h/2-2.3)continue;
@@ -178,23 +179,23 @@ function panelMeshes(scene,model,part,spec,frame) {
       return [mesh,...fixing.meshes];
     }
   }
-  const inset=hasInsetScrews(part),edgeInset=inset?INSET_PANEL_EDGE_INSET:1.5;
+  const inset=hasInsetScrews(part),clear=clearPanelFeatures.has(spec.feature),edgeInset=inset?INSET_PANEL_EDGE_INSET:clear?1.5:0;
   const f=factory(scene,frame),w=spec.width-2*edgeInset,h=spec.height-2*edgeInset,feature=spec.feature;
   const color=confirmedColor(part)||'#398ddb';
-  const clear=clearPanelFeatures.has(feature);
   if(part.params?.screwAxis && !hasInsetScrews(part) && feature!=='basketball')panelScrews(f,model,part,frame);
   if(standard) {
     // 网格加载期间及低画质使用同样外宽和管顶高度，避免加载前后板面跳变。
-    const mesh=f.add(`plate:standard:${spec.id}`,()=>plateGeometry(spec.width-0.24,spec.height-0.24,feature),color,[0,0,2.51-geometry().panelThickness]);
+    const mesh=f.add(`plate:standard:${spec.id}`,()=>plateGeometry(spec.width,spec.height,feature),color,[0,0,PANEL_OUTER_FACE-geometry().panelThickness]);
     if(scene._panelMaterial)mesh.material=scene._panelMaterial(part.color,false,false);
   } else if(feature!=='basin' && feature!=='grid' && feature!=='sensory') {
-    const faceHeight=inset?geometry().panelThickness/2:(({acrylic:2.25,acrylic_holes:2.37,capsule:2.37})[feature] ?? 3.12);
+    const faceHeight=inset?geometry().panelThickness/2:(({acrylic:2.25,acrylic_holes:2.37,capsule:2.37})[feature] ?? PANEL_OUTER_FACE);
     const materialType=clear?'glass':(({magnet:'coated-metal',felt:'cloth'})[feature] || 'plastic');
-    f.add(`plate:${w}:${h}:${feature}`,()=>plateGeometry(w,h,feature),clear?'#eaf7fa':color,[0,0,faceHeight-geometry().panelThickness],null,materialType);
+    f.add(`plate:${w}:${h}:${feature}:${inset?'inset':'outer'}`,()=>plateGeometry(w,h,feature,inset||clear),clear?'#eaf7fa':color,[0,0,faceHeight-geometry().panelThickness],null,materialType);
   }
+  const featureStart=f.meshes.length;
   if(clear)f.meshes.push(...insetScrewMeshes(scene,model,part,frame));
   if(clear){
-    const points=outline(w,h,feature).getPoints(64).map(p=>[p.x,p.y,inset?0:2.2]);
+    const points=outline(w,h,feature,true).getPoints(64).map(p=>[p.x,p.y,inset?0:2.2]);
     for(let i=1;i<points.length;i++)f.tube('acrylic-polished-edge',[points[i-1],points[i]],0.065,'#bdcdd1','glass-edge');
     if(feature==='acrylic_holes')for(const x of [-w*.28,0,w*.28])for(const y of [-h*.28,0,h*.28])f.torus('acrylic-hole-edge',3.2,0.06,'#beced3',[x,y,inset?0:2.2],null,'glass-edge');
   }
@@ -244,7 +245,6 @@ function panelMeshes(scene,model,part,spec,frame) {
     f.box('basket-mount-base',[8,6,1.4],'#efece1',[0,-4,4],0.45);for(const x of [-2.5,2.5])for(const y of [-2,-6])f.ball('basket-base-screw',0.45,'#b4bac0',[x,y,5],'metal');
     f.box('basket-neck',[2,1.8,8],'#f88722',[0,-4,8.5]);f.torus('basket-orange-ring',8,0.75,'#ff8524',[0,-4,16],new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),Math.PI/2));
     for(let i=0;i<16;i++)for(const direction of [-1,1]){const points=[];for(let k=0;k<=6;k++){const a=i*Math.PI/8+direction*(k%2?Math.PI/8:0),r=8-k*0.55;points.push([Math.cos(a)*r,-4-k*3.1,16+Math.sin(a)*r]);}f.tube('basket-net:'+i+':'+direction,points,0.13,'#efe6cd');}
-    clips(f,model,part,'#929b9f');
   }
   if(feature==='basin') {
     const shape=new THREE.Shape();shape.moveTo(-17,-17);shape.lineTo(17,-17);shape.lineTo(17,17);shape.lineTo(-17,17);shape.closePath();
@@ -296,6 +296,11 @@ function panelMeshes(scene,model,part,spec,frame) {
     }
     f.meshes.push(...insetScrewMeshes(scene,model,part,frame));
   }
+  if(!standard&&!inset&&!clear&&!['basin','sensory'].includes(feature)){
+    // 功能装饰的原坐标以3.12cm板面为基准，随板面一起贴合到普通板高度。
+    for(const mesh of f.meshes.slice(featureStart))mesh.position.addScaledVector(vec(frame.axes[2]),PANEL_OUTER_FACE-3.12);
+  }
+  if(feature==='basketball')clips(f,model,part,'#929b9f');
   return f.meshes;
 }
 

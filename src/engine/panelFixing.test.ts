@@ -159,7 +159,7 @@ describe('板件实际固定对边', () => {
   it.each(['panel_40x40','panel_40x20','hole_panel_40x40','panel_40x40_lego'])('%s 背面唇边不与板身正面重叠',id=>{
     const {model}=createConfirmedComponentFixture(id,{install:false})
     const part=model.addPanelAccessory(model.panelAccessoryMounts(id,{screwAxis:'horizontal',oppositeRetainers:true})[0],'blue') as any
-    const front=id==='panel_40x40_lego'?3.12:2.51,back=front-geometry().panelThickness+PANEL_LIP_JOIN_DEPTH
+    const front=2.51,back=front-geometry().panelThickness+PANEL_LIP_JOIN_DEPTH
     for(const lip of panelLipProfiles(part))expect(lip.sections.at(-1)!.outer[1]).toBeCloseTo(back)
     const cache={_materials:{},_cachedGeo:(_:string,make:()=>THREE.BufferGeometry)=>make()}
     const lips=confirmedComponentMeshes(cache,model,part).filter(m=>m.name.startsWith('panel-back-lip'))

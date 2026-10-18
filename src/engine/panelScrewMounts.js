@@ -9,16 +9,16 @@ export const PANEL_LIP_THICKNESS=.12;
 export const PANEL_LIP_CLEARANCE=.06;
 export const PANEL_LIP_JOIN_DEPTH=.01;
 const LIP_SEGMENTS=32;
-const STANDARD_PANELS=new Set(['panel_40x40','panel_40x20','panel_30x30','hole_panel_40x40']);
+// 与原厂普通板网格一致：正面距管轴25.1mm，角部给接头让位25.1mm。
+export const PANEL_OUTER_FACE=2.51;
+export const PANEL_CORNER_RELIEF=2.51;
 
 export function panelLipProfiles(part) {
   const spec=confirmedSpec(part.panelId);if(!spec)return [];
   const horizontal=part.params?.screwAxis==='horizontal';
-  let front=3.12;
-  if(STANDARD_PANELS.has(part.panelId))front=2.51;
-  else if(spec.feature==='basin')front=2.25;
+  const front=spec.feature==='basin'?2.25:PANEL_OUTER_FACE;
   const inner=geometry().tubeRadius+PANEL_LIP_CLEARANCE,outer=inner+PANEL_LIP_THICKNESS;
-  const back=front-geometry().panelThickness+PANEL_LIP_JOIN_DEPTH,edge=STANDARD_PANELS.has(part.panelId)?0:1.5;
+  const back=front-geometry().panelThickness+PANEL_LIP_JOIN_DEPTH,edge=0;
   const top=Math.min(back,Math.sqrt(inner*inner-edge*edge)),bottom=-2.2;
   // 同高的内外圆弧截面保留管壁间隙；末端嵌入板身，避免接面共面闪烁。
   const sections=Array.from({length:LIP_SEGMENTS+1},(_,k)=>{

@@ -131,7 +131,25 @@ function segmentHits(box, a, b, radius = 2.45) {
     lo = Math.max(lo, Math.min(t0, t1)); hi = Math.min(hi, Math.max(t0, t1));
     if (hi <= lo) return false;
   }
-  return true;
+  if(!box.roundTubeClearance)return true;
+  // 薄板边缘使用圆管到盒体的真实距离，避免方形膨胀把框架延伸管误判为穿板。
+  const start=box.axes.map(axis=>dot(p,axis)),end=box.axes.map(axis=>dot(q,axis)),delta=end.map((v,i)=>v-start[i]);
+  const times=[0,1];
+  for(let i=0;i<3;i++)if(Math.abs(delta[i])>1e-8)for(const side of [-1,1]){
+    const t=(side*box.half[i]-start[i])/delta[i];if(t>0&&t<1)times.push(t);
+  }
+  times.sort((a,b)=>a-b);
+  const distance=t=>start.reduce((sum,v,i)=>sum+Math.max(0,Math.abs(v+delta[i]*t)-box.half[i])**2,0);
+  for(let k=1;k<times.length;k++){
+    const left=times[k-1],right=times[k],middle=(left+right)/2;let aa=0,bb=0;
+    for(let i=0;i<3;i++){
+      const at=start[i]+delta[i]*middle;if(Math.abs(at)<=box.half[i])continue;
+      aa+=delta[i]**2;bb+=delta[i]*(start[i]-Math.sign(at)*box.half[i]);
+    }
+    const t=aa?Math.max(left,Math.min(right,-bb/aa)):middle;
+    if(distance(t)<radius*radius-1e-6)return true;
+  }
+  return false;
 }
 
 function boxesOverlap(a, b) {
