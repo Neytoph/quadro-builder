@@ -1507,9 +1507,47 @@ export class SceneManager {
     if (!entry) return null;
     const rec = store[entry.id];
     if (!rec) return null;
+    const quat = cubeQuat.clone().multiply(entry.quat);
+    const local = quat.clone().invert();
+    let bowMask = 0;
+    for (const e of dirs) {
+      if (!e.bow) continue;
+      v.fromArray(e.d).applyQuaternion(local);
+      bowMask |= axisBit(v.x, v.y, v.z) & rec.mask;
+    }
+    const source = this._meshGeometry("conn:" + entry.id, rec);
     return {
-      geo: this._meshGeometry("conn:" + entry.id, rec),
-      quat: cubeQuat.clone().multiply(entry.quat),
+      geo: bowMask ? this._cachedGeo(`mesh:conn:${entry.id}:bow:${bowMask}`, () => {
+        // 仅收短插入弯管的隐藏直杆；接头本体、直管及空插口保持原尺寸。
+        // 变体纳入 mesh 缓存，画质升级时随原始网格一起释放。
+        const geo = source.clone();
+        const positions = geo.getAttribute("position"), normals = geo.getAttribute("normal");
+        const half = geometry().connectorSize / 2;
+        const tip = half + geometry().connectorSize * 0.32 - 0.4;
+        const point = new THREE.Vector3(), normal = new THREE.Vector3();
+        for (const [bit, d] of CONNECTOR_ARM_BITS) {
+          if (!(bowMask & bit)) continue;
+          const axis = new THREE.Vector3(...d);
+          let end = half;
+          for (let i = 0; i < positions.count; i++) end = Math.max(end, point.fromBufferAttribute(positions, i).dot(axis));
+          if (end <= tip) continue;
+          const scale = (tip - half) / (end - half);
+          for (let i = 0; i < positions.count; i++) {
+            point.fromBufferAttribute(positions, i);
+            const distance = point.dot(axis);
+            if (distance <= half) continue;
+            point.addScaledVector(axis, (distance - half) * (scale - 1));
+            positions.setXYZ(i, point.x, point.y, point.z);
+            normal.fromBufferAttribute(normals, i);
+            normal.addScaledVector(axis, normal.dot(axis) * (1 / scale - 1)).normalize();
+            normals.setXYZ(i, normal.x, normal.y, normal.z);
+          }
+        }
+        geo.computeBoundingBox();
+        geo.computeBoundingSphere();
+        return geo;
+      }) : source,
+      quat,
     };
   }
 
