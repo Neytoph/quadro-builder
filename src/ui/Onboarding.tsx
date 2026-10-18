@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useI18n } from '../i18n'
 import { storage } from '../engine-api'
 import { useEngine } from '../store/EngineContext'
-import { EDITOR_EMBED } from '../entry'
+import { EDITOR_EMBED, SINGLE_MODEL } from '../entry'
 import { syncConfigured } from '../sync/bootstrap'
 import { UI_ESCAPE_EVENT } from './events'
 import { useDock, type DockPane } from './dock'
@@ -17,11 +17,12 @@ const MANAGEMENT_KEY = 'quadro.builder.models-guide.v2:'
 export const ONBOARDING_EVENT = 'quadro:onboarding'
 
 type Step = { title: string; body: string; hint?: string; tour: string; pane: DockPane | null; color?: boolean; prefer: Prefer }
-type Session = { account: string | null; management: boolean; short: boolean }
+type Session = { account: string | null; management: boolean; short: boolean; current: boolean }
 const MANAGEMENT_STEP: Step = { title: 'models.guideTitle', body: 'models.guideBody', hint: 'models.guideHint', tour: 'my-models', pane: null, prefer: 'bottom' }
+const CURRENT_STEP: Step = { title: 'onboard.currentTitle', body: 'onboard.currentBody', tour: 'current-design', pane: null, prefer: 'bottom' }
 const STEPS: Step[] = [
-  { title: 'onboard.s1title', body: 'onboard.s1body', hint: 'onboard.s1hint', tour: 'dock-panel', pane: 'library', prefer: 'left' },
-  { title: 'onboard.s2title', body: 'onboard.s2body', hint: 'onboard.s2hint', tour: 'tool-tubes', pane: null, prefer: 'bottom' },
+  { title: 'onboard.s1title', body: 'onboard.s1body', tour: 'dock-panel', pane: 'library', prefer: 'left' },
+  { title: 'onboard.s2title', body: 'onboard.s2body', tour: 'tool-tubes', pane: null, prefer: 'bottom' },
   { title: 'onboard.s3title', body: 'onboard.s3body', tour: 'left-color', pane: null, color: true, prefer: 'right' },
   { title: 'onboard.s4title', body: 'onboard.s4body', tour: 'dock-panel', pane: 'bom', prefer: 'left' },
   { title: 'onboard.s5title', body: 'onboard.s5body', tour: 'scene-buttons', pane: null, prefer: 'bottom' },
@@ -34,9 +35,10 @@ function account(): string | null {
 }
 
 function guideSteps(session: Session | null): Step[] {
-  if (!session?.management) return STEPS
+  const basics = session?.current ? [CURRENT_STEP, ...STEPS.slice(1)] : STEPS
+  if (!session?.management) return basics
   if (session.short) return [MANAGEMENT_STEP]
-  return [...STEPS, MANAGEMENT_STEP]
+  return [...basics, MANAGEMENT_STEP]
 }
 
 export default function Onboarding({ autoOpen = true }: { autoOpen?: boolean } = {}) {
@@ -48,6 +50,8 @@ export default function Onboarding({ autoOpen = true }: { autoOpen?: boolean } =
   const [session, setSession] = useState<Session | null>(null)
   const [shown, leaving] = usePresence(session)
   const [i, setI] = useState(0)
+  const active = api.tabs.find(tab => tab.tabId === api.activeTabId)
+  const current = SINGLE_MODEL && (EDITOR_EMBED || !!(active?.docId || active?.libraryId || active?.planId))
 
   const steps = guideSteps(shown)
   const step = shown ? steps[i] : STEPS[0]
@@ -61,8 +65,8 @@ export default function Onboarding({ autoOpen = true }: { autoOpen?: boolean } =
     attempted.current = true
     const owner = account(), seen = localStorage.getItem(KEY) === '1'
     const management = syncConfigured() && !EDITOR_EMBED && localStorage.getItem(MANAGEMENT_KEY + (owner || 'anonymous')) !== '1'
-    if (management || !seen) setSession({ account: owner, management, short: management && seen })
-  }, [autoOpen, api.ready, api.entryReady])
+    if (management || !seen) setSession({ account: owner, management, short: management && seen, current })
+  }, [autoOpen, api.ready, api.entryReady, current])
 
   const markDone = () => {
     localStorage.setItem(KEY, '1')
@@ -87,11 +91,11 @@ export default function Onboarding({ autoOpen = true }: { autoOpen?: boolean } =
       track('builder.onboard.replay')
       setI(0)
       const owner = account()
-      setSession({ account: owner, management: syncConfigured() && !EDITOR_EMBED, short: false })
+      setSession({ account: owner, management: syncConfigured() && !EDITOR_EMBED, short: false, current })
     }
     window.addEventListener(ONBOARDING_EVENT, replay)
     return () => window.removeEventListener(ONBOARDING_EVENT, replay)
-  }, [])
+  }, [current])
 
   useEffect(() => {
     if (!session) return
@@ -125,7 +129,7 @@ export default function Onboarding({ autoOpen = true }: { autoOpen?: boolean } =
       hole={hole} prefer={step.prefer} cardRef={cardRef} cardH={cardH} leaving={leaving}
       ui="onboard" kicker={t(management ? 'models.guideKicker' : 'onboard.kicker')} step={i} count={steps.length}
       title={t(step.title)} body={t(step.body)} hint={step.hint ? t(step.hint) : undefined}
-      tryLine={management ? undefined : t('onboard.try')}
+      tryLine={!management && i === 0 ? t('onboard.try') : undefined}
       action={management ? { label: t('models.open'), href: myModelsURL(lang), onClick: () => finish('models'), secondary: { label: t('single.find'), href: `/builder/?recover=1&lang=${lang}` } } : undefined}
       skipLabel={t('onboard.skip')} backLabel={t('onboard.back')}
       nextLabel={t(nextLabel)}

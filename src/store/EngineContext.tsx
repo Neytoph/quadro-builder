@@ -2804,8 +2804,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
       const library=ent.src?.match(/^\/quadro\/library\/([a-f0-9]+)\/native$/)
       if(tab&&library&&libraryRevision){tab.libraryId=library[1];tab.libraryRevision=libraryRevision;tab.libraryOwner=libraryOwner;tab.dirty=false;tab.savedName=ent.name||tab.name;tab.savedContent=modelContent(tab.local.history.toJSON());tab.saveState='synced'}
-      if (tab && ent.name) {
-        tab.name = ent.name
+      if (tab) {
+        if (ent.name) tab.name = ent.name
         syncTabs()
       }
       if (tab && ent.origin) tabOpenedFrom(tab.tabId, ent.origin)
