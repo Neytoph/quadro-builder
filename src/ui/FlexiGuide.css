@@ -8,9 +8,9 @@
 body:has([data-ui="flexi-guide"]) .qb-floating-toast { display: none; }
 .qb-flexi-options, .qb-flexi-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .qb-flexi-options { margin-top: 6px; }
-.qb-flexi-guide button { min-height: 32px; padding: 4px 9px; border: 1px solid #e0b892; border-radius: 8px; background: #fff1e6; color: #1f2430; font: inherit; cursor: pointer; }
-.qb-flexi-guide button:hover, .qb-flexi-guide button[aria-pressed="true"] { color: #db6b0b; border-color: #db6b0b; background: #ffe7d1; }
-.qb-flexi-guide button:disabled { opacity: .45; cursor: default; color: #5a6270; border-color: #e0b892; background: #fff1e6; }
+.qb-flexi-guide button:not(:is(.btn,.qb-btn,.xmf-button)) { min-height: 32px; padding: 4px 9px; border: 1px solid #e0b892; border-radius: 8px; background: #fff1e6; color: #1f2430; font: inherit; cursor: pointer; }
+.qb-flexi-guide button:hover:not(:is(.btn,.qb-btn,.xmf-button)), .qb-flexi-guide button[aria-pressed="true"]:not(:is(.btn,.qb-btn,.xmf-button)) { color: #db6b0b; border-color: #db6b0b; background: #ffe7d1; }
+.qb-flexi-guide button:disabled:not(:is(.btn,.qb-btn,.xmf-button)) { opacity: .45; cursor: default; color: #5a6270; border-color: #e0b892; background: #fff1e6; }
 .qb-flexi-depth { margin-left: auto; }
-.qb-flexi-actions button:last-child:not(:disabled) { background: linear-gradient(135deg, #ff8a2b, #ea580c); border-color: #ea580c; color: white; }
+.qb-flexi-actions button:last-child:not(:disabled):not(:is(.btn,.qb-btn,.xmf-button)) { background: linear-gradient(135deg, #ff8a2b, #ea580c); border-color: #ea580c; color: white; }
 @media (max-width: 640px), (pointer: coarse) { .qb-flexi-guide button { min-height: 44px; } }

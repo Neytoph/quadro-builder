@@ -165,9 +165,9 @@ export default function InventoryPane() {
         </div>
         <div className="flex gap-1.5">
           <button type="button" onClick={api.exportInventory}
-            className="flex-1 text-xs rounded-lg border border-gray-700 bg-gray-800 hover:border-teal-400 px-2 py-1.5 cursor-pointer">{t('btn.invExport')}</button>
+            className="qb-btn qb-btn-ghost qb-btn-sm flex-1">{t('btn.invExport')}</button>
           <button type="button" onClick={() => fileRef.current?.click()}
-            className="flex-1 text-xs rounded-lg border border-gray-700 bg-gray-800 hover:border-teal-400 px-2 py-1.5 cursor-pointer">{t('btn.invImport')}</button>
+            className="qb-btn qb-btn-ghost qb-btn-sm flex-1">{t('btn.invImport')}</button>
           <input ref={fileRef} type="file" accept="application/json,.json" hidden
             onChange={e => {
               const f = e.target.files?.[0]

@@ -1,0 +1,118 @@
+/* 已确认按钮规范 U01–U05。Builder 的同名文件由 sync-button-system.mjs 同步。 */
+:root {
+  --button-primary: linear-gradient(135deg,#EA580C,#FF8A2B);
+  --button-secondary: linear-gradient(135deg,#FFF6EB,#FFEBD7);
+  --button-secondary-hover: linear-gradient(135deg,#FFF0DF,#FFE2C3);
+  --button-secondary-pressed: linear-gradient(135deg,#FFE9D1,#FFDBB8);
+  --button-disabled: linear-gradient(135deg,#F7ECDF,#F0E1D0);
+  --button-focus: #9B806B;
+}
+:is(.btn,.qb-btn,.xmf-button) {
+  --button-bg: var(--button-primary);
+  --button-hover-bg: var(--button-bg);
+  --button-pressed-bg: var(--button-bg);
+  --button-ink: #fff;
+  --button-line: transparent;
+  --button-hover-line: var(--button-line);
+  --button-weight: 700;
+  --button-shadow: 0 6px 20px -6px #EA580C70;
+  --button-hover-shadow: 0 9px 22px -5px #EA580C70,inset 0 1px 0 #FFFFFF40;
+  box-sizing: border-box;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: var(--button-height,44px);
+  padding: 10px 18px;
+  border: 1px solid var(--button-line);
+  border-radius: var(--button-radius,10px);
+  background: var(--button-bg);
+  color: var(--button-ink);
+  font-family: inherit;
+  font-size: var(--button-size,14px);
+  font-weight: var(--button-weight);
+  line-height: 1.5;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+  touch-action: manipulation;
+  box-shadow: var(--button-shadow);
+  transition: background-color 180ms,color 180ms,border-color 180ms,box-shadow 180ms,translate 400ms cubic-bezier(.16,1,.3,1),scale 400ms cubic-bezier(.16,1,.3,1),filter 120ms;
+}
+:is(.btn-ghost,.btn-line,.btn.ghost,.cmty-cta.ghost,.qb-btn-ghost,.xmf-button-secondary,[data-button="secondary"]) {
+  --button-bg: var(--button-secondary);
+  --button-hover-bg: var(--button-secondary-hover);
+  --button-pressed-bg: var(--button-secondary-pressed);
+  --button-ink: #99521F;
+  --button-line: #EDC9A6;
+  --button-hover-line: #E8B98D;
+  --button-weight: 500;
+  --button-shadow: none;
+  --button-hover-shadow: 0 7px 16px -8px #C5753655;
+}
+:is(.xmf-button-text,[data-button="text"],.btn.danger,.btn.armed,.btn-danger,.xmf-button-danger,[data-button="danger"]) {
+  --button-bg: transparent;
+  --button-hover-bg: #FFF0DF;
+  --button-pressed-bg: #FFE9D1;
+  --button-ink: #947259;
+  --button-line: transparent;
+  --button-hover-line: transparent;
+  --button-weight: 500;
+  --button-shadow: none;
+  --button-hover-shadow: 0 7px 16px -8px #C5753655;
+}
+:is(.btn.danger,.btn.armed,.btn-danger,.xmf-button-danger,[data-button="danger"]) { --button-ink: #AD4935; }
+:is(.btn.mini,.btn.sm,.btn.xs,.qb-btn-sm,.xmf-button-small) { --button-height:32px; --button-size:13px; --button-busy-padding:2px; padding:5px 12px; }
+body[data-page="landing"] :is(.hero-cta,.scene .acts,.end-cta) .btn,a.cmty-cta,[data-button-shape="marketing"] { --button-radius:999px; --button-height:48px; --button-size:16px; }
+.xmf-tool { display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:32px;padding:5px 8px;border:0;border-radius:8px;background:transparent;color:#947259;font-family:inherit;font-size:13px;font-weight:500;line-height:1.5;cursor:pointer;touch-action:manipulation; }
+.xmf-tool:hover:not(:disabled) { background:#FFF0DF; }
+.xmf-tool-danger { color:#AD4935; }
+.xmf-tool:disabled { color:#A28D78;cursor:default; }
+:is(.btn,.qb-btn,.xmf-button):hover:not(:disabled):not(.off):not([aria-disabled="true"]):not([aria-busy="true"]) {
+  background:var(--button-hover-bg); color:var(--button-ink); border-color:var(--button-hover-line); box-shadow:var(--button-hover-shadow);
+}
+:is(.btn,.qb-btn,.xmf-button):active:not(:disabled):not(.off):not([aria-disabled="true"]):not([aria-busy="true"]) {
+  background:var(--button-pressed-bg); filter:brightness(.98); box-shadow:inset 0 1px 3px #A24F2620;
+}
+:is(.btn,.qb-btn,.xmf-button):is(:disabled,.off,[aria-disabled="true"]) {
+  background:var(--button-disabled);color:#A28D78;border-color:#EAD9C6;box-shadow:none;opacity:1;cursor:default;filter:none;
+  translate:none;scale:none;
+  transition-property:background-color,color,border-color,box-shadow;
+}
+/* 加载是正在执行，和不可用的禁用状态分开；由业务负责防重复与真实文案。 */
+:root :is(.btn,.qb-btn,.xmf-button)[aria-busy="true"],
+:root [aria-busy="true"] :is(.btn,.qb-btn,.xmf-button)[type="submit"] {
+  background:var(--button-bg);color:var(--button-ink);border-color:var(--button-line);box-shadow:none;opacity:1;cursor:wait;translate:none;scale:none;filter:none;
+  display:inline-flex;justify-content:center;gap:8px;padding-inline:var(--button-busy-padding,8px);white-space:normal;
+  transition-property:background-color,color,border-color,box-shadow;
+}
+:is(.btn,.qb-btn,.xmf-button)[aria-busy="true"]::before,
+[aria-busy="true"] :is(.btn,.qb-btn,.xmf-button)[type="submit"]::before {
+  content:"";position:static;flex:0 0 12px;width:12px;height:12px;box-sizing:border-box;border:1.5px solid currentColor;border-right-color:transparent;border-radius:50%;animation:xmf-button-spin 800ms linear infinite;
+}
+/* 加载圈替代原动作图标与快捷键，和可见文案作为一组居中。 */
+:is(.btn,.qb-btn,.xmf-button)[aria-busy="true"] > :is(svg,kbd),
+[aria-busy="true"] :is(.btn,.qb-btn,.xmf-button)[type="submit"] > :is(svg,kbd) { display:none; }
+@keyframes xmf-button-spin { to { rotate:360deg; } }
+/* 按钮焦点沿用实际形状；输入框保持独立的 field-focus 规则。 */
+:root :is(button,a[href],summary,[role="button"]):focus-visible:not(:disabled) { outline:1px solid var(--button-focus);outline-offset:2px; }
+:root :is(button,a[href],summary,[role="button"]):focus:not(:focus-visible) { outline:none; }
+@media (hover:hover) and (pointer:fine) and (prefers-reduced-motion:no-preference) {
+  :is(.btn,.qb-btn,.xmf-button)[data-button-magnetic] { translate:var(--button-x,0px) calc(var(--button-y,0px) - 3px);scale:1.025;transition-duration:180ms,180ms,180ms,180ms,120ms,120ms,120ms; }
+  :is(.btn,.qb-btn,.xmf-button)[data-button-press]:not(:disabled):not(.off):not([aria-busy="true"]):not([aria-disabled="true"]) { translate:none;scale:.98;transition-duration:120ms; }
+}
+@media (pointer:coarse) {
+  :is(button,summary,.btn,.qb-btn,.xmf-button,[role="button"]) { min-width:44px;min-height:44px; }
+  :root :is(.btn,.qb-btn,.xmf-button,summary):not([hidden]) { min-width:44px;min-height:44px; }
+}
+@media (prefers-reduced-motion:reduce) {
+  :is(.btn,.qb-btn,.xmf-button) { transition:none;translate:none;scale:none; }
+  :is(.btn,.qb-btn,.xmf-button)[aria-busy="true"]::before,
+  [aria-busy="true"] :is(.btn,.qb-btn,.xmf-button)[type="submit"]::before { animation:none; }
+}
+@media (forced-colors:active) {
+  :root :is(button,a[href],summary,[role="button"]):focus-visible:not(:disabled) { outline:2px solid Highlight; }
+  :is(.btn,.qb-btn,.xmf-button) { border:1px solid ButtonText; }
+  :is(.btn,.qb-btn,.xmf-button):is(:disabled,.off,[aria-disabled="true"]) { border-color:GrayText;color:GrayText; }
+}

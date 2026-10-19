@@ -391,7 +391,7 @@ export default function ColorTune() {
             <button
               type="button"
               onClick={() => commit({ ...tune, grade: { ...DEFAULT_GRADE } })}
-              className="mt-2 w-full h-8 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-200 text-[12px] cursor-pointer"
+              className="qb-btn qb-btn-ghost qb-btn-sm mt-2 w-full"
             >
               滤镜归零
             </button>
@@ -427,7 +427,7 @@ export default function ColorTune() {
           <button
             type="button"
             onClick={() => void copyJson()}
-            className="flex-1 h-8 rounded-lg bg-amber-700 hover:bg-amber-600 text-white text-[12px] cursor-pointer"
+            className="qb-btn qb-btn-sm flex-1"
           >
             {copied ? '已复制' : '复制'}
           </button>
@@ -435,7 +435,7 @@ export default function ColorTune() {
             type="button"
             disabled={comparing}
             onClick={() => applyDraft(jsonDraft)}
-            className="flex-1 h-8 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-200 text-[12px] cursor-pointer disabled:opacity-40"
+            className="qb-btn qb-btn-ghost qb-btn-sm flex-1"
           >
             套上
           </button>
@@ -450,7 +450,7 @@ export default function ColorTune() {
                 api.notify('读不了剪贴板，请粘贴到框里', 'warn')
               }
             }}
-            className="h-8 px-2.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-200 text-[12px] cursor-pointer disabled:opacity-40"
+            className="qb-btn qb-btn-ghost qb-btn-sm"
           >
             粘贴
           </button>
@@ -458,7 +458,7 @@ export default function ColorTune() {
             type="button"
             disabled={comparing}
             onClick={() => commit(structuredClone(DEFAULT_TUNE))}
-            className="h-8 px-2.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-200 text-[12px] cursor-pointer disabled:opacity-40"
+            className="qb-btn qb-btn-ghost qb-btn-sm"
           >
             重置
           </button>

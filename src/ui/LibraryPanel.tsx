@@ -184,13 +184,13 @@ export default function LibraryPanel() {
         {tab === 'mine' && (
           <div className="flex flex-wrap gap-1.5">
             <button disabled={!!busy} onClick={() => folderRef.current?.click()}
-              className="text-xs rounded-lg border border-gray-700 bg-gray-800 hover:border-teal-400 px-2 py-1.5 cursor-pointer disabled:opacity-40">{t('lib.folder')}</button>
+              className="qb-btn qb-btn-ghost qb-btn-sm">{t('lib.folder')}</button>
             <button disabled={!!busy} onClick={() => filesRef.current?.click()}
-              className="text-xs rounded-lg border border-gray-700 bg-gray-800 hover:border-teal-400 px-2 py-1.5 cursor-pointer disabled:opacity-40">{t('lib.files')}</button>
+              className="qb-btn qb-btn-ghost qb-btn-sm">{t('lib.files')}</button>
             <button disabled={!!busy || !rows.length} onClick={() => {
               if (!window.confirm(t('lib.confirmClear'))) return
               void Promise.all(rows.map(r => storage.libRemove(r.id))).then(() => reload()).then(() => api.notify(t('lib.cleared')))
-            }} className="text-xs rounded-lg border border-red-900 bg-red-950/40 hover:border-red-400 px-2 py-1.5 cursor-pointer disabled:opacity-40">{t('lib.clear')}</button>
+            }} className="qb-btn xmf-button-danger qb-btn-sm">{t('lib.clear')}</button>
             <input
               ref={el => {
                 folderRef.current = el
@@ -309,7 +309,7 @@ export default function LibraryPanel() {
                   <button onClick={() => {
                     if (!window.confirm(t('lib.confirmDelete', { name: row.name }))) return
                     void storage.libRemove(row.id).then(() => reload())
-                  }} className="text-xs text-red-400 hover:text-red-200 cursor-pointer shrink-0 mt-0.5">{t('lib.delete')}</button>
+                  }} className="xmf-tool xmf-tool-danger shrink-0 mt-0.5">{t('lib.delete')}</button>
                 </div>
               )
             })}

@@ -17,7 +17,7 @@ import { DeviceDraftsLink } from './SingleModelBar'
 import { COLOR_HEX } from '../engine/colors.js'
 import { Box, BookOpen, ChevronDown, FileJson, FolderInput, Image, Link, Plus, Save, Sparkles, Upload } from 'lucide-react'
 
-const btn = 'qb-file-action'
+const btn = 'qb-file-action xmf-button xmf-button-secondary'
 const officialHexes = new Set([...Object.values(COLOR_HEX).map(hex => hex.toUpperCase()), '#2B2B2B'])
 
 export default function FilePanel() {
@@ -51,7 +51,7 @@ export default function FilePanel() {
           {active.saveState === 'conflict' && active.conflictDocId && <button className="qb-file-row" onClick={() => void api.openDoc(active.conflictDocId!)}>{t('sync.viewLatest')}</button>}
           {active.saveState === 'failed' && <button className="qb-file-row" onClick={() => void api.retrySave(active.tabId)}>{t('sync.retry')}</button>}
         </div>}
-        {!plan && <button disabled={contentReadOnly || api.saving || !api.entryReady} onClick={() => void api.saveCurrent()} className={`${btn} qb-file-primary`}><Save aria-hidden="true" /><span>{t('chrome.save')}</span><kbd>{t('chrome.saveShortcut')}</kbd></button>}
+        {!plan && <button disabled={contentReadOnly || api.saving || !api.entryReady} aria-busy={api.saving} onClick={() => void api.saveCurrent()} className={`qb-file-action qb-file-primary xmf-button`}><Save aria-hidden="true" /><span>{t('chrome.save')}</span><kbd>{t('chrome.saveShortcut')}</kbd></button>}
         {SINGLE_MODEL && !plan && !active?.docId && !active?.libraryId && <><button onClick={() => { if (active?.dirty && !window.confirm(t('single.replace'))) return; fileRef.current?.click() }} className="qb-file-row"><Upload aria-hidden="true"/><span>{t('btn.import')}</span></button><input ref={fileRef} type="file" accept=".qdf,.json,application/json" hidden onChange={event => { const file=event.target.files?.[0];event.target.value='';if(file)void api.importFile(file) }}/></>}
         {!SINGLE_MODEL && !EDITOR_EMBED && <><div className="qb-file-two">
           <button onClick={() => { api.newTab(); api.notify(t('toast.newTab')) }} className={btn}><Plus aria-hidden="true" /><span>{t('btn.new')}</span></button>

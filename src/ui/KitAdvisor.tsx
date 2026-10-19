@@ -111,14 +111,14 @@ export default function KitAdvisor() {
             {cheapest && <div className="mt-2.5 text-sm text-emerald-700">{t('kit.cheapest', { name: cheapest.disp, price: formatKitPrice(cheapest.price ?? 0, lang) })}</div>}
           </div>
           <div className="flex flex-col gap-1.5">
-            <button onClick={copyList} className="w-full bg-teal-500 hover:bg-teal-400 text-white font-semibold text-sm rounded-lg py-2.5 cursor-pointer">{t('kit.copy')}</button>
-            <button onClick={() => setPane('bom')} className="w-full bg-gray-800 hover:bg-gray-700 text-sm rounded-lg py-2.5 cursor-pointer">{t('kit.continue')}</button>
+            <button onClick={copyList} className="qb-btn w-full">{t('kit.copy')}</button>
+            <button onClick={() => setPane('bom')} className="qb-btn qb-btn-ghost w-full">{t('kit.continue')}</button>
           </div>
         </div>
       ) : (
         <div className="p-3 space-y-4">
           <ReplenishmentList />
-          <button onClick={() => setPane('bom')} className="w-full bg-gray-800 hover:bg-gray-700 text-sm rounded-lg py-2.5 cursor-pointer">{t('kit.continue')}</button>
+          <button onClick={() => setPane('bom')} className="qb-btn qb-btn-ghost w-full">{t('kit.continue')}</button>
         </div>
       )}
     </div>

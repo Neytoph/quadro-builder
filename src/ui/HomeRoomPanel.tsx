@@ -94,7 +94,7 @@ export default function HomeRoomPanel({ tile = 40 }: { tile?: number }) {
     finally { if (version === request.current) setChoosing(false) }
   }
   const switchTo = (mode: 'grass' | 'blank' | 'home') => { api.setBackground(mode); close(true) }
-  const iconButton = 'relative shrink-0 overflow-hidden rounded-[11px] p-0 cursor-pointer flex items-center justify-center bg-[#FFFDF9] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600 disabled:opacity-50 disabled:cursor-wait'
+  const iconButton = 'relative shrink-0 overflow-hidden rounded-lg p-0 cursor-pointer flex items-center justify-center bg-[#FFFDF9] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600 disabled:opacity-50 disabled:cursor-wait'
   const option = (active: boolean) => iconButton + ' h-[var(--scene-tile)] w-[var(--scene-tile)] border-2 ' + (active ? 'border-orange-600' : 'border-white hover:border-orange-200')
   return <div ref={root} className="relative pointer-events-auto" onKeyDown={event => {
     event.stopPropagation()

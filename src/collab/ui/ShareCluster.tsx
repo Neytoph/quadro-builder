@@ -46,7 +46,7 @@ export default function ShareCluster({ triggerRef }: { triggerRef?: RefObject<HT
     return (
       <div className="cb-cluster">
         {createAllowed && <button ref={triggerRef} type="button" className="cb-share ghost" title={t('collab.create.action')} aria-label={t('collab.create.action')} onClick={() => show('enable')} data-ui="share-enable"><Users /><span>{t('collab.create.action')}</span></button>}
-        {collab.createdPlan && <button type="button" className="cb-text-action" onClick={collab.recoverCreatedPlan}>{t('collab.create.recover')}</button>}
+        {collab.createdPlan && <button type="button" className="cb-text-action xmf-button xmf-button-text xmf-button-small" onClick={collab.recoverCreatedPlan}>{t('collab.create.recover')}</button>}
         {open === 'enable' && <EnableShareModal onClose={closeCreate} />}
       </div>
     )
@@ -72,7 +72,7 @@ export default function ShareCluster({ triggerRef }: { triggerRef?: RefObject<HT
           {collab.role === 'owner' ? <UserPlus /> : <Users />}<span>{t(collab.role === 'owner' ? 'collab.create.invite' : 'collab.create.members')}</span>
         </button>
       )}
-      {!plan && collab.createdPlan && <button type="button" className="cb-text-action" onClick={collab.recoverCreatedPlan} data-ui="plan-recovery">{t('collab.create.recover')}</button>}
+      {!plan && collab.createdPlan && <button type="button" className="cb-text-action xmf-button xmf-button-text xmf-button-small" onClick={collab.recoverCreatedPlan} data-ui="plan-recovery">{t('collab.create.recover')}</button>}
       {open === 'share' && <ShareModal onClose={close} onDeliver={() => { collab.closeInvite(); show('deliver') }} />}
       {open === 'deliver' && <DeliverModal onClose={close} />}
       {open === 'enable' && <EnableShareModal onClose={closeCreate} />}

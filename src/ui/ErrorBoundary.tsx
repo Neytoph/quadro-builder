@@ -63,7 +63,7 @@ class ErrorBoundaryInner extends Component<InnerProps, InnerState> {
           <div className="text-lg font-semibold">{this.props.t('error.title')}</div>
           <p className="text-sm text-red-300 break-words">{this.state.error.message}</p>
           <button type="button" onClick={() => window.location.reload()}
-            className="text-sm rounded-lg bg-teal-500 hover:bg-teal-400 text-white font-semibold px-4 py-2 cursor-pointer">
+            className="qb-btn">
             {this.props.t('error.reload')}
           </button>
         </div>

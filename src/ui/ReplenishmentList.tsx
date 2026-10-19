@@ -62,7 +62,7 @@ export default function ReplenishmentList({ showRows = true }: { showRows?: bool
             <Copy size={15} aria-hidden="true" />{copying ? t('replenish.copying') : t('replenish.copy')}
           </button>
           <button type="button" onClick={exportCsv} aria-label={t('replenish.csvLabel')}
-            className="min-h-11 flex items-center justify-center gap-1.5 px-3 rounded-full border border-[#e0b892] bg-[#fff1e6] text-[#1f2430] text-xs font-semibold hover:bg-[#ffe7d1] hover:text-[#db6b0b] hover:border-[#db6b0b] cursor-pointer">
+            className="qb-btn qb-btn-ghost qb-btn-sm">
             <Download size={15} aria-hidden="true" />{t('replenish.csv')}
           </button>
         </div>

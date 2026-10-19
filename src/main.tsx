@@ -1,5 +1,6 @@
 import { createRoot } from 'react-dom/client'
 import './ui/motion'
+import './ui/button-motion.js'
 import './index.css'
 import App from './App'
 import { landedFrom, startAnalytics, track } from './analytics/track'

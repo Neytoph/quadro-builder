@@ -15,7 +15,7 @@ const tileChrome = (_on: boolean, h: number): CSSProperties => ({
   border: TILE_EDGE,
 })
 
-const tileBtn = 'm-tile overflow-hidden rounded-[11px] p-0 border-0 cursor-pointer transition-[filter,opacity,box-shadow,transform] duration-200 hover:scale-[1.03] active:scale-95 flex items-center justify-center'
+const tileBtn = 'm-tile overflow-hidden rounded-lg p-0 border-0 cursor-pointer transition-[filter,opacity,box-shadow,transform] duration-200 hover:scale-[1.03] active:scale-95 flex items-center justify-center'
 
 /** 场景工具位于左侧属性栏旁，区域显示按钮排在最右侧。 */
 export default function SceneToggle() {

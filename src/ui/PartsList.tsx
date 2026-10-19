@@ -57,7 +57,7 @@ export function BomPane() {
   const { t, lang } = useI18n()
   const bom = api.bom
   const empty = !bom || bom.totals.tubes + bom.totals.connectors + bom.totals.panels + bom.totals.other === 0
-  const exportBtn = 'flex-1 text-xs rounded-lg border border-gray-700 bg-gray-800 hover:border-teal-400 px-2 py-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed'
+  const exportBtn = 'qb-btn qb-btn-ghost qb-btn-sm flex-1'
 
   return (
     <>

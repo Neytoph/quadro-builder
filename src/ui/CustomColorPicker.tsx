@@ -72,7 +72,7 @@ export default function CustomColorPicker({ initial, anchor, selected, onPreview
         <div className="qb-color-sample"><span style={{ background: hex }} /><small>{s.after}</small></div>
       </div>
       {!valid && <p id="qb-color-error" role="alert" className="qb-color-error">{s.invalid}</p>}
-      <div className="qb-color-actions"><button type="button" className="qb-color-secondary" onClick={() => onFinish()}>{s.cancel}</button>
+      <div className="qb-color-actions"><button type="button" className="qb-color-secondary xmf-button xmf-button-text" onClick={() => onFinish()}>{s.cancel}</button>
         <button type="submit" className="qb-btn" disabled={!valid}>{s.apply}</button></div>
     </form>
   </dialog>, document.body)

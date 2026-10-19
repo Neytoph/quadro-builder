@@ -4,14 +4,14 @@
 .qb-color-section { padding-top: 12px; border-top: 1px solid #f0d9c6; }
 .qb-color-label { font-size: 11px; font-weight: 500; line-height: 1.5; color: #5a6270; margin: 0 0 6px; }
 .qb-color-swatches { display: flex; flex-wrap: wrap; gap: 0; }
-.qb-color-swatch { width: 32px; height: 32px; display: grid; place-items: center; padding: 3px; border: 1px solid transparent; border-radius: 9px; cursor: pointer; background: transparent; }
+.qb-color-swatch { width: 32px; height: 32px; display: grid; place-items: center; padding: 3px; border: 1px solid transparent; border-radius: 8px; cursor: pointer; background: transparent; }
 .qb-color-swatch > span { width: 24px; height: 24px; border-radius: 6px; border: 1px solid rgb(31 36 48 / 18%); position: relative; }
 .qb-color-swatch[aria-pressed="true"] { border-color: #db6b0b; background: #fff1e6; }
 .qb-color-swatch[aria-pressed="true"] > span::after { content: ''; position: absolute; inset: 7px; border: 2px solid white; border-radius: 50%; box-shadow: 0 0 0 1px rgb(31 36 48 / 55%); }
-.qb-color-secondary { display: inline-flex; align-items: center; justify-content: center; gap: 5px; background: #fff1e6; border: 1px solid #e0b892; border-radius: 9px; color: #1f2430; cursor: pointer; font-size: 12px; min-height: 32px; padding: 5px 9px; }
+.qb-color-secondary { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 32px; padding: 5px 9px; }
 .qb-color-slot-heading { display: flex; align-items: center; justify-content: space-between; gap: 4px; min-height: 22px; margin-bottom: 4px; }
 .qb-color-slot-heading .qb-color-label { margin: 0; min-width: 0; overflow-wrap: anywhere; }
-.qb-color-edit { display: inline-flex; align-items: center; justify-content: center; gap: 3px; min-height: 32px; margin: -5px 0; border: 0; border-radius: 6px; padding: 0 4px; background: transparent; color: #5a6270; font-size: 11px; cursor: pointer; }
+.qb-color-edit { display: inline-flex; align-items: center; justify-content: center; gap: 3px; min-height: 32px; margin: -5px 0; border: 0; border-radius: 8px; padding: 0 4px; background: transparent; color: #5a6270; font-size: 11px; cursor: pointer; }
 .qb-color-slots { display: grid; grid-template-columns: repeat(auto-fit, 32px); max-width: 128px; justify-content: start; gap: 0; }
 .qb-color-swatch > span { display: grid; place-items: center; }
 .qb-color-slot[data-empty="true"] > span { border-style: dashed; border-color: #c4a58a; color: #8a6c54; }
@@ -23,7 +23,7 @@
 .qb-color-slot[data-editing="true"]:is(:hover, :focus-visible):not(:disabled) > span { border-color: #db6b0b; }
 .qb-color-slot[data-editing="true"]:is(:hover, :focus-visible):not(:disabled) > span > svg { opacity: 1; }
 .qb-color-palettes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
-.qb-color-palette { display: grid; align-items: center; grid-template-columns: 16px minmax(0, 1fr); gap: 6px; padding: 7px; border: 1px solid #e0b892; border-radius: 9px; background: #fff1e6; color: #1f2430; font-size: 11px; font-weight: 500; line-height: 1.4; text-align: left; cursor: pointer; }
+.qb-color-palette { display: grid; align-items: center; grid-template-columns: 16px minmax(0, 1fr); gap: 6px; padding: 7px; border: 1px solid #e0b892; border-radius: 10px; background: #fff1e6; color: #1f2430; font-size: 11px; font-weight: 500; line-height: 1.4; text-align: left; cursor: pointer; }
 .qb-color-palette > span:last-child { overflow-wrap: anywhere; }
 .qb-color-palette { padding: 6px; gap: 4px; }
 .qb-color-palette-preview { display: flex; width: 16px; height: 16px; border: 1px solid rgb(31 36 48 / 18%); border-radius: 4px; overflow: hidden; }
@@ -47,23 +47,22 @@
 .qb-color-dialog .react-colorful__pointer { width: 20px; height: 20px; }
 .qb-color-fields { display: flex; align-items: flex-end; gap: 12px; margin-top: 18px; }
 .qb-color-hex { display: flex; flex-direction: column; gap: 5px; min-width: 0; flex: 1; font-size: 12px; color: #5a6270; }
-.qb-color-hex input { min-width: 0; width: 100%; height: 40px; border: 1px solid #e0b892; border-radius: 9px; background: #fffdf9; font-family: var(--font-num); font-size: 16px; color: #1f2430; padding: 6px 9px; }
+.qb-color-hex input { min-width: 0; width: 100%; height: 40px; border: 1px solid #e0b892; border-radius: 10px; background: #fffdf9; font-family: var(--font-num); font-size: 16px; color: #1f2430; padding: 6px 9px; }
 .qb-color-hex input[aria-invalid="true"] { border-color: #b91c1c; }
 .qb-color-sample { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 11px; color: #5a6270; }
 .qb-color-sample > span { display: block; width: 32px; height: 32px; border: 1px solid rgb(31 36 48 / 18%); border-radius: 8px; }
 .qb-color-sample small { font-size: 10px; }
 .qb-color-actions { display: flex; gap: 8px; margin-top: 18px; }
 .qb-color-actions button { min-height: 44px; flex: 1; white-space: normal; }
-.qb-color-actions .qb-color-secondary { font-size: 13px; border-radius: 999px; }
-.qb-color-edit:hover, .qb-color-palette:hover, .qb-color-secondary:hover, .qb-color-close:hover { background: #ffe7d1; color: #db6b0b; border-color: #db6b0b; }
+.qb-color-edit:hover, .qb-color-palette:hover, .qb-color-close:hover { background: #ffe7d1; color: #db6b0b; border-color: #db6b0b; }
 .qb-color-swatch:hover:not(:disabled) { background: #fff1e6; }
-.qb-color-swatch:focus-visible, .qb-color-edit:focus-visible, .qb-color-palette:focus-visible, .qb-color-secondary:focus-visible, .qb-color-close:focus-visible { outline: 2px solid #db6b0b; outline-offset: 2px; }
+.qb-color-swatch:focus-visible, .qb-color-edit:focus-visible, .qb-color-palette:focus-visible, .qb-color-close:focus-visible { outline: 2px solid #db6b0b; outline-offset: 2px; }
 .qb-color-edit:disabled, .qb-color-palette:disabled, .qb-color-swatch:disabled { opacity: .45; cursor: not-allowed; }
 @media (pointer: coarse) {
   .qb-color-swatch { width: 44px; height: 44px; }
   .qb-color-swatch > span { width: 28px; height: 28px; }
   .qb-color-edit, .qb-color-palette, .qb-color-close { min-height: 44px; }
-  .qb-color-edit { min-width: 44px; }
+  .qb-color-edit, .qb-color-close { min-width: 44px; }
   .qb-color-slots { grid-template-columns: repeat(auto-fit, 44px); max-width: 176px; }
   .qb-color-dialog .react-colorful__hue { height: 24px; flex-basis: 24px; }
 }

@@ -91,9 +91,9 @@ export function EnableShareModal({ onClose }: { onClose: () => void }) {
           <label className="cb-field"><span>{t('collab.create.name')}</span><input autoFocus value={name} onChange={e => setName(Array.from(e.target.value).slice(0, 40).join(''))} disabled={busy} required data-ui="create-name" autoComplete="off" /></label>
           <p className="cb-independent"><Copy />{t('collab.create.independent')}</p>
           {failure && <p className="cb-action-error" role="alert">{failure}</p>}
-          {collab.createdPlan && <a href={`?plan=${encodeURIComponent(collab.createdPlan.id)}&inviteManage=1`} className="cb-text-action" data-ui="create-recovery">{t('collab.create.recover')}</a>}
+          {collab.createdPlan && <a href={`?plan=${encodeURIComponent(collab.createdPlan.id)}&inviteManage=1`} className="cb-text-action xmf-button xmf-button-text xmf-button-small" data-ui="create-recovery">{t('collab.create.recover')}</a>}
           {signedIn
-            ? <button type="submit" className="qb-btn cb-wide" disabled={busy || !name.trim() || !api.entryReady} data-ui="enable-share-go">{t(busy ? 'collab.create.creating' : 'collab.create.go')}</button>
+            ? <button type="submit" className="qb-btn cb-wide" disabled={busy || !name.trim() || !api.entryReady} aria-busy={busy} data-ui="enable-share-go">{t(busy ? 'collab.create.creating' : 'collab.create.go')}</button>
             : <a href={collab.loginUrl()} className="qb-btn cb-wide no-underline">{t('collab.create.login')}</a>}
         </form>
       </div>
@@ -176,12 +176,12 @@ export function ShareModal({ onClose, onDeliver }: { onClose: () => void; onDeli
         <p className="s">{collab.session?.name || plan.name}</p>
         <div className="cb-modal-tabs" role="tablist">{(owner ? ['invite', 'members', 'view'] as const : ['members'] as const).map(key => <button key={key} type="button" role="tab" aria-selected={tab === key} className={tab === key ? 'active' : ''} data-ui={`share-tab-${key}`} onClick={() => { setTab(key); setConfirm(null) }}>{t(`collab.create.tab.${key}`)}{key === 'members' ? ` · ${plan.members.length}` : ''}</button>)}</div>
         {failure && <div className="cb-action-error" role="alert">{failure}</div>}
-        {collab.createdPlan?.id === plan.id && collab.createdPlan.coverError && <div className="cb-action-error" role="alert">{t('collab.create.coverFailed')}<p>{collab.createdPlan.coverError}</p><button type="button" className="cb-text-action" disabled={busy} data-ui="cover-retry" onClick={() => void act(collab.retryCover)}>{t('collab.create.retryCover')}</button></div>}
+        {collab.createdPlan?.id === plan.id && collab.createdPlan.coverError && <div className="cb-action-error" role="alert">{t('collab.create.coverFailed')}<p>{collab.createdPlan.coverError}</p><button type="button" className="cb-text-action xmf-button xmf-button-text xmf-button-small" disabled={busy} data-ui="cover-retry" onClick={() => void act(collab.retryCover)}>{t('collab.create.retryCover')}</button></div>}
         {busy && <p className="s" role="status">{t('collab.loading')}</p>}
         {confirm ? <div className="cb-confirm-action">
           <h3>{t(confirm.kind === 'disable' ? 'collab.create.disableTitle' : 'collab.create.removeTitle')}</h3>
           <p className="s">{confirm.kind === 'remove' ? t('collab.create.removeBody', { name: confirm.name }) : t('collab.create.disableBody')}</p>
-          <div className="foot"><button type="button" className="qb-btn qb-btn-ghost" disabled={busy} onClick={() => setConfirm(null)}>{t('confirm.cancel')}</button><button type="button" className="qb-btn" disabled={busy} data-ui="confirm-collab-action" onClick={() => void act(async () => {
+          <div className="foot"><button type="button" className="qb-btn qb-btn-ghost" disabled={busy} onClick={() => setConfirm(null)}>{t('confirm.cancel')}</button><button type="button" className="qb-btn" disabled={busy} aria-busy={busy} data-ui="confirm-collab-action" onClick={() => void act(async () => {
             if (confirm.kind === 'disable') { await collabApi.disableInvite(plan.id, confirm.token); setInvites(list => list.filter(item => item.token !== confirm.token)) }
             else await collab.removeMember(confirm.userId)
             setConfirm(null)
@@ -194,13 +194,13 @@ export function ShareModal({ onClose, onDeliver }: { onClose: () => void; onDeli
           {invite ? <>
             <input className="cb-url-input" readOnly value={inviteURL} aria-label={t('collab.invite')} data-ui="invite-url" />
             <button type="button" className="qb-btn cb-wide" disabled={busy} data-ui="invite-copy" onClick={() => copy(inviteURL, t('collab.inviteCopied'))}><Copy />{t(`collab.create.copyInvite.${role}`)}</button>
-            <div className="cb-link-tools"><a className="cb-text-action" href={inviteURL} target="_blank" rel="noreferrer">{t('collab.create.previewInvite')}</a><button type="button" className="cb-text-action danger" disabled={busy} data-ui="invite-disable" onClick={() => setConfirm({ kind: 'disable', token: invite.token })}>{t('collab.create.disable')}</button></div>
+            <div className="cb-link-tools"><a className="cb-text-action xmf-button xmf-button-text xmf-button-small" href={inviteURL} target="_blank" rel="noreferrer">{t('collab.create.previewInvite')}</a><button type="button" className="cb-text-action danger xmf-button xmf-button-danger xmf-button-small" disabled={busy} data-ui="invite-disable" onClick={() => setConfirm({ kind: 'disable', token: invite.token })}>{t('collab.create.disable')}</button></div>
           </> : <>
             <div className="cb-status-box">{t('collab.create.noLink')}</div>
-            <button type="button" className="qb-btn cb-wide" disabled={busy} data-ui="invite-generate" onClick={() => void generate()}><Link />{t('collab.create.generate')}</button>
+            <button type="button" className="qb-btn cb-wide" disabled={busy} aria-busy={busy} data-ui="invite-generate" onClick={() => void generate()}><Link />{t('collab.create.generate')}</button>
           </>}
           <div className="cb-sub">{t('collab.create.joinedMembers')}</div>{memberRows(false)}
-          <button type="button" className="cb-text-action" onClick={() => setTab('members')}>{t('collab.create.manageMembers')}</button>
+          <button type="button" className="cb-text-action xmf-button xmf-button-text xmf-button-small" onClick={() => setTab('members')}>{t('collab.create.manageMembers')}</button>
         </> : tab === 'view' && owner ? <div className="cb-view-pane">
           <Eye /><h3>{t('collab.create.viewTitle')}</h3><p className="s">{t('collab.create.viewHint')}</p>
           <input className="cb-url-input" readOnly value={collab.viewUrl()} aria-label={t('collab.viewLink')} data-ui="view-url" />
@@ -246,7 +246,7 @@ export function ForkModal({ onClose }: { onClose: () => void }) {
         </div>
         <div className="foot">
           <button type="button" className="qb-btn qb-btn-ghost qb-btn-sm" onClick={onClose}>{t('confirm.cancel')}</button>
-          <button type="button" className="qb-btn qb-btn-sm" disabled={busy} onClick={() => void go()} data-ui="fork-go">{t('collab.forkGo')}</button>
+          <button type="button" className="qb-btn qb-btn-sm" disabled={busy} aria-busy={busy} onClick={() => void go()} data-ui="fork-go">{t('collab.forkGo')}</button>
         </div>
       </div>
     </Modal>
@@ -338,7 +338,7 @@ export function DeliverModal({ onClose }: { onClose: () => void }) {
         {!token && (
           <>
             {!preview && <div className="cb-delivery-source"><b>{snapshot?.name || collab.session?.name}</b><p>{snapshot ? f('frozenHint') : f('currentModel')}</p>
-              {snapshot && <><button type="button" className="cb-text-action" disabled={busy} onClick={() => void prepare(true)} data-ui="delivery-refresh">{f('refreshSnapshot')}</button><small>{f('resetImagesHint')}</small></>}
+              {snapshot && <><button type="button" className="cb-text-action xmf-button xmf-button-text xmf-button-small" disabled={busy} onClick={() => void prepare(true)} data-ui="delivery-refresh">{f('refreshSnapshot')}</button><small>{f('resetImagesHint')}</small></>}
             </div>}
             {preview && snapshot && collab.plan && <section className="cb-delivery-preview" data-ui="delivery-preview">
               <h4>{f('preview')}</h4><p className="cb-hint">{f('frozenHint')}</p>
@@ -369,7 +369,7 @@ export function DeliverModal({ onClose }: { onClose: () => void }) {
             <div className="foot">
               <span className="note">{t('collab.deliver.disclaimer')}</span>
               <button type="button" className="qb-btn qb-btn-ghost qb-btn-sm" disabled={busy} onClick={preview ? () => setPreview(false) : onClose}>{preview ? f('edit') : t('confirm.cancel')}</button>
-              <button type="button" className="qb-btn qb-btn-sm" disabled={busy || !collab.canDeliver || !ageNote.trim() || !loadNote.trim()} onClick={() => preview ? void submit() : void prepare()} data-ui={preview ? 'deliver-submit' : 'deliver-preview'}><ShieldCheck />{busy ? busyLabel : preview ? f('deliveryTitle') : f('preview')}</button>
+              <button type="button" className="qb-btn qb-btn-sm" disabled={busy || !collab.canDeliver || !ageNote.trim() || !loadNote.trim()} aria-busy={busy} onClick={() => preview ? void submit() : void prepare()} data-ui={preview ? 'deliver-submit' : 'deliver-preview'}><ShieldCheck />{busy ? busyLabel : preview ? f('deliveryTitle') : f('preview')}</button>
             </div>
           </>
         )}
