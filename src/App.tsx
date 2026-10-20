@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import './ui/manualProgress.css'
 import { LanguageProvider, useI18n } from './i18n'
 import { EngineProvider, useEngine } from './store/EngineContext'
 import CanvasHost from './ui/CanvasHost'
@@ -277,15 +278,27 @@ function NewOnEntry() {
 }
 
 function ManualProgress() {
-  const { exportingManual } = useEngine()
+  const { exportingManual, cancelManualExport } = useEngine()
   const { t } = useI18n()
+  const dialog = useRef<HTMLDialogElement>(null)
+  useEffect(() => { if (exportingManual && !dialog.current?.open) dialog.current?.showModal() }, [exportingManual])
   if (!exportingManual) return null
+  const { page, total, phase, progress } = exportingManual
+  const cancelling = phase === 'cancelling'
+  let status = t('manual.resources')
+  if (phase === 'prepare') status = t('manual.preparing')
+  if (total > 0) status = t('manual.progress', { k: Math.min(page + 1, total), n: total })
+  if (phase === 'save') status = t('manual.saving')
+  if (cancelling) status = t('manual.cancelling')
+  let value = progress
+  if (total > 0) value = page
   return (
-    <div className="m-backdrop fixed inset-0 z-[80] bg-black/45 flex items-center justify-center">
-      <div className="m-modal qb-card px-6 py-4 text-gray-100 text-sm tabular-nums">
-        {t('manual.progress', { k: exportingManual.page, n: exportingManual.total })}
-      </div>
-    </div>
+    <dialog ref={dialog} className="qb-manual-progress" aria-labelledby="manual-progress-title" onCancel={event => { event.preventDefault(); if (phase !== 'save') cancelManualExport() }}>
+      <h2 id="manual-progress-title">{t('confirm.exportManualTitle')}</h2>
+      <p role="status">{status}</p>
+      <progress aria-label={t('confirm.exportManualTitle')} value={value} max={total || 100} />
+      <div><button type="button" autoFocus disabled={cancelling || phase === 'save'} onClick={cancelManualExport} className="qb-btn qb-btn-ghost qb-btn-sm">{t('confirm.cancel')}</button></div>
+    </dialog>
   )
 }
 

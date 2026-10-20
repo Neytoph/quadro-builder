@@ -26,6 +26,7 @@ import { fetchOfficialQdf, officialCacheVersion, cachedOfficialQdf, officialLibI
 import { versionPublicSource } from '../engine/publicResources.js'
 import { applyFrameHex, loadTune } from '../engine/colorTune.js'
 import { exportAssemblyPdf as runAssemblyPdf } from '../engine/assemblyManual.js'
+import { requestManualPlan } from '../engine/manualPlan'
 import { ACCESSORY_IDS } from '../engine/accessoryPack.js'
 import { takeModelThumb, waitSceneReady } from '../engine/thumbShot.js'
 import { bomToCsv, bomToPngDataUrl, loadImage } from '../ui/bomExport'
@@ -316,7 +317,8 @@ interface EngineApi {
   reviewManualRepairs: (nodeIds: string[]) => void
   applyManualRepairs: () => boolean
   discardManualRepairs: () => void
-  exportingManual: { page: number; total: number } | null
+  exportingManual: { page: number; total: number; phase?: string; progress?: number } | null
+  cancelManualExport: () => void
   shareCurrent: () => Promise<void>
   /**
    * 导出文件要先有账号（部署设了 VITE_REGISTER_URL 时）。register：还没登录，问要不要
@@ -767,7 +769,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   }, [])
   const [room, setRoomState] = useState<RoomSettings>(loadRoom)
   const [side, setSide] = useState<SidePanel>('bom')
-  const [exportingManual, setExportingManual] = useState<{ page: number; total: number } | null>(null)
+  const [exportingManual, setExportingManual] = useState<{ page: number; total: number; phase?: string; progress?: number } | null>(null)
   const [exportManualConfirm, setExportManualConfirm] = useState(false)
   const [manualPreview, setManualPreview] = useState<ManualPreview | null>(null)
   const manualPreviewRef = useRef<ManualPreview | null>(null)
@@ -776,6 +778,13 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     setManualPreview(preview)
   }
   const exportingManualRef = useRef(false)
+  const manualAbort = useRef<AbortController | null>(null)
+  const manualPlanCache = useRef<{ key: string; plan: E } | null>(null)
+  const cancelManualExport = useCallback(() => {
+    manualAbort.current?.abort()
+    setExportingManual(value => value && { ...value, phase: 'cancelling' })
+  }, [])
+  useEffect(() => () => manualAbort.current?.abort(), [])
   const [nameAsk, setNameAsk] = useState<NameAsk | null>(null)
   const [accountAsk, setAccountAsk] = useState<EngineApi['accountAsk']>(null)
   const nameAskRef = useRef<NameAsk | null>(null)
@@ -2538,11 +2547,11 @@ export function EngineProvider({ children }: { children: ReactNode }) {
 
   const cancelExportManual = useCallback(() => { pendingManualOpen.current = false; if (exportingManualRef.current) return; setExportManualConfirm(false); putManualPreview(null) }, [])
 
-  function makeManualPreview(data: ModelJSON, previous?: ManualPreview): ManualPreview {
+  function makeManualPreview(data: ModelJSON, previous?: Pick<ManualPreview, 'source' | 'tabId' | 'name' | 'repair'>, suppliedPlan?: E): ManualPreview {
     const frozen = new BuildModel()
     if (!frozen.loadJSON(data).ok) throw new Error('invalid assembly snapshot')
     const order = 'y+'
-    const plan = computeAssemblyPlan(frozen, frozen.assemblyConfig || {}, order)
+    const plan = suppliedPlan || computeAssemblyPlan(frozen, frozen.assemblyConfig || {}, order)
     const config: AssemblyConfig = frozen.assemblyConfig || {
       version: 1,
       regions: plan.regions.map((r: E) => ({ id: r.id, name: r.name, partIds: [...r.partIds] })),
@@ -2604,12 +2613,36 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       return
     }
     if (needAccount('manual')) return
-    await ensureAssemblyMeshes()
-    putManualPreview(makeManualPreview(structuredClone(e2.model.toJSON()) as ModelJSON))
-    track('builder.export.manual.ask', { parts: modelPartCount(e2.model.toJSON()) })
-    setExportManualConfirm(true)
+    const data = structuredClone(e2.model.toJSON()) as ModelJSON
+    const snapshot = { source: JSON.stringify(data), tabId: activeRef.current, name: activeName(), repair: null }
+    const account = storage.getAccountScope()
+    const controller = new AbortController()
+    exportingManualRef.current = true
+    manualAbort.current = controller
+    setExportingManual({ page: 0, total: 0, phase: 'prepare', progress: 0 })
+    try {
+      const key = `${lang}|${snapshot.source}`
+      const plan = manualPlanCache.current?.key === key ? manualPlanCache.current.plan : await requestManualPlan({
+        model: data, config: data.assemblyConfig || {}, lang, signal: controller.signal,
+        onProgress: progress => setExportingManual(value => controller.signal.aborted ? value : { page: 0, total: 0, phase: 'prepare', progress }),
+      })
+      await ensureAssemblyMeshes()
+      if (account !== storage.getAccountScope() || snapshot.tabId !== activeRef.current || eng.current !== e2) controller.abort()
+      controller.signal.throwIfAborted()
+      manualPlanCache.current = { key, plan }
+      putManualPreview(makeManualPreview(data, snapshot, plan))
+      track('builder.export.manual.ask', { parts: modelPartCount(data) })
+      setExportManualConfirm(true)
+    } catch (error) {
+      if (controller.signal.aborted && error === controller.signal.reason) notify(t('manual.cancelled'))
+      else { console.error('Assembly preparation failed', error); notify(t('toast.manualFailed'), 'err') }
+    } finally {
+      manualAbort.current = null
+      exportingManualRef.current = false
+      setExportingManual(null)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [notify, t, entryReady])
+  }, [notify, t, entryReady, lang])
 
   useEffect(() => {
     if (entryReady && pendingManualOpen.current) void exportAssemblyPdf()
@@ -2633,19 +2666,27 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const manualObject = manualTab && tabAnalytics.get(manualTab)?.object || ''
     track('builder.export.manual.go')
     exportingManualRef.current = true
-    setExportingManual({ page: 0, total: 1 })
+    const controller = new AbortController()
+    manualAbort.current = controller
+    setExportingManual({ page: 0, total: 0, phase: 'resources' })
     let stamp: Stamp | null = null
     if (sharePagesEnabled()) {
       const cover = previewCover
       try {
         if (!cover) throw new Error('cover')
         stamp = await makeStamp('manual', cover, preview)
+        controller.signal.throwIfAborted()
       } catch (err) {
-        track('builder.manual.fail', { reason: 'share_page', object: manualObject })
-        console.error('Assembly manual share page failed', err)
+        const cancelled = controller.signal.aborted && err === controller.signal.reason
+        if (!cancelled) {
+          track('builder.manual.fail', { reason: 'share_page', object: manualObject })
+          console.error('Assembly manual share page failed', err)
+        }
+        manualAbort.current = null
         exportingManualRef.current = false
         setExportingManual(null)
-        notify(t('toast.stampFailed'), 'err')
+        if (cancelled) notify(t('manual.cancelled'))
+        else notify(t('toast.stampFailed'), 'err')
         return
       }
     }
@@ -2659,6 +2700,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       const bomNow = asBom(computeBOM(frozen) as AnyRec)
       await runAssemblyPdf({
         model: frozen,
+        signal: controller.signal,
         modelJSON: preview.data,
         plan: preview.plan,
         assemblyConfig: preview.config,
@@ -2666,7 +2708,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
         name: preview.name,
         bom: bomNow,
         filename: `${fileBase}-${t('manual.fileSuffix')}.pdf`,
-        onProgress: (p: { page: number; total: number }) => setExportingManual(p),
+        onProgress: (p: { page: number; total: number; phase?: string }) => setExportingManual(value => controller.signal.aborted ? value : p),
         stamp: stamp && { ...stamp, hint: t('stamp.hint') },
         copy: {
           ...assemblyPdfStrings[lang],
@@ -2699,11 +2741,13 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       output('manual')
       notify(t('toast.manualSaved'))
     } catch (err) {
+      if (controller.signal.aborted && err === controller.signal.reason) { notify(t('manual.cancelled')); return }
       track('builder.manual.fail', { reason: (err as { code?: string })?.code === 'empty' ? 'empty' : 'render', object: manualObject })
       console.error('Assembly manual export failed', err)
       if ((err as { code?: string })?.code === 'empty') notify(t('toast.manualEmpty'), 'warn')
       else notify(t('toast.manualFailed'), 'err')
     } finally {
+      manualAbort.current = null
       exportingManualRef.current = false
       setExportingManual(null)
       bump()
@@ -3080,7 +3124,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     toast,
     tabs, activeTabId, bom, inventory,
     invRows: cmp.rows, feasible: cmp.feasible, sizeCm, room, setRoom, roomOverflow,
-    loadPreset, placeModule, exportPng, exportBomCsv, exportBomPng, exportAssemblyPdf, confirmExportManual, cancelExportManual, exportManualConfirm, exportingManual, shareCurrent,
+    loadPreset, placeModule, exportPng, exportBomCsv, exportBomPng, exportAssemblyPdf, confirmExportManual, cancelExportManual, exportManualConfirm, exportingManual, cancelManualExport, shareCurrent,
     manualPreview, updateManualConfig, saveManualConfig, reviewManualRepairs, applyManualRepairs, discardManualRepairs,
     accountAsk, answerAccount,
     assembly: {

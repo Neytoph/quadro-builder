@@ -30,7 +30,7 @@ export function renderComponentThumbnail(key: string): Promise<string> {
       scene.renderModel(model, null)
       scene.frameFromYaw(model, 0, { silent: true, aspect: 1, margin: 1.15 })
       const image = scene.snapshot({ hideGrid: true, hideLabels: true, hideRoom: true, width: 256, height: 256, pixelRatio: 1, mime: 'image/png' })
-      if (!image?.startsWith('data:image/png')) throw new Error('Component thumbnail capture failed')
+      if (typeof image !== 'string' || !image.startsWith('data:image/png')) throw new Error('Component thumbnail capture failed')
       return image
     } finally {
       if (scene) {

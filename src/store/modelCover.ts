@@ -97,8 +97,10 @@ export function renderModelCover(data: unknown): Promise<string | null> {
       const bounds = scene.homeProductBounds()
       if (bounds) {frameCover(scene,model,bounds);fitSilhouette(scene)}
       else if (model.homeContext) scene.frameHome()
-      return scene.snapshot({ hideGrid: true, hideLabels: true, hideRoom: false,
+      const image = scene.snapshot({ hideGrid: true, hideLabels: true, hideRoom: false,
         width: 480, height: 360, pixelRatio: 2, mime: 'image/jpeg', quality: .88 })
+      if (typeof image !== 'string') throw new Error('Cover image encoding failed')
+      return image
     } finally {
       if (scene) {
         scene.onMeshesReady = () => {}
