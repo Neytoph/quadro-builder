@@ -263,8 +263,8 @@ html:not([data-motion]) .qb-tool[data-mode-on="true"][data-tone="red"] { backgro
 .select-box {
   position: absolute;
   pointer-events: none;
-  border: 1px solid color-mix(in srgb, var(--color-teal-400) 75%, transparent);
-  background: color-mix(in srgb, var(--color-teal-500) 16%, transparent);
+  border: 1px solid #ea580c;
+  background: rgb(234 88 12 / 12%);
 }
 
 /* 滚动条贴在容器起点一侧（左栏 = 窗口外沿），不挡靠画布的那条边。 */

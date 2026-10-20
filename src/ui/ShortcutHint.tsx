@@ -68,6 +68,7 @@ function rowsFor(
     default:
       return [
         { chord: t('keys.chord.addSelect'), action: t('keys.addSelect') },
+        { chord: t('keys.chord.boxSelect'), action: t('keys.boxSelect') },
         { chord: t('keys.chord.block'), action: t('keys.block') },
         { chord: t('keys.chord.selectAll'), action: t('keys.selectAll') },
         { chord: t('keys.chord.copyPaste'), action: t('keys.copyPaste') },
