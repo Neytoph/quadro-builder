@@ -153,6 +153,8 @@ export class Builder {
     this._hingeDrag = null;
     this._panning = false;
     this._boxing = false;
+    this.boxSelect = false;
+    this._boxSelected = new Map();
     this._paste = null;              // Kopie, die gerade am Zeiger haengt
     this._lastPointer = null;        // letzte Zeigerstelle (fuer Strg+V)
     this._attach();
@@ -198,6 +200,7 @@ export class Builder {
 
   /** 从文档读出来的整座造型换进模型，选择里已经不存在的零件去掉。 */
   applyExternal(json) {
+    this._cancelClampDrag();
     this._colorPreview = null;
     const res = this.model.loadJSON(json);
     if (!res.ok) throw new Error(`Yjs document does not load: ${res.reason}`);
@@ -211,6 +214,7 @@ export class Builder {
   }
 
   setReadOnly(on) {
+    if (on) this._cancelClampDrag();
     if (on) this._colorPreview = null;
     if (on) this._cancelHingeDrag();
     this.readOnly = !!on;
@@ -285,6 +289,9 @@ export class Builder {
 
   // --- oeffentliche Steuerung --------------------------------------------
   setMode(mode) {
+    this._cancelClampDrag();
+    if (this._down?.box) this._abortGesture();
+    this.boxSelect = false;
     this._colorPreview = null;
     this._cancelHingeDrag();
     this._ropeFirst = null;
@@ -320,6 +327,16 @@ export class Builder {
     this.scene.setCursor("default");
     this.refresh();
     if (mode === "slide" || mode === "fitting") this._hintPlaceMode();
+  }
+
+  setBoxSelect(on) {
+    this.cancelPaste();
+    this.setMode("select");
+    this.boxSelect = !!on;
+    this.scene.setHover(null);
+    this.scene.setHoverPart(null);
+    this.scene.setCursor(on ? "crosshair" : "default");
+    this.refresh();
   }
 
   /** 选了配件却没有绿面/绿点时，立刻说清：没有可挂的位置。 */
@@ -777,7 +794,7 @@ export class Builder {
    * dir ist ein Einheitsvektor auf einer Achse.
    */
   moveSelectionBy(dir, step = this.moveStep) {
-    if (this.mode !== "select" || !this.selection.size) return false;
+    if (this.readOnly || this.mode !== "select" || !this.selection.size) return false;
     const driver = this._selectedClampDriver();
     if (driver) {
       const c = this.model.clamps.get(driver);
@@ -1580,6 +1597,8 @@ export class Builder {
    * Zaehler starten wieder bei 1) -- _pruneSelection findet das nicht.
    */
   modelReplaced() {
+    this.boxSelect = false;
+    this._boxSelected?.clear();
     this._colorPreview = null;
     if (this._hingeDrag) {
       this._hingeDrag = null;
@@ -1951,6 +1970,10 @@ export class Builder {
   }
 
   refresh() {
+    // 框选着色仅跟随仍被选中的同一种零件，取消选择后恢复原材质。
+    for (const [id, kind] of this._boxSelected || []) {
+      if (this.selection.get(id) !== kind) this._boxSelected.delete(id);
+    }
     // 拖动、粘贴期间攒下的外部修改：操作收尾以后的第一次刷新读进来
     if (this._externalPending && !this.busy()) {
       this._externalPending = false;
@@ -2004,6 +2027,7 @@ export class Builder {
       { labelFor, slideNameFor, labelIds, soloId, soloLabel, assembly, suggest, reinforce, reinforcementPartId: this.reinforcementPartId,
         selected: this._colorPreview ? null : selected,
         preserveSelectionAppearance: this.mode === 'select',
+        solidSelected: this._boxSelected,
         interactionMode: this.mode,
         profileSelection: this._profilGewaehlt() ? this._profilAuswahl : null,
         highlight: this._colorPreview || panelPlacement ? null : this.highlight || firstRails, invalid, tints: this.tints,
@@ -3034,7 +3058,7 @@ export class Builder {
       this.refresh();
     });
 
-    el.addEventListener("pointerdown", (e) => {
+    const onPointerDown = (e) => {
       const art = (e.pointerType === "touch" || e.pointerType === "pen") ? "touch" : "mouse";
       if (art !== this.inputType) { this.inputType = art; this.onInputTypeChange(); }
       if (this._pointerId !== null) { this._abortGesture(); return; }
@@ -3048,9 +3072,10 @@ export class Builder {
       this._pointerId = e.pointerId;
       this._down = {
         x: e.clientX, y: e.clientY,
+        button: e.button,
         add: e.ctrlKey || e.metaKey || e.shiftKey,
-        // Rechteck nur mit Strg/Cmd -- ohne bleibt es beim Drehen wie gewohnt.
-        box: this.mode === "select" && (e.ctrlKey || e.metaKey),
+        box: this.mode === "select" && !this._paste &&
+          (e.button === 1 || (e.button === 0 && !e.altKey && (this.boxSelect || e.ctrlKey || e.metaKey))),
       };
       this._boxing = false;
       this._last = { x: e.clientX, y: e.clientY };
@@ -3078,7 +3103,7 @@ export class Builder {
           || this.scene.pickBuild(e.clientX, e.clientY);
         if (pick && pick.data.kind === "clamp" && this._beginClampDrag(pick.data.id)) return;
       }
-      if (e.button === 0 && !this.readOnly && !this._down.add && !e.altKey && !this._paste
+      if (e.button === 0 && !this._down.box && !this.readOnly && !this._down.add && !e.altKey && !this._paste
           && (this.mode === "select" || (this.mode === "fitting" && ["flexi", BOLT_PART, HINGE_PART].includes(this.fittingKind)))) {
         const hit = this.scene.pickForDelete(e.clientX, e.clientY);
         if (hit?.data.kind === "node" && hit.data.hinge != null) {
@@ -3090,9 +3115,10 @@ export class Builder {
           }
         }
       }
-      if (e.button === 0 && this.mode === "select" && !this._down.add && !e.altKey) {
+      if (e.button === 0 && !this._down.box && this.mode === "select" && !this._down.add && !e.altKey) {
         const pick = this._pickSelect(e.clientX, e.clientY);
-        const driver = this._rotationDriverForPick(pick);
+        const adjustment = this.clampAdjustment();
+        const driver = adjustment?.mode === 'slide' ? this._flapDriverForPick(pick) : this._rotationDriverForPick(pick);
         const key = this._rotationPickKey(pick);
         if (driver && this.selection.has(key) && this._beginClampDrag(driver)) return;
       }
@@ -3112,7 +3138,15 @@ export class Builder {
         const px = e.clientX, py = e.clientY;
         this._longPress = setTimeout(() => this._fireLongPress(px, py), LONG_PRESS_MS);
       }
-    });
+    };
+    // OrbitControls 先注册了中键缩放；在捕获阶段接管框选，避免相机同时移动。
+    el.addEventListener("pointerdown", (e) => {
+      if (e.button !== 1 || this.mode !== "select" || this._paste) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      onPointerDown(e);
+    }, { capture: true });
+    el.addEventListener("pointerdown", onPointerDown);
     // Zeiger, die nicht zum laufenden Zug gehoeren, bleiben aussen vor.
     const fremd = (e) => this._pointerId !== null && e.pointerId !== this._pointerId;
     el.addEventListener("pointermove", (e) => { if (!fremd(e)) this._onMove(e); });
@@ -3241,7 +3275,7 @@ export class Builder {
     }
     // Ansichtswuerfel zuerst: solange der Zeiger darueber steht, gilt nichts
     // anderes -- er liegt als Bedienelement ueber der Szene.
-    if (!(e.buttons & 1)) {
+    if (!(e.buttons & 1) && !this._down?.box) {
       const cell = this.scene.pickViewCube(e.clientX, e.clientY);
       this.scene.setViewCubeHover(cell);
       if (cell) {
@@ -3282,7 +3316,7 @@ export class Builder {
       if (dx || dy) this.scene.orbitBy(dx, dy);
       return;
     }
-    if (this._down && this._down.box && (e.buttons & 1)) {
+    if (this._down && this._down.box && (e.buttons & (this._down.button === 1 ? 4 : 1))) {
       if (this._boxing ||
           Math.hypot(e.clientX - this._down.x, e.clientY - this._down.y) > CLICK_TOLERANCE) {
         this._boxing = true;
@@ -3303,6 +3337,12 @@ export class Builder {
     let obj = null;
     let arrowFocus;
     if (this.mode === "select" || this.mode === "delete") {
+      if (this.mode === "select" && this.boxSelect) {
+        this.scene.setHover(null);
+        this.scene.setHoverPart(null);
+        this.scene.setCursor("crosshair");
+        return;
+      }
       // Cursor- und Loesch-Modus: alles Platzierte ist treffbar, Rutschen
       // eingeschlossen. Im Loesch-Modus wird der Klick zum Loeschen.
       obj = this.scene.pickForDelete(x, y)?.object || null;
@@ -3496,10 +3536,16 @@ export class Builder {
     if (this._boxing) {
       this._boxing = false;
       this.scene.hideSelectBox();
-      // Das Rechteck ergaenzt immer: mehrere Zuege lassen sich so zu einer
-      // Auswahl zusammensetzen. Aufgehoben wird sie per Klick ins Leere.
       const found = this.scene.pickInRect(d.x, d.y, e.clientX, e.clientY);
-      for (const [id, kind] of found) this.selection.set(id, kind);
+      if (!d.add) this.selection.clear();
+      this._boxSelected ||= new Map();
+      for (const [id, kind] of found) {
+        this.selection.set(id, kind);
+        this._boxSelected.set(id, kind);
+      }
+      this._profilAuswahl = null;
+      this.highlight = null;
+      this.onHighlightCleared();
       finish();
       this.refresh();
       return;
@@ -3740,6 +3786,33 @@ export class Builder {
     return c && this._clampMovesPart(c, this.model._clampFlap(c), pick.data.id, pick.data.kind) ? driver : null;
   }
 
+  clampAdjustment() {
+    if (this.readOnly || this.mode !== 'select' || this.boxSelect || this._paste) return null;
+    const id = this._selectedClampDriver();
+    const c = id && this.model.clamps.get(id);
+    if (!c || !this.model._clampSecondTube(c)) return null;
+    return { id, mode: this._clampAdjustment?.id === id ? this._clampAdjustment.mode : 'rotate' };
+  }
+
+  setClampAdjustmentMode(mode) {
+    const target = this.clampAdjustment();
+    if (!target || !['rotate', 'slide'].includes(mode) || this.busy()) return false;
+    this._cancelSelectFlip();
+    this._clampAdjustment = { id: target.id, mode };
+    this.refresh();
+    return true;
+  }
+
+  slideSelectedClampBy(cm) {
+    const target = this.clampAdjustment();
+    if (!target || this.busy() || !Number.isFinite(cm)) return false;
+    const before = JSON.stringify(this.model.toJSON());
+    const ok = this.model.slideClampFlap(target.id, cm);
+    if (ok) this._afterMove(before, { merged: 0, detached: 0 });
+    if (!ok) this.onNotice(t('notice_clamp_slide_limit'), 'warn');
+    return ok;
+  }
+
   _rotationPickKey(pick) {
     return Number.isInteger(pick?.data.hinge) ? hingeKey(pick.data.id, pick.data.hinge) : pick?.data.id;
   }
@@ -3921,6 +3994,8 @@ export class Builder {
 
   _beginClampDrag(id) {
     if (this.readOnly) return false;
+    const adjustment = this.clampAdjustment();
+    if (adjustment?.id === id && adjustment.mode === 'slide') return this._beginClampSlide(id);
     const joint = typeof id === 'object' ? this.model.rotationJoint(id, geometry().connectorSize) : null;
     const c = joint || this.model.clamps.get(id);
     if (!c || !(joint || c.dir && c.off)) return false;
@@ -3931,17 +4006,16 @@ export class Builder {
       origin: joint ? joint.origin.slice() : [c.x, c.y, c.z],
       axis: (joint ? joint.axis : c.dir).slice(),
       startOff: (joint ? joint.dir : c.off).slice(),
+      angle: 0,
+      appliedAngle: 0,
       moved: false,
     };
     const d = this._clampDrag;
     if (this._down) {
+      d.pointer = { ...this._down };
       d.pointerDir = this._clampPointerDir(this._down.x, this._down.y, d);
       if (!d.pointerDir) {
-        const points = this.scene.projectWorld([d.origin, d.origin.map((v, i) => v + d.axis[i] * 10)]);
-        const rect = this.scene.renderer.domElement.getBoundingClientRect();
-        const dx = (points[1].u - points[0].u) * rect.width, dy = (points[1].v - points[0].v) * rect.height;
-        const length = Math.hypot(dx, dy);
-        d.screenPerp = length > 1 ? [-dy / length, dx / length] : [0, 1];
+        d.screenTangent = this._clampScreenTangent(d);
       }
     }
     this.scene.setCursor("grabbing");
@@ -3955,6 +4029,20 @@ export class Builder {
     const q = new Vector3(hit.x, hit.y, hit.z).sub(new Vector3(...d.origin));
     q.addScaledVector(u, -q.dot(u));
     return q.length() >= 0.4 ? q.normalize() : null;
+  }
+
+  _clampScreenTangent(d) {
+    const axis = new Vector3(...d.axis).normalize();
+    const radial = new Vector3(...d.startOff).normalize().applyAxisAngle(axis, d.appliedAngle).multiplyScalar(10);
+    const origin = new Vector3(...d.origin);
+    const points = this.scene.projectWorld([-0.005, 0.005].map(angle =>
+      radial.clone().applyAxisAngle(axis, angle).add(origin).toArray()));
+    if (points.some(point => !point)) return null;
+    const rect = this.scene.renderer.domElement.getBoundingClientRect();
+    const dx = (points[1].u - points[0].u) * rect.width;
+    const dy = (points[1].v - points[0].v) * rect.height;
+    const length = Math.hypot(dx, dy);
+    return length > 1e-3 ? [dx / length, dy / length] : null;
   }
 
   _snapDirAroundAxis(dir, u, stepRad) {
@@ -3977,23 +4065,26 @@ export class Builder {
   _updateClampDrag(e) {
     const d = this._clampDrag;
     if (!d || !this._down) return;
+    if (d.motion === 'slide') { this._updateClampSlide(e); return; }
     if (!d.moved && Math.hypot(e.clientX - this._down.x, e.clientY - this._down.y) <= CLICK_TOLERANCE) return;
     d.moved = true;
     const u = d.axis;
     const ul = Math.hypot(u[0], u[1], u[2]) || 1;
     const ux = u[0] / ul, uy = u[1] / ul, uz = u[2] / ul;
     const axis = new Vector3(ux, uy, uz);
-    let angle;
     if (d.pointerDir) {
       const pointer = this._clampPointerDir(e.clientX, e.clientY, d);
       if (!pointer) return;
-      angle = Math.atan2(axis.dot(new Vector3().crossVectors(d.pointerDir, pointer)), d.pointerDir.dot(pointer));
+      d.angle += Math.atan2(axis.dot(new Vector3().crossVectors(d.pointerDir, pointer)), d.pointerDir.dot(pointer));
+      d.pointerDir = pointer;
     } else {
-      // 从侧面看转轴时射线无法稳定落在旋转平面，按屏幕垂直于转轴的拖动连续换角。
-      const dx = e.clientX - this._down.x, dy = e.clientY - this._down.y;
-      angle = (dx * d.screenPerp[0] + dy * d.screenPerp[1]) * Math.PI / 180;
+      // 侧视时用活动侧的实际旋转切线确定方向，轴向或视角改变也保持跟手。
+      const dx = e.clientX - d.pointer.x, dy = e.clientY - d.pointer.y;
+      d.pointer = { x: e.clientX, y: e.clientY };
+      if (!d.screenTangent) return;
+      d.angle += (dx * d.screenTangent[0] + dy * d.screenTangent[1]) * Math.PI / 180;
     }
-    let q = new Vector3(...d.startOff).normalize().applyAxisAngle(axis, angle).toArray();
+    let q = new Vector3(...d.startOff).normalize().applyAxisAngle(axis, d.angle).toArray();
     if (e.shiftKey) q = this._snapDirAroundAxis(q, [ux, uy, uz], Math.PI / 12);
     this.model.loadJSON(JSON.parse(d.before));
     const apply = dir => {
@@ -4005,7 +4096,14 @@ export class Builder {
     };
     const ok = apply(q);
     if (!ok && d.lastDir) apply(d.lastDir);
-    else if (ok) d.lastDir = q;
+    if (ok) {
+      d.lastDir = q;
+      const from = new Vector3(...d.startOff).normalize(), to = new Vector3(...q).normalize();
+      d.appliedAngle = Math.atan2(axis.dot(new Vector3().crossVectors(from, to)), from.dot(to));
+    } else {
+      // 丢弃越界位移，下一次回拖直接从最后有效姿态开始。
+      d.angle = d.appliedAngle;
+    }
     this.refresh();
     if (!ok) { this.onNotice(t('notice_joint_limit'), 'warn'); return; }
     const c = d.joint ? { off: d.lastDir || d.startOff } : this.model.clamps.get(d.id);
@@ -4030,6 +4128,7 @@ export class Builder {
     this.scene.endOrbit();
     if (!d) return;
     if (!d.moved) {
+      if (d.motion === 'slide') return;
       if (this.mode === "select") { this._clickSelect(e); return; }
       let turned = false;
       this.recordHistory(() => { turned = this._rotateClampWithFallback(d.id); });
@@ -4039,6 +4138,60 @@ export class Builder {
     }
     this._pushHistory(d.before);
     this.refresh();
+  }
+
+  _cancelClampDrag() {
+    const d = this._clampDrag;
+    if (!d) return;
+    this._clampDrag = null;
+    this.model.loadJSON(JSON.parse(d.before));
+    this.scene.setCursor('default');
+    this.scene.endOrbit();
+    this.refresh();
+  }
+
+  _beginClampSlide(id) {
+    const c = this.model.clamps.get(id);
+    if (this.readOnly || !c?.dir || !this._down) return false;
+    const tube = this.model._clampSecondTube(c);
+    if (!tube) return false;
+    const origin = [c.x, c.y, c.z], axis = new Vector3(...c.dir).normalize().toArray();
+    const points = this.scene.projectWorld([origin, origin.map((v, i) => v + axis[i] * 10)]);
+    if (!points[0] || !points[1]) {
+      this.onNotice(t('notice_clamp_slide_view'), 'info');
+      return false;
+    }
+    const rect = this.scene.renderer.domElement.getBoundingClientRect();
+    const screenAxis = [(points[1].u - points[0].u) * rect.width, (points[1].v - points[0].v) * rect.height];
+    if (Math.hypot(...screenAxis) < 1) {
+      this.onNotice(t('notice_clamp_slide_view'), 'info');
+      return false;
+    }
+    const n = this.model.nodes.get(tube.a);
+    this._clampDrag = { id, motion: 'slide', before: JSON.stringify(this.model.toJSON()),
+      origin, axis, screenAxis, mark: [n.id, n.x, n.y, n.z], moved: false, lastDelta: 0 };
+    this.scene.setCursor('grabbing');
+    return true;
+  }
+
+  _updateClampSlide(e) {
+    const d = this._clampDrag;
+    if (!d || !this._down) return;
+    const dx = e.clientX - this._down.x, dy = e.clientY - this._down.y;
+    if (!d.moved && Math.hypot(dx, dy) <= CLICK_TOLERANCE) return;
+    d.moved = true;
+    // 按转轴在屏幕上的投影计算相对抓取点的位移，竖管和斜视角也能沿轴滑动。
+    const [sx, sy] = d.screenAxis;
+    const delta = (dx * sx + dy * sy) / (sx * sx + sy * sy) * 10;
+    this.model.loadJSON(JSON.parse(d.before));
+    const ok = delta === 0 || this.model.slideClampFlap(d.id, delta);
+    if (ok) d.lastDelta = delta;
+    else if (d.lastDelta) this.model.slideClampFlap(d.id, d.lastDelta);
+    this.refresh();
+    if (!ok) { this.onNotice(t('notice_clamp_slide_limit'), 'warn'); return; }
+    const n = this.model.nodes.get(d.mark[0]);
+    const along = n ? Math.round(d.axis.reduce((sum, v, i) => sum + v * ([n.x, n.y, n.z][i] - d.mark[i + 1]), 0) * 10) / 10 : 0;
+    this.onNotice(t('notice_clamp_slide', along), 'info');
   }
 
 

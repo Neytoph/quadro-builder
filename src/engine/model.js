@@ -4131,22 +4131,47 @@ export class BuildModel {
     d = this._limitSlideDelta(flap, u, d);
     if (Math.abs(d) < 1e-6) return false;
     const vec = [u[0] * d, u[1] * d, u[2] * d];
+    const moved = new Set(tagged.keys());
+    if (this._incompleteComponentMove({ nodes: moved })) return false;
+    // 活动组回接固定管时禁止拉伸真实管件；端点之间的虚拟连接允许随滑动改变。
+    for (const t of this.tubes.values()) {
+      const a = moved.has(t.a), b = moved.has(t.b);
+      if (!t.link && a !== b) return false;
+      if (a && b && t.bow && t.bowCenter) {
+        const na = this.nodes.get(t.a), nb = this.nodes.get(t.b);
+        if (this.isBelowGround(this._bowLowestY([na.x, na.y, na.z], [nb.x, nb.y, nb.z], t.bowCenter) + vec[1])) return false;
+      }
+    }
+    for (const map of [this.panels, this.textiles]) {
+      for (const p of map.values()) {
+        const supports = p.supportTubes || [p.a, p.b];
+        const moving = supports.map(id => {
+          const t = this.tubes.get(id);
+          return !!t && moved.has(t.a) && moved.has(t.b);
+        });
+        if (moving.some(Boolean) && !moving.every(Boolean)) return false;
+      }
+    }
+    const extra = [...this.fittings.values(), ...this.slides.values()].filter(p => this.clampPartAxis(flap, tagged, p));
+    if (extra.some(p => this.isBelowGround(p.y + vec[1]))) return false;
+    // 在节点移动前识别嵌套夹子，否则原位置可能已经找不到承载管。
+    const movingClamps = [...flap.clampIds].map(cid => this.clamps.get(cid))
+      .filter(k => k && flap.second.has(this._clampBaseTube(k)?.id));
     for (const nid of tagged.keys()) {
       const n = this.nodes.get(nid);
       if (n && this.isBelowGround(n.y + vec[1])) return false;
     }
-    const moved = new Set();
     for (const nid of tagged.keys()) {
       const n = this.nodes.get(nid);
       if (!n) continue;
       n.x = round(n.x + vec[0]); n.y = round(n.y + vec[1]); n.z = round(n.z + vec[2]);
-      moved.add(n.id);
     }
-    for (const cid of flap.clampIds) {
-      const k = this.clamps.get(cid);
-      const base = k && this._clampBaseTube(k);
-      if (!k || !base || !flap.second.has(base.id)) continue;
+    for (const k of movingClamps) {
       k.x = round(k.x + vec[0]); k.y = round(k.y + vec[1]); k.z = round(k.z + vec[2]);
+    }
+    for (const p of extra) {
+      p.x = round(p.x + vec[0]); p.y = round(p.y + vec[1]); p.z = round(p.z + vec[2]);
+      if (p.hook) p.hook = p.hook.map((v, i) => round(v + vec[i]));
     }
     this._moveTubeGeom(moved, vec);
     this._movePanelGeom(moved, vec);

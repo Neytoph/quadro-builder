@@ -292,7 +292,7 @@ function ManualProgress() {
 function AppInner() {
   const api = useEngine()
   const collab = useCollab()
-  const { handleEsc, setPane } = useDock()
+  const { handleEsc, setPane, pane } = useDock()
   const [componentPosition, setComponentPosition] = useState<ComponentMenuPosition | null>(null)
   const pointer = useRef<ComponentMenuPosition | null>(null)
   const closeComponents = useCallback(() => setComponentPosition(null), [])
@@ -342,6 +342,11 @@ function AppInner() {
           api.cancelExportManual()
           return
         }
+        // 内层菜单、工具和抽屉先退出；画布空闲时才请父页面检查保存并关闭。
+        const innerOpen = !!document.querySelector('[role="dialog"], .m-backdrop')
+        const closeEditor = EDITOR_EMBED && !innerOpen && !pane && api.mode === 'select'
+          && !api.boxSelect && !api.pasting && !api.installationPreview && !collab.placingPin
+          && !api.accountAsk && !api.exportingManual && !api.engine()?.builder.busy()
         const focused = document.activeElement as HTMLElement | null
         if (focused && focused !== document.body && typeof focused.blur === 'function') focused.blur()
         window.dispatchEvent(new Event(UI_ESCAPE_EVENT))
@@ -352,6 +357,7 @@ function AppInner() {
         }
         api.setMode('select')
         handleEsc()
+        if (closeEditor) window.parent.postMessage({ type: 'xmf-model-editor:request-close' }, location.origin)
         return
       }
       // 输入控件和确认框占用键盘时，不触发画布操作。
@@ -426,6 +432,12 @@ function AppInner() {
           if (e.key === 'ArrowUp' || e.key === 'ArrowDown') api.nudgePasteY(e.key === 'ArrowUp' ? 1 : -1)
           return
         }
+        const builder = api.engine()?.builder
+        if (api.mode === 'select' && (e.key === 'ArrowLeft' || e.key === 'ArrowRight') && builder?.clampAdjustment()) {
+          builder.slideSelectedClampBy(e.key === 'ArrowRight' ? 5 : -5)
+          api.bump()
+          return
+        }
         const { axes, frontal } = api.cameraAxes()
         const neg = (v: number[]) => v.map(n => -n)
         const dir = e.key === 'ArrowUp' ? (frontal ? [0, 1, 0] : axes.forward)
@@ -479,7 +491,7 @@ function AppInner() {
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [api, collab, handleEsc, setPane, componentPosition])
+  }, [api, collab, handleEsc, setPane, pane, componentPosition])
 
   // 共享方案里只能看的人没有颜色栏；访客连工具条也没有，评论者的工具条只剩「选择」「评论」
   const viewer = collab.mode === 'plan' && !collab.canEdit

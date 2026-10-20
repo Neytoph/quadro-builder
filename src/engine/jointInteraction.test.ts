@@ -1,4 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest'
+import * as THREE from 'three'
+import { SceneManager } from './scene.js'
 import { BuildModel, hingeDir, hingeKey, holeArmDirs } from './model.js'
 import { Builder } from './builder.js'
 import { loadCatalog, buildableTubes, panels, geometry } from './catalog.js'
@@ -42,8 +44,11 @@ function clampFixture(part = 'hole_1') {
 function builderFor(model: any) {
   const builder = Object.create(Builder.prototype)
   const scene = { setCursor: () => {}, endOrbit: () => {}, pointOnPlane: () => null,
-    projectWorld: () => [{ u: 0.2, v: 0.5 }, { u: 0.8, v: 0.5 }],
+    projectWorld: SceneManager.prototype.projectWorld,
+    camera: new THREE.PerspectiveCamera(45, 1, 0.1, 1000),
     renderer: { domElement: { getBoundingClientRect: () => ({ width: 100, height: 100 }) } } }
+  scene.camera.position.set(0, 160, 180)
+  scene.camera.lookAt(0, 80, 0)
   Object.assign(builder, { model, scene, selection: new Map(), stepFrom: [], mode: 'select', refresh: () => {},
     onNotice: () => {}, onHistoryChange: () => {}, onChange: () => {} })
   builder.setHistory(new ModelHistory(docFromJSON(model.toJSON())))
