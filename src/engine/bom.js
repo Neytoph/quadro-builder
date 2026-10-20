@@ -394,7 +394,7 @@ function legacyConnectorsForNode(model, node) {
       if (t.a !== node.id && t.b !== node.id) continue;
       if (t.arm) arme++; else if (!t.link) andere++;
     }
-    if (arme && !andere) return ["straight"];
+    if (arme && !andere && !node.arms?.length) return ["straight"];
   }
   if (!node.c45) {
     const pref = getConnector(node.preferType);
@@ -403,7 +403,7 @@ function legacyConnectorsForNode(model, node) {
     return t && t !== "end" ? [t] : [];
   }
   const axis = [], diag = [];
-  for (const d of localDirs(model, node, dirs)) (isC45Dir(d) ? diag : axis).push(d);
+  for (const d of localDirs(model, node, physicalDirs(node, dirs))) (isC45Dir(d) ? diag : axis).push(d);
   const out = [];
   const baseType = connectorTypeForDirs(axis);
   if (baseType && baseType !== "end") out.push(baseType);

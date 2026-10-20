@@ -1580,6 +1580,12 @@ export class SceneManager {
     return dirs;
   }
 
+  /** 删除前读取当前画面的实际形状，裸管端没有实体连接件。 */
+  connectorShapeFor(id) {
+    const shape = this._connectorShapes?.get(id);
+    return shape ? { arms: shape.arms.map(d => d.slice()), quat: shape.quat.slice() } : null;
+  }
+
   /**
    * Abgegriffenes Modell zu einer Flaeche (Platte oder Tuch), passend zu ihrer
    * Spannweite. Geliefert wird Geometrie samt Lage-Matrix, oder `null` -- dann
@@ -4047,6 +4053,7 @@ export class SceneManager {
     else this._disposeGroup(this.buildGroup);
     this._disposeLabels();
     this.pickNodes = [];
+    this._connectorShapes = new Map();
     this.pickTubes = [];
     this.pickPanels = [];
     this.pickClamps = [];
@@ -4392,6 +4399,7 @@ export class SceneManager {
         // Offene Huelsen kommen aus variant2 (`n.arms`) bzw. dem gewaehlten
         // `preferType` -- nicht nur aus bereits steckenden Rohren.
         const dirs = (connection.renderDirs || connection.worldDirs).map(d => ({ d, bow: (tubeDirsAt.get(n.id) || []).some(entry => entry.bow && entry.d.every((value, axis) => Math.abs(value - d[axis]) < 0.01)) }));
+        this._connectorShapes.set(n.id, { arms: dirs.map(e => e.d.slice()), quat: quat.toArray() });
         const echt = wantMeshes ? this._connMeshFor(dirs, quat, connection.typeId) : null;
         if (echt) {
           this._batchAdd(echt.geo, matFor(n.id, mat),

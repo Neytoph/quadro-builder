@@ -1547,7 +1547,7 @@ export class Builder {
   }
 
   /** Loescht alle ausgewaehlten Teile. Kupplungen zuletzt (nehmen Rohre mit). */
-  deleteSelection() {
+  deleteSelection({ precise = false } = {}) {
     if (!this.selection.size) return 0;
     // Ein gewaehltes Verstaerkungsprofil: nur das Profil kommt heraus, die
     // Rohre bleiben stehen. Sie sind ja nicht angeklickt worden -- sie tragen
@@ -1565,8 +1565,20 @@ export class Builder {
     // jeden Anschluss dastehen und werden dann mit weggeraeumt.
     const nachbarn = this.model.neighborNodeIds(entries.map(([id]) => id));
     this.recordHistory(() => {
+      // 保存实际绘制的插口和姿态，避免删管后按默认通型补出其他插口。
+      if (precise) for (const id of nachbarn) {
+        const node = this.model.nodes.get(id);
+        if (!node || node.part || node.c45body) continue;
+        const shape = this.scene.connectorShapeFor(id);
+        if (!shape) {
+          if (!node.arms?.length && !node.preferType && !node.c45 && !node.c45file) node.unused = true;
+          continue;
+        }
+        node.arms = shape.arms;
+        node.quat = shape.quat;
+      }
       for (const [id, kind] of entries) {
-        if (kind === "tube") this.model.removeTube(id);
+        if (kind === "tube") this.model.removeTube(id, { keepConnectors: precise });
         else if (kind === "panel") this.model.removePanel(id);
         else if (kind === "textile") this.model.removeTextile(id);
         else if (kind === "slide") this.model.removeSlide(id);
@@ -1579,10 +1591,10 @@ export class Builder {
       }
       for (const [id, kind] of entries) {
         if (kind !== "node") continue;
-        this.model.removeConnector(id);
+        this.model.removeConnector(id, { precise });
       }
       for (const [id] of entries) nachbarn.delete(id);
-      this.model.removeEmptyNodes(nachbarn);
+      if (!precise) this.model.removeEmptyNodes(nachbarn);
     });
     if (this.selectedNodeId && !this.model.nodes.has(this.selectedNodeId)) this.selectedNodeId = null;
     const n = entries.length;
@@ -5269,22 +5281,20 @@ export class Builder {
   }
 
   /**
-   * Loesch-Modus: Klick auf ein Teil nimmt genau dieses heraus. Verstaerkungs-
-   * profil und Scharnier gelten wie in der Auswahl -- ein Profil ist der ganze
-   * Lauf, nicht nur das eine Rohr. Klick ins Leere tut nichts.
+   * 精准删除：管子单独删除，连接件连同直接相连管子删除，保留另一端连接件。
+   * 加固条与铰链仍按独立零件处理，点击空白不操作。
    */
   _clickDelete(e) {
     const pick = this.scene.pickForDelete(e.clientX, e.clientY);
     if (!pick) return;
     this._fillSelectionFromPick(pick);
-    this.deleteSelection();
+    this.deleteSelection({ precise: true });
   }
 
   /** 删除模式下：指到接头时，把会一起删掉的管子也标出来。 */
   _deleteHoverExtras(pick) {
     if (this.mode !== "delete" || !pick || pick.data.kind !== "node") return null;
     if (pick.data.hinge != null) return null;
-    if (!this.model.isAutomaticConnector(pick.data.id)) return null;
     const ids = this.model.incidentTubeIds(pick.data.id);
     return ids.length ? ids : null;
   }

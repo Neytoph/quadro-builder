@@ -725,7 +725,7 @@ export class BuildModel {
     return node;
   }
 
-  removeNode(id) {
+  removeNode(id, { keepConnectors = false } = {}) {
     const weg = this.nodes.get(id);
     if (!weg) return;
     const armNeighbors = new Set();
@@ -738,14 +738,19 @@ export class BuildModel {
       tubeNeighbors.add(t.a === id ? t.b : t.a);
       if (t.arm) armNeighbors.add(t.a === id ? t.b : t.a);
       if (t.reinforcement) this.removeReinforcement(t.id);
-      this._releaseArms(t);
+      if (!keepConnectors) this._releaseArms(t);
       this.tubes.delete(t.id);
     }
     this.nodes.delete(id);
-    for (const neighborId of armNeighbors) this._syncC45Flag(neighborId);
+    for (const neighborId of armNeighbors) {
+      // 导入标记属于刚移除的45°件，不能再在承载接头上补画同一件。
+      const neighbor = this.nodes.get(neighborId);
+      if (keepConnectors && weg.c45body && neighbor) neighbor.c45file = false;
+      this._syncC45Flag(neighborId);
+    }
     this._prunePanels();
     this._pruneClamps();
-    this._pruneOrphanedC45Bodies(tubeNeighbors);
+    if (!keepConnectors) this._pruneOrphanedC45Bodies(tubeNeighbors);
   }
 
   isAutomaticConnector(id) {
@@ -753,10 +758,15 @@ export class BuildModel {
     return !!node && !node.preferType && !node.part && !node.c45body;
   }
 
-  /** 自动接头连管一起删；手动接头只移除配件，管端恢复自动匹配。 */
-  removeConnector(id) {
+  /** 精准删除连同直接相连管子移除；普通选区沿用手动配件拆卸规则。 */
+  removeConnector(id, { precise = false } = {}) {
     const node = this.nodes.get(id);
     if (!node) return;
+    if (precise) {
+      for (const tubeId of this.incidentTubeIds(id)) this.removeTube(tubeId, { keepConnectors: true });
+      this.removeNode(id, { keepConnectors: true });
+      return;
+    }
     if (node.c45body) { this.removeC45(id); return; }
     if (this.isAutomaticConnector(id)) { this.removeNode(id); return; }
     delete node.preferType;
@@ -1007,14 +1017,14 @@ export class BuildModel {
     return null;
   }
 
-  removeTube(id) {
+  removeTube(id, { keepConnectors = false } = {}) {
     const t = this.tubes.get(id);
     if (t?.reinforcement) this.removeReinforcement(id);
-    if (t) this._releaseArms(t);
+    if (t && !keepConnectors) this._releaseArms(t);
     this.tubes.delete(id);
     this._prunePanels();
     this._pruneClamps();
-    this._pruneOrphanedC45Bodies();
+    if (!keepConnectors) this._pruneOrphanedC45Bodies();
     // 套在这根管上的软包跟着走
     for (const f of [...this.fittings.values()]) {
       if (f.tube === id) this.fittings.delete(f.id);
