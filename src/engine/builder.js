@@ -198,6 +198,7 @@ export class Builder {
 
   /** 从文档读出来的整座造型换进模型，选择里已经不存在的零件去掉。 */
   applyExternal(json) {
+    this._cancelClampDrag();
     this._colorPreview = null;
     const res = this.model.loadJSON(json);
     if (!res.ok) throw new Error(`Yjs document does not load: ${res.reason}`);
@@ -211,6 +212,7 @@ export class Builder {
   }
 
   setReadOnly(on) {
+    if (on) this._cancelClampDrag();
     if (on) this._colorPreview = null;
     if (on) this._cancelHingeDrag();
     this.readOnly = !!on;
@@ -285,6 +287,7 @@ export class Builder {
 
   // --- oeffentliche Steuerung --------------------------------------------
   setMode(mode) {
+    this._cancelClampDrag();
     this._colorPreview = null;
     this._cancelHingeDrag();
     this._ropeFirst = null;
@@ -777,7 +780,7 @@ export class Builder {
    * dir ist ein Einheitsvektor auf einer Achse.
    */
   moveSelectionBy(dir, step = this.moveStep) {
-    if (this.mode !== "select" || !this.selection.size) return false;
+    if (this.readOnly || this.mode !== "select" || !this.selection.size) return false;
     const driver = this._selectedClampDriver();
     if (driver) {
       const c = this.model.clamps.get(driver);
@@ -3087,7 +3090,8 @@ export class Builder {
       }
       if (e.button === 0 && this.mode === "select" && !this._down.add && !e.altKey) {
         const pick = this._pickSelect(e.clientX, e.clientY);
-        const driver = this._rotationDriverForPick(pick);
+        const adjustment = this.clampAdjustment();
+        const driver = adjustment?.mode === 'slide' ? this._flapDriverForPick(pick) : this._rotationDriverForPick(pick);
         const key = this._rotationPickKey(pick);
         if (driver && this.selection.has(key) && this._beginClampDrag(driver)) return;
       }
@@ -3735,6 +3739,33 @@ export class Builder {
     return c && this._clampMovesPart(c, this.model._clampFlap(c), pick.data.id, pick.data.kind) ? driver : null;
   }
 
+  clampAdjustment() {
+    if (this.readOnly || this.mode !== 'select' || this.boxSelect || this._paste) return null;
+    const id = this._selectedClampDriver();
+    const c = id && this.model.clamps.get(id);
+    if (!c || !this.model._clampSecondTube(c)) return null;
+    return { id, mode: this._clampAdjustment?.id === id ? this._clampAdjustment.mode : 'rotate' };
+  }
+
+  setClampAdjustmentMode(mode) {
+    const target = this.clampAdjustment();
+    if (!target || !['rotate', 'slide'].includes(mode) || this.busy()) return false;
+    this._cancelSelectFlip();
+    this._clampAdjustment = { id: target.id, mode };
+    this.refresh();
+    return true;
+  }
+
+  slideSelectedClampBy(cm) {
+    const target = this.clampAdjustment();
+    if (!target || this.busy() || !Number.isFinite(cm)) return false;
+    const before = JSON.stringify(this.model.toJSON());
+    const ok = this.model.slideClampFlap(target.id, cm);
+    if (ok) this._afterMove(before, { merged: 0, detached: 0 });
+    if (!ok) this.onNotice(t('notice_clamp_slide_limit'), 'warn');
+    return ok;
+  }
+
   _rotationPickKey(pick) {
     return Number.isInteger(pick?.data.hinge) ? hingeKey(pick.data.id, pick.data.hinge) : pick?.data.id;
   }
@@ -3916,6 +3947,8 @@ export class Builder {
 
   _beginClampDrag(id) {
     if (this.readOnly) return false;
+    const adjustment = this.clampAdjustment();
+    if (adjustment?.id === id && adjustment.mode === 'slide') return this._beginClampSlide(id);
     const joint = typeof id === 'object' ? this.model.rotationJoint(id, geometry().connectorSize) : null;
     const c = joint || this.model.clamps.get(id);
     if (!c || !(joint || c.dir && c.off)) return false;
@@ -3985,6 +4018,7 @@ export class Builder {
   _updateClampDrag(e) {
     const d = this._clampDrag;
     if (!d || !this._down) return;
+    if (d.motion === 'slide') { this._updateClampSlide(e); return; }
     if (!d.moved && Math.hypot(e.clientX - this._down.x, e.clientY - this._down.y) <= CLICK_TOLERANCE) return;
     d.moved = true;
     const u = d.axis;
@@ -4047,6 +4081,7 @@ export class Builder {
     this.scene.endOrbit();
     if (!d) return;
     if (!d.moved) {
+      if (d.motion === 'slide') return;
       if (this.mode === "select") { this._clickSelect(e); return; }
       let turned = false;
       this.recordHistory(() => { turned = this._rotateClampWithFallback(d.id); });
@@ -4056,6 +4091,60 @@ export class Builder {
     }
     this._pushHistory(d.before);
     this.refresh();
+  }
+
+  _cancelClampDrag() {
+    const d = this._clampDrag;
+    if (!d) return;
+    this._clampDrag = null;
+    this.model.loadJSON(JSON.parse(d.before));
+    this.scene.setCursor('default');
+    this.scene.endOrbit();
+    this.refresh();
+  }
+
+  _beginClampSlide(id) {
+    const c = this.model.clamps.get(id);
+    if (this.readOnly || !c?.dir || !this._down) return false;
+    const tube = this.model._clampSecondTube(c);
+    if (!tube) return false;
+    const origin = [c.x, c.y, c.z], axis = new Vector3(...c.dir).normalize().toArray();
+    const points = this.scene.projectWorld([origin, origin.map((v, i) => v + axis[i] * 10)]);
+    if (!points[0] || !points[1]) {
+      this.onNotice(t('notice_clamp_slide_view'), 'info');
+      return false;
+    }
+    const rect = this.scene.renderer.domElement.getBoundingClientRect();
+    const screenAxis = [(points[1].u - points[0].u) * rect.width, (points[1].v - points[0].v) * rect.height];
+    if (Math.hypot(...screenAxis) < 1) {
+      this.onNotice(t('notice_clamp_slide_view'), 'info');
+      return false;
+    }
+    const n = this.model.nodes.get(tube.a);
+    this._clampDrag = { id, motion: 'slide', before: JSON.stringify(this.model.toJSON()),
+      origin, axis, screenAxis, mark: [n.id, n.x, n.y, n.z], moved: false, lastDelta: 0 };
+    this.scene.setCursor('grabbing');
+    return true;
+  }
+
+  _updateClampSlide(e) {
+    const d = this._clampDrag;
+    if (!d || !this._down) return;
+    const dx = e.clientX - this._down.x, dy = e.clientY - this._down.y;
+    if (!d.moved && Math.hypot(dx, dy) <= CLICK_TOLERANCE) return;
+    d.moved = true;
+    // 按转轴在屏幕上的投影计算相对抓取点的位移，竖管和斜视角也能沿轴滑动。
+    const [sx, sy] = d.screenAxis;
+    const delta = (dx * sx + dy * sy) / (sx * sx + sy * sy) * 10;
+    this.model.loadJSON(JSON.parse(d.before));
+    const ok = delta === 0 || this.model.slideClampFlap(d.id, delta);
+    if (ok) d.lastDelta = delta;
+    else if (d.lastDelta) this.model.slideClampFlap(d.id, d.lastDelta);
+    this.refresh();
+    if (!ok) { this.onNotice(t('notice_clamp_slide_limit'), 'warn'); return; }
+    const n = this.model.nodes.get(d.mark[0]);
+    const along = n ? Math.round(d.axis.reduce((sum, v, i) => sum + v * ([n.x, n.y, n.z][i] - d.mark[i + 1]), 0) * 10) / 10 : 0;
+    this.onNotice(t('notice_clamp_slide', along), 'info');
   }
 
 

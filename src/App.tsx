@@ -426,6 +426,12 @@ function AppInner() {
           if (e.key === 'ArrowUp' || e.key === 'ArrowDown') api.nudgePasteY(e.key === 'ArrowUp' ? 1 : -1)
           return
         }
+        const builder = api.engine()?.builder
+        if (api.mode === 'select' && (e.key === 'ArrowLeft' || e.key === 'ArrowRight') && builder?.clampAdjustment()) {
+          builder.slideSelectedClampBy(e.key === 'ArrowRight' ? 5 : -5)
+          api.bump()
+          return
+        }
         const { axes, frontal } = api.cameraAxes()
         const neg = (v: number[]) => v.map(n => -n)
         const dir = e.key === 'ArrowUp' ? (frontal ? [0, 1, 0] : axes.forward)
