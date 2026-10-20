@@ -4140,7 +4140,9 @@ export class Builder {
     this.scene.endOrbit();
     if (!d) return;
     if (!d.moved) {
-      if (d.motion === 'slide') return;
+      // 沿管平移只接管拖动，面板上的原地点击仍按选择模式翻面。
+      if (d.motion === 'slide' && (this.mode !== 'select'
+          || this._pickSelect(e.clientX, e.clientY)?.data.kind !== 'panel')) return;
       if (this.mode === "select") { this._clickSelect(e); return; }
       let turned = false;
       this.recordHistory(() => { turned = this._rotateClampWithFallback(d.id); });
