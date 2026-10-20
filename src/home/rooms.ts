@@ -65,6 +65,7 @@ async function read(path: string, expectedOwner: number, version: number, text: 
   const { response, body } = await request('/quadro/rooms' + path + '?expectedUserID=' + expectedOwner, text)
   if (version !== generation) throw accountError(text)
   if (response.status === 401 || body?.code === 'room_account_changed') { invalidate(); throw accountError(text) }
+  if (response.status === 404) throw new Error(text('关联房间已删除，保留上次背景', 'Linked room deleted. Previous background kept.', 'Verknüpfter Raum gelöscht. Letzter Hintergrund bleibt.'))
   if (!response.ok) throw new Error(text('房间加载失败，请重试', 'Cannot load rooms. Please retry.', 'Räume nicht ladbar. Bitte erneut versuchen.'))
   if (response.headers.get('X-Room-User-ID') !== String(expectedOwner)) { invalidate(); throw accountError(text) }
   return body

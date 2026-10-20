@@ -45,6 +45,8 @@ import { validAssemblyConfig } from '../engine/assemblyConfig.js'
 import { assemblyPdfStrings, assemblyStrings } from '../ui/assemblyStrings'
 import { UI_ESCAPE_EVENT } from '../ui/events'
 import { validHomeContext, placeInRoom } from '../home/context.js'
+import { readRoom } from '../home/rooms'
+import { refreshedRoomBackground, roomBackgroundWarnings } from '../home/refresh'
 import { installationChoices, selectInstallation, type CatalogueChoice } from './installationCatalogue'
 import { captureTool, ToolMemory, type BuilderTool, type ToolState } from './toolMemory'
 
@@ -1842,6 +1844,36 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     savingRef.current=true;setSaving(true)
     try{return await saveCurrentNow(name)}finally{savingRef.current=false;setSaving(false)}
   },[entryReady,saveCurrentNow])
+
+  const refreshedRoomEntries=useRef(new Set<string>())
+  useEffect(()=>{
+    const refresh=()=>{const tab=tabsRef.current.find(x=>x.tabId===activeRef.current);if(tab){refreshedRoomEntries.current.delete(tab.tabId);bump()}}
+    window.addEventListener('xmf-room-background-refresh',refresh)
+    return()=>window.removeEventListener('xmf-room-background-refresh',refresh)
+  },[bump])
+  useEffect(()=>{
+    const tab=tabsRef.current.find(x=>x.tabId===activeRef.current),scope=String(storage.getAccountScope()),e2=eng.current
+    if(!ready||!entryReady||!tab||!e2||tab.planId||tab.readOnly||!scope.startsWith('user:')||refreshedRoomEntries.current.has(tab.tabId))return
+    const context=e2.model.homeContext
+    if(!context?.roomId)return
+    refreshedRoomEntries.current.add(tab.tabId)
+    const source=JSON.stringify(context),account=scope,tabId=tab.tabId
+    void (async()=>{
+      try{
+        const room=await readRoom({id:context.roomId,rev:context.roomRev,name:context.name,data:context.snapshot,ownerID:Number(scope.slice(5))},(zh,en,de)=>lang==='zh'?zh:lang==='de'?de:en)
+        if(String(storage.getAccountScope())!==account||activeRef.current!==tabId||eng.current!==e2||JSON.stringify(e2.model.homeContext)!==source)return
+        const updated=refreshedRoomBackground(context,room)
+        if(!updated)return
+        const clean=!tab.dirty&&!!(tab.docId||tab.libraryId)&&modelContent(exportTab(tab))===tab.savedContent
+        e2.builder.recordHistory(()=>{e2.model.homeContext=updated})
+        e2.scene.setHomeContext(updated);e2.builder.refresh();bump()
+        const warning=roomBackgroundWarnings(updated,e2.scene.homeProductBounds())
+        if(warning.outside||warning.overlap)notify(lang==='zh'?'房间已更新，造型位置保持；造型外包范围可能超出房间或与家具、留空区重叠，请检查摆放。':lang==='de'?'Raum aktualisiert, Modellposition bleibt. Modellumfang kann außerhalb des Raums oder in Möbeln/Freizonen liegen. Platzierung prüfen.':'Room refreshed, model position kept. Its bounds may extend outside the room or overlap furniture / reserved areas. Check placement.','warn')
+        if(clean){const saved=await saveCurrent();if(!saved)notify(lang==='zh'?'房间背景已更新，尚未保存；原缩略图保留。':lang==='de'?'Raum aktualisiert, noch nicht gespeichert. Vorschaubild bleibt.':'Room refreshed but not saved. Previous thumbnail kept.','warn')}
+        else notify(lang==='zh'?'房间背景已更新，随当前草稿保存后更新缩略图。':lang==='de'?'Raum aktualisiert. Vorschaubild folgt nach dem Speichern.':'Room refreshed. Save your draft to update its thumbnail.')
+      }catch(error){console.warn('[room background refresh]',error);if(String(storage.getAccountScope())===account&&activeRef.current===tabId)notify(error instanceof Error?error.message:lang==='zh'?'暂未获取到源房间，保留上次背景；可从场景菜单重试。':lang==='de'?'Quellraum nicht verfügbar. Letzter Hintergrund bleibt.':'Source room unavailable. Previous background kept.','warn')}
+    })()
+  },[ready,entryReady,activeTabId,tick,lang,exportTab,saveCurrent,notify,bump])
 
   /**
    * 使用独立场景给已保存快照生成封面；JSON 无需等待，晚到封面按 saveId 核对内容。

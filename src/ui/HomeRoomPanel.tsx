@@ -126,6 +126,7 @@ export default function HomeRoomPanel({ tile = 40 }: { tile?: number }) {
       })}
       {context && !rooms.some(room => room.id === context.roomId) && <button type="button" role="menuitemradio" data-room-id={context.roomId} aria-checked={api.background === 'home'} aria-label={context.name} title={context.name} className={option(api.background === 'home')} disabled={choosing} onClick={() => switchTo('home')}><RoomThumb data={context.snapshot} /></button>}
       {loading && <span role="status" aria-label={text('正在加载房间', 'Loading rooms', 'Räume werden geladen')} className="flex h-[var(--scene-tile)] w-[var(--scene-tile)] shrink-0 items-center justify-center text-[#9A3412]"><LoaderCircle size={18} className="animate-spin" /></span>}
+      {context?.roomId&&<button type="button" className={option(false)} aria-label={text('更新房间背景','Refresh room background','Raumhintergrund aktualisieren')} title={text('更新房间背景','Refresh room background','Raumhintergrund aktualisieren')} onClick={()=>{window.dispatchEvent(new Event('xmf-room-background-refresh'));close(true)}}><RefreshCw size={18}/></button>}
       {error && <><span role="alert" className="sr-only">{error}</span><button type="button" className={option(false)} aria-label={text('重新加载房间', 'Reload rooms', 'Räume erneut laden')} title={error} onClick={() => void load()}><RefreshCw size={18} /></button></>}
     </div>, document.body)}
   </div>
