@@ -180,6 +180,8 @@ interface EngineApi {
   canUndo: boolean
   canRedo: boolean
   selectionCount: number
+  boxSelect: boolean
+  setBoxSelect: (on: boolean) => void
   installationPreview: InstallationPreview | null
   insetScrewAxis: 'auto' | 'vertical' | 'horizontal'
   setInsetScrewAxis: (axis: 'auto' | 'vertical' | 'horizontal') => void
@@ -3055,6 +3057,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     canUndo: !!builder?.canUndo?.(),
     canRedo: !!builder?.canRedo?.(),
     selectionCount: builder?.selection?.size ?? 0,
+    boxSelect: !!builder?.boxSelect,
+    setBoxSelect: (on) => { rememberTool(); clearBomHighlight(); builder?.setBoxSelect(on); bump() },
     installationPreview: builder?.installationPreview ?? null,
     insetScrewAxis: builder?.insetScrewAxis || 'auto',
     setInsetScrewAxis: axis => { if (!builder || builder.readOnly) return; builder.setInsetScrewAxis(axis); bump() },

@@ -153,6 +153,8 @@ export class Builder {
     this._hingeDrag = null;
     this._panning = false;
     this._boxing = false;
+    this.boxSelect = false;
+    this._boxSelected = new Map();
     this._paste = null;              // Kopie, die gerade am Zeiger haengt
     this._lastPointer = null;        // letzte Zeigerstelle (fuer Strg+V)
     this._attach();
@@ -285,6 +287,8 @@ export class Builder {
 
   // --- oeffentliche Steuerung --------------------------------------------
   setMode(mode) {
+    if (this._down?.box) this._abortGesture();
+    this.boxSelect = false;
     this._colorPreview = null;
     this._cancelHingeDrag();
     this._ropeFirst = null;
@@ -320,6 +324,16 @@ export class Builder {
     this.scene.setCursor("default");
     this.refresh();
     if (mode === "slide" || mode === "fitting") this._hintPlaceMode();
+  }
+
+  setBoxSelect(on) {
+    this.cancelPaste();
+    this.setMode("select");
+    this.boxSelect = !!on;
+    this.scene.setHover(null);
+    this.scene.setHoverPart(null);
+    this.scene.setCursor(on ? "crosshair" : "default");
+    this.refresh();
   }
 
   /** 选了配件却没有绿面/绿点时，立刻说清：没有可挂的位置。 */
@@ -1577,6 +1591,8 @@ export class Builder {
    * Zaehler starten wieder bei 1) -- _pruneSelection findet das nicht.
    */
   modelReplaced() {
+    this.boxSelect = false;
+    this._boxSelected?.clear();
     this._colorPreview = null;
     if (this._hingeDrag) {
       this._hingeDrag = null;
@@ -1948,6 +1964,10 @@ export class Builder {
   }
 
   refresh() {
+    // 框选着色仅跟随仍被选中的同一种零件，取消选择后恢复原材质。
+    for (const [id, kind] of this._boxSelected || []) {
+      if (this.selection.get(id) !== kind) this._boxSelected.delete(id);
+    }
     // 拖动、粘贴期间攒下的外部修改：操作收尾以后的第一次刷新读进来
     if (this._externalPending && !this.busy()) {
       this._externalPending = false;
@@ -2001,6 +2021,7 @@ export class Builder {
       { labelFor, slideNameFor, labelIds, soloId, soloLabel, assembly, suggest, reinforce, reinforcementPartId: this.reinforcementPartId,
         selected: this._colorPreview ? null : selected,
         preserveSelectionAppearance: this.mode === 'select',
+        solidSelected: this._boxSelected,
         interactionMode: this.mode,
         profileSelection: this._profilGewaehlt() ? this._profilAuswahl : null,
         highlight: this._colorPreview || panelPlacement ? null : this.highlight || firstRails, invalid, tints: this.tints,
@@ -3044,8 +3065,7 @@ export class Builder {
       this._down = {
         x: e.clientX, y: e.clientY,
         add: e.ctrlKey || e.metaKey || e.shiftKey,
-        // Rechteck nur mit Strg/Cmd -- ohne bleibt es beim Drehen wie gewohnt.
-        box: this.mode === "select" && (e.ctrlKey || e.metaKey),
+        box: e.button === 0 && !e.altKey && this.mode === "select" && (this.boxSelect || e.ctrlKey || e.metaKey),
       };
       this._boxing = false;
       this._last = { x: e.clientX, y: e.clientY };
@@ -3073,7 +3093,7 @@ export class Builder {
           || this.scene.pickBuild(e.clientX, e.clientY);
         if (pick && pick.data.kind === "clamp" && this._beginClampDrag(pick.data.id)) return;
       }
-      if (e.button === 0 && !this.readOnly && !this._down.add && !e.altKey && !this._paste
+      if (e.button === 0 && !this._down.box && !this.readOnly && !this._down.add && !e.altKey && !this._paste
           && (this.mode === "select" || (this.mode === "fitting" && ["flexi", BOLT_PART, HINGE_PART].includes(this.fittingKind)))) {
         const hit = this.scene.pickForDelete(e.clientX, e.clientY);
         if (hit?.data.kind === "node" && hit.data.hinge != null) {
@@ -3085,7 +3105,7 @@ export class Builder {
           }
         }
       }
-      if (e.button === 0 && this.mode === "select" && !this._down.add && !e.altKey) {
+      if (e.button === 0 && !this._down.box && this.mode === "select" && !this._down.add && !e.altKey) {
         const pick = this._pickSelect(e.clientX, e.clientY);
         const driver = this._rotationDriverForPick(pick);
         const key = this._rotationPickKey(pick);
@@ -3298,6 +3318,12 @@ export class Builder {
     let obj = null;
     let arrowFocus;
     if (this.mode === "select" || this.mode === "delete") {
+      if (this.mode === "select" && this.boxSelect) {
+        this.scene.setHover(null);
+        this.scene.setHoverPart(null);
+        this.scene.setCursor("crosshair");
+        return;
+      }
       // Cursor- und Loesch-Modus: alles Platzierte ist treffbar, Rutschen
       // eingeschlossen. Im Loesch-Modus wird der Klick zum Loeschen.
       obj = this.scene.pickForDelete(x, y)?.object || null;
@@ -3491,10 +3517,16 @@ export class Builder {
     if (this._boxing) {
       this._boxing = false;
       this.scene.hideSelectBox();
-      // Das Rechteck ergaenzt immer: mehrere Zuege lassen sich so zu einer
-      // Auswahl zusammensetzen. Aufgehoben wird sie per Klick ins Leere.
       const found = this.scene.pickInRect(d.x, d.y, e.clientX, e.clientY);
-      for (const [id, kind] of found) this.selection.set(id, kind);
+      if (!d.add) this.selection.clear();
+      this._boxSelected ||= new Map();
+      for (const [id, kind] of found) {
+        this.selection.set(id, kind);
+        this._boxSelected.set(id, kind);
+      }
+      this._profilAuswahl = null;
+      this.highlight = null;
+      this.onHighlightCleared();
       finish();
       this.refresh();
       return;

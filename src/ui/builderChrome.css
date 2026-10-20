@@ -13,7 +13,7 @@
 .qb-project-name { display: flex; align-items: center; gap: 6px; min-height: 44px; min-width: 0; padding: 0 8px; text-align: left; font-size: 13px; font-weight: 500; cursor: pointer; }
 .qb-project-name > span:first-of-type { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .qb-tab-close, .qb-project-new { display: flex; align-items: center; justify-content: center; min-width: 32px; min-height: 44px; border-radius: 8px; cursor: pointer; flex-shrink: 0; color: #6b7380; }
-.qb-embedded-bar{display:flex;align-items:center;gap:16px;padding:8px 16px;box-sizing:border-box}
+.qb-embedded-bar{display:flex;align-items:center;gap:16px;padding:8px 108px 8px 16px;box-sizing:border-box}
 .qb-embedded-bar>strong{min-width:0;max-width:30%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
 .qb-embedded-bar>nav{display:flex;align-items:center;gap:4px;min-width:0;overflow:auto;margin-left:auto}
 .qb-embedded-bar .qb-nav-button{flex:none;min-height:44px}
@@ -57,6 +57,7 @@
 .qb-top-toolbar .qb-tool > svg { color: currentColor; }
 .qb-top-toolbar[data-compact=true] .qb-tool { width: 44px; min-width: 44px; padding: 0; }
 .qb-top-toolbar[data-compact=true] .qb-tool > :is(span,small) { display: none; }
+.qb-top-toolbar[data-compact=true] [data-ui="tool-box-select"] > span { display:block;font-size:10px;line-height:12px }
 .qb-toolbar-divider { width: 1px; background: #ecd6c2; margin: 8px 3px; flex-shrink: 0; align-self: stretch; }
 .qb-top-toolbar .qb-tool-key { position:absolute; top:3px; right:4px; padding:0; border:0; color:#8c8075; background:none; font-family:inherit; font-size:9px; font-weight:400; line-height:12px; pointer-events:none; }
 html .qb-top-toolbar .qb-tool, html[data-motion] .qb-top-toolbar .qb-tool:active { transform:none; box-shadow:none; transition:color .15s, background-color .15s, border-color .15s; }

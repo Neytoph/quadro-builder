@@ -24,3 +24,5 @@ html[data-device-drafts] :is(#qhChatFab,#qhChatNoticeHint,#qhChatPeek,#qhChat){d
 .device-drafts button:disabled:not(:is(.btn,.qb-btn,.xmf-button)) { opacity: .5; cursor: default; }
 @media(max-width:600px) { .qb-single-save span { display:none; }.qb-single-nav .qb-nav-button { padding:0 8px; }.qb-single-nav .qb-nav-button span { display:none; }.qb-single-nav .qb-nav-button { min-width:44px; justify-content:center; }.device-drafts {padding:16px}.device-drafts li {align-items:flex-start; flex-direction:column;gap:4px}.device-draft-actions {width:100%;justify-content:flex-end} }
 @media(max-width:767px){.qb-single-nav{display:none}.qb-project-bar.qb-single-bar .qb-single-menu-trigger{display:flex}.qb-single-save span{display:none}.qb-single-bar .qb-single-title{padding:0 4px}.qb-single-bar.qb-embedded-bar>.qb-single-title{display:flex}.qb-single-bar.qb-embedded-bar{gap:4px;padding:4px 8px}}
+html[data-editor-embed] .qb-project-bar.qb-embedded-bar{padding-inline-end:108px}
+@media(max-width:767px){.qb-project-bar.qb-single-bar.qb-embedded-bar>.qb-single-nav{display:none}}

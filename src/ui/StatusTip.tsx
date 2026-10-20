@@ -41,9 +41,11 @@ export default function StatusTip({ menuOpen }: { menuOpen: boolean }) {
   const { pane } = useDock()
   const adjustment = api.engine()?.builder.selectedPartAdjustment()
   const adjusting = !!adjustment
+  const boxTip = mobile ? 'tip.boxSelectTouch' : 'tip.boxSelect'
   const key = api.pasting ? 'status.paste'
     : api.placingConnector ? 'tip.placeConnector'
     : api.assembly.active ? 'status.assembly'
+    : api.boxSelect ? boxTip
     : adjusting ? 'tip.adjustSelected'
     : api.mode === 'reinforce' && api.reinforcementPartId === 'alu_connector' ? 'status.aluConnector'
     : (BY_MODE[api.mode] || 'tip.select')
@@ -63,13 +65,13 @@ export default function StatusTip({ menuOpen }: { menuOpen: boolean }) {
 
   const flexi = (api.mode === 'fitting' && ['flexi', 'flexi_bolt', 'flexi_hinge'].includes(api.fittingKind))
     || (api.mode === 'select' && !!api.engine()?.builder.flexiTarget())
-  if (flexi && !menuOpen && !api.readOnly) {
+  if (flexi && !api.boxSelect && !menuOpen && !api.readOnly) {
     const box = narrow ? { left: 8, right: 8, bottom: 68 } : statusTipBox(left, vw, toolbarW, pane ? right : null)
     if (!box || (narrow && pane)) return null
     return <div data-ui="flexi-guide" className="fixed z-40 flex justify-center pointer-events-none" style={box}><FlexiGuide /></div>
   }
 
-  if (adjustment === 'panel' && !menuOpen && !api.toast && !api.canFlipAccessory && !api.selectedPanelFixing && !api.installationPreview && !componentForTool(api)) {
+  if (adjustment === 'panel' && !api.boxSelect && !menuOpen && !api.toast && !api.canFlipAccessory && !api.selectedPanelFixing && !api.installationPreview && !componentForTool(api)) {
     const box = narrow ? { left: 8, right: 8, bottom: 68 } : statusTipBox(left, vw, toolbarW, pane ? right : null)
     if (!box || (narrow && pane)) return null
     return <div data-ui="panel-adjustment" className="fixed z-40 flex justify-center pointer-events-none" style={box}>
@@ -87,7 +89,7 @@ export default function StatusTip({ menuOpen }: { menuOpen: boolean }) {
     return (
       <div data-ui="status-tip" className="fixed left-2 right-2 bottom-[68px] z-30 pointer-events-none flex justify-center">
         {shown && (
-          <p key={key} className={`m-say m-say-up qb-card text-gray-100 max-w-full px-3 py-1.5 text-[12px] leading-snug truncate ${leaving ? 'm-leave' : ''}`}>
+          <p key={key} className={`m-say m-say-up qb-card text-gray-100 max-w-full px-3 py-1.5 text-[12px] leading-snug ${api.boxSelect ? 'whitespace-normal' : 'truncate'} ${leaving ? 'm-leave' : ''}`}>
             {shown}
           </p>
         )}

@@ -12,6 +12,19 @@ function sceneFixture() {
 }
 
 describe('选中配件保留真实外观的轮廓', () => {
+  it('框选的玻璃和纹理配件整件着橙色，清除选择后原始材质完整保留', () => {
+    const scene = sceneFixture(), texture = new THREE.Texture()
+    const original = new THREE.MeshPhysicalMaterial({ color: '#22c55e', map: texture, vertexColors: true, transmission: .9, transparent: true, opacity: .25, side: THREE.DoubleSide })
+    const selected = scene._boxSelectedMaterial(original) as THREE.MeshPhysicalMaterial
+    expect(selected.color.getHexString()).toBe('ea580c')
+    expect(selected.transmission).toBe(0); expect(selected.opacity).toBe(1)
+    expect(selected.transparent).toBe(false); expect(selected.map).toBeNull(); expect(selected.vertexColors).toBe(false)
+    expect(selected.side).toBe(THREE.DoubleSide); expect(selected.depthWrite).toBe(true)
+    expect(original.color.getHexString()).toBe('22c55e'); expect(original.transmission).toBe(.9)
+    expect(original.map).toBe(texture); expect(original.opacity).toBe(.25); expect(original.vertexColors).toBe(true)
+    expect(scene._boxSelectedMaterial(original)).toBe(selected)
+    selected.dispose(); original.dispose(); texture.dispose()
+  })
   it('半球只生成边缘线，原始几何保持完整', () => {
     const scene = sceneFixture(), original = new THREE.SphereGeometry(16, 56, 36, 0, Math.PI * 2, 0, Math.PI / 2)
     const before = original.getAttribute('position').array.slice()

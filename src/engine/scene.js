@@ -13,7 +13,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { geometry, colorHex, connectorColor, getPanel } from "./catalog.js";
 import { panelNormal, modelMiddle } from "./util.js";
 import { nodeClampOffset, isHolePart, HOLE_MASKS, holeArmDirs, BLACK_FITTINGS,
-  isBoltPart, boltAxis, boltShift, hingeDir, hingeKey, POOL_KINDS, fixedFittingColor,
+  isBoltPart, boltAxis, boltShift, hingeDir, hingeKey, splitHingeKey, POOL_KINDS, fixedFittingColor,
   ARM_FITTINGS, SLIDE_HOOK_LIFT, SLIDE_SPECS, SLIDE_PARTS } from "./model.js";
 import { reinforcementProfiles } from "./qdfexport.js";
 import { ALUMINIUM_CONNECTOR, aluminiumConnectorDisplay } from './reinforcement.js';
@@ -2717,6 +2717,21 @@ export class SceneManager {
     return this._tintMaterial(base, "sel:", HIGHLIGHT_COLOR, HIGHLIGHT_EMISSIVE);
   }
 
+  // 框选整件着橙色，透明板、纹理和顶点色同样清楚；不改原始材质。
+  _boxSelectedMaterial(base) {
+    const material = this._tintMaterial(base, "box:", HIGHLIGHT_COLOR, HIGHLIGHT_EMISSIVE);
+    material.map = null;
+    material.alphaMap = null;
+    material.emissiveMap = null;
+    material.vertexColors = false;
+    material.opacity = 1;
+    material.transparent = false;
+    material.alphaTest = 0;
+    material.depthWrite = true;
+    if ('transmission' in material) material.transmission = 0;
+    return material;
+  }
+
   _hoverMaterial(base) {
     const two = !!(base && base.side === THREE.DoubleSide);
     const key = two ? "hov:2" : "hov:1";
@@ -4074,6 +4089,11 @@ export class SceneManager {
       if (!opts.panelPlacementRails && focusId != null && id === focusId) return this._focusMaterial(base);
       if (highlight && id != null && highlight.has(id)) {
         return focusId != null ? this._partnerMaterial(base) : this._selectedMaterial(base);
+      }
+      const parentId = typeof id === 'string' ? splitHingeKey(id)?.nodeId : null;
+      if (selected && (selected.has(id) || parentId && selected.has(parentId))
+          && (opts.solidSelected?.has(id) || parentId && opts.solidSelected?.has(parentId))) {
+        return this._boxSelectedMaterial(base);
       }
       if (marked) {
         if (id != null && marked.has(id)) {

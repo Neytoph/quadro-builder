@@ -5,6 +5,7 @@ import {EDITOR_EMBED,bootEntry} from '../entry'
 import {storage} from '../engine-api'
 import {modelContent} from '../store/personalTabs'
 import {useI18n} from '../i18n'
+import {isUntitledName} from '../names'
 
 /** 父页面负责外壳和关闭确认，实际保存与协作仍由编辑器完成。 */
 export default function EmbeddedEditorBridge(){
@@ -38,7 +39,14 @@ export default function EmbeddedEditorBridge(){
      const state=api.editorState();await api.checkpointEditor();send(state.dirty?'unsaved':'close',{...state});return
     }
     if(command==='xmf-model-editor:save'){
-     const saved=await api.saveCurrent()
+     const active=api.tabs.find(tab=>tab.tabId===api.activeTabId)
+     let name
+     if(active&&!active.docId&&!active.libraryId&&isUntitledName(active.name)){
+      const typed=await api.askName(live.current.t('saves.saveTitle'),live.current.t('saves.saveOk'),'')
+      if(typed===null){send('save-cancelled');return}
+      name=typed.trim()||live.current.t('tab.untitled')
+     }
+     const saved=await api.saveCurrent(name)
      if(!saved||api.editorState().dirty)throw new Error(live.current.t('sync.failed'))
     }
     if(command==='xmf-model-editor:discard')await api.discardEditor()
@@ -51,10 +59,8 @@ export default function EmbeddedEditorBridge(){
   const leaving=()=>send('loading')
   window.addEventListener('message',receive);window.addEventListener('quadro-account-invalidated',identity)
   window.addEventListener('pagehide',leaving)
-  const key=(e:KeyboardEvent)=>{if(e.key==='Escape'&&!document.querySelector('[role=dialog],.m-backdrop')){send('request-close');e.preventDefault()}}
-  window.addEventListener('keydown',key)
   send('mounted')
-  return()=>{window.removeEventListener('message',receive);window.removeEventListener('quadro-account-invalidated',identity);window.removeEventListener('keydown',key);window.removeEventListener('pagehide',leaving)}
+  return()=>{window.removeEventListener('message',receive);window.removeEventListener('quadro-account-invalidated',identity);window.removeEventListener('pagehide',leaving)}
  },[])
  useEffect(()=>{
   if(!EDITOR_EMBED||announced.current)return

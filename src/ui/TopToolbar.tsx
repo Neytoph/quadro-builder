@@ -12,7 +12,7 @@ import { MOTION, usePresence } from './motion'
 import { Pop } from './Pop'
 import StatusTip from './StatusTip'
 import AccessoryInstallation from './AccessoryInstallation'
-import { LayoutGrid, MessageSquarePlus, Shapes } from 'lucide-react'
+import { LayoutGrid, MessageSquarePlus, Shapes, Scan } from 'lucide-react'
 import { useCollab } from '../collab/CollabContext'
 import { useOverflowCompact } from './useOverflowCompact'
 import { useDock } from './dock'
@@ -88,8 +88,11 @@ export default function TopToolbar() {
           <button disabled={!api.canRedo} onClick={api.redo} title={t('hint.redo')} aria-label={t('hint.redo')} className="qb-tool qb-history-tool"><Svg16 inner={TOOL_ICON.redo} /><span>{t('tool.redo')}</span></button>
         </div>
         {sep}
-        <button className="m-tool qb-tool" data-ui="tool-select" title={narrow ? t('tool.select') : `${t('tool.select')} · Esc · ${t('keys.toggleTool')} (Space)`} aria-label={t('tool.select')} aria-pressed={api.mode === 'select' && !collab.placingPin} data-mode-on={api.mode === 'select' && !collab.placingPin} onClick={() => { api.setMode('select'); collab.setPlacingPin(false); close() }}>
+        <button className="m-tool qb-tool" data-ui="tool-select" title={narrow ? t('tool.select') : `${t('tool.select')} · Esc · ${t('keys.toggleTool')} (Space)`} aria-label={t('tool.select')} aria-pressed={api.mode === 'select' && !api.boxSelect && !collab.placingPin} data-mode-on={api.mode === 'select' && !api.boxSelect && !collab.placingPin} onClick={() => { api.setMode('select'); collab.setPlacingPin(false); close() }}>
           <Svg16 inner={TOOL_ICON.select} /><span>{t('tool.select')}</span>{!narrow && <kbd className="qb-tool-key" aria-hidden="true">Esc</kbd>}
+        </button>
+        <button type="button" className="m-tool qb-tool" data-ui="tool-box-select" title={t('tip.boxSelect')} aria-label={t('tool.boxSelect')} aria-pressed={api.boxSelect && !collab.placingPin} data-mode-on={api.boxSelect && !collab.placingPin} onClick={() => { api.setBoxSelect(!api.boxSelect); collab.setPlacingPin(false); close() }}>
+          <Scan size={18} strokeWidth={1.7} /><span>{t('tool.boxSelect')}</span>
         </button>
         <div className={`contents ${locked ? 'qb-locked' : ''}`}>
           <button className="m-tool qb-tool" data-mode-on={api.mode === 'delete'} aria-pressed={api.mode === 'delete'} data-tone="red" title={t('tool.deleteHint')} aria-label={t('tool.deleteHint')} onClick={() => { api.setMode(api.mode === 'delete' ? 'select' : 'delete'); close() }}>
