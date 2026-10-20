@@ -512,22 +512,6 @@ export const INSTALLATION_CATALOGUE: readonly CatalogueEntry[] = [
     "aliases": ""
   },
   {
-    "id": "TA35",
-    "origin": "extended",
-    "group": "tubes",
-    "tool": "tubes",
-    "method": "两端连接",
-    "aliases": ""
-  },
-  {
-    "id": "TA75",
-    "origin": "extended",
-    "group": "tubes",
-    "tool": "tubes",
-    "method": "两端连接",
-    "aliases": ""
-  },
-  {
     "id": "T10",
     "origin": "official",
     "group": "tubes",
@@ -586,6 +570,22 @@ export const INSTALLATION_CATALOGUE: readonly CatalogueEntry[] = [
   {
     "id": "TC1",
     "origin": "official",
+    "group": "tubes",
+    "tool": "tubes",
+    "method": "两端连接",
+    "aliases": ""
+  },
+  {
+    "id": "TA35",
+    "origin": "extended",
+    "group": "tubes",
+    "tool": "tubes",
+    "method": "两端连接",
+    "aliases": ""
+  },
+  {
+    "id": "TA75",
+    "origin": "extended",
     "group": "tubes",
     "tool": "tubes",
     "method": "两端连接",
