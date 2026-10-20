@@ -5,6 +5,7 @@ import { computeBOM } from './bom.js'
 import { computeAssemblyPlan } from './assemblyPlan.js'
 import { beginAssemblyCollisionPass, checkAssemblyPath, partEnvelope } from './assemblyCollision.js'
 import { assemblyMeshes } from './assemblyNativeMesh.js'
+import { componentFrame, componentMountsValid } from './accessoryPack.js'
 
 beforeAll(async () => { await loadCatalog() })
 
@@ -27,6 +28,16 @@ function cube(height = 40) {
 }
 
 describe('工厂普通方板的确认安装入口', () => {
+  it('两边固定的原厂板翻面更新原厂姿态并可重开',()=>{
+    const {model,probe}=cube(),panel=model.addNativePanel(probe,'blue')!
+    const before=componentFrame(model,panel)!
+    expect(model.flipPanelSide(panel.id)).toBe(-probe.side)
+    const after=componentFrame(model,panel)!
+    after.axes[2].forEach((v:number,i:number)=>expect(v).toBeCloseTo(-before.axes[2][i]))
+    expect(componentMountsValid(model,panel)).toBe(true)
+    const reopened=new BuildModel(),saved=model.toJSON()
+    expect(reopened.loadJSON(saved).ok).toBe(true);expect(reopened.toJSON()).toEqual(saved)
+  })
   it('确认组件显式朝外的方向保存后不变，缺省居中仍保持缺省', () => {
     const { model, probe } = cube()
     const panel = model.addConfirmedComponent({ ...probe, side: 1 }, 'yellow')!
@@ -44,12 +55,12 @@ describe('工厂普通方板的确认安装入口', () => {
     expect(restored.loadJSON(centered).ok).toBe(true)
     expect(restored.panels.get(panel.id)?.side).toBeNull()
   })
-  it('半高围板保留真实工厂网格、四边支撑与四颗板螺丝', () => {
+  it('半高围板保留工厂网格、两条固定边与四颗板螺丝', () => {
     const { model } = cube(20)
     const probe = model.confirmedMounts('panel_40x20', { deduplicate: false }).find((p: any) => p.valid)!
     const panel = model.addNativePanel(probe, 'blue')!
     expect(panel).toBeTruthy()
-    expect(Object.hasOwn(panel, 'appearanceVersion')).toBe(false)
+    expect(Object.hasOwn(panel,'appearanceVersion')).toBe(false)
     expect(model.confirmedDiagnostics(panel).valid).toBe(true)
     beginAssemblyCollisionPass(model)
     expect(partEnvelope(model, panel.id)).toHaveLength(assemblyMeshes()!.surfaceTriangles.panel2_350x150.length)
@@ -63,9 +74,10 @@ describe('工厂普通方板的确认安装入口', () => {
     const { model, probe } = cube()
     const panel = model.addNativePanel(probe, 'green')!
     expect(panel).toBeTruthy()
-    expect(Object.hasOwn(panel, 'appearanceVersion')).toBe(false)
-    expect(Object.hasOwn(panel, 'params')).toBe(false)
-    expect(Object.hasOwn(panel, 'mounts')).toBe(false)
+    expect(Object.hasOwn(panel,'appearanceVersion')).toBe(false)
+    expect((panel as any).params.mountLayout).toBe('opposite-retainers')
+    expect((panel as any).mounts).toHaveLength(4)
+    expect((panel as any).supportTubes).toHaveLength(2)
     expect(model.confirmedDiagnostics(panel).valid).toBe(true)
     beginAssemblyCollisionPass(model)
     const shapes = partEnvelope(model, panel.id)
@@ -101,12 +113,15 @@ describe('工厂普通方板的确认安装入口', () => {
     expect([panel.a, panel.b, panel.t0, panel.len, panel.side]).toEqual([before.a, before.b, before.t0, before.len, before.side])
   })
 
-  it('缺少一条边、重复占位及特殊板均在安装前拒绝', () => {
+  it('缺少非固定边允许安装，缺少固定边、重复占位及特殊板仍拒绝', () => {
     const missing = cube()
-    const removed = missing.probe.supportTubes.find((id: string) => ![missing.probe.a, missing.probe.b].includes(id))!
+    const removed = missing.probe.supportTubes[0]
     missing.model.removeTube(removed)
     expect(missing.model.addNativePanel(missing.probe, 'green')).toBeNull()
     expect(missing.model.panels.size).toBe(0)
+    const partial=cube(),nonFixed=[...partial.model.tubes.keys()].find(id=>!partial.probe.supportTubes.includes(id))!
+    partial.model.removeTube(nonFixed)
+    expect(partial.model.addNativePanel(partial.probe,'green')).toBeTruthy()
     const occupied = cube()
     expect(occupied.model.addNativePanel(occupied.probe, 'green')).toBeTruthy()
     const before = occupied.model.toJSON()

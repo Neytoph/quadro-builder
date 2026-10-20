@@ -1454,9 +1454,9 @@ export class Builder {
       const dims = this._panelDims();
       partners = dims ? this.model.panelPartners(railId, dims) : [];
       const rail=this.model._rail(railId);
-      if(dims && rail && supportsPanelFixing(this.panelId) && Math.max(...dims)>rail.len+.35){
+      if(dims && rail && supportsPanelFixing(this.panelId)){
         const sizes=dims[0]===dims[1]?[dims]:[dims,[dims[1],dims[0]]];
-        for(const [width,height] of sizes)for(const probe of insetPanelProbes(this.model,width,height,{deduplicate:false,segmentedOnly:true,onlyRailId:railId})){
+        for(const [width,height] of sizes)for(const probe of insetPanelProbes(this.model,width,height,{deduplicate:false,onlyRailId:railId})){
           if(probe.a!==railId || at!=null && (at<probe.t0-.35 || at>probe.t0+probe.len+.35))continue;
           if(!partners.some(p=>p.id===probe.b && Math.abs(p.lo-probe.t0)<.01 && p.len===probe.len))partners.push({id:probe.b,gap:width,len:probe.len,lo:probe.t0,hi:probe.t0+probe.len});
         }

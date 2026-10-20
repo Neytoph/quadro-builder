@@ -18,7 +18,7 @@ const local=(frame,p)=>frame.axes.map(a=>dot(sub(p,frame.pos),a));
 
 export function hasInsetScrews(part) {return INSET_PANEL_IDS.has(part.panelId) && part.params?.mountLayout===INSET_MOUNT_LAYOUT;}
 
-// 连续边管用于查找矩形候选；调用方分别核对普通板四边或内嵌板安装条件。
+// 连续边管用于查找矩形候选，固定边可由一根或多根相接的直管组成。
 export function insetPanelProbes(model,width,height,{deduplicate=true,segmentedOnly=false,onlyRailId=null}={}) {
   const rails=[...model.tubes.values()].flatMap(t=>{const rail=model._rail(t.id);return rail?[{...rail,id:t.id}]:[];}),out=[],seen=new Set();
   for(const rail of rails){
@@ -91,7 +91,8 @@ export function insetPanelReference(model,frame,width,height,supports,{screwAxis
   const a=supports.mounts[0].tube,b=supports.mounts[2].tube,rail=model._rail(a);
   const horizontal=screwAxis==='horizontal',direction=dot(rail.dir,frame.axes[horizontal?0:1])>=0?1:-1;
   const start=at(frame,horizontal?[-direction*width/2,-height/2,0]:[-width/2,-direction*height/2,0]);
-  return {a,b,t0:dot(sub(start,rail.p0),rail.dir),len:horizontal?width:height};
+  const t0=dot(sub(start,rail.p0),rail.dir);
+  return {a,b,t0:Math.abs(t0)<1e-8?0:t0,len:horizontal?width:height};
 }
 
 // 框边与内嵌板的接合属于既有框架空间，固定引用仅记录实际螺丝承载管。

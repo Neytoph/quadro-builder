@@ -1,6 +1,6 @@
 import { quatFromBasis, xAxisOf, yAxisOf, zAxisOf } from './util.js';
 import { CONFIRMED_COMPONENTS, CONFIRMED_PANEL_IDS, CONFIRMED_FITTING_IDS, confirmedSpec } from './componentPack.js';
-import { confirmedCandidates, confirmedPanelDiagnostics, confirmedStructuralValid, confirmedFrame, confirmedVolumes, curvePoint, ropeCandidate, trampolineCandidate } from './confirmedComponentModel.js';
+import { confirmedCandidates, confirmedPanelDiagnostics, confirmedStructuralValid, confirmedFrame, confirmedVolumes, curvePoint, ropeCandidate, trampolineCandidate, isOuterScrewPanel, PANEL_RETAINER_LAYOUT } from './confirmedComponentModel.js';
 import { INSET_MOUNT_LAYOUT, INSET_PANEL_EDGE_INSET, hasInsetScrews, oppositeScrewSupports, insetFrameTubeIds, insetScrewVolumes, insetPanelReference } from './insetPanelMounts.js';
 import { geometry } from './catalog.js';
 import { isSoftPart } from './softParts.js';
@@ -50,7 +50,7 @@ export function componentFrame(model, part) {
     if(!Array.isArray(q) || q.length!==4 || !q.every(Number.isFinite) || Math.abs(Math.hypot(...q)-1)>.001)return null;
     return {pos:[part.x,part.y,part.z],axes:[xAxisOf(q),yAxisOf(q),zAxisOf(q)],quat:q};
   }
-  if (part.appearanceVersion === 2) return confirmedFrame(model, part);
+  if (part.appearanceVersion === 2 || part.params?.mountLayout===PANEL_RETAINER_LAYOUT) return confirmedFrame(model, part);
   if (ACCESSORY_IDS.has(part.kind)) {
     const tube = model.tubes.get(part.tube);
     const a = tube && model.nodes.get(tube.a), b = tube && model.nodes.get(tube.b);
@@ -222,7 +222,7 @@ export function componentObstacle(model, part, { sweep = false, collisionCache =
   // 先用保守世界包围盒排除远处部件；精确盒体和圆管检查继续决定真实碰撞。
   const bounded=volumes.map(box=>({box,bounds:volumeBounds(box)})),bounds=combinedBounds(bounded);
   const supports = new Set(Array.isArray(part.supportTubes) ? part.supportTubes : [part.tube, part.a, part.b].filter(Boolean));
-  if(hasInsetScrews(part)) {
+  if(hasInsetScrews(part) || part.params?.screwAxis && confirmedSpec(part.panelId)) {
     const spec=accessorySpec(part.panelId);
     for(const id of insetFrameTubeIds(model,componentFrame(model,part),spec.width,spec.height))supports.add(id);
   }
@@ -240,7 +240,13 @@ export function componentObstacle(model, part, { sweep = false, collisionCache =
         prev = next;
       }
     } else {
-      const start=point(a),end=point(b);
+      let start=point(a),end=point(b);
+      if(isOuterScrewPanel(part.panelId)){
+        // 接头中心到实际管端有半个接头的距离，邻框管端不能膨胀到板内。
+        const length=Math.hypot(...sub(end,start)),inset=Math.min(geometry().connectorSize/2,length/2);
+        const offset=sub(end,start).map(v=>v/length*inset);
+        start=start.map((v,i)=>v+offset[i]);end=end.map((v,i)=>v-offset[i]);
+      }
       if(segmentNearBounds(bounds,start,end,2.45) && bounded.some(({box,bounds})=>segmentNearBounds(bounds,start,end,2.45) && segmentHits(box,start,end)))return {kind:'tube',id:tube.id};
     }
   }
@@ -266,8 +272,7 @@ export function componentObstacle(model, part, { sweep = false, collisionCache =
 
 function separatePanelRetainers(model, candidate, part, a, b) {
   if (!candidate.panelId || !part.panelId || a.role !== 'retainer' || b.role !== 'retainer') return false;
-  const standard = ['panel_40x40', 'panel_40x20', 'panel_30x30', 'hole_panel_40x40'];
-  if (!standard.includes(candidate.panelId) && !standard.includes(part.panelId)) return false;
+  if (!isOuterScrewPanel(candidate.panelId) || !isOuterScrewPanel(part.panelId)) return false;
   const rail = model._rail(a.tube), first = componentFrame(model, candidate), second = componentFrame(model, { ...part, appearanceVersion: 2 });
   const point = mountPoint(model, a);
   if (!rail || !first || !second || !point) return false;
@@ -275,7 +280,7 @@ function separatePanelRetainers(model, candidate, part, a, b) {
     const delta = sub(frame.pos, point), along = dot(delta, rail.dir);
     return unit(sub(delta, rail.dir.map(v => v * along)));
   };
-  // 普通板扣朝各自开口内侧；不同侧共边仍交由实际部件空间检查。
+  // 外扣板螺丝朝各自开口内侧，共边后仍检查实际部件空间。
   return dot(inward(first), inward(second)) <= 0.01;
 }
 
@@ -403,6 +408,7 @@ export function componentMountsValid(model, part) {
     return distance>=0 && distance<=rail.len && Math.hypot(...sub(delta,rail.dir.map(v=>v*distance)))<.1 && Math.abs(dot(frame.axes[0],rail.dir))>.999;
   }
   if (part.appearanceVersion === 2) return confirmedStructuralValid(model, part);
+  if (!part.appearanceVersion && part.params?.mountLayout===PANEL_RETAINER_LAYOUT) return confirmedStructuralValid(model,{...part,appearanceVersion:2});
   if (part.appearanceVersion !== APPEARANCE_VERSION) return false;
   const expected = part.kind ? 2 : 4;
   if (!Array.isArray(part.mounts) || part.mounts.length !== expected || !Array.isArray(part.supportTubes) || !part.supportTubes.length) return false;

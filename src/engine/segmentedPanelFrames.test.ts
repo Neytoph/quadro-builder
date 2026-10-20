@@ -35,11 +35,14 @@ describe('短管围成的连续板件框格',()=>{
     expect(model.panelAccessoryMounts('panel_40x40')).toHaveLength(0)
   })
 
-  it('缺少任一框边短管时不生成普通板安装点',()=>{
+  it('缺少任一非固定框边短管时仍可改用完整的另一对边',()=>{
     for(let edge=0;edge<4;edge++){
       const {model,edges}=segmentedPanelFrame()
       model.removeTube(edges[edge][0])
-      expect(model.panelAccessoryMounts('panel_40x40')).toHaveLength(0)
+      const mounts=model.panelAccessoryMounts('panel_40x40')
+      expect(mounts).toHaveLength(1)
+      expect(mounts[0].supportTubes).not.toContain(edges[edge][0])
+      expect(model.addConfirmedComponent(mounts[0],'blue')).toBeTruthy()
     }
   })
 

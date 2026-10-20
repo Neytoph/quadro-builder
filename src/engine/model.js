@@ -4,12 +4,12 @@
 import { MERGE_EPS, FORMAT_VERSION, DIAGONAL_SNAP_TOL, DIRECTIONS, DIAGONAL_DIRECTIONS, DIR_ALIGN_TOL, ARM_ALIGN_TOL, CONN_TYPE_MASK, anchorGap } from "./config.js";
 import { ACCESSORY_IDS, PANEL_ACCESSORY_IDS, accessoryMount, accessoryDiagnostics, panelAccessoryDiagnostics, componentMountsValid, componentVolumes, componentFrame, confirmedDiagnostics, nativeWheelComponentObstacle } from './accessoryPack.js';
 import { confirmedSpec } from './componentPack.js';
-import { confirmedCandidates, ropeCandidate, supportsPanelFixing } from './confirmedComponentModel.js';
+import { confirmedCandidates, ropeCandidate, supportsPanelFixing, PANEL_RETAINER_LAYOUT } from './confirmedComponentModel.js';
 import { insetPanelProbes, INSET_PANEL_IDS, INSET_MOUNT_LAYOUT, oppositeScrewSupports, insetPanelReference } from './insetPanelMounts.js';
 import { validAssemblyConfig } from './assemblyConfig.js';
 import { validHomeContext } from '../home/context.js';
 import { isSoftPart } from './softParts.js';
-import { nativePanelDiagnostics, nativePanelMounts } from './nativePanelDiagnostics.js';
+import { nativePanelDiagnostics, nativePanelMounts, nativePanelGeometry } from './nativePanelDiagnostics.js';
 import { reinforcementPaths, aluminiumConnectorMounts, aluminiumConnectorSupport, isAluminiumConnector, validReinforcementRecords, explicitReinforcementGroups } from './reinforcement.js';
 
 // Zellweite des Rasters, mit dem die Kollisionspruefung Nachbarn sucht. Etwas
@@ -1316,7 +1316,7 @@ export class BuildModel {
     if (!part) return { valid: false, reason: 'missing_support' };
     if (part.appearanceVersion && part.panelId === 'panel_40x40_pocket') return { valid: false, reason: 'pocket_facing' };
     const flipped = { ...part, side: -(part.side || 1) };
-    if (part.appearanceVersion && PANEL_ACCESSORY_IDS.has(part.panelId)) {
+    if ((part.appearanceVersion || part.params?.mountLayout===PANEL_RETAINER_LAYOUT) && PANEL_ACCESSORY_IDS.has(part.panelId)) {
       const diagnostic = this.panelAccessoryDiagnostics(flipped);
       if (!diagnostic.valid) return diagnostic;
       if (componentVolumes(this, flipped).some(box => box.pos[1] - box.axes.reduce((sum, axis, i) => sum + Math.abs(axis[1]) * box.half[i], 0) < -0.01)) {
@@ -1334,7 +1334,8 @@ export class BuildModel {
     p.side = (p.side || 1) < 0 ? 1 : -1;
     // Die eigene Lage aus der Datei kennt die alte Seite -- ab jetzt rechnet
     // sich die Platte wieder aus ihrem Rohrpaar.
-    delete p.geom;
+    if(!p.appearanceVersion && p.params?.mountLayout===PANEL_RETAINER_LAYOUT)p.geom=nativePanelGeometry(this,p);
+    else delete p.geom;
     return p.side;
   }
 
@@ -1403,7 +1404,7 @@ export class BuildModel {
     this.panels.set(record.id,record);return record;
   }
 
-  panelAccessoryMounts(panelId,{screwAxis='vertical',oppositeRetainers=false}={}) {
+  panelAccessoryMounts(panelId,{screwAxis='auto',oppositeRetainers=true}={}) {
     if(screwAxis==='auto'){
       const seen=new Set();
       return ['vertical','horizontal'].flatMap(axis=>this._panelAccessoryMounts(panelId,axis,true)).filter(part=>{
@@ -1462,12 +1463,12 @@ export class BuildModel {
     const part=this.panels.get(id);
     if(!part || !supportsPanelFixing(part.panelId) || !['vertical','horizontal'].includes(screwAxis))return {valid:false,reason:'missing_support'};
     const probe={...part,params:{...part.params,screwAxis}};
-    // 显式编辑旧内嵌板时采用当前对边螺丝，加载旧存档时保持原记录。
-    if(INSET_PANEL_IDS.has(part.panelId)){
+    // 切换固定边时从原姿态重建引用，加载旧存档时保持原记录。
+    if(INSET_PANEL_IDS.has(part.panelId) || confirmedSpec(part.panelId)){
       const frame=componentFrame(this,part),spec=confirmedSpec(part.panelId) || {width:40,height:40};
       const supports=oppositeScrewSupports(this,frame,spec.width,spec.height,{screwAxis});
       if(!supports)return {valid:false,reason:'opposite_edges'};
-      probe.params.mountLayout=INSET_MOUNT_LAYOUT;
+      probe.params.mountLayout=INSET_PANEL_IDS.has(part.panelId)?INSET_MOUNT_LAYOUT:PANEL_RETAINER_LAYOUT;
       Object.assign(probe,insetPanelReference(this,frame,spec.width,spec.height,supports,{screwAxis}));
       probe.side=1;
       const normal=componentFrame(this,probe)?.axes[2];
@@ -1483,7 +1484,7 @@ export class BuildModel {
     return true;
   }
 
-  // 普通方板与半高围板使用工厂原生形状；安装前仍检查四边及固定位。
+  // 普通方板与半高围板使用工厂原生形状，保留实际固定边引用。
   addNativePanel(probe, color, { nativeGeometry = false } = {}) {
     if (!['panel_40x40', 'panel_40x20'].includes(probe?.panelId)) return null;
     const candidate = nativeGeometry ? nativePanelDiagnostics(this, { ...probe, id: undefined }) : confirmedDiagnostics(this, { ...probe, id: undefined });
@@ -1493,6 +1494,11 @@ export class BuildModel {
       t0: round(candidate.t0), len: round(candidate.len), panelId: candidate.panelId,
       color: color || probe.color || null, side: candidate.side < 0 ? -1 : 1,
     };
+    if(candidate.params?.mountLayout===PANEL_RETAINER_LAYOUT){
+      for(const key of ['params','mounts','supportTubes'])panel[key]=structuredClone(candidate[key]);
+      panel.geom=nativePanelGeometry(this,candidate);
+      if(this._panelTurnedFromQuat(panel))panel.turned=true;
+    }
     this.panels.set(panel.id, panel);
     return panel;
   }

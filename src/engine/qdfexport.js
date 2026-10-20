@@ -22,7 +22,7 @@
 // Bewusst ohne Three.js und DOM -- wie qdfimport.js in Node testbar.
 
 import { geometry, getPanel, getTube } from "./catalog.js";
-import { ACCESSORY_PACK } from './accessoryPack.js';
+import { ACCESSORY_PACK, componentFrame } from './accessoryPack.js';
 import { confirmedSpec, confirmedColor } from './componentPack.js';
 import { QDF_FEATURE_KEYS } from './qdfFeatures.js';
 import { QDF_FITTING_KINDS, QDF_SLIDE_KINDS } from './qdfimport.js';
@@ -660,7 +660,7 @@ export function buildQDF(model, opts = {}) {
   //   * Die Plattenmitte liegt exakt in der Kupplungsebene (2603 von 2604
   //     Platten, Versatz 0). Auf welcher Seite der Rohre das Teil liegt, sagt
   //     die Normale -- siehe canonicalNormal.
-  const rectLine = (name, corners, matNum, dims, side, turned = false) => {
+  const rectLine = (name, corners, matNum, dims, side, turned = false, normal = null) => {
     if (!corners) return null;
     const [A, B, C, D] = corners.map((c) => ({ x: c[0], y: c[1], z: c[2] }));
     const e1 = dirOf(A, B), e2 = dirOf(A, D);
@@ -676,7 +676,7 @@ export function buildQDF(model, opts = {}) {
     // Normale nicht aus der Ecken-Reihenfolge ableiten (die ist beliebig und
     // liess die Platte mal oben, mal unten erscheinen), sondern eindeutig
     // festlegen und mit der gespeicherten Seite multiplizieren.
-    const n = panelNormal(e1, e2, [cx, cy, cz], middle).map((v) => v * (side < 0 ? -1 : 1));
+    const n = normal || panelNormal(e1, e2, [cx, cy, cz], middle).map((v) => v * (side < 0 ? -1 : 1));
     // Rechtshaendiges Dreibein zur gewaehlten Normalen. Die lokale X-Achse sagt,
     // wo die LIPPEN der Platte liegen: laengs der Tragrohre (e1) oder quer dazu
     // (e2). Genau daran erkennt auch die Herstellersoftware eine gedrehte
@@ -722,7 +722,7 @@ export function buildQDF(model, opts = {}) {
     const rail=model._rail(p.a),fixing=p.params?.screwAxis && model._rail(p.mounts?.[0]?.tube);
     const turned=fixing && rail ? Math.abs(fixing.dir.reduce((sum,v,i)=>sum+v*rail.dir[i],0))<.999 : !!p.turned;
     const line = rectLine("panel2", model.panelCorners(p), panelMat(color, lochplatte(p)),
-      def ? [def.w, def.h] : null, p.side, turned);
+      def ? [def.w, def.h] : null, p.side, turned, p.params?.screwAxis ? componentFrame(model,p)?.axes[2] : null);
     if (line) { lines.push(line); stats.panels++; }
   }
   for (const x of (model.textiles ? model.textiles.values() : [])) {
