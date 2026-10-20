@@ -57,9 +57,12 @@
 .qb-top-toolbar .qb-tool > svg { color: currentColor; }
 .qb-top-toolbar[data-compact=true] .qb-tool { width: 44px; min-width: 44px; padding: 0; }
 .qb-top-toolbar[data-compact=true] .qb-tool > :is(span,small) { display: none; }
-.qb-top-toolbar[data-compact=true] [data-ui="tool-box-select"] > span { display:block;font-size:10px;line-height:12px }
+.qb-top-toolbar .qb-text-tool,
+.qb-top-toolbar[data-compact=true] .qb-text-tool { flex-direction:row; width:auto; min-width:62px; padding:0 9px; gap:6px; }
+.qb-top-toolbar[data-compact=true] .qb-text-tool > span { display:block; }
 .qb-toolbar-divider { width: 1px; background: #ecd6c2; margin: 8px 3px; flex-shrink: 0; align-self: stretch; }
 .qb-top-toolbar .qb-tool-key { position:absolute; top:3px; right:4px; padding:0; border:0; color:#8c8075; background:none; font-family:inherit; font-size:9px; font-weight:400; line-height:12px; pointer-events:none; }
+.qb-top-toolbar .qb-text-tool .qb-tool-key { position:static; display:flex; align-items:center; flex-shrink:0; font-size:10px; line-height:16px; }
 html .qb-top-toolbar .qb-tool, html[data-motion] .qb-top-toolbar .qb-tool:active { transform:none; box-shadow:none; transition:color .15s, background-color .15s, border-color .15s; }
 html .qb-top-toolbar .qb-tool:hover { background:#fff1e6; }
 html .qb-top-toolbar .qb-tool[data-mode-on=true] { color:#9a3412; background:#ffead8; font-weight:600; }
