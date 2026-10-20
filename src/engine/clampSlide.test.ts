@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { BuildModel } from './model.js'
 import { Builder } from './builder.js'
 import { loadCatalog } from './catalog.js'
@@ -6,6 +6,7 @@ import { ModelHistory } from '../collab/history'
 import { docFromJSON } from '../collab/ymodel'
 
 beforeAll(async () => { await loadCatalog() })
+afterEach(() => { vi.useRealTimers() })
 
 // 隔离场景投影检查手势与历史；真实射线命中另在浏览器验收。
 // JS 引擎会附加手势字段，夹具用 any 调用真实原型方法。
@@ -25,12 +26,68 @@ function fixture(axis = [1, 0, 0], screenAxis = [100, 0]) {
     renderer: { domElement: { getBoundingClientRect: () => ({ width: 1000, height: 1000 }) } } }
   Object.assign(builder, { model, scene, selection: new Map([[tube.id, 'tube']]), stepFrom: [], mode: 'select',
     refresh: vi.fn(), onNotice: vi.fn(), onHistoryChange: vi.fn(), onChange: vi.fn(),
-    _snapRadius: () => 1, _down: { x: 200, y: 200 } })
+    _snapRadius: () => 1, _pickSelect: () => ({ data: { id: tube.id, kind: 'tube' } }), _down: { x: 200, y: 200 } })
   builder.setHistory(new ModelHistory(docFromJSON(model.toJSON())))
   return { model, builder, clamp, base, tube, n0, n1 }
 }
 
 describe('双管连接旋转与沿轴平移', () => {
+  function slopedPanel() {
+    const f = fixture()
+    const a = f.model.addNode(0, 80, 45), b = f.model.addNode(40, 80, 45)
+    const foot = f.model.addTube(a.id, b.id, 'T35', 'blue', 35)!
+    f.model.addTube(f.tube.a, a.id, 'T35', 'blue', 35)
+    f.model.addTube(f.tube.b, b.id, 'T35', 'blue', 35)
+    const panel = f.model.addPanel(f.tube.id, foot.id, 0, 40, 'panel_40x40', 'green')!
+    expect(f.model.rotateClamp(f.clamp.id, Math.PI / 6)).toBe(true)
+    f.builder.selection = new Map([[panel.id, 'panel']])
+    f.builder._pickSelect = () => ({ data: { id: panel.id, kind: 'panel' } })
+    f.builder.setHistory(new ModelHistory(docFromJSON(f.model.toJSON())))
+    return { ...f, panel }
+  }
+
+  it.each(['rotate', 'slide'])('%s 模式下斜坡面板原地点击翻面，支架保持，真实历史可撤销重做', mode => {
+    vi.useFakeTimers()
+    const { model, builder, clamp, panel } = slopedPanel()
+    // 旋转手势需要随位置变化的投影。
+    builder.scene.projectWorld = (points: number[][]) => points.map(([x, y]) => ({ u: x / 100, v: y / 100 }))
+    builder.setClampAdjustmentMode(mode)
+    const before = model.toJSON()
+    const side = panel.side
+    expect(builder._beginClampDrag(clamp.id)).toBe(true)
+    builder._onUp({ clientX: 200, clientY: 200, button: 0 })
+    expect(model.toJSON()).toEqual(before)
+    vi.advanceTimersByTime(1000)
+    expect(model.panels.get(panel.id)!.side).toBe(-side)
+    const after = model.toJSON()
+    expect(after.nodes).toEqual(before.nodes)
+    expect(after.tubes).toEqual(before.tubes)
+    expect(after.clamps).toEqual(before.clamps)
+    builder.history.undo(); expect(model.toJSON()).toEqual(before)
+    expect(builder.history.canUndo()).toBe(false)
+    builder.history.redo(); expect(model.toJSON()).toEqual(after)
+    builder.history.destroy()
+  })
+
+  it('沿管平移模式下快速双击斜坡面板只选整块，取消待翻面', () => {
+    vi.useFakeTimers()
+    const { model, builder, clamp } = slopedPanel()
+    builder.setClampAdjustmentMode('slide')
+    const before = model.toJSON()
+    builder._selectConnectedFromPick = vi.fn()
+    for (let i = 0; i < 2; i++) {
+      builder._down = { x: 200, y: 200 }
+      builder._beginClampDrag(clamp.id)
+      builder._onUp({ clientX: 200, clientY: 200, button: 0 })
+      vi.advanceTimersByTime(50)
+    }
+    vi.advanceTimersByTime(1000)
+    expect(builder._selectConnectedFromPick).toHaveBeenCalledOnce()
+    expect(model.toJSON()).toEqual(before)
+    expect(builder.history.canUndo()).toBe(false)
+    builder.history.destroy()
+  })
+
   it('连续拖动保留小数位移，不分档、不吸附，并按原抓取点往返', () => {
     const { model, builder, clamp, tube } = fixture()
     builder._snapRadius = () => 30
