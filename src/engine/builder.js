@@ -21,6 +21,7 @@ import { supportsPanelFixing, panelRailScrewAxis } from './confirmedComponentMod
 import { insetPanelProbes } from './insetPanelMounts.js';
 import { installationReason, installationFacingNotice } from './installationReason.js';
 import { panelInstallationFacing } from './panelInstallationFacing.js';
+import { gymRingSupport } from './gymRingSupport.js';
 import { pickStepAnchor, stepCandidates, stepCandidatesFromSelection, stepNeighbor } from "./stepAnchor.js";
 
 // Kupplungen, die auf einem Rohr sitzen statt im Raster: QDF-Art -> Katalogteil.
@@ -374,6 +375,10 @@ export class Builder {
       return;
     }
     if (this.mode !== "fitting") return;
+    if (this.fittingKind === 'rope') {
+      if (this._countFittingPlaces() < 2) this.onNotice(installationReason(this.model, {reason:'missing_support'}), 'info');
+      return;
+    }
     const confirmedId = this.fittingPart || this.fittingKind;
     if (confirmedSpec(confirmedId)?.placement === 'fitting') {
       const mounts = this._confirmedFittingMounts?.id === confirmedId
@@ -442,6 +447,7 @@ export class Builder {
   /** Wieviele Stellen das gewaehlte Anbauteil jetzt hat -- wie _buildFittingHandles. */
   _countFittingPlaces() {
     const kind = this.fittingKind;
+    if (kind === 'rope') return this._tubeMidpoints().length;
     if (confirmedSpec(this.fittingPart || kind)?.placement === 'fitting') return this.model.confirmedMounts(this.fittingPart || kind).filter(mount => mount.valid).length;
     if (ACCESSORY_IDS.has(kind)) return this.model.accessoryMounts(kind).length;
     const cs = geometry().connectorSize;
@@ -2716,6 +2722,8 @@ export class Builder {
     // Zeiger zeigt dort eine Hand, auch wenn er den Ankerpunkt knapp verfehlt.
     this._fittingMountNodes = new Set();
     this._confirmedFittingMounts = null;
+    if (this.fittingKind === 'rope') { this._buildRopeHandles(); return; }
+    if (this.fittingKind === 'gym_rings') { this._buildGymRingHandles(); return; }
     if (confirmedSpec(this.fittingPart || this.fittingKind)?.placement === 'fitting') {
       const id = this.fittingPart || this.fittingKind, mounts = this.model.confirmedMounts(id);
       // 提示紧接本次 refresh 使用同一批诊断；下一次 refresh 会重新读取模型。
@@ -2853,6 +2861,7 @@ export class Builder {
    * wieder auf seiner Ruhelage in der Mitte.
    */
   _trackTubeHandles(x, y) {
+    if (this.fittingKind === 'gym_rings' && this.mode === 'fitting') { this._trackGymRingHandles(x,y); return; }
     if (!this._tubeHandles.size) return;
     const tp = this.scene.pickTube ? this.scene.pickTube(x, y) : null;
     const unterZeiger = tp && tp.point ? tp.data.id : null;
@@ -2861,26 +2870,144 @@ export class Builder {
       if (tubeId !== unterZeiger) {
         this.scene.moveHandle(e.mesh, e.ruhe.pos);
         this.scene.setHandleVisible(e.mesh, true);
-        if (e.art === "fitting") e.mesh.userData.fittingMount = e.ruhe;
+        if (e.art === 'rope') e.mesh.userData.ropeMount = e.ruhe;
+        else if (e.art === "fitting") e.mesh.userData.fittingMount = e.ruhe;
         else e.mesh.userData.clampTube = e.ruhe;
         continue;
       }
       const punkt = [tp.point.x, tp.point.y, tp.point.z];
-      const m = e.art === "fitting"
-        ? this.model.tubeFittingMount(tubeId, punkt, this.fittingKind, cs)
-        : e.art === "clamp"
-          ? this.model.tubeClampMount(tubeId, punkt, TUBE_CLAMP_PARTS[this.fittingKind], cs)
-          : { pos: punkt };            // Doppelrohrverbinder/Rohrklammer: ueberall
+      let m;
+      if (e.art === 'rope') m = this._ropeMountAt(tubeId, tp.point);
+      else if (e.art === 'fitting') m = this.model.tubeFittingMount(tubeId, punkt, this.fittingKind, cs);
+      else if (e.art === 'clamp') m = this.model.tubeClampMount(tubeId, punkt, TUBE_CLAMP_PARTS[this.fittingKind], cs);
+      else m = { pos: punkt }; // Doppelrohrverbinder/Rohrklammer: ueberall
       if (!m) { this.scene.setHandleVisible(e.mesh, false); continue; }
       this.scene.setHandleVisible(e.mesh, true);
       // Der Punkt laeuft MITTIG im Rohr mit: nur die Stelle entlang des Rohrs
       // wandert, nicht die Seite. Fuer den Klick zaehlt trotzdem der echte
       // Trefferpunkt -- aus ihm ergibt sich, wohin der Anschluss zeigt.
-      const aufAchse = e.art === "fitting" ? m.pos : (this.model.tubeAxisPoint(tubeId, punkt) || punkt);
+      const aufAchse = e.art === 'rope' || e.art === "fitting" ? m.pos : (this.model.tubeAxisPoint(tubeId, punkt) || punkt);
       this.scene.moveHandle(e.mesh, aufAchse);
-      if (e.art === "fitting") e.mesh.userData.fittingMount = m;
+      if (e.art === 'rope') e.mesh.userData.ropeMount = m;
+      else if (e.art === "fitting") e.mesh.userData.fittingMount = m;
       else e.mesh.userData.clampTube = { tubeId, pos: punkt, tracked: true };
     }
+  }
+
+  // 绳结与8字件共用沿管跟随的定位点；已选第一端保留方形标记。
+  _buildRopeHandles() {
+    this._ropeHoverKey = null;
+    this.scene.clearInstallationPreview?.();
+    const first = this._ropeFirst, rail = first && this.model._rail(first.tube);
+    if (first && !rail) { this._ropeFirst = null; this.installationPreview = null; }
+    if (rail) this.scene.addHandle(rail.p0.map((v, i) => v + rail.dir[i] * rail.len * first.t), { ropeFirst: true, placeNode:true }, 'place');
+    for (const midpoint of this._tubeMidpoints()) {
+      if (midpoint.tubeId === this._ropeFirst?.tube) continue;
+      const mount = this._ropeMountAt(midpoint.tubeId, {x:midpoint.pos[0],y:midpoint.pos[1],z:midpoint.pos[2]});
+      if (!mount) continue;
+      const mesh = this.scene.addHandle(mount.pos, { ropeMount: mount }, 'dir', 3.2);
+      this._tubeHandles.set(midpoint.tubeId, {mesh, art:'rope', ruhe:mount});
+    }
+  }
+
+  _ropeMountAt(tubeId, point) {
+    const rail = this.model._rail(tubeId);
+    if (!rail || !point) return null;
+    const t = Math.max(0.05, Math.min(0.95, this._alongTube(tubeId, point) / rail.len));
+    return {tube:tubeId, t, pos:rail.p0.map((v, i) => v + rail.dir[i] * rail.len * t)};
+  }
+
+  _ropePointerMount(x, y) {
+    const handle = this.scene.pickHandle(x, y);
+    if (handle?.data?.ropeFirst) return {handle, mount:null};
+    if (handle?.data?.ropeMount) return {handle, mount:handle.data.ropeMount};
+    const pick = this.scene.pickTube(x, y);
+    return {pick, mount:pick && this._ropeMountAt(pick.data.id, pick.point)};
+  }
+
+  _showRopeHover(mount) {
+    const first = this._ropeFirst;
+    const key = first && mount && first.tube !== mount.tube ? `${first.tube}:${first.t}:${mount.tube}:${mount.t}` : '';
+    if (key === this._ropeHoverKey) return;
+    this._ropeHoverKey = key;
+    if (!key) { this.scene.clearInstallationPreview?.(); return; }
+    const probe = this.model.ropeDiagnostics(first, {tube:mount.tube,t:mount.t});
+    this.scene.showInstallationPreview(this.model, probe, probe.valid);
+  }
+
+  _clickRope(e) {
+    if (this.readOnly) return;
+    // 触屏没有悬停，点击时也按同一投影更新定位点。
+    this._trackTubeHandles(e.clientX, e.clientY);
+    const {handle, mount} = this._ropePointerMount(e.clientX, e.clientY);
+    if (handle?.data?.ropeFirst) { this.cancelInstallation(); return; }
+    if (!mount) return;
+    const endpoint = {tube:mount.tube, t:mount.t};
+    if (!this._ropeFirst || this._ropeFirst.tube === endpoint.tube) {
+      this._ropeFirst = endpoint;
+      this.installationPreview = {kind:'fitting',partId:'rope',mountCount:1,supportCount:1,valid:false,reason:t('notice_rope_second'),canFlip:false,assumption:'frame-grid-unmeasured'};
+      this.scene.clearInstallationPreview?.();
+      this.onNotice(t('notice_rope_second'), 'info');
+      this.refresh();
+      return;
+    }
+    const probe = this.model.ropeDiagnostics(this._ropeFirst, endpoint);
+    if (!probe.valid) {
+      this.onNotice(installationReason(this.model, probe), 'warn');
+      this.scene.showInstallationPreview(this.model, probe, false);
+      return;
+    }
+    this._ropeFirst = null;
+    this._previewInstallation(probe, 'rope');
+  }
+
+  _buildGymRingHandles() {
+    this._gymRingHandles = [];
+    this._gymRingHoverKey = null;
+    this.scene.clearInstallationPreview?.();
+    const seen = new Set();
+    for (const tube of this.model.tubes.values()) {
+      if (seen.has(tube.id)) continue;
+      const support = gymRingSupport(this.model,tube.id);
+      if (!support) continue;
+      for (const segment of support.segments) seen.add(segment.id);
+      if (!support.ranges.length) continue;
+      const mount = this.model.accessoryDiagnostics('gym_rings',tube.id);
+      if (!mount.mounts.length) continue;
+      const mesh = this.scene.addHandle([mount.x,mount.y,mount.z],{gymRingMount:mount},'dir',3.2);
+      this._gymRingHandles.push({mesh,ruhe:mount,tubeIds:new Set(support.segments.map(segment=>segment.id))});
+    }
+  }
+
+  _trackGymRingHandles(x,y) {
+    let pick = this.scene.pickTube(x,y);
+    if (!pick) {
+      const node = this.scene.pickForDelete(x,y);
+      if (node?.data.kind === 'node') {
+        const tubeId = this.model.incidentTubeIds(node.data.id).find(id=>this._gymRingHandles.some(entry=>entry.tubeIds.has(id)));
+        if (tubeId) pick={...node,data:{kind:'tube',id:tubeId}};
+      }
+    }
+    for (const entry of this._gymRingHandles) {
+      const onTube = pick?.point && entry.tubeIds.has(pick.data.id);
+      const position = onTube ? [pick.point.x,pick.point.y,pick.point.z] : null;
+      const mount = onTube ? this.model.accessoryDiagnostics('gym_rings',pick.data.id,{position}) : entry.ruhe;
+      if (!mount.mounts.length) {this.scene.setHandleVisible(entry.mesh,false);continue;}
+      this.scene.setHandleVisible(entry.mesh,true);
+      this.scene.moveHandle(entry.mesh,[mount.x,mount.y,mount.z]);
+      entry.mesh.userData.gymRingMount=mount;
+    }
+  }
+
+  _gymRingPointerMount(x,y) {
+    this._trackGymRingHandles(x,y);
+    const handle = this.scene.pickHandle(x,y);
+    if (handle?.data?.gymRingMount) return {handle,mount:handle.data.gymRingMount};
+    const pick = this.scene.pickTube(x,y) || this.scene.pickForDelete(x,y);
+    const entry = pick && this._gymRingHandles.find(item=>item.tubeIds.has(pick.data.id) || pick.data.kind==='node' && [...item.tubeIds].some(id=>{
+      const tube=this.model.tubes.get(id);return tube.a===pick.data.id || tube.b===pick.data.id;
+    }));
+    return {pick,mount:entry?.mesh.userData.gymRingMount};
   }
 
   /** Mitte jedes echten Rohrs -- Vorschlagspunkte fuer Teile, die dort klemmen. */
@@ -3154,6 +3281,11 @@ export class Builder {
       if (e.pointerType === 'touch') return;
       this._panelHoverKey = null;
       this.scene.clearPanelPlacementPreview?.();
+      if (this.mode === 'fitting' && this.fittingKind === 'rope') this._showRopeHover(null);
+      if (this.mode === 'fitting' && this.fittingKind === 'gym_rings') {
+        this._gymRingHoverKey = null;
+        this.scene.clearInstallationPreview?.();
+      }
     });
     el.addEventListener("pointerup", (e) => {
       if (fremd(e)) return;
@@ -3396,6 +3528,20 @@ export class Builder {
         const pick = this.scene.pickForDelete(x, y);
         if (pick?.data.kind === "slide" && this.model.slides.get(pick.data.id)?.kind === "curved-slide-domestic80") obj = pick.object;
       }
+    } else if (this.mode === 'fitting' && this.fittingKind === 'gym_rings') {
+      const {handle:h,pick,mount} = this._gymRingPointerMount(x,y);
+      const key=mount ? `${mount.tube}:${mount.x}:${mount.y}:${mount.z}` : '';
+      if (key!==this._gymRingHoverKey) {
+        this._gymRingHoverKey=key;
+        if (mount) this.scene.showInstallationPreview(this.model,mount,mount.valid);
+        else this.scene.clearInstallationPreview?.();
+      }
+      obj=h?.object || (mount ? pick?.object : null);
+    } else if (this.mode === 'fitting' && this.fittingKind === 'rope') {
+      this._trackTubeHandles(x, y);
+      const {handle:h, pick, mount} = this._ropePointerMount(x, y);
+      this._showRopeHover(mount);
+      obj = h?.object || (mount ? pick?.object : null);
     } else if (this.mode === "fitting" && POOL_KINDS.has(this.fittingKind)) {
       obj = handle();
     } else if (this.mode === "fitting" && RAIL_FITTINGS.has(this.fittingKind)) {
@@ -4375,15 +4521,12 @@ export class Builder {
   }
 
   _clickFitting(e) {
-    if (this.fittingKind === 'rope') {
-      const pick = this.scene.pickForDelete(e.clientX, e.clientY);
-      if (pick?.data?.kind !== 'tube') return;
-      const rail = this.model._rail(pick.data.id); if (!rail) return;
-      const at = this._alongTube(pick.data.id, pick.point);
-      const endpoint = { tube: pick.data.id, t: Math.max(0.05, Math.min(0.95, at / rail.len)) };
-      if (!this._ropeFirst) { this._ropeFirst = endpoint; this.installationPreview = { kind:'fitting',partId:'rope',mountCount:1,supportCount:1,valid:false,reason:t('notice_rope_second'),canFlip:false,assumption:'frame-grid-unmeasured' };this.onNotice(t('notice_rope_second'), 'info'); this.refresh(); return; }
-      const first = this._ropeFirst; this._ropeFirst = null;
-      this._previewInstallation(this.model.ropeDiagnostics(first, endpoint), 'rope'); return;
+    if (this.fittingKind === 'rope') { this._clickRope(e); return; }
+    if (this.fittingKind === 'gym_rings') {
+      if (this.readOnly) return;
+      const {mount}=this._gymRingPointerMount(e.clientX,e.clientY);
+      if (mount) this._previewInstallation(mount,'gym_rings');
+      return;
     }
     if (confirmedSpec(this.fittingPart || this.fittingKind)?.placement === 'fitting') {
       const h = this.scene.pickHandle(e.clientX, e.clientY);
@@ -5078,12 +5221,13 @@ export class Builder {
   confirmInstallation() {
     const part = this._installationPart;
     if (!part || this.readOnly) return false;
-    const fresh = part.appearanceVersion === 2 ? this.model.confirmedDiagnostics(part) : part.kind ? this.model.accessoryDiagnostics(part.kind, part.tube, { facing: part.facing }) : this.model.panelAccessoryDiagnostics(part);
+    const position = part.kind==='gym_rings' ? [part.x,part.y,part.z] : undefined;
+    const fresh = part.appearanceVersion === 2 ? this.model.confirmedDiagnostics(part) : part.kind ? this.model.accessoryDiagnostics(part.kind, part.tube, { facing: part.facing, position }) : this.model.panelAccessoryDiagnostics(part);
     if (!fresh) { this.cancelInstallation(); return false; }
     if (!fresh.valid) { this._previewInstallation(fresh, part.kind || part.panelId); return false; }
     let added;
     this.recordHistory(() => {
-      added = part.appearanceVersion === 2 ? this.model.addConfirmedComponent(fresh, this.colorFor('panel')) : part.kind ? this.model.addAccessory(part.kind, part.tube, this.colorFor('panel'), { facing: part.facing })
+      added = part.appearanceVersion === 2 ? this.model.addConfirmedComponent(fresh, this.colorFor('panel')) : part.kind ? this.model.addAccessory(part.kind, fresh.tube, this.colorFor('panel'), { facing: part.facing, position })
         : this.model.addPanelAccessory(fresh,part.color || this.colorFor('panel'));
     });
     if (!added) return false;

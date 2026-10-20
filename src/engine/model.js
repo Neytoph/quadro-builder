@@ -1438,7 +1438,7 @@ export class BuildModel {
     const mount = accessoryMount(this, kind, tubeId, opts);
     if (!mount) return null;
     const f = this.addFitting(kind, ...mount.pos, { color, quat: mount.quat });
-    f.tube = tubeId;
+    f.tube = mount.tube;
     for (const key of ['mounts', 'supportTubes', 'appearanceVersion', 'params', 'facing']) f[key] = structuredClone(mount[key]);
     return f;
   }

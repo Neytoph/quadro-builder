@@ -4,6 +4,7 @@ import { confirmedCandidates, confirmedPanelDiagnostics, confirmedStructuralVali
 import { INSET_MOUNT_LAYOUT, INSET_PANEL_EDGE_INSET, hasInsetScrews, oppositeScrewSupports, insetFrameTubeIds, insetScrewVolumes, insetPanelReference } from './insetPanelMounts.js';
 import { geometry } from './catalog.js';
 import { isSoftPart } from './softParts.js';
+import { gymRingPlacement } from './gymRingSupport.js';
 
 export const ACCESSORY_PACK = [
   { id: 'steering_wheel', name: '方向盘', name_en: 'Steering wheel', name_de: 'Lenkrad', placement: 'fitting', mount: 'horizontal', diameter: 24, clampSpacing: 8, shaft: 8, width: 24, drop: 0 },
@@ -318,14 +319,18 @@ export function accessoryDiagnostics(model, kind, tubeId, opts = {}) {
   if (Math.abs(a.y - b.y) > 0.01) return invalid('horizontal_tube');
   const len = Math.hypot(...sub(point(b), point(a)));
   const spacing = spec.clampSpacing || spec.hangerSpacing || 18;
-  if (len < spacing + 12) return invalid('tube_short');
+  const saved = opts.ignoreId && model.fittings.get(opts.ignoreId);
+  const position = opts.position || (kind === 'gym_rings' && saved ? [saved.x,saved.y,saved.z] : null);
+  const ringMount = kind === 'gym_rings' ? gymRingPlacement(model,tubeId,position) : null;
+  if (kind === 'gym_rings' ? !ringMount : len < spacing + 12) return invalid('tube_short');
   if (kind !== 'steering_wheel' && a.y < spec.drop + 8) return invalid('ground_clearance');
   const x = unit(sub(point(b), point(a))), y = [0, 1, 0], z = cross(x, y);
   const facing = opts.facing < 0 ? -1 : 1;
   const quat = quatFromBasis(x.map(n => n * facing), y, z.map(n => n * facing));
-  const mounts = [-1, 1].map(side => ({ tube: tubeId, t: 0.5 + side * spacing / (2 * len), width: 2.5, role: kind === 'steering_wheel' ? 'clamp' : 'hanger' }));
-  const part = { kind, tube: tubeId, ...Object.fromEntries(['x', 'y', 'z'].map((key, i) => [key, mid(point(a), point(b))[i]])), quat,
-    mounts, supportTubes: [tubeId], appearanceVersion: APPEARANCE_VERSION, facing, params: { ...spec }, id: opts.ignoreId };
+  const mounts = ringMount?.mounts || [-1, 1].map(side => ({ tube: tubeId, t: 0.5 + side * spacing / (2 * len), width: 2.5, role: kind === 'steering_wheel' ? 'clamp' : 'hanger' }));
+  const center = ringMount?.pos || mid(point(a),point(b));
+  const part = { kind, tube: ringMount?.tube || tubeId, ...Object.fromEntries(['x', 'y', 'z'].map((key, i) => [key, center[i]])), quat,
+    mounts, supportTubes: ringMount?.supportTubes || [tubeId], appearanceVersion: APPEARANCE_VERSION, facing, params: { ...spec }, id: opts.ignoreId };
   if (kind === 'steering_wheel' && componentVolumes(model, part).some(box => {
     const lowest = box.pos[1] - box.axes.reduce((height, axis, i) => height + Math.abs(axis[1]) * box.half[i], 0);
     return model.isBelowGround(lowest);
@@ -414,7 +419,7 @@ export function componentMountsValid(model, part) {
   for (const key of ['diameter', 'clampSpacing', 'shaft', 'width', 'height', 'depth', 'drop', 'hangerSpacing']) {
     if (spec[key] != null && part.params?.[key] !== spec[key]) return false;
   }
-  const candidate = part.kind ? accessoryDiagnostics(model, part.kind, part.tube, { facing: part.facing, ignoreId: part.id }) : panelAccessoryDiagnostics(model, part);
+  const candidate = part.kind ? accessoryDiagnostics(model, part.kind, part.tube, { facing: part.facing, ignoreId: part.id, position:part.kind==='gym_rings' ? [part.x,part.y,part.z] : undefined }) : panelAccessoryDiagnostics(model, part);
   if (!candidate.mounts || candidate.mounts.length !== expected) return false;
   if (candidate.supportTubes.length !== part.supportTubes.length || candidate.supportTubes.some(id => !part.supportTubes.includes(id))) return false;
   const unmatched = candidate.mounts.slice();
