@@ -92,7 +92,7 @@ export default function TopToolbar() {
           <Svg16 inner={TOOL_ICON.select} /><span>{t('tool.select')}</span>{!narrow && <kbd className="qb-tool-key" aria-hidden="true">Esc</kbd>}
         </button>
         <button type="button" className="m-tool qb-tool" data-ui="tool-box-select" title={t('tip.boxSelect')} aria-label={t('tool.boxSelect')} aria-pressed={api.boxSelect && !collab.placingPin} data-mode-on={api.boxSelect && !collab.placingPin} onClick={() => { api.setBoxSelect(!api.boxSelect); collab.setPlacingPin(false); close() }}>
-          <Scan size={18} strokeWidth={1.7} /><span>{t('tool.boxSelect')}</span>
+          <Scan size={18} strokeWidth={1.7} /><span>{t('tool.boxSelect')}</span>{!narrow && <kbd className="qb-tool-key" aria-hidden="true">{t('keys.middleMouse')}</kbd>}
         </button>
         <div className={`contents ${locked ? 'qb-locked' : ''}`}>
           <button className="m-tool qb-tool" data-mode-on={api.mode === 'delete'} aria-pressed={api.mode === 'delete'} data-tone="red" title={t('tool.deleteHint')} aria-label={t('tool.deleteHint')} onClick={() => { api.setMode(api.mode === 'delete' ? 'select' : 'delete'); close() }}>

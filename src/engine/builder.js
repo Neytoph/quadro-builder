@@ -3050,7 +3050,7 @@ export class Builder {
       this.refresh();
     });
 
-    el.addEventListener("pointerdown", (e) => {
+    const onPointerDown = (e) => {
       const art = (e.pointerType === "touch" || e.pointerType === "pen") ? "touch" : "mouse";
       if (art !== this.inputType) { this.inputType = art; this.onInputTypeChange(); }
       if (this._pointerId !== null) { this._abortGesture(); return; }
@@ -3064,8 +3064,10 @@ export class Builder {
       this._pointerId = e.pointerId;
       this._down = {
         x: e.clientX, y: e.clientY,
+        button: e.button,
         add: e.ctrlKey || e.metaKey || e.shiftKey,
-        box: e.button === 0 && !e.altKey && this.mode === "select" && (this.boxSelect || e.ctrlKey || e.metaKey),
+        box: this.mode === "select" && !this._paste &&
+          (e.button === 1 || (e.button === 0 && !e.altKey && (this.boxSelect || e.ctrlKey || e.metaKey))),
       };
       this._boxing = false;
       this._last = { x: e.clientX, y: e.clientY };
@@ -3127,7 +3129,15 @@ export class Builder {
         const px = e.clientX, py = e.clientY;
         this._longPress = setTimeout(() => this._fireLongPress(px, py), LONG_PRESS_MS);
       }
-    });
+    };
+    // OrbitControls 先注册了中键缩放；在捕获阶段接管框选，避免相机同时移动。
+    el.addEventListener("pointerdown", (e) => {
+      if (e.button !== 1 || this.mode !== "select" || this._paste) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      onPointerDown(e);
+    }, { capture: true });
+    el.addEventListener("pointerdown", onPointerDown);
     // Zeiger, die nicht zum laufenden Zug gehoeren, bleiben aussen vor.
     const fremd = (e) => this._pointerId !== null && e.pointerId !== this._pointerId;
     el.addEventListener("pointermove", (e) => { if (!fremd(e)) this._onMove(e); });
@@ -3256,7 +3266,7 @@ export class Builder {
     }
     // Ansichtswuerfel zuerst: solange der Zeiger darueber steht, gilt nichts
     // anderes -- er liegt als Bedienelement ueber der Szene.
-    if (!(e.buttons & 1)) {
+    if (!(e.buttons & 1) && !this._down?.box) {
       const cell = this.scene.pickViewCube(e.clientX, e.clientY);
       this.scene.setViewCubeHover(cell);
       if (cell) {
@@ -3297,7 +3307,7 @@ export class Builder {
       if (dx || dy) this.scene.orbitBy(dx, dy);
       return;
     }
-    if (this._down && this._down.box && (e.buttons & 1)) {
+    if (this._down && this._down.box && (e.buttons & (this._down.button === 1 ? 4 : 1))) {
       if (this._boxing ||
           Math.hypot(e.clientX - this._down.x, e.clientY - this._down.y) > CLICK_TOLERANCE) {
         this._boxing = true;
