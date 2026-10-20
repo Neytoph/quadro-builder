@@ -725,7 +725,7 @@ export class BuildModel {
     return node;
   }
 
-  removeNode(id, { keepConnectors = false } = {}) {
+  removeNode(id) {
     const weg = this.nodes.get(id);
     if (!weg) return;
     const armNeighbors = new Set();
@@ -738,19 +738,19 @@ export class BuildModel {
       tubeNeighbors.add(t.a === id ? t.b : t.a);
       if (t.arm) armNeighbors.add(t.a === id ? t.b : t.a);
       if (t.reinforcement) this.removeReinforcement(t.id);
-      if (!keepConnectors) this._releaseArms(t);
+      this._releaseArms(t);
       this.tubes.delete(t.id);
     }
     this.nodes.delete(id);
     for (const neighborId of armNeighbors) {
       // 导入标记属于刚移除的45°件，不能再在承载接头上补画同一件。
       const neighbor = this.nodes.get(neighborId);
-      if (keepConnectors && weg.c45body && neighbor) neighbor.c45file = false;
+      if (weg.c45body && neighbor) neighbor.c45file = false;
       this._syncC45Flag(neighborId);
     }
     this._prunePanels();
     this._pruneClamps();
-    if (!keepConnectors) this._pruneOrphanedC45Bodies(tubeNeighbors);
+    this._pruneOrphanedC45Bodies(tubeNeighbors);
   }
 
   isAutomaticConnector(id) {
@@ -758,15 +758,10 @@ export class BuildModel {
     return !!node && !node.preferType && !node.part && !node.c45body;
   }
 
-  /** 精准删除连同直接相连管子移除；普通选区沿用手动配件拆卸规则。 */
-  removeConnector(id, { precise = false } = {}) {
+  /** 自动接头连管一起删；手动接头移除后按剩余连接自动匹配。 */
+  removeConnector(id) {
     const node = this.nodes.get(id);
     if (!node) return;
-    if (precise) {
-      for (const tubeId of this.incidentTubeIds(id)) this.removeTube(tubeId, { keepConnectors: true });
-      this.removeNode(id, { keepConnectors: true });
-      return;
-    }
     if (node.c45body) { this.removeC45(id); return; }
     if (this.isAutomaticConnector(id)) { this.removeNode(id); return; }
     delete node.preferType;
@@ -1017,14 +1012,14 @@ export class BuildModel {
     return null;
   }
 
-  removeTube(id, { keepConnectors = false } = {}) {
+  removeTube(id) {
     const t = this.tubes.get(id);
     if (t?.reinforcement) this.removeReinforcement(id);
-    if (t && !keepConnectors) this._releaseArms(t);
+    if (t) this._releaseArms(t);
     this.tubes.delete(id);
     this._prunePanels();
     this._pruneClamps();
-    if (!keepConnectors) this._pruneOrphanedC45Bodies();
+    this._pruneOrphanedC45Bodies();
     // 套在这根管上的软包跟着走
     for (const f of [...this.fittings.values()]) {
       if (f.tube === id) this.fittings.delete(f.id);
@@ -2778,8 +2773,9 @@ export class BuildModel {
    * @param {string} railId
    * @param {number} [tol]
    * @param {{ along: number, gap: number } | null} [size]
+   * @param {boolean} [flexible] 彩虹门按实际管间距和重叠长度安装。
    */
-  latticePartners(railId, tol = 1.5, size = null) {
+  latticePartners(railId, tol = 1.5, size = null, flexible = false) {
     const gaps = size ? [size.gap] : LATTICE_GAPS;
     const step = size ? size.along : LATTICE_STEP;
     const max = size ? size.along : LATTICE_MAX;
@@ -2796,13 +2792,13 @@ export class BuildModel {
       const along = off[0] * ra.dir[0] + off[1] * ra.dir[1] + off[2] * ra.dir[2];
       const perp = [off[0] - ra.dir[0] * along, off[1] - ra.dir[1] * along, off[2] - ra.dir[2] * along];
       const gap = Math.hypot(perp[0], perp[1], perp[2]);
-      if (!gaps.some((g) => Math.abs(g - gap) <= tol)) continue;
+      if (flexible ? gap <= 5 : !gaps.some((g) => Math.abs(g - gap) <= tol)) continue;
       const e = along + rb.len * dot;
       const lo = Math.max(0, Math.min(along, e));
       const hi = Math.min(ra.len, Math.max(along, e));
       const span = hi - lo;
-      if (span < step - tol) continue;
-      const len = Math.min(max, Math.floor((span + tol) / step) * step);
+      if (flexible ? span <= 5 : span < step - tol) continue;
+      const len = flexible ? span : Math.min(max, Math.floor((span + tol) / step) * step);
       out.push({ id: t.id, gap: round(gap), len, lo: round(lo), hi: round(hi) });
     }
     return out;
@@ -2813,14 +2809,15 @@ export class BuildModel {
    * 避免竖管对和横管对在同一面上叠两块绿。size 是固定尺寸布面的 { along, gap }。
    * @param {string} kind
    * @param {{ along: number, gap: number } | null} [size]
+   * @param {boolean} [flexible]
    */
-  railFittingMounts(kind, size = null) {
+  railFittingMounts(kind, size = null, flexible = false) {
     const out = [];
     const seenPair = new Set();
     const seenFace = new Set();
     for (const t of this.tubes.values()) {
       if (t.arm || t.link || t.bow) continue;
-      const partners = kind === "bag2" ? this.bagPartners(t.id) : this.latticePartners(t.id, 1.5, size);
+      const partners = kind === "bag2" ? this.bagPartners(t.id) : this.latticePartners(t.id, 1.5, size, flexible);
       for (const p of partners) {
         const count = Math.max(1, Math.floor((p.hi - p.lo + 0.5) / p.len));
         for (let k = 0; k < count; k++) {

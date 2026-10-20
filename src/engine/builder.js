@@ -421,7 +421,7 @@ export class Builder {
       return;
     }
     if (RAIL_FITTINGS.has(this.fittingKind)
-      && !this.model.railFittingMounts(this.fittingKind, this._railSize()).length) {
+      && !this.model.railFittingMounts(this.fittingKind, this._railSize(), this._isRainbowTextile()).length) {
       this.onNotice(t(this._railSize() ? "notice_short_textile_no_cell" : "notice_textile_no_cell"), "info");
       return;
     }
@@ -445,7 +445,7 @@ export class Builder {
     if (confirmedSpec(this.fittingPart || kind)?.placement === 'fitting') return this.model.confirmedMounts(this.fittingPart || kind).filter(mount => mount.valid).length;
     if (ACCESSORY_IDS.has(kind)) return this.model.accessoryMounts(kind).length;
     const cs = geometry().connectorSize;
-    if (RAIL_FITTINGS.has(kind)) return this.model.railFittingMounts(kind, this._railSize()).length;
+    if (RAIL_FITTINGS.has(kind)) return this.model.railFittingMounts(kind, this._railSize(), this._isRainbowTextile()).length;
     if (ROOF_KINDS.has(kind)) return this.model.roofMounts(kind).length;
     if (kind === "textil-round2") return this.model.fittingMounts(kind).length;
     if (HOLE_MASKS[kind]) return this.model.holeArmMounts(cs).length;
@@ -1173,12 +1173,12 @@ export class Builder {
     return frag ? this.startPaste(frag) : false;
   }
 
-  /** Katalog-Rohr zu einem Kupplungsabstand (Spannweite = Rohr + Kupplung). */
+  /** 泳池框架按连接件间距选普通管（间距 = 管长 + 连接件）。 */
   _tubeIdForSpan(span, cs) {
     const gesucht = span - cs;
     let best = null, bestD = Infinity;
     for (const tb of buildableTubes()) {
-      if (tb.length_cm == null || tb.shape === "curved") continue;
+      if (tb.length_cm == null || tb.shape === "curved" || tb.material === "aluminium") continue;
       const d = Math.abs(tb.length_cm - gesucht);
       if (d < bestD) { bestD = d; best = tb; }
     }
@@ -1547,7 +1547,7 @@ export class Builder {
   }
 
   /** Loescht alle ausgewaehlten Teile. Kupplungen zuletzt (nehmen Rohre mit). */
-  deleteSelection({ precise = false } = {}) {
+  deleteSelection() {
     if (!this.selection.size) return 0;
     // Ein gewaehltes Verstaerkungsprofil: nur das Profil kommt heraus, die
     // Rohre bleiben stehen. Sie sind ja nicht angeklickt worden -- sie tragen
@@ -1565,20 +1565,8 @@ export class Builder {
     // jeden Anschluss dastehen und werden dann mit weggeraeumt.
     const nachbarn = this.model.neighborNodeIds(entries.map(([id]) => id));
     this.recordHistory(() => {
-      // 保存实际绘制的插口和姿态，避免删管后按默认通型补出其他插口。
-      if (precise) for (const id of nachbarn) {
-        const node = this.model.nodes.get(id);
-        if (!node || node.part || node.c45body) continue;
-        const shape = this.scene.connectorShapeFor(id);
-        if (!shape) {
-          if (!node.arms?.length && !node.preferType && !node.c45 && !node.c45file) node.unused = true;
-          continue;
-        }
-        node.arms = shape.arms;
-        node.quat = shape.quat;
-      }
       for (const [id, kind] of entries) {
-        if (kind === "tube") this.model.removeTube(id, { keepConnectors: precise });
+        if (kind === "tube") this.model.removeTube(id);
         else if (kind === "panel") this.model.removePanel(id);
         else if (kind === "textile") this.model.removeTextile(id);
         else if (kind === "slide") this.model.removeSlide(id);
@@ -1591,10 +1579,10 @@ export class Builder {
       }
       for (const [id, kind] of entries) {
         if (kind !== "node") continue;
-        this.model.removeConnector(id, { precise });
+        this.model.removeConnector(id);
       }
       for (const [id] of entries) nachbarn.delete(id);
-      if (!precise) this.model.removeEmptyNodes(nachbarn);
+      this.model.removeEmptyNodes(nachbarn);
     });
     if (this.selectedNodeId && !this.model.nodes.has(this.selectedNodeId)) this.selectedNodeId = null;
     const n = entries.length;
@@ -4566,7 +4554,11 @@ export class Builder {
   _railPartners(railId) {
     return this.fittingKind === "bag2"
       ? this.model.bagPartners(railId)
-      : this.model.latticePartners(railId, 1.5, this._railSize());   // Netz und Textil: gleiche Regel
+      : this.model.latticePartners(railId, 1.5, this._railSize(), this._isRainbowTextile());
+  }
+
+  _isRainbowTextile() {
+    return this.fittingKind === "textil2" && getPartById(this.fittingPart)?.variant === "rainbow";
   }
 
   /** Gewaehltes Tuch fester Groesse: { along, gap } aus dem Katalog, sonst null. */
@@ -5283,20 +5275,21 @@ export class Builder {
   }
 
   /**
-   * 精准删除：管子单独删除，连接件连同直接相连管子删除，保留另一端连接件。
+   * 点击零件删除，连接件按剩余接口自动匹配并清理空节点。
    * 加固条与铰链仍按独立零件处理，点击空白不操作。
    */
   _clickDelete(e) {
     const pick = this.scene.pickForDelete(e.clientX, e.clientY);
     if (!pick) return;
     this._fillSelectionFromPick(pick);
-    this.deleteSelection({ precise: true });
+    this.deleteSelection();
   }
 
   /** 删除模式下：指到接头时，把会一起删掉的管子也标出来。 */
   _deleteHoverExtras(pick) {
     if (this.mode !== "delete" || !pick || pick.data.kind !== "node") return null;
     if (pick.data.hinge != null) return null;
+    if (!this.model.isAutomaticConnector(pick.data.id)) return null;
     const ids = this.model.incidentTubeIds(pick.data.id);
     return ids.length ? ids : null;
   }
