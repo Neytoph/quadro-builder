@@ -1173,12 +1173,12 @@ export class Builder {
     return frag ? this.startPaste(frag) : false;
   }
 
-  /** Katalog-Rohr zu einem Kupplungsabstand (Spannweite = Rohr + Kupplung). */
+  /** 泳池框架按连接件间距选普通管（间距 = 管长 + 连接件）。 */
   _tubeIdForSpan(span, cs) {
     const gesucht = span - cs;
     let best = null, bestD = Infinity;
     for (const tb of buildableTubes()) {
-      if (tb.length_cm == null || tb.shape === "curved") continue;
+      if (tb.length_cm == null || tb.shape === "curved" || tb.material === "aluminium") continue;
       const d = Math.abs(tb.length_cm - gesucht);
       if (d < bestD) { bestD = d; best = tb; }
     }
