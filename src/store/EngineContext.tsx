@@ -1764,7 +1764,11 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       const data=structuredClone(exportTab(tab)),generation=tab.editGeneration||0
       const binding={id:tab.libraryId,owner:tab.libraryOwner,revision:tab.libraryRevision}
       let stats
-      try{stats=await libraryStatsQueue.compute(binding.id,data)}catch(error){console.warn('[library stats]',error);notify(t('sync.localFailed'),'err');return null}
+      // 个人保存的统计由详情按实际内容计算，保存只等待模型写入回执。
+      // 分享内容仍需同步更新公开尺寸和手册步数。
+      if(slotAccess(null,binding.id)?.kind!=='save'){
+        try{stats=await libraryStatsQueue.compute(binding.id,data)}catch(error){console.warn('[library stats]',error);notify(t('sync.localFailed'),'err');return null}
+      }
       let res:Response
       try{res=await fetch('/quadro/library/'+encodeURIComponent(binding.id)+'/native',{method:'PUT',credentials:'include',headers:{'Content-Type':'application/json','X-Builder-User-ID':binding.owner||''},body:JSON.stringify({name:name||tab.name,data,parts:partsOfData(data),stats,revision:binding.revision})})}
       catch(error){console.warn('[library save]',error);notify(t('sync.failed'),'err');return null}
