@@ -77,6 +77,8 @@ describe('双管连接旋转与沿轴平移', () => {
     expect(builder.slideSelectedClampBy(5)).toBe(true)
     const before = model.nodes.get(tube.a)!.x
     expect(builder.setClampAdjustmentMode('rotate')).toBe(true)
+    // 旋转切线需要有位置变化的投影；平移夹具的固定两点只用于标定沿轴距离。
+    builder.scene.projectWorld = (points: number[][]) => points.map(([x, y]) => ({ u: x / 100, v: y / 100 }))
     builder._beginClampDrag(clamp.id)
     builder._updateClampDrag({ clientX: 200, clientY: 230, shiftKey: true })
     builder._endClampDrag({})
