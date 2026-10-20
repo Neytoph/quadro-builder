@@ -3926,17 +3926,16 @@ export class Builder {
       origin: joint ? joint.origin.slice() : [c.x, c.y, c.z],
       axis: (joint ? joint.axis : c.dir).slice(),
       startOff: (joint ? joint.dir : c.off).slice(),
+      angle: 0,
+      appliedAngle: 0,
       moved: false,
     };
     const d = this._clampDrag;
     if (this._down) {
+      d.pointer = { ...this._down };
       d.pointerDir = this._clampPointerDir(this._down.x, this._down.y, d);
       if (!d.pointerDir) {
-        const points = this.scene.projectWorld([d.origin, d.origin.map((v, i) => v + d.axis[i] * 10)]);
-        const rect = this.scene.renderer.domElement.getBoundingClientRect();
-        const dx = (points[1].u - points[0].u) * rect.width, dy = (points[1].v - points[0].v) * rect.height;
-        const length = Math.hypot(dx, dy);
-        d.screenPerp = length > 1 ? [-dy / length, dx / length] : [0, 1];
+        d.screenTangent = this._clampScreenTangent(d);
       }
     }
     this.scene.setCursor("grabbing");
@@ -3950,6 +3949,20 @@ export class Builder {
     const q = new Vector3(hit.x, hit.y, hit.z).sub(new Vector3(...d.origin));
     q.addScaledVector(u, -q.dot(u));
     return q.length() >= 0.4 ? q.normalize() : null;
+  }
+
+  _clampScreenTangent(d) {
+    const axis = new Vector3(...d.axis).normalize();
+    const radial = new Vector3(...d.startOff).normalize().applyAxisAngle(axis, d.appliedAngle).multiplyScalar(10);
+    const origin = new Vector3(...d.origin);
+    const points = this.scene.projectWorld([-0.005, 0.005].map(angle =>
+      radial.clone().applyAxisAngle(axis, angle).add(origin).toArray()));
+    if (points.some(point => !point)) return null;
+    const rect = this.scene.renderer.domElement.getBoundingClientRect();
+    const dx = (points[1].u - points[0].u) * rect.width;
+    const dy = (points[1].v - points[0].v) * rect.height;
+    const length = Math.hypot(dx, dy);
+    return length > 1e-3 ? [dx / length, dy / length] : null;
   }
 
   _snapDirAroundAxis(dir, u, stepRad) {
@@ -3978,17 +3991,19 @@ export class Builder {
     const ul = Math.hypot(u[0], u[1], u[2]) || 1;
     const ux = u[0] / ul, uy = u[1] / ul, uz = u[2] / ul;
     const axis = new Vector3(ux, uy, uz);
-    let angle;
     if (d.pointerDir) {
       const pointer = this._clampPointerDir(e.clientX, e.clientY, d);
       if (!pointer) return;
-      angle = Math.atan2(axis.dot(new Vector3().crossVectors(d.pointerDir, pointer)), d.pointerDir.dot(pointer));
+      d.angle += Math.atan2(axis.dot(new Vector3().crossVectors(d.pointerDir, pointer)), d.pointerDir.dot(pointer));
+      d.pointerDir = pointer;
     } else {
-      // 从侧面看转轴时射线无法稳定落在旋转平面，按屏幕垂直于转轴的拖动连续换角。
-      const dx = e.clientX - this._down.x, dy = e.clientY - this._down.y;
-      angle = (dx * d.screenPerp[0] + dy * d.screenPerp[1]) * Math.PI / 180;
+      // 侧视时用活动侧的实际旋转切线确定方向，轴向或视角改变也保持跟手。
+      const dx = e.clientX - d.pointer.x, dy = e.clientY - d.pointer.y;
+      d.pointer = { x: e.clientX, y: e.clientY };
+      if (!d.screenTangent) return;
+      d.angle += (dx * d.screenTangent[0] + dy * d.screenTangent[1]) * Math.PI / 180;
     }
-    let q = new Vector3(...d.startOff).normalize().applyAxisAngle(axis, angle).toArray();
+    let q = new Vector3(...d.startOff).normalize().applyAxisAngle(axis, d.angle).toArray();
     if (e.shiftKey) q = this._snapDirAroundAxis(q, [ux, uy, uz], Math.PI / 12);
     this.model.loadJSON(JSON.parse(d.before));
     const apply = dir => {
@@ -4000,7 +4015,14 @@ export class Builder {
     };
     const ok = apply(q);
     if (!ok && d.lastDir) apply(d.lastDir);
-    else if (ok) d.lastDir = q;
+    if (ok) {
+      d.lastDir = q;
+      const from = new Vector3(...d.startOff).normalize(), to = new Vector3(...q).normalize();
+      d.appliedAngle = Math.atan2(axis.dot(new Vector3().crossVectors(from, to)), from.dot(to));
+    } else {
+      // 丢弃越界位移，下一次回拖直接从最后有效姿态开始。
+      d.angle = d.appliedAngle;
+    }
     this.refresh();
     if (!ok) { this.onNotice(t('notice_joint_limit'), 'warn'); return; }
     const c = d.joint ? { off: d.lastDir || d.startOff } : this.model.clamps.get(d.id);
