@@ -4135,6 +4135,7 @@ export class SceneManager {
     // nicht die Sehne zum Gegenknoten -- sonst gilt ein belegter Arm faelschlich
     // als frei.
     const tubeDirsAt = new Map();
+    const c45CarrierNodes = new Set();
     const pushDir = (nodeId, vx, vy, vz, bow) => {
       const L = Math.hypot(vx, vy, vz);
       if (L < 1e-6) return;
@@ -4218,6 +4219,7 @@ export class SceneManager {
           const ax = m.indexOf(Math.max(m[0], m[1], m[2]));
           const o = [0, 0, 0]; o[ax] = Math.sign(d[ax]) || 1; return o; };
         const koerper = na.c45body ? na : nb.c45body ? nb : null;
+        if (koerper) c45CarrierNodes.add(koerper === na ? nb.id : na.id);
         const achse = koerper && koerper.c45axis;
         const ab = achse
           ? (koerper === nb ? achse.slice() : [-achse[0], -achse[1], -achse[2]])
@@ -4354,13 +4356,13 @@ export class SceneManager {
       // Wo eine Radkappe sitzt, gibt es keine Kupplung mehr -- die Kappe
       // schliesst das Rohrende selbst ab. Der Flexikupplungs-Bolzen ersetzt sie
       // ebenfalls: er steckt selbst im Rohrende.
-      if (!n.c45body && !isHolePart(n.part) && !isBoltPart(n.part)
+      const connection = resolveNodeConnection(model, n);
+      // 空套筒和自由管端只保留逻辑锚点；独立45°件仍在下方按真实外形绘制。
+      const hasOrdinaryConnector = connection.types.some(type => type && type !== 'diagonal' && type !== 'end')
+        || n.preferType || n.part || n.bearingOn;
+      if (hasOrdinaryConnector && !n.c45body && !isHolePart(n.part) && !isBoltPart(n.part)
           && !(model.hasWheelCap && model.hasWheelCap(n))) {
         const pos = new THREE.Vector3(n.x, n.y, n.z);
-        const connection = resolveNodeConnection(model, n);
-        // 虚拟双管连杆保留图关系；自由管端没有实际接头。
-        if (!connection.types.length && !n.preferType && !n.arms?.length
-            && !n.part && !n.c45 && !n.bearingOn) continue;
         const quat = connection.quat ? new THREE.Quaternion(...connection.quat).normalize()
           : connection.frame ? new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(...connection.frame.map(axis => new THREE.Vector3(...axis))))
           : new THREE.Quaternion();
@@ -4393,7 +4395,8 @@ export class SceneManager {
       // KARDINALEN Arm der Basiskupplung gesteckt, davon zweigt ein 45°-Arm ab,
       // der in die Tube greift.
       const fileC45 = hasStandaloneFileC45(model, n);
-      if ((n.c45 || fileC45) && st !== "future") {
+      // 有独立本体时由本体绘制一次；承载接头不再叠加旧版斜角外形和错误拾取身份。
+      if ((n.c45body || fileC45 || (n.c45 && !c45CarrierNodes.has(n.id))) && st !== "future") {
         // Im Aufbau bleicht der Adapter genau wie die uebrigen fertigen Teile
         // aus -- sonst steht die 45-Grad-Kupplung als einziges Stueck kraeftig
         // schwarz im schon Gebauten.

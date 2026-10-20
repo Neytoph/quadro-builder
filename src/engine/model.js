@@ -760,6 +760,9 @@ export class BuildModel {
     if (node.c45body) { this.removeC45(id); return; }
     if (this.isAutomaticConnector(id)) { this.removeNode(id); return; }
     delete node.preferType;
+    // 手动接头的插臂随实体移除，锚点继续按实际连接匹配。
+    delete node.arms;
+    delete node.armDirs;
     if (node.part) {
       for (const key of ["part", "partMask", "partQuat", "clampOn", "stub", "hinges", "boltDeep"]) delete node[key];
     }
@@ -1071,17 +1074,19 @@ export class BuildModel {
     return out;
   }
 
-  // Verwaiste c45body-Knoten entfernen: Adapter-Koerper ohne Diagonalrohr
-  // (nur noch per Arm-Kante mit der Eck-Kupplung verbunden) werden geloescht.
+  // 已装在承载接头上的45°件可独立保留；只清理失去承载连接的残留节点。
   _pruneOrphanedC45Bodies(ids = null) {
     const armNeighbors = new Set();
     for (const n of [...this.nodes.values()]) {
       if (!n.c45body) continue;
       if (ids && !ids.has(n.id)) continue;
-      let hasNonArmTube = false;
+      let hasNonArmTube = false, hasArm = false;
       for (const t of this.tubes.values()) {
-        if ((t.a === n.id || t.b === n.id) && !t.arm && !t.link) { hasNonArmTube = true; break; }
+        if (t.a !== n.id && t.b !== n.id) continue;
+        if (t.arm) hasArm = true;
+        else if (!t.link) hasNonArmTube = true;
       }
+      if (hasArm) continue;
       if (!hasNonArmTube) {
         for (const t of [...this.tubes.values()]) {
           if (t.a !== n.id && t.b !== n.id) continue;
@@ -1090,6 +1095,8 @@ export class BuildModel {
           this.tubes.delete(t.id);
         }
         this.nodes.delete(n.id);
+      } else {
+        this._syncC45Flag(n.id);
       }
     }
     // 转接头移除后同步承载接头，避免继续绘制已不存在的斜向管头。
@@ -5129,13 +5136,27 @@ export class BuildModel {
    */
   _syncC45Flag(id) {
     const n = this.nodes.get(id);
-    if (!n || n.c45body) return;
+    if (!n) return;
     let has = false;
     for (const t of this.tubes.values()) {
       if (t.arm && (t.a === id || t.b === id)) { has = true; break; }
     }
+    // 套筒侧接头被删除后，留下的斜管端恢复为空管口。
+    if (n.c45body) {
+      if (!has) this._clearC45Body(n);
+      return;
+    }
     n.c45 = has;
     if (!has) n.c45axis = null;
+  }
+
+  _clearC45Body(node) {
+    node.c45 = false;
+    node.c45body = false;
+    node.c45axis = null;
+    node.c45quat = null;
+    node.c45file = false;
+    node.ownConnector = false;
   }
 
   _applyOffset(tg, dx, dy, dz) {
@@ -5928,6 +5949,18 @@ export class BuildModel {
           return [0, 1, 2].map((i) => axes[0][i] * v[0] + axes[1][i] * v[1] + axes[2][i] * v[2]);
         });
     }
+    if (!ports && !node.c45body) {
+      let carriesC45 = false, hasTube = false;
+      for (const tube of this.tubes.values()) {
+        if (tube.link) continue;
+        const otherId = tube.a === node.id ? tube.b : tube.b === node.id ? tube.a : null;
+        if (!otherId) continue;
+        if (tube.arm && this.nodes.get(otherId)?.c45body) carriesC45 = true;
+        else if (!tube.arm) hasTube = true;
+      }
+      // 已接管的45°承载接头只使用现有空插口；需要其他方向时先明确更换普通通型。
+      if (carriesC45 && hasTube) ports = node.arms || [];
+    }
     const length = Math.hypot(...dir);
     if (!length) return false;
     const unit = dir.map((v) => v / length);
@@ -6172,12 +6205,7 @@ export class BuildModel {
       this._releaseArms(t);
       this.tubes.delete(t.id);
     }
-    body.c45 = false;
-    body.c45body = false;
-    body.c45axis = null;
-    body.c45quat = null;
-    body.c45file = false;
-    body.ownConnector = false;
+    this._clearC45Body(body);
     if (baseId) this._syncC45Flag(baseId);
     // Knoten, die nun nichts mehr halten, verschwinden -- ein Wuerfel ohne
     // Rohr steht sonst allein in der Luft.
@@ -6832,6 +6860,18 @@ export class BuildModel {
       maxSeq = Math.max(maxSeq, parseSeq(g.id));
     }
     this._pruneGroups();
+    // 兼容旧存档中已拆掉套筒连接、仍残留45°件标记的管端。
+    for (const node of this.nodes.values()) if (node.c45body) this._syncC45Flag(node.id);
+    // 旧版本删除弯头会在空套筒锚点留下一根插臂；它不代表实际连接件。
+    for (const node of this.nodes.values()) {
+      if (node.preferType || node.part || node.arms?.length !== 1) continue;
+      const edges = [...this.tubes.values()].filter(tube => tube.a === node.id || tube.b === node.id);
+      if (edges.length !== 1 || !edges[0].arm) continue;
+      const edge = edges[0], other = this.nodes.get(edge.a === node.id ? edge.b : edge.a);
+      if (!other?.c45body) continue;
+      delete node.arms;
+      delete node.armDirs;
+    }
     this._seq = maxSeq + 1;
     return { ok: true };
   }

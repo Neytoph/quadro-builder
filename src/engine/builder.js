@@ -811,6 +811,9 @@ export class Builder {
     if (this.selection.size === 1) {
       const [id, kind] = [...this.selection][0];
       const node = kind === "node" ? this.model.nodes.get(id) : null;
+      // 斜角件绕已连接的一侧调整，避免整体选区旋转拆开管子。
+      const c45 = node && (node.c45body ? node : this._c45BodyAt(id));
+      if (c45) { this._cancelSelectFlip(); return this._turnC45(c45.id, steps); }
       if (node && !node.part && !node.c45body && !node.bearingOn && !node.stub) return this._rotateConnector(node, steps);
     }
     const driver = this._selectedClampDriver();
@@ -968,12 +971,12 @@ export class Builder {
     return !!res?.node;
   }
 
-  _turnC45(id) {
-    if (this.readOnly || !this.model.nodes.get(id)?.c45body) return false;
+  _turnC45(id, steps = 1) {
+    if (this.readOnly || !Number.isInteger(steps) || !steps || !this.model.nodes.get(id)?.c45body) return false;
     const sleeve = this._c45HasTube(id);
     let ok = false;
     this.recordHistory(() => {
-      ok = this._rotateWithDirection(`c45:${id}`, 1, (direction) => sleeve
+      ok = this._rotateWithDirection(`c45:${id}`, steps, (direction) => sleeve
         ? this.model.rotateC45Sleeve(id, direction)
         : this.model.rotateC45(id, direction));
     });
@@ -2123,16 +2126,15 @@ export class Builder {
     return n;
   }
 
-  /** 真实管子占用的世界轴 bit；斜管无法套普通通型。 */
+  /** 管子及45°套筒占用的世界轴 bit；斜管无法直接套普通通型。 */
   _worldOccupiedBits(node) {
     let bits = 0;
     for (const t of this.model.tubes.values()) {
-      if (t.arm || t.link) continue;
+      if (t.link) continue;
       const other = t.a === node.id ? this.model.nodes.get(t.b)
         : t.b === node.id ? this.model.nodes.get(t.a) : null;
       if (!other) continue;
-      const dx = other.x - node.x, dy = other.y - node.y, dz = other.z - node.z;
-      const bit = this._axisBit(dx, dy, dz);
+      const bit = this._axisBit(...this.model._tubeDirAt(t, node, other));
       if (!bit) return null;
       bits |= bit;
     }
@@ -2512,7 +2514,10 @@ export class Builder {
       : [...this.model.nodes.values()];
     for (const node of nodes) {
       if (node.unused || node.c45body || node.part) continue;
-      for (const m of this._c45MountsFor(node)) {
+      const tubeDir = this.model.c45TubeDir(node);
+      // 裸管口直接插入45°件；先装普通接头后才提供其外侧插臂，避免同心安装点混淆。
+      const bareEnd = tubeDir && !node.preferType && !node.arms?.length;
+      for (const m of bareEnd ? [] : this._c45MountsFor(node)) {
         this.scene.addHandle(
           [node.x, node.y, node.z],
           { c45mount: true, nodeId: node.id, axis: m.axis, dir: m.dir, arrowDir: m.axis }, "dir");
@@ -2521,7 +2526,7 @@ export class Builder {
       // Dummy-Kupplung (ein Rohr, sonst nichts) sitzt der Punkt deshalb MITTIG
       // auf ihr. Gesetzt tritt die Winkelkupplung an ihre Stelle, und am
       // anderen Ende der Huelse entsteht eine neue Dummy-Kupplung.
-      const achsen = this.model.c45SleeveAxes(this.model.c45TubeDir(node));
+      const achsen = this.model.c45SleeveAxes(tubeDir);
       if (achsen.length) {
         // Er sitzt MITTEN auf der Dummy-Kupplung und ist etwas groesser: die
         // Punkte weiter aussen setzen die Winkelkupplung auf einen Stutzen,
