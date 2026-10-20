@@ -640,6 +640,7 @@ export class SceneManager {
     this._hoverPartKind = null;
     this._hoverPartHinge = null;
     this._hoverPartProfile = false;
+    this._solidSelectedParts = null;
     this._hoverMat = new THREE.Matrix4();
     this._panning = false;
 
@@ -4068,6 +4069,7 @@ export class SceneManager {
     // die Cursor-Auswahl waere das stoerend: dort waehlt man staendig etwas an.
     const selected = opts.selected && opts.selected.size ? opts.selected : null;
     const highlight = opts.highlight && opts.highlight.size ? opts.highlight : null;
+    this._solidSelectedParts = selected && !highlight ? opts.solidSelected : null;
     const focusId = opts.focusId != null ? opts.focusId : null;
     // Beides zugleich ist der Normalfall: etwas ist im Modell gewaehlt UND in
     // der Liste wird eine Zeile angeklickt. Dann gilt die ZEILE -- die Auswahl
@@ -6346,6 +6348,7 @@ export class SceneManager {
     const ids = new Set([id, ...(extraIds || [])]);
     const matches = data => {
       if (!data || !ids.has(data.id)) return false;
+      if (this._hoverPartMode === 'select' && this._isSolidSelectedPart(data)) return false;
       if (data.id !== id) return true;
       if (this._hoverPartKind && data.kind !== this._hoverPartKind) return false;
       if (data.kind === 'tube' && !!data.tubes?.length !== this._hoverPartProfile) return false;
@@ -6442,6 +6445,7 @@ export class SceneManager {
         const key = data.hinge != null ? hingeKey(rec.id, data.hinge) : rec.id;
         const kind = data.hinge != null ? 'hinge' : partKey.split(':')[0];
         if (!selected.has(key) || (selected instanceof Map && selected.get(key) !== kind)) continue;
+        if (this._isSolidSelectedPart(data)) continue;
         if (kind === 'tube' && !!data.tubes?.length !== !!profileSelection) continue;
         const world = this._pieceWorld(piece, new THREE.Matrix4()).premultiply(inverse);
         pieces.push({ piece, key, world, size: this._partOutlineSize(piece.obj.geometry, world) });
@@ -6457,6 +6461,12 @@ export class SceneManager {
         this._clipMaterial(line.material);
       }
     }
+  }
+
+  // 框选配件已经整件着橙色，选择及悬停不再叠加亮色轮廓。
+  _isSolidSelectedPart(data) {
+    return this._solidSelectedParts?.get(data.id) === data.kind ||
+      data.hinge != null && this._solidSelectedParts?.get(hingeKey(data.id, data.hinge)) === 'hinge';
   }
 
   // --- 动效 ----------------------------------------------------------------
