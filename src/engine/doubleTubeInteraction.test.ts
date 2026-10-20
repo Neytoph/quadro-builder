@@ -192,7 +192,9 @@ describe('已选双管夹绕管旋转', () => {
     expect(model.clamps.get(clamp.id)!.off).toEqual([0, 5, 0])
     builder._endClampDrag({ clientX: 10, clientY: 0 })
     scene.pointOnPlane = () => null
-    scene.projectWorld = () => [{ u: 0.2, v: 0.5 }, { u: 0.8, v: 0.5 }]
+    scene.camera = new THREE.PerspectiveCamera(45, 1.25, 0.1, 1000)
+    scene.camera.position.set(30, 120, 100)
+    scene.camera.lookAt(30, 40, 0)
     scene.renderer = { domElement: { getBoundingClientRect: () => ({ width: 1000, height: 800 }) } }
     builder._down = { x: 0, y: 0 }
     builder._beginClampDrag(clamp.id)
