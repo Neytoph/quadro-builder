@@ -88,20 +88,22 @@ export default function TopToolbar() {
           <button disabled={!api.canRedo} onClick={api.redo} title={t('hint.redo')} aria-label={t('hint.redo')} className="qb-tool qb-history-tool"><Svg16 inner={TOOL_ICON.redo} /><span>{t('tool.redo')}</span></button>
         </div>
         {sep}
-        <button className="m-tool qb-tool qb-text-tool" data-ui="tool-select" title={narrow ? t('tool.select') : `${t('tool.select')} · Esc · ${t('keys.toggleTool')} (Space)`} aria-label={t('tool.select')} aria-pressed={api.mode === 'select' && !api.boxSelect && !collab.placingPin} data-mode-on={api.mode === 'select' && !api.boxSelect && !collab.placingPin} onClick={() => { api.setMode('select'); collab.setPlacingPin(false); close() }}>
-          <span>{t('tool.select')}</span><kbd className="qb-tool-key" aria-hidden="true">Esc</kbd>
-        </button>
-        <button type="button" className="m-tool qb-tool qb-text-tool" data-ui="tool-box-select" title={t('tip.boxSelect')} aria-label={t('tool.boxSelect')} aria-pressed={api.boxSelect && !collab.placingPin} data-mode-on={api.boxSelect && !collab.placingPin} onClick={() => { api.setBoxSelect(!api.boxSelect); collab.setPlacingPin(false); close() }}>
-          <span>{t('tool.boxSelect')}</span><kbd className="qb-tool-key" aria-hidden="true" title={t('keys.middleMouse')}>
-            <svg width="14" height="20" viewBox="0 0 16 22" fill="none">
-              <rect x="2.5" y="1.5" width="11" height="19" rx="5.5" stroke="currentColor" strokeWidth="1.3" />
-              <path d="M8 1.5V4M2.5 9H5.5M10.5 9H13.5" stroke="currentColor" strokeWidth="1.1" />
-              <rect x="6.25" y="4" width="3.5" height="6" rx="1.75" fill="#ea580c" />
-            </svg>
-          </kbd>
-        </button>
+        <div className="qb-mode-group" role="group" aria-label={t('tool.select')}>
+          <button className="m-tool qb-tool qb-text-tool" data-ui="tool-select" title={narrow ? t('tool.select') : `${t('tool.select')} · Esc · ${t('keys.toggleTool')} (Space)`} aria-label={t('tool.select')} aria-pressed={api.mode === 'select' && !api.boxSelect && !collab.placingPin} data-mode-on={api.mode === 'select' && !api.boxSelect && !collab.placingPin} onClick={() => { api.setMode('select'); collab.setPlacingPin(false); close() }}>
+            <span>{t('tool.select')}</span><kbd className="qb-tool-key" aria-hidden="true">Esc</kbd>
+          </button>
+          <button type="button" className="m-tool qb-tool qb-text-tool" data-ui="tool-box-select" title={t('tip.boxSelect')} aria-label={t('tool.boxSelect')} aria-pressed={api.boxSelect && !collab.placingPin} data-mode-on={api.boxSelect && !collab.placingPin} onClick={() => { api.setBoxSelect(!api.boxSelect); collab.setPlacingPin(false); close() }}>
+            <span>{t('tool.boxSelect')}</span><kbd className="qb-tool-key" aria-hidden="true" title={t('keys.middleMouse')}>
+              <svg width="12" height="17" viewBox="0 0 16 22" fill="none">
+                <rect x="2.5" y="1.5" width="11" height="19" rx="5.5" stroke="currentColor" strokeWidth="1.3" />
+                <path d="M8 1.5V4M2.5 9H5.5M10.5 9H13.5" stroke="currentColor" strokeWidth="1.1" />
+                <rect x="6.25" y="4" width="3.5" height="6" rx="1.75" fill="#ea580c" />
+              </svg>
+            </kbd>
+          </button>
+        </div>
         <div className={`contents ${locked ? 'qb-locked' : ''}`}>
-          <button className="m-tool qb-tool qb-text-tool" data-mode-on={api.mode === 'delete'} aria-pressed={api.mode === 'delete'} data-tone="red" title={t('tool.deleteHint')} aria-label={t('tool.deleteHint')} onClick={() => { api.setMode(api.mode === 'delete' ? 'select' : 'delete'); close() }}>
+          <button className="m-tool qb-tool qb-text-tool qb-delete-tool" data-mode-on={api.mode === 'delete'} aria-pressed={api.mode === 'delete'} data-tone="red" title={t('tool.deleteHint')} aria-label={t('tool.deleteHint')} onClick={() => { api.setMode(api.mode === 'delete' ? 'select' : 'delete'); close() }}>
             <span>{t('tool.delete')}</span><kbd className="qb-tool-key" aria-hidden="true">D</kbd>
           </button>
           {sep}
