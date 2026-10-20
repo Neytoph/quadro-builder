@@ -2773,8 +2773,9 @@ export class BuildModel {
    * @param {string} railId
    * @param {number} [tol]
    * @param {{ along: number, gap: number } | null} [size]
+   * @param {boolean} [flexible] 彩虹门按实际管间距和重叠长度安装。
    */
-  latticePartners(railId, tol = 1.5, size = null) {
+  latticePartners(railId, tol = 1.5, size = null, flexible = false) {
     const gaps = size ? [size.gap] : LATTICE_GAPS;
     const step = size ? size.along : LATTICE_STEP;
     const max = size ? size.along : LATTICE_MAX;
@@ -2791,13 +2792,13 @@ export class BuildModel {
       const along = off[0] * ra.dir[0] + off[1] * ra.dir[1] + off[2] * ra.dir[2];
       const perp = [off[0] - ra.dir[0] * along, off[1] - ra.dir[1] * along, off[2] - ra.dir[2] * along];
       const gap = Math.hypot(perp[0], perp[1], perp[2]);
-      if (!gaps.some((g) => Math.abs(g - gap) <= tol)) continue;
+      if (flexible ? gap <= 5 : !gaps.some((g) => Math.abs(g - gap) <= tol)) continue;
       const e = along + rb.len * dot;
       const lo = Math.max(0, Math.min(along, e));
       const hi = Math.min(ra.len, Math.max(along, e));
       const span = hi - lo;
-      if (span < step - tol) continue;
-      const len = Math.min(max, Math.floor((span + tol) / step) * step);
+      if (flexible ? span <= 5 : span < step - tol) continue;
+      const len = flexible ? span : Math.min(max, Math.floor((span + tol) / step) * step);
       out.push({ id: t.id, gap: round(gap), len, lo: round(lo), hi: round(hi) });
     }
     return out;
@@ -2808,14 +2809,15 @@ export class BuildModel {
    * 避免竖管对和横管对在同一面上叠两块绿。size 是固定尺寸布面的 { along, gap }。
    * @param {string} kind
    * @param {{ along: number, gap: number } | null} [size]
+   * @param {boolean} [flexible]
    */
-  railFittingMounts(kind, size = null) {
+  railFittingMounts(kind, size = null, flexible = false) {
     const out = [];
     const seenPair = new Set();
     const seenFace = new Set();
     for (const t of this.tubes.values()) {
       if (t.arm || t.link || t.bow) continue;
-      const partners = kind === "bag2" ? this.bagPartners(t.id) : this.latticePartners(t.id, 1.5, size);
+      const partners = kind === "bag2" ? this.bagPartners(t.id) : this.latticePartners(t.id, 1.5, size, flexible);
       for (const p of partners) {
         const count = Math.max(1, Math.floor((p.hi - p.lo + 0.5) / p.len));
         for (let k = 0; k < count; k++) {
