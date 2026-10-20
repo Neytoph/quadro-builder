@@ -421,7 +421,7 @@ export class Builder {
       return;
     }
     if (RAIL_FITTINGS.has(this.fittingKind)
-      && !this.model.railFittingMounts(this.fittingKind, this._railSize()).length) {
+      && !this.model.railFittingMounts(this.fittingKind, this._railSize(), this._isRainbowTextile()).length) {
       this.onNotice(t(this._railSize() ? "notice_short_textile_no_cell" : "notice_textile_no_cell"), "info");
       return;
     }
@@ -445,7 +445,7 @@ export class Builder {
     if (confirmedSpec(this.fittingPart || kind)?.placement === 'fitting') return this.model.confirmedMounts(this.fittingPart || kind).filter(mount => mount.valid).length;
     if (ACCESSORY_IDS.has(kind)) return this.model.accessoryMounts(kind).length;
     const cs = geometry().connectorSize;
-    if (RAIL_FITTINGS.has(kind)) return this.model.railFittingMounts(kind, this._railSize()).length;
+    if (RAIL_FITTINGS.has(kind)) return this.model.railFittingMounts(kind, this._railSize(), this._isRainbowTextile()).length;
     if (ROOF_KINDS.has(kind)) return this.model.roofMounts(kind).length;
     if (kind === "textil-round2") return this.model.fittingMounts(kind).length;
     if (HOLE_MASKS[kind]) return this.model.holeArmMounts(cs).length;
@@ -4564,7 +4564,11 @@ export class Builder {
   _railPartners(railId) {
     return this.fittingKind === "bag2"
       ? this.model.bagPartners(railId)
-      : this.model.latticePartners(railId, 1.5, this._railSize());   // Netz und Textil: gleiche Regel
+      : this.model.latticePartners(railId, 1.5, this._railSize(), this._isRainbowTextile());
+  }
+
+  _isRainbowTextile() {
+    return this.fittingKind === "textil2" && getPartById(this.fittingPart)?.variant === "rainbow";
   }
 
   /** Gewaehltes Tuch fester Groesse: { along, gap } aus dem Katalog, sonst null. */
