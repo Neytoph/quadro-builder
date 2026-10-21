@@ -20,11 +20,17 @@ import {openDownloads} from './Downloads'
 
 const btn = 'qb-file-action xmf-button xmf-button-secondary'
 const officialHexes = new Set([...Object.values(COLOR_HEX).map(hex => hex.toUpperCase()), '#2B2B2B'])
+const fileWords = {
+  zh: { actions: '文件操作', importHint: '导入官方 QDF', export: '导出', exportHint: '配件清单 · 分层说明书 · 官方 QDF' },
+  en: { actions: 'File actions', importHint: 'Import official QDF', export: 'Export', exportHint: 'Parts list · Layer-by-layer instructions · Official QDF' },
+  de: { actions: 'Dateiaktionen', importHint: 'Offizielle QDF importieren', export: 'Exportieren', exportHint: 'Teileliste · Schichtanleitung · Offizielle QDF' },
+}
 
 export default function FilePanel() {
   const api = useEngine()
   const collab = useCollab()
   const { t, lang, setLang } = useI18n()
+  const words = fileWords[lang]
   const fileRef = useRef<HTMLInputElement>(null)
   const [batch, setBatch] = useState(false)
   const [backingUp, setBackingUp] = useState(false)
@@ -42,8 +48,7 @@ export default function FilePanel() {
 
   return (
     <div className="qb-file-panel">
-      <section aria-labelledby="qb-file-start">
-        <h2 id="qb-file-start" className="qb-file-section">{t('chrome.start')}</h2>
+      <section aria-label={words.actions} className="qb-file-actions" data-button-motion="off">
         <MyModelsLink />
         {SINGLE_MODEL && !EDITOR_EMBED && <DeviceDraftsLink/>}
         {saveCapacityFull()&&<p className="text-xs px-2 pb-2 leading-relaxed" role="status" data-ui="capacity-guidance">{t('capacity.cloudFull')}</p>}
@@ -53,10 +58,10 @@ export default function FilePanel() {
           {active.saveState === 'failed' && <button className="qb-file-row" onClick={() => void api.retrySave(active.tabId)}>{t('sync.retry')}</button>}
         </div>}
         {!plan && <button disabled={contentReadOnly || api.saving || !api.entryReady} aria-busy={api.saving} onClick={() => void api.saveCurrent()} className={`qb-file-action qb-file-primary xmf-button`}><Save aria-hidden="true" /><span>{t('chrome.save')}</span><kbd>{t('chrome.saveShortcut')}</kbd></button>}
-        {SINGLE_MODEL && !plan && !active?.docId && !active?.libraryId && <><button onClick={() => { if (active?.dirty && !window.confirm(t('single.replace'))) return; fileRef.current?.click() }} className="qb-file-row"><Upload aria-hidden="true"/><span>{t('btn.import')}</span></button><input ref={fileRef} type="file" accept=".qdf,.json,application/json" hidden onChange={event => { const file=event.target.files?.[0];event.target.value='';if(file)void api.importFile(file) }}/></>}
+        {SINGLE_MODEL && !plan && !active?.docId && !active?.libraryId && <><button onClick={() => { if (active?.dirty && !window.confirm(t('single.replace'))) return; fileRef.current?.click() }} className={btn}><Upload aria-hidden="true"/><span>{t('btn.import')}<small>{words.importHint}</small></span></button><input ref={fileRef} type="file" accept=".qdf,.json,application/json" hidden onChange={event => { const file=event.target.files?.[0];event.target.value='';if(file)void api.importFile(file) }}/></>}
         {!SINGLE_MODEL && !EDITOR_EMBED && <><div className="qb-file-two">
           <button onClick={() => { api.newTab(); api.notify(t('toast.newTab')) }} className={btn}><Plus aria-hidden="true" /><span>{t('btn.new')}</span></button>
-          <button onClick={() => fileRef.current?.click()} className={btn}><Upload aria-hidden="true" /><span>{t('btn.import')}</span></button>
+          <button onClick={() => fileRef.current?.click()} className={btn}><Upload aria-hidden="true" /><span>{t('btn.import')}<small>{words.importHint}</small></span></button>
         </div>
         <button disabled={contentReadOnly} onClick={() => void api.saveCurrentAs()} className="qb-file-row"><Save aria-hidden="true" /><span>{t('chrome.saveAs')}</span><kbd>{t('chrome.saveAsShortcut')}</kbd></button>
         <button onClick={() => setBatch(true)} className="qb-file-row" data-ui="batch-open"><FolderInput aria-hidden="true" /><span>{t('batch.open')}<small>QDF</small></span></button>
@@ -68,10 +73,7 @@ export default function FilePanel() {
         }}><FileJson aria-hidden="true" /><span>{t('saves.legacyBackup')}</span></button>}
         <input ref={fileRef} type="file" accept=".qdf,.json,application/json" hidden
           onChange={e => { const f = e.target.files?.[0]; if (f) void api.importFile(f); e.target.value = '' }} /></>}
-      </section>
-      <section aria-labelledby="qb-file-exports" className="qb-file-separated">
-        <h2 id="qb-file-exports" className="qb-file-section">{t('chrome.export')}</h2>
-        <button type="button" disabled={contentReadOnly} onClick={openDownloads} className="qb-file-row"><Download aria-hidden="true"/><span>{lang==='zh'?'下载资料':lang==='de'?'Dateien herunterladen':'Download files'}</span></button>
+        <button type="button" disabled={contentReadOnly} onClick={openDownloads} className={btn}><Download aria-hidden="true"/><span>{words.export}<small>{words.exportHint}</small></span></button>
         {api.modelColors.some(hex => !officialHexes.has(hex)) && <p className="text-xs text-gray-300 leading-relaxed px-2 mt-2">{colorStrings[lang].export}</p>}
         {!SINGLE_MODEL && <button disabled={contentReadOnly} onClick={() => void api.shareCurrent()} className="qb-file-row"><Link aria-hidden="true" /><span>{t('btn.share')}</span></button>}
       </section>

@@ -1,5 +1,5 @@
 .qb-project-bar {
-  display: flex; align-items: center; gap: 6px; padding: 0 10px;
+  display: flex; align-items: center; gap: 6px; padding: 7px 10px;
   background: #fffdf9; border-bottom: 1px solid #ecd6c2;
   box-shadow: 0 2px 9px #543e2510;
 }
@@ -92,6 +92,8 @@ html[data-motion] .qb-top-toolbar .qb-tool > svg { animation:none; }
 .qb-file-panel button span { min-width: 0; overflow-wrap: anywhere; }
 .qb-file-languages .qb-file-primary { background: linear-gradient(135deg,#ea580c,#ff8a2b); color: white; border-color: #ea580c; font-weight: 700; box-shadow: 0 3px 8px #ea580c24; }
 .qb-file-action.qb-file-primary { justify-content: center; }
+.qb-file-actions > .qb-file-action { justify-content: flex-start; min-height: 60px; margin-top: 8px; gap: 9px; }
+.qb-file-actions .qb-file-action small { display: block; font-size: 11px; line-height: 1.5; font-weight: 400; color: #5a6270; }
 .qb-file-languages .qb-file-primary:hover { background: linear-gradient(135deg,#ea580c,#ff8a2b); }
 .qb-file-primary svg { color: currentColor; }
 .qb-file-panel kbd { margin-left: auto; font-size: 11px; font-family: inherit; white-space: nowrap; opacity: .85; flex-shrink: 0; }

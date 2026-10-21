@@ -3,6 +3,15 @@ import {describe,it,expect} from 'vitest'
 import {compareRows,missingRows,resourceCsv,mountResources,exportRows} from '../../public/model-resources.js'
 const rows=[{group:'tubes',id:'T35',need:6,label:'管 35 cm',image:'/builder/parts/T35.png'},{group:'fittings',id:'textile',need:2,label:'布面',soft:true},{group:'screws',id:'screw_panel',need:8,label:'螺丝'}]
 describe('造型资料与库存',()=>{
+  it('账号门槛或取消没有产出QDF时，不显示下载成功',async()=>{
+    const root=document.createElement('div');document.body.append(root)
+    const widget=mountResources(root,{rows:compareRows(rows,null),name:'造型',lang:'zh',stockState:'empty',canNative:true,onExport:async()=>({cancelled:true})})
+    root.querySelector<HTMLButtonElement>('[data-mr-action=qdf]')!.click()
+    await new Promise(resolve=>setTimeout(resolve,0))
+    expect(root.querySelector('.mr-status')?.textContent).toBe('已取消，可重新导出。')
+    expect(root.textContent).not.toContain('文件已准备并交给浏览器下载。')
+    widget.destroy();root.remove()
+  })
   it('完整清单保留颜色和尺寸分行，库存仅记在第一行；缺件继续按规格合并',()=>{
     const source=[{group:'tubes',id:'T35',need:6,owned:2,short:4,label:'管 35 cm',variants:[{need:4,label:'红'},{need:2,label:'蓝'}]}]
     expect(exportRows(source).map((row:{need:number;owned:number|null})=>[row.need,row.owned])).toEqual([[4,2],[2,null]])
@@ -37,13 +46,13 @@ describe('造型资料与库存',()=>{
     expect(button('[data-mr-action=manual]').disabled).toBe(true)
     widget.destroy();root.remove()
   })
-  it('仅保留配件清单和分层说明书，清单筛选与导出共用范围',async()=>{
+  it('配件清单、分层说明书和官方QDF集中，清单筛选与导出共用范围',async()=>{
     const root=document.createElement('div');document.body.append(root);const exports:string[]=[]
     const widget=mountResources(root,{rows:compareRows(rows,{tubes:{T35:2},fittings:{textile:2}}),name:'造型',lang:'zh',stockState:'ready',canNative:true,onExport:async(action:string)=>exports.push(action)})
     expect(root.querySelector('[data-mr-action=downloads]')).toBeNull()
     expect(root.querySelector('[data-mr-downloads]')?.hasAttribute('hidden')).toBe(false)
-    expect([...root.querySelectorAll('h2')].map(el=>el.textContent)).toEqual(['配件清单','分层说明书'])
-    expect(root.querySelector('[data-mr-action=retry],[data-mr-action=picture],[data-mr-action=qdf],[data-mr-action=json]')).toBeNull()
+    expect([...root.querySelectorAll('h2')].map(el=>el.textContent)).toEqual(['配件清单','分层说明书','官方 QDF'])
+    expect(root.querySelector('[data-mr-action=retry],[data-mr-action=picture],[data-mr-action=json]')).toBeNull()
     expect(root.querySelector('a')).toBeNull()
     expect(root.querySelector('[data-mr-list]')?.hasAttribute('hidden')).toBe(true)
     root.querySelector<HTMLButtonElement>('[data-mr-expand]')!.click()
@@ -62,6 +71,9 @@ describe('造型资料与库存',()=>{
     root.querySelector<HTMLButtonElement>('[data-mr-action=manual]')!.click()
     await new Promise(resolve=>setTimeout(resolve,0))
     expect(exports).toEqual(['manual'])
+    root.querySelector<HTMLButtonElement>('[data-mr-action=qdf]')!.click()
+    await new Promise(resolve=>setTimeout(resolve,0))
+    expect(exports).toEqual(['manual','qdf'])
     expect(root.textContent).toContain('分层说明书')
     expect(root.textContent).not.toContain('预览')
     widget.destroy();root.remove()

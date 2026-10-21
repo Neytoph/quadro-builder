@@ -5,11 +5,12 @@ import {labelOf,colorLabel} from '../names'
 import {partImageSrc} from './partImages'
 import {RESOURCE_MODE,bootEntry} from '../entry'
 import {bomSections} from './bomExport'
+import {usePresence} from './motion'
 
 export const OPEN_DOWNLOADS='quadro:downloads'
 let inlineManualViews=0
 export function hasInlineManualProgress(){return inlineManualViews>0}
-const words={zh:['下载资料','正在读取造型资料…','关闭'],en:['Download files','Loading model information…','Close'],de:['Dateien herunterladen','Modellinformationen werden geladen…','Schließen']}
+const words={zh:['导出','正在读取造型资料…','关闭'],en:['Export','Loading model information…','Close'],de:['Exportieren','Modellinformationen werden geladen…','Schließen']}
 export function openDownloads(){window.dispatchEvent(new Event(OPEN_DOWNLOADS))}
 export async function exportResource(api:ReturnType<typeof useEngine>,action:string){
   if(api.readOnly)throw new Error('423')
@@ -24,7 +25,7 @@ export async function exportResource(api:ReturnType<typeof useEngine>,action:str
   }
   else if(action==='picture')await api.exportPng()
   else if(action==='json')api.exportJson()
-  else if(action==='qdf')api.exportQdf()
+  else if(action==='qdf')return {cancelled:!api.exportQdf()}
 }
 type Widget={destroy:()=>void;update:(value:unknown)=>void}
 type ResourceStock={data:Record<string,Record<string,number>>;rev:number}
@@ -57,7 +58,7 @@ export function DownloadContents(){
   const latestRows=useRef(rows);latestRows.current=rows
   useEffect(()=>{inlineManualViews++;return()=>{inlineManualViews--;live.current.cancelManualExport()}},[])
   useEffect(()=>{
-    let cancelled=false;const url=import.meta.env.BASE_URL+'model-resources.js?v=20261020';
+    let cancelled=false;const url=import.meta.env.BASE_URL+'model-resources.js?v=20261021';
     void import(/* @vite-ignore */ url).then(module=>{
       if(cancelled||!root.current)return
       const current=live.current
@@ -72,11 +73,13 @@ export function DownloadContents(){
 }
 export default function Downloads(){
   const {lang}=useI18n(),api=useEngine(),dialog=useRef<HTMLDialogElement>(null),[open,setOpen]=useState(false),previous=useRef<Element|null>(null)
+  const [shown,leaving]=usePresence(open?true:null)
   useEffect(()=>{const show=()=>{previous.current=document.activeElement;setOpen(true)};window.addEventListener(OPEN_DOWNLOADS,show);return()=>window.removeEventListener(OPEN_DOWNLOADS,show)},[])
-  useEffect(()=>{if(open)dialog.current?.showModal()},[open])
-  if(!open)return null
-  const close=()=>{if(api.exportingManual){api.cancelManualExport();return}dialog.current?.close();setOpen(false);if(previous.current instanceof HTMLElement)previous.current.focus({preventScroll:true})}
-  return <dialog ref={dialog} className="mr-root-dialog" onCancel={event=>{event.preventDefault();close()}} onClick={event=>{if(event.target===dialog.current){const box=dialog.current.getBoundingClientRect();if(event.clientX<box.left||event.clientX>box.right||event.clientY<box.top||event.clientY>box.bottom)close()}}}>
+  useEffect(()=>{if(api.accountAsk&&open)setOpen(false)},[api.accountAsk,open])
+  useEffect(()=>{if(shown&&!dialog.current?.open)dialog.current?.showModal();if(!shown&&previous.current instanceof HTMLElement)previous.current.focus({preventScroll:true})},[shown])
+  if(!shown)return null
+  const close=()=>{if(api.exportingManual){api.cancelManualExport();return}setOpen(false)}
+  return <dialog ref={dialog} inert={leaving} className={'mr-root-dialog m-pop'+(leaving?' m-leave':'')} onCancel={event=>{event.preventDefault();close()}} onClick={event=>{if(event.target===dialog.current){const box=dialog.current.getBoundingClientRect();if(event.clientX<box.left||event.clientX>box.right||event.clientY<box.top||event.clientY>box.bottom)close()}}}>
     <header className="mr-dialog-header"><h2>{words[lang][0]}</h2><button type="button" onClick={close} disabled={!!api.exportingManual} aria-label={words[lang][2]}>×</button></header>
     <div className="mr-dialog-body"><DownloadContents/></div>
   </dialog>

@@ -1,3 +1,4 @@
+import {disclosureMotion} from './disclosure-motion.js?v=20261021';
 const words = {
   title:['配件清单','Parts list','Teileliste'], downloads:['造型资料','Model files','Modellunterlagen'],
   all:['全部配件','All parts','Alle Bauteile'], missing:['只看缺件','Missing parts','Nur Fehlteile'],
@@ -11,6 +12,7 @@ const words = {
   summary:['共 {k} 种，{n} 件','{k} types, {n} parts','{k} Arten, {n} Bauteile'], shortage:['还缺 {k} 种，{n} 件','Missing {k} types, {n} parts','Es fehlen {k} Arten, {n} Bauteile'],
   manual:['分层说明书','Layer-by-layer instructions','Schichtweise Bauanleitung'], manualHint:['按高度分层，包含本层结构和零件用量','Layers by height, with structure views and parts quantities','Ebenen nach Höhe mit Strukturansichten und Teilemengen'],
   exportPdf:['导出 PDF','Export PDF','PDF exportieren'], exportList:['导出清单','Export list','Liste exportieren'],
+  qdf:['官方 QDF','Official QDF','Offizielles QDF'], qdfHint:['可在 QUADRO Designer 中打开与继续编辑','Open and continue editing in QUADRO Designer','In QUADRO Designer öffnen und weiterbearbeiten'], exportQdf:['导出 QDF','Export QDF','QDF exportieren'], qdfLogin:['登录后可导出官方 QDF。','Sign in to export official QDF.','Zum Export von offiziellem QDF anmelden.'], qdfUnavailable:['当前权限暂不可导出官方 QDF。','Your access does not allow QDF export.','Dein Zugriff erlaubt keinen QDF-Export.'],
   viewList:['查看清单','View list','Liste ansehen'], hideList:['收起清单','Hide list','Liste schließen'],
   resources:['正在准备资料…','Preparing resources…','Unterlagen werden vorbereitet…'], prepare:['正在准备页面…','Preparing pages…','Seiten werden vorbereitet…'],
   page:['正在生成 PDF… {k} / {n} 页','Generating PDF… {k} / {n} pages','PDF wird erstellt… {k} / {n} Seiten'], saving:['正在保存 PDF…','Saving PDF…','PDF wird gespeichert…'],
@@ -91,18 +93,27 @@ export function installResourceStyle(){if(document.getElementById('model-resourc
 @media(max-width:600px){.mr-toolbar{gap:6px}.mr-filters button{padding:8px}.mr-menu>summary{padding:6px}.mr-resource-row{gap:12px}.mr-resource-row>button{min-width:92px}.mr-overview{gap:6px 12px}.mr-resource-row .mr-caption{max-width:30ch}.mr-row{grid-template-columns:minmax(0,1fr) repeat(3,34px);padding:9px 8px;gap:4px}.mr-label img{width:28px;height:28px}}
   .mr{display:flex;flex-direction:column;gap:14px}.mr-resource-card{min-width:0;border:1px solid #eaded2;border-radius:14px;background:#fffdf9;padding:20px}.mr-card-head{display:flex;align-items:center;gap:14px}.mr-card-icon{width:44px;height:44px;display:grid;place-items:center;flex:none;background:#fff1e6;border-radius:12px;color:#b95009}.mr-card-copy{flex:1;min-width:0}.mr-card-copy h2{margin:0 0 4px!important}.mr-card-summary{display:flex;gap:4px 14px;flex-wrap:wrap}.mr-stock-count{font-size:12px;color:#a34c0b}.mr-card-head>.mr-primary{flex:none;min-width:110px}.mr .mr-expand{display:flex;align-items:center;gap:8px;flex:none;border:0;border-radius:8px;background:transparent;color:#b95009;padding:8px}.mr .mr-expand:hover{background:#fff1e6}.mr-toolbar{margin:18px 0 12px}.mr-table{max-height:none;overflow:visible}.mr-columns{position:static}.mr-label img{width:44px;height:44px}.mr-row{min-height:64px}.mr-inline-progress{margin-top:20px;padding-top:18px;border-top:1px solid #f0e6dd}.mr-inline-progress>p{font-size:13px;color:#5a6270;margin-bottom:10px}.mr-inline-progress progress{display:block;width:100%;height:7px;accent-color:#ea580c;border:0;border-radius:8px;overflow:hidden}.mr-inline-progress progress::-webkit-progress-bar{background:#f0e6dd;border-radius:8px}.mr-inline-progress progress::-webkit-progress-value{background:linear-gradient(110deg,#ea580c,#ff8a2b);border-radius:8px}.mr-progress-footer{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:12px}.mr-progress-footer button{flex:none;color:#5a6270}.mr-manual-status{font-size:13px;color:#13763e;padding-top:12px}.mr-manual-status[data-error=true]{color:#b91c1c}.mr-source{text-align:right}.mr-status{font-size:13px;min-height:0}.mr [data-mr-downloads]:focus{outline:none}.mr [data-mr-downloads]:focus-visible{outline:1px solid #8a8078;outline-offset:2px}
   @media(max-width:600px){.mr-resource-card{padding:14px}.mr-card-head{gap:10px;flex-wrap:wrap}.mr-card-icon{width:36px;height:36px;border-radius:10px}.mr-card-copy{flex-basis:calc(100% - 46px)}.mr-card-head>.mr-primary,.mr-card-head>.mr-expand{margin-left:46px}.mr-card-head>.mr-primary{min-width:110px}.mr-label img{width:32px;height:32px}.mr-label{font-size:12px}.mr-row{min-height:58px}.mr-toolbar{flex-wrap:wrap;gap:4px}.mr-menu{margin-left:auto}.mr-progress-footer{align-items:flex-start}.mr-source{text-align:left}}
+  .mr-card-head>.xmf-button{flex:none;min-width:110px}
+  .mr-expand>span,.mr-menu>summary::after{display:inline-block;transition:transform 200ms cubic-bezier(.22,1,.36,1)}
+  .mr-expand[aria-expanded=true]>span,.mr-menu>summary[aria-expanded=true]::after{transform:rotate(180deg)}
+  @media(max-width:600px){.mr-card-head>.xmf-button{margin-left:46px}}
+  @media(prefers-reduced-motion:reduce){.mr-expand>span,.mr-menu>summary::after{transition:none}}
   `;document.head.append(style)}
 export function mountResources(root,config){
   installResourceStyle();const t=(key,values)=>resourceText(config.lang,key,values),controller=new AbortController();let state=config,filter='all',busy=false,manualBusy=false,expanded=false,cancelRequested=false,lastRows,lastStock,lastFilter;
   const button=(action,label,disabled=false)=>'<button type="button" class="xmf-button xmf-button-secondary" data-mr-action="'+action+'"'+(disabled?' disabled':'')+'>'+esc(t(label))+'</button>';
   root.classList.add('mr');
   const listMenu='<details class="mr-menu mr-list-menu"><summary>'+esc(t('exportList'))+'</summary><div class="mr-menu-content"><p class="mr-caption" data-mr-list-label></p>'+button('csv','csv')+button('png','png')+button('copy','copy')+'</div></details>';
-  const icon=kind=>'<span class="mr-card-icon" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">'+(kind==='list'?'<path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/>':'<path d="m12 3 9 5-9 5-9-5 9-5Zm-9 9 9 5 9-5M3 16l9 5 9-5"/>')+'</svg></span>';
+  const iconPaths={list:'<path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/>',file:'<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6M8 13h8M8 17h5"/>',manual:'<path d="m12 3 9 5-9 5-9-5 9-5Zm-9 9 9 5 9-5M3 16l9 5 9-5"/>'};
+  const icon=kind=>'<span class="mr-card-icon" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">'+iconPaths[kind]+'</svg></span>';
   root.innerHTML='<section class="mr-resource-card"><div class="mr-card-head">'+icon('list')+'<div class="mr-card-copy"><h2>'+esc(t('title'))+'</h2><div class="mr-card-summary"><p class="mr-caption" data-mr-summary></p><p class="mr-stock-count" data-mr-stock></p></div></div><button type="button" class="mr-expand" data-mr-expand aria-expanded="false">'+esc(t('viewList'))+'<span aria-hidden="true">⌄</span></button></div><div data-mr-list hidden><div class="mr-toolbar"><div class="mr-filters" role="group" aria-label="'+esc(t('list'))+'">'+['all','missing'].map(id=>'<button type="button" data-mr-filter="'+id+'" aria-pressed="'+(id==='all')+'">'+esc(t(id))+'</button>').join('')+'</div>'+listMenu+'</div><div class="mr-table" data-mr-table></div><p class="mr-note">'+esc(t('note'))+'</p></div></section>'+
     '<section class="mr-resource-card" data-mr-downloads tabindex="-1"><div class="mr-card-head">'+icon('manual')+'<div class="mr-card-copy"><h2>'+esc(t('manual'))+'</h2><p class="mr-caption">'+esc(t('manualHint'))+' · PDF</p></div>'+button('manual','exportPdf',!config.canNative)+'</div><div class="mr-inline-progress" data-mr-progress hidden><p role="status" aria-live="polite" data-mr-progress-label></p><progress aria-label="'+esc(t('manual'))+'"></progress><div class="mr-progress-footer"><p class="mr-caption">'+esc(t('downloadHint'))+'</p>'+button('cancel','cancel')+'</div></div><p class="mr-manual-status" role="status" hidden></p>'+(!config.canNative?'<p class="mr-note">'+esc(t(config.stockState==='anonymous'?'manualLogin':'unavailable'))+'</p>':'')+'</section><p class="mr-source mr-caption">'+esc(t(config.source||'saved'))+'</p><p class="mr-status" role="status" aria-live="polite" hidden></p>';
   const manualButton=root.querySelector('[data-mr-action=manual]');manualButton.classList.remove('xmf-button-secondary');manualButton.classList.add('mr-primary');
   root.querySelectorAll('.mr-menu button').forEach(button=>{button.className='mr-menu-item'});
   root.querySelectorAll('.mr-menu,.mr-filters,.mr-expand').forEach(group=>{group.dataset.buttonMotion='off'});
+  const qdfCard=document.createElement('section');qdfCard.className='mr-resource-card';
+  qdfCard.innerHTML='<div class="mr-card-head">'+icon('file')+'<div class="mr-card-copy"><h2>'+esc(t('qdf'))+'</h2><p class="mr-caption">'+esc(t('qdfHint'))+'</p></div>'+button('qdf','exportQdf',!config.canNative)+'</div>'+(!config.canNative?'<p class="mr-note">'+esc(t(config.stockState==='anonymous'?'qdfLogin':'qdfUnavailable'))+'</p>':'');
+  root.querySelector('.mr-source').before(qdfCard);
   const status=root.querySelector('.mr-status'),manualStatus=root.querySelector('.mr-manual-status');
   function paint(){
     const rows=state.rows,missing=missingRows(rows),available=state.stockState==='ready';
@@ -120,6 +131,7 @@ export function mountResources(root,config){
     root.querySelector('[data-mr-action=copy]').disabled=busy||!available||!missing.length;
     for(const action of ['csv','png'])root.querySelector('[data-mr-action='+action+']').disabled=busy||!rows.length||(filter==='missing'&&!missing.length);
     manualButton.disabled=busy||!config.canNative;
+    root.querySelector('[data-mr-action=qdf]').disabled=busy||!config.canNative;
     manualButton.setAttribute('aria-busy',String(manualBusy));
     const progress=state.manualProgress,showProgress=manualBusy||!!progress,area=root.querySelector('[data-mr-progress]');area.hidden=!showProgress;
     if(showProgress){
@@ -130,8 +142,8 @@ export function mountResources(root,config){
     }
   }
   root.addEventListener('click',async event=>{
-    const menu=event.target.closest('details.mr-menu');root.querySelectorAll('details.mr-menu[open]').forEach(other=>{if(other!==menu)other.open=false});
-    const expand=event.target.closest('[data-mr-expand]');if(expand){expanded=!expanded;root.querySelector('[data-mr-list]').hidden=!expanded;expand.setAttribute('aria-expanded',String(expanded));expand.innerHTML=esc(t(expanded?'hideList':'viewList'))+'<span aria-hidden="true">'+(expanded?'⌃':'⌄')+'</span>';return}
+    const menu=event.target.closest('details.mr-menu');root.querySelectorAll('details.mr-menu[open]').forEach(other=>{if(other!==menu)disclosureMotion.set(other,false)});
+    const expand=event.target.closest('[data-mr-expand]');if(expand){expanded=!expanded;disclosureMotion.set(root.querySelector('[data-mr-list]'),expanded,{trigger:expand});expand.firstChild.textContent=t(expanded?'hideList':'viewList');return}
     if(event.target.closest('[data-mr-action=cancel]')){if(root.querySelector('[data-mr-action=cancel]').disabled)return;cancelRequested=true;state={...state,manualProgress:{...state.manualProgress,phase:'cancelling'}};paint();config.onCancel?.();return}
     const pick=event.target.closest('[data-mr-filter]');if(pick){if(busy||pick.disabled)return;filter=pick.dataset.mrFilter;paint();return}
     const target=event.target.closest('[data-mr-action]');if(!target||target.disabled||busy)return;
@@ -146,13 +158,13 @@ export function mountResources(root,config){
       if(action==='csv')downloadBlob(new Blob([resourceCsv(rows,config.name,config.lang,missing)],{type:'text/csv;charset=utf-8'}),config.name+' '+t(missing?'missing':'list')+'.csv');
       else if(action==='png'){const images=await listImage(rows,config.name,config.lang,missing);if(controller.signal.aborted)return;images.forEach((blob,index)=>downloadBlob(blob,config.name+' '+t(missing?'missing':'list')+(images.length>1?' '+(index+1):'')+'.png'))}
       else if(action==='copy'){await navigator.clipboard.writeText([config.name,...missingRows(rows).map(row=>row.label+' ('+row.id+') ×'+row.short+(row.soft?' · '+t('optional'):''))].join('\n'))}
-      else {const result=await config.onExport(action);if(result?.cancelled)feedback.textContent=t('cancelled')}
-      if(!controller.signal.aborted){if(!feedback.textContent||action!=='manual')feedback.textContent=action==='copy'?t('copied'):t('done');feedback.hidden=false;root.querySelectorAll('details.mr-menu').forEach(menu=>menu.open=false)}
+      else {const result=await config.onExport(action);if(result?.cancelled){feedback.textContent=t('cancelled');feedback.hidden=false;return}}
+      if(!controller.signal.aborted){if(!feedback.textContent||action!=='manual')feedback.textContent=action==='copy'?t('copied'):t('done');feedback.hidden=false;root.querySelectorAll('details.mr-menu[open]').forEach(menu=>disclosureMotion.set(menu,false))}
     }catch(error){if(!controller.signal.aborted){feedback.dataset.error=String(!cancelRequested);feedback.textContent=cancelRequested?t('cancelled'):error.message||t('failed');feedback.hidden=false}}
     finally{busy=false;manualBusy=false;state={...state,manualProgress:null};if(!controller.signal.aborted)paint()}
   },{signal:controller.signal});
-  root.addEventListener('keydown',event=>{if(event.key==='Escape'){const open=[...root.querySelectorAll('details.mr-menu[open]')];if(open.length){event.preventDefault();event.stopPropagation();open.forEach(menu=>{menu.open=false;menu.querySelector('summary').focus()})}}},{signal:controller.signal});
-  document.addEventListener('click',event=>{if(!root.contains(event.target))root.querySelectorAll('details.mr-menu[open]').forEach(menu=>menu.open=false)},{signal:controller.signal});
+  root.addEventListener('keydown',event=>{if(event.key==='Escape'){const open=[...root.querySelectorAll('details.mr-menu[open]')];if(open.length){event.preventDefault();event.stopPropagation();open.forEach(menu=>{disclosureMotion.set(menu,false);menu.querySelector('summary').focus()})}}},{signal:controller.signal});
+  document.addEventListener('click',event=>{if(!root.contains(event.target))root.querySelectorAll('details.mr-menu[open]').forEach(menu=>disclosureMotion.set(menu,false))},{signal:controller.signal});
   paint();
-  return {destroy(){controller.abort();root.replaceChildren()},update(next){state={...state,...next};paint()}};
+  return {destroy(){controller.abort();disclosureMotion.dispose(root);root.replaceChildren()},update(next){state={...state,...next};paint()}};
 }
