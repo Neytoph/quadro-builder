@@ -34,6 +34,10 @@ import BatchImport from './collab/ui/BatchImport'
 import RoomEditor from './collab/ui/RoomEditor'
 import CustomComponentsMenu, { CUSTOM_COMPONENTS_EVENT, type ComponentMenuPosition } from './ui/CustomComponentsMenu'
 import { NUMBER_TUBES } from './store/toolMemory'
+import Downloads, {DownloadContents,exportResource,hasInlineManualProgress} from './ui/Downloads'
+import {resourceFileDelivered,sendResourceMessage} from './resourceDownload'
+import {installResourceStyle} from '../public/model-resources.js'
+import {RESOURCE_MODE} from './entry'
 
 function Toast() {
   const { toast: live, dismissToast } = useEngine()
@@ -277,15 +281,27 @@ function NewOnEntry() {
 }
 
 function ManualProgress() {
-  const { exportingManual } = useEngine()
+  const { exportingManual, cancelManualExport } = useEngine()
   const { t } = useI18n()
-  if (!exportingManual) return null
+  const dialog=useRef<HTMLDialogElement>(null)
+  const visible=!!exportingManual&&!hasInlineManualProgress()&&!(RESOURCE_MODE&&parent!==window)
+  useEffect(()=>{if(visible&&!dialog.current?.open){installResourceStyle();dialog.current?.showModal()}if(!visible&&dialog.current?.open)dialog.current.close()},[visible])
+  if (!exportingManual||!visible) return null
+  const { page, total, phase } = exportingManual
+  const cancelling = phase === 'cancelling'
+  let status = t('manual.resources')
+  if (phase === 'prepare') status = t('manual.preparing')
+  if (total > 0) status = t('manual.progress', { k: Math.min(page + 1, total), n: total })
+  if (phase === 'save') status = t('manual.saving')
+  if (cancelling) status = t('manual.cancelling')
   return (
-    <div className="m-backdrop fixed inset-0 z-[80] bg-black/45 flex items-center justify-center">
-      <div className="m-modal qb-card px-6 py-4 text-gray-100 text-sm tabular-nums">
-        {t('manual.progress', { k: exportingManual.page, n: exportingManual.total })}
-      </div>
-    </div>
+    <dialog ref={dialog} className="mr-progress-dialog" aria-labelledby="manual-progress-title" onCancel={event=>{event.preventDefault();if(phase!=='save')cancelManualExport()}}>
+      <h2 id="manual-progress-title">{t('manual.coverTitle')}</h2>
+      <p role="status" aria-live="polite">{status}</p>
+      <progress aria-label={t('manual.coverTitle')} value={exportingManual.total>0?exportingManual.page:undefined} max={exportingManual.total||1}/>
+      <p>{t('manual.downloadHint')}</p>
+      <button type="button" autoFocus disabled={cancelling || phase === 'save'} onClick={cancelManualExport} className="qb-btn qb-btn-ghost qb-btn-sm">{t('confirm.cancel')}</button>
+    </dialog>
   )
 }
 
@@ -510,6 +526,7 @@ function AppInner() {
       {collab.mode === 'plan' && collab.compare && <CompareView key={collab.session?.id} />}
       <JoinModal />
       <Toast />
+      <Downloads />
       <AssemblyPreview />
       <AccountDialog />
       <NameDialog />
@@ -551,7 +568,28 @@ function EngineShell() {
 
 function Shell() {
   const collab = useCollab()
+  if(RESOURCE_MODE)return <ResourceShell />
   if (VIEW_ONLY || collab.mode === 'delivery' || collab.mode === 'snapshot') return <ViewShell />
   if (collab.mode === 'room') return <RoomShell />
   return <AppInner />
+}
+
+function ResourceShell(){
+  const api=useEngine(),{lang}=useI18n(),started=useRef(false)
+  const [exportFinished,setExportFinished]=useState(false)
+  const directManual=new URLSearchParams(location.search).get('resourceAction')==='manual'
+  const messages={zh:['正在读取已保存的造型…','请使用下方按钮重试下载。'],en:['Loading the saved model…','Use the buttons below to retry.'],de:['Gespeichertes Modell wird geladen…','Mit den Schaltflächen unten erneut versuchen.']}
+  useEffect(()=>{
+    if(!api.ready||!api.entryReady||started.current)return
+    started.current=true
+    const action=new URLSearchParams(location.search).get('resourceAction')
+    if(action)void exportResource(api,action).then(()=>{if(!resourceFileDelivered())sendResourceMessage({type:'xmf-resource:result',status:'failed'})}).catch(error=>{api.notify(String(error),'err');sendResourceMessage({type:'xmf-resource:result',status:'failed',message:String(error)})}).finally(()=>setExportFinished(true))
+  },[api])
+  useEffect(()=>{if(api.exportingManual)sendResourceMessage({type:'xmf-resource:progress',progress:api.exportingManual})},[api.exportingManual])
+  useEffect(()=>{if(api.error)sendResourceMessage({type:'xmf-resource:result',status:'failed',message:api.error})},[api.error])
+  return <div className="app-viewport" style={{display:'flex',flexDirection:'column',overflow:'auto',background:'#fffaf5'}}>
+    <div style={{position:'fixed',left:-10000,top:0,width:1200,height:900,display:'flex',pointerEvents:'none'}} aria-hidden="true"><CanvasHost hideViewCube/></div>
+    <div style={{padding:20}}>{api.ready&&api.entryReady&&(!directManual||exportFinished)?<DownloadContents/>:<p role="status">{api.error||api.toast?.message||messages[lang][0]}</p>}</div>
+    <AccountDialog/><ManualProgress/><Toast/>
+  </div>
 }

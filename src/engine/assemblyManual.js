@@ -11,7 +11,7 @@ import {
 import { connectorsForNode, textileRow, computeBOM } from "./bom.js";
 import { POOL_KINDS, BuildModel } from "./model.js";
 import { SceneManager } from "./scene.js";
-import { computeAssemblyPlan, assemblyState, assemblyDetailState } from "./assemblyPlan.js";
+import { computeLayeredManualPlan, assemblyState, assemblyDetailState } from "./assemblyPlan.js";
 import { waitSceneReady } from "./thumbShot.js";
 import { applyFrameHex, loadTune } from "./colorTune.js";
 import { componentStepLabel, componentPartId, componentOutputColor, componentFittingKey, componentSizeLabel } from './accessoryInfo.js';
@@ -628,7 +628,7 @@ async function captureView(scene, model, yaw, { bounds, width, height, items, on
     else scene.frameFromYaw(model, yaw, { silent: true, bounds, aspect, margin: fitMargin || FIT });
     scene._updateTreeCamera?.();
     const marks = items && items.length ? projectCallouts(scene, items, aspect, !!oneEach) : [];
-    const img = await loadImage(scene.snapshot({
+    const img = scene.snapshot({
       hideGrid: false,
       hideRoom: true,
       hideLabels: true,
@@ -636,7 +636,8 @@ async function captureView(scene, model, yaw, { bounds, width, height, items, on
       width,
       height,
       pixelRatio: 1.5,
-    }));
+      canvas: true,
+    });
     return { img, marks };
   } finally {
     scene._viewSize = null;
@@ -865,8 +866,11 @@ function paintStep(ctx, { front, back, copy, heading, items, icons, k, n, fill, 
 }
 
 async function pageToPdf(doc, canvas, first) {
-  // Keep the full page raster and fonts; reduce codec overhead for long manuals.
-  const jpeg = canvas.toDataURL("image/jpeg", 0.90);
+  const blob = await new Promise((resolve, reject) => canvas.toBlob(value => {
+    if (value) resolve(value);
+    else reject(new Error('说明书图片编码失败'));
+  }, 'image/jpeg', 0.90));
+  const jpeg = new Uint8Array(await blob.arrayBuffer());
   if (!first) doc.addPage();
   doc.addImage(jpeg, "JPEG", 0, 0, PAGE_W, PAGE_H);
 }
@@ -1486,13 +1490,16 @@ function manualError(code, message, diagnostics = []) {
  *   save?: boolean,
  *   onDocument?: (result: {doc: object, blob: Blob, pages: number, plan: object}) => void | Promise<void>,
  *   onProgress?: (p: { page: number, total: number, phase?: string }) => void,
+ *   signal?: AbortSignal,
  *   stamp?: { url: string, host: string, hint: string } | null,
  * }} opts
  *
  * stamp 是方案页的网址和二维码（src/sharePage.ts），给了就印在每一页右下角。
  */
 export async function exportAssemblyPdf(opts) {
-  const { name, filename, onProgress, stamp, save = true, onDocument } = opts;
+  const { name, filename, onProgress, stamp, save = true, onDocument, signal } = opts;
+  const checkpoint = async () => { await yieldUi(); signal?.throwIfAborted(); };
+  signal?.throwIfAborted();
   const manualLang = getLang();
   // 在第一个异步等待之前冻结输入，编辑器切换模型或继续修改均不会进入本次导出。
   const snapshot = structuredClone(opts.modelJSON ?? opts.model.toJSON());
@@ -1500,18 +1507,21 @@ export async function exportAssemblyPdf(opts) {
   const copy = { actionView: '安装动作', completeView: '本步完成', regionOverview: '区域总览', regionShape: '独立外形', regionLocation: '成品定位', regionOrder: '拼接顺序', finalTitle: '完成造型与接口位置', instructionsTitle: '安装说明', ...manualSafetyCopy(manualLang), ...opts.copy };
   onProgress?.({ page: 0, total: 0, phase: 'resources' });
   await loadCatalog();
+  await checkpoint();
   const model = new BuildModel();
   const loaded = model.loadJSON(snapshot);
   if (!loaded.ok) throw manualError('model', `说明书模型无法载入: ${loaded.reason}`);
-  const plan = suppliedPlan || computeAssemblyPlan(model, opts.assemblyConfig, opts.order || opts.builder?.assemblyOrder || 'y+');
-  if (!plan.canExport) throw manualError('diagnostics', '模型连接诊断尚未通过，无法导出说明书', plan.diagnostics);
+  const plan = suppliedPlan || computeLayeredManualPlan(model);
   const steps = plan.steps || [];
   if (!steps.length) throw manualError('empty', '模型没有可导出的装配步骤');
   const regionDescriptors = manualRegionDescriptors(model, plan);
   await document.fonts?.ready;
+  signal?.throwIfAborted();
   const itemsCover = coverItems(plan.bom || opts.bom || computeBOM(model));
   for (const item of itemsCover) item.instanceIds = [...new Set((plan.ledger?.instances || []).filter(row => row.group === item.kind && row.key === item.ledgerKey).flatMap(row => row.partIds))];
   const icons = await loadIcons(itemsCover);
+  onProgress?.({ page: 0, total: 0, phase: 'prepare' });
+  await checkpoint();
   const reading = createAssemblyReadingPlan(model, plan, { items: itemsCover, copy });
   const coverLayout = manualLegendChunks(itemsCover, true, icons, stamp, copy.bomTitle);
   const descriptors = [{ type: 'cover', items: coverLayout.chunks[0], partsH: coverLayout.partsH }, ...coverLayout.chunks.slice(1).map(items => ({ type: 'legend', title: copy.bomTitle, items }))];
@@ -1557,6 +1567,7 @@ export async function exportAssemblyPdf(opts) {
   host.setAttribute('aria-hidden', 'true');
   document.body.append(host);
   let scene;
+  const pageShots = [];
   let activeState = null;
   let currentPage = 0;
   const coverCopy = { ...copy, modelName: name || copy.product || 'design', stepsLine: String(copy.stepsLine || '').replaceAll('{n}', String(reading.steps.length)) };
@@ -1567,17 +1578,26 @@ export async function exportAssemblyPdf(opts) {
     scene.controls.enabled = false;
     scene.onMeshesReady = () => scene.renderModel(model, null, { assembly: activeState });
     scene.renderModel(model, null);
-    if (!await waitSceneReady(scene)) throw manualError('resources', '零件网格载入超时');
+    if (!await waitSceneReady(scene, 20000, signal)) throw manualError('resources', '零件网格载入超时');
     const failedMeshes = ['_connMeshes', '_tubeMeshes', '_fitMeshes', '_surfMeshes', '_slideMeshes'].filter(key => scene[key] === false);
     if (failedMeshes.length) throw manualError('resources', `真实零件网格载入失败: ${failedMeshes.join(', ')}`);
     scene.renderModel(model, null);
+    let renderedState = null;
+    const applyState = state => {
+      if (renderedState === state) return;
+      activeState = state;
+      scene.renderModel(model, null, { assembly: state });
+      renderedState = state;
+    };
     const fullBounds = renderedBounds(scene, model);
     const allIds = new Set(['nodes', 'tubes', 'panels', 'clamps', 'textiles', 'slides', 'fittings'].flatMap(key => [...(model[key]?.keys() || [])]));
     const shot = async (state, yaw, items = [], bounds = null, direction = null, box = stepBox(), local = false) => {
-      activeState = state; scene.renderModel(model, null, { assembly: state });
+      await checkpoint();
+      applyState(state);
       const size = snapSize(box.imgW, box.imgH);
       const visibleItems = local ? items : items.slice(0, 6);
       const image = await captureView(scene, model, yaw, { ...size, bounds: bounds || renderedBounds(scene, model), items: positionedItems(model, visibleItems, state), oneEach: true, direction, fitMargin: box.fitMargin });
+      pageShots.push(image.img);
       if (!local) image.marks.push(...projectStateMarks(scene, state, size.width / size.height));
       image.operationNumbers = state?.operationNumbers || [];
       image.operationMarks = projectOperationMarks(scene, model, state, size.width / size.height);
@@ -1591,8 +1611,8 @@ export async function exportAssemblyPdf(opts) {
     };
     for (const descriptor of descriptors) {
       currentPage++;
-      onProgress?.({ page: currentPage, total, phase: 'render' });
-      await yieldUi();
+      onProgress?.({ page: currentPage - 1, total, phase: 'render' });
+      await checkpoint();
       const { c, ctx } = newPageCanvas();
       const pageBox = descriptor.type === 'cover' ? coverBox(descriptor.partsH) : manualReadingPageBox(descriptor.partsH, descriptor.headerH, descriptor.type === 'reading-local');
       try {
@@ -1613,8 +1633,8 @@ export async function exportAssemblyPdf(opts) {
             const height = pageLayout.availableHeight;
             const state = assemblyDetailState(plan, descriptor.index, group.id, { action: true });
             const completed = assemblyDetailState(plan, descriptor.index, group.id, { action: false });
-            scene.renderModel(model, null, { assembly: state }); const beforeBounds = assemblyDetailBounds(scene, model, plan, steps[descriptor.index], state);
-            scene.renderModel(model, null, { assembly: completed }); const afterBounds = assemblyDetailBounds(scene, model, plan, steps[descriptor.index], completed);
+            applyState(state); const beforeBounds = assemblyDetailBounds(scene, model, plan, steps[descriptor.index], state);
+            applyState(completed); const afterBounds = assemblyDetailBounds(scene, model, plan, steps[descriptor.index], completed);
             const bounds = unionBounds(beforeBounds, afterBounds);
             const imageHeight = group.compact ? (height - (group.titleLines.length * 4.6 + group.lines.length * 4.6 + 3) - group.legendH - 4) / 2 : height - (group.height - 46);
             const box = { imgW: group.compact ? 138.5 : 124, imgH: imageHeight };
@@ -1639,29 +1659,28 @@ export async function exportAssemblyPdf(opts) {
           const module = entry.kind === 'module';
           const leftState = assemblyReadingState(model, plan, entry, { area: area || null, structure: !module });
           const rightState = assemblyReadingState(model, plan, entry, { area: area || null, whole: !localized });
-          scene.renderModel(model, null, { assembly: rightState });
+          if (localized || module) applyState(rightState);
           const bounds = localized || module ? renderedBounds(scene, model) : fullBounds;
           const leftDirection = module ? readingModuleDirection(model, plan, entry) : [1, .75, 1];
           const rightDirection = localized ? [-1, .75, -1] : leftDirection;
           const priority = [...descriptor.allItems].sort((a, b) => (a.kind === 'connectors' ? 0 : 1) - (b.kind === 'connectors' ? 0 : 1) || a.num - b.num);
-          scene.renderModel(model, null, { assembly: leftState });
+          applyState(leftState);
           const leftBounds = localized ? bounds : renderedBounds(scene, model);
           const left = await shot(leftState, 0, priority.slice(0, 6), leftBounds, leftDirection, pageBox, true);
           const right = await shot(rightState, 0, priority.slice(6, 12), localized ? bounds : fullBounds, rightDirection, pageBox, true);
           const attachMarks = module ? (plan.interfaces || []).filter(marker => entry.interfaceIds.includes(marker.id) && marker.position).map((marker, i) => ({ position: marker.position, num: String.fromCharCode(65 + i) })) : [];
-          const addMarks = (image, state, bounds, direction, markers) => {
-            scene.renderModel(model, null, { assembly: state });
+          const addMarks = (image, bounds, direction, markers) => {
             scene._frameAlong(model, new Vector3(...direction).normalize(), { silent: true, bounds, aspect: image.img.width / image.img.height, margin: 1.18 });
             const points = scene.projectWorld(markers.map(marker => marker.position), image.img.width / image.img.height);
             image.marks.push(...points.flatMap((point, i) => point ? [{ ...point, num: markers[i].num }] : []));
           };
           if (module) {
-            addMarks(left, leftState, leftBounds, leftDirection, attachMarks);
-            addMarks(right, rightState, fullBounds, rightDirection, attachMarks);
+            addMarks(left, leftBounds, leftDirection, attachMarks);
+            addMarks(right, fullBounds, rightDirection, attachMarks);
           } else if (!localized && entry.areas.length) {
             const markers = entry.areas.map(value => ({ position: value.center, num: value.label }));
-            addMarks(left, leftState, leftBounds, leftDirection, markers);
-            addMarks(right, rightState, fullBounds, rightDirection, markers);
+            addMarks(left, leftBounds, leftDirection, markers);
+            addMarks(right, fullBounds, rightDirection, markers);
           }
           const consumed = paintStep(ctx, { front: left.img, back: right.img, copy: { ...copy, front: localized ? copy.readingStructureFront : module ? copy.readingModule : copy.readingLayerStructure, back: localized ? copy.readingCompleteBack : copy.readingWholeLocation, thisStep: localized ? (copy.readingAreaParts || '{area}').replace('{area}', area.label) : copy.thisStep, contextHint: '' }, heading: descriptor.heading, items: descriptor.items, icons, k: currentPage, n: total, fill: sceneFill(scene), frontMarks: [], backMarks: [], instructions: [], stamp, partsH: descriptor.partsH, headerH: descriptor.headerH, imageBox: pageBox });
           drawReadingMarks(ctx, left, mm(pageBox.x0), mm(pageBox.imgY), mm(pageBox.imgW), mm(pageBox.imgH));
@@ -1706,9 +1725,9 @@ export async function exportAssemblyPdf(opts) {
               if (roofCoverDetail) {
                 // A canopy covers its supporting roof from above. Show the
                 // underside and the complete referenced support instead.
-                scene.renderModel(model, null, { assembly: state });
+                applyState(state);
                 leftFocus = assemblyFocusBounds(scene, model, plan, steps[descriptor.index], state);
-                scene.renderModel(model, null, { assembly: completed });
+                applyState(completed);
                 rightFocus = assemblyFocusBounds(scene, model, plan, steps[descriptor.index], completed);
               }
             }
@@ -1730,9 +1749,9 @@ export async function exportAssemblyPdf(opts) {
             bounds = fullBounds;
           }
           if (descriptor.type === 'step') {
-            scene.renderModel(model, null, { assembly: state });
+            applyState(state);
             const leftBounds = assemblyFocusBounds(scene, model, plan, steps[descriptor.index], state);
-            scene.renderModel(model, null, { assembly: completed });
+            applyState(completed);
             const rightBounds = assemblyFocusBounds(scene, model, plan, steps[descriptor.index], completed);
             bounds = boundsFor(leftBounds.min.map((value, axis) => Math.min(value, rightBounds.min[axis])), leftBounds.max.map((value, axis) => Math.max(value, rightBounds.max[axis])));
           }
@@ -1755,6 +1774,8 @@ export async function exportAssemblyPdf(opts) {
         }
         ctx.fillStyle = MUTED; ctx.font = font(400, mm(2)); ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
         ctx.fillText(`${currentPage} / ${total}`, mm(PAGE_W / 2), mm(PAGE_H - 2.5));
+        onProgress?.({ page: currentPage - 1, total, phase: 'encode' });
+        await checkpoint();
         await pageToPdf(doc, c, currentPage === 1);
         if (descriptor.type === 'safety') {
           const sourceLayout = manualTextPageLayout(ctx, descriptor.title, descriptor.lines, stamp);
@@ -1762,9 +1783,15 @@ export async function exportAssemblyPdf(opts) {
             if (line === copy.safetySource || line.startsWith('https://quadroworld.com/')) doc.link(M, sourceLayout.bodyY + index * 5, ctx.measureText(line).width / mm(1), 5, { url: 'https://quadroworld.com/files/manuals/Sicherheitsanweisung.pdf' });
           });
         }
-      } finally { c.width = c.height = 0; }
+      } finally {
+        c.width = c.height = 0;
+        for (const canvas of pageShots) canvas.width = canvas.height = 0;
+        pageShots.length = 0;
+      }
     }
     if (doc.getNumberOfPages() !== total) throw manualError('pagination', '说明书页数与导出进度不一致');
+    onProgress?.({ page: total, total, phase: 'save' });
+    await checkpoint();
     const blob = doc.output('blob');
     await onDocument?.({ doc, blob, pages: total, plan });
     if (save) doc.save(filename || `${name || 'design'}.pdf`);
@@ -1774,6 +1801,7 @@ export async function exportAssemblyPdf(opts) {
     error.page = currentPage; error.total = total;
     throw error;
   } finally {
+    for (const canvas of pageShots) canvas.width = canvas.height = 0;
     if (scene) { scene.onMeshesReady = () => {}; scene.dispose(); scene.renderer.forceContextLoss(); }
     host.remove();
   }

@@ -7504,7 +7504,14 @@ export class SceneManager {
     let url = null;
     try {
       this._renderMainScene();
-      url = mime === "image/jpeg"
+      if (opts.canvas) {
+        // 独立拷贝当前帧，供说明书直接合成，避免 PNG 编码后再解码。
+        const canvas = document.createElement('canvas');
+        canvas.width = this.renderer.domElement.width;
+        canvas.height = this.renderer.domElement.height;
+        canvas.getContext('2d').drawImage(this.renderer.domElement, 0, 0);
+        url = canvas;
+      } else url = mime === "image/jpeg"
         ? this.renderer.domElement.toDataURL(mime, quality ?? 0.82)
         : this.renderer.domElement.toDataURL(mime);
     } finally {

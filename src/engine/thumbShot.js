@@ -14,12 +14,17 @@ function sceneWaiting(scene) {
   return !!scene._spinner?.classList.contains('visible')
 }
 
-/** 等到零件网格加载完，避免截到空转圈或替代方块。 */
-export async function waitSceneReady(scene, timeoutMs = 20000) {
+/** 等到零件网格加载完，避免截到空转圈或替代方块。
+ * @param {object} scene
+ * @param {number} timeoutMs
+ * @param {AbortSignal | null} signal
+ */
+export async function waitSceneReady(scene, timeoutMs = 20000, signal = null) {
   const started = performance.now()
   const prev = scene.onMeshesReady
   try {
     while (performance.now() - started < timeoutMs) {
+      signal?.throwIfAborted();
       if (!sceneWaiting(scene)) {
         await waitFrame()
         await waitFrame()

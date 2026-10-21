@@ -11,7 +11,8 @@ import { onSyncEvent, syncSavedDoc, syncNow, syncProbe, syncStarted } from '../s
 import { pushDocToServer, type PushDocOptions } from '../sync/docPublish'
 import { tabOpenedFrom, tabSavedAs } from '../sync/origin'
 import { pullDoc } from '../sync/docEntry'
-import { bootEntry, dropParam, SESSIONLESS, VIEW_ONLY, EDITOR_EMBED, EDITOR_SESSION, SINGLE_MODEL, type ResumeExport } from '../entry'
+import { bootEntry, dropParam, SESSIONLESS, VIEW_ONLY, EDITOR_EMBED, EDITOR_SESSION, SINGLE_MODEL, RESOURCE_MODE, type ResumeExport } from '../entry'
+import {deliverResourceFile,sendResourceMessage} from '../resourceDownload'
 import { draftHandoff, entryDraft } from './draftEntry'
 import { clearSlotAccess, slotLocked, slotAccess, saveCapacityFull, updateSlotAccess } from '../sync/slotAccess'
 import { chooseSharing, SharingCancelled } from '../shareOptions'
@@ -37,7 +38,7 @@ import { appendTab } from './tabs'
 import { modelColors, selectionColor } from '../engine/customColors.js'
 import { modelContent, personalDecision, personalRecordUnconfirmed, personalSaveBaseline, readPersonalBinding, restorePersonalBinding, samePersonalBinding, savedGenerationUnchanged, savedRecordState, type PersonalState } from './personalTabs'
 import { renderModelCover } from './modelCover'
-import { computeAssemblyPlan } from '../engine/assemblyPlan.js'
+import { computeAssemblyPlan, computeLayeredManualPlan } from '../engine/assemblyPlan.js'
 import { ensureAssemblyMeshes } from '../engine/assemblyNativeMesh.js'
 import { createAssemblyReadingPlan } from '../engine/assemblyReadingPlan.js'
 import { proposeAssemblyRepairs } from '../engine/connectionResolver.js'
@@ -306,8 +307,8 @@ interface EngineApi {
   exportBomCsv: () => Promise<void>
   /** 料表存成一张图，发群里直接能看 */
   exportBomPng: () => Promise<void>
-  exportAssemblyPdf: () => Promise<void>
-  confirmExportManual: (cover?: string | null) => Promise<void>
+  exportAssemblyPdf: () => Promise<{status:'done'|'cancelled'|'failed';message?:string}|void>
+  confirmExportManual: (cover?: string | null) => Promise<{status:'done'|'cancelled'|'failed';message?:string}|void>
   cancelExportManual: () => void
   exportManualConfirm: boolean
   manualPreview: ManualPreview | null
@@ -316,7 +317,8 @@ interface EngineApi {
   reviewManualRepairs: (nodeIds: string[]) => void
   applyManualRepairs: () => boolean
   discardManualRepairs: () => void
-  exportingManual: { page: number; total: number } | null
+  exportingManual: { page: number; total: number; phase?: string } | null
+  cancelManualExport: () => void
   shareCurrent: () => Promise<void>
   /**
    * 导出文件要先有账号（部署设了 VITE_REGISTER_URL 时）。register：还没登录，问要不要
@@ -592,11 +594,7 @@ function designFromText(text: string): unknown {
 }
 
 function download(name: string, text: string, type: string) {
-  const a = document.createElement('a')
-  a.href = URL.createObjectURL(new Blob([text], { type }))
-  a.download = name
-  a.click()
-  URL.revokeObjectURL(a.href)
+  deliverResourceFile(new Blob([text], { type }),name)
 }
 
 export function asBom(raw: AnyRec): BomView {
@@ -767,7 +765,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   }, [])
   const [room, setRoomState] = useState<RoomSettings>(loadRoom)
   const [side, setSide] = useState<SidePanel>('bom')
-  const [exportingManual, setExportingManual] = useState<{ page: number; total: number } | null>(null)
+  const [exportingManual, setExportingManual] = useState<{ page: number; total: number; phase?: string } | null>(null)
   const [exportManualConfirm, setExportManualConfirm] = useState(false)
   const [manualPreview, setManualPreview] = useState<ManualPreview | null>(null)
   const manualPreviewRef = useRef<ManualPreview | null>(null)
@@ -776,6 +774,12 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     setManualPreview(preview)
   }
   const exportingManualRef = useRef(false)
+  const manualAbort = useRef<AbortController | null>(null)
+  const cancelManualExport = useCallback(() => {
+    manualAbort.current?.abort()
+    setExportingManual(value => value && { ...value, phase: 'cancelling' })
+  }, [])
+  useEffect(() => () => manualAbort.current?.abort(), [])
   const [nameAsk, setNameAsk] = useState<NameAsk | null>(null)
   const [accountAsk, setAccountAsk] = useState<EngineApi['accountAsk']>(null)
   const nameAskRef = useRef<NameAsk | null>(null)
@@ -1752,6 +1756,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   },[notify,saveSessionNow,t])
 
   const saveCurrentNow = useCallback(async (name?: string) => {
+    if(RESOURCE_MODE)return null
     const e2 = eng.current
     const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
     if (!e2 || !tab || tab.readOnly) return null
@@ -1855,7 +1860,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   },[bump])
   useEffect(()=>{
     const tab=tabsRef.current.find(x=>x.tabId===activeRef.current),scope=String(storage.getAccountScope()),e2=eng.current
-    if(!ready||!entryReady||!tab||!e2||tab.planId||tab.readOnly||!scope.startsWith('user:')||refreshedRoomEntries.current.has(tab.tabId))return
+    if(SESSIONLESS||!ready||!entryReady||!tab||!e2||tab.planId||tab.readOnly||!scope.startsWith('user:')||refreshedRoomEntries.current.has(tab.tabId))return
     const context=e2.model.homeContext
     if(!context?.roomId)return
     refreshedRoomEntries.current.add(tab.tabId)
@@ -2377,7 +2382,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   function needAccount(kind: ResumeExport) {
     const tab=tabsRef.current.find(x=>x.tabId===activeRef.current)
     if(tab?.readOnly||tab?.slotLocked||tab&&slotLocked(tab.docId,tab.libraryId,tab.planId)){notify(t('toast.srcFailed')+' (423)','err');return true}
-    if (!import.meta.env.VITE_REGISTER_URL || syncStarted()) return false
+    if (!import.meta.env.VITE_REGISTER_URL || syncStarted() || RESOURCE_MODE && String(storage.getAccountScope()).startsWith('user:')) return false
     track('builder.export.gate', { kind })
     setAccountAsk({ kind, phase: 'register' })
     return true
@@ -2442,6 +2447,12 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const e2 = eng.current
     if (!e2) return
     if (needAccount('shareimg')) return
+    if(RESOURCE_MODE){
+      const cover=await renderModelCover(e2.model.toJSON())
+      if(!cover){notify(t('toast.pngFailed'),'err');return}
+      deliverResourceFile(await (await fetch(cover)).blob(),`${activeName()}.png`)
+      track('builder.export.png',{stamp:false});notify(t('toast.pngSaved'));return
+    }
     const shot = e2.scene.snapshot?.() as string | null
     if (!shot) { notify(t('toast.pngFailed'), 'err'); return }
     let stamp: Stamp | null = null
@@ -2553,6 +2564,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     putManualPreview(makeManualPreview({ ...prev.data, assemblyConfig: structuredClone(config) }, prev))
   }
   function saveManualConfig() {
+    if(RESOURCE_MODE)return false
     const prev = manualPreviewRef.current
     const e2 = eng.current
     if (!prev || !e2 || e2.builder.readOnly || prev.tabId !== activeRef.current || JSON.stringify(e2.model.toJSON()) !== prev.source || prev.repair) return false
@@ -2577,6 +2589,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     if (prev?.repair) putManualPreview(makeManualPreview(prev.repair.before, { ...prev, repair: null }))
   }
   function applyManualRepairs() {
+    if(RESOURCE_MODE)return false
     const prev = manualPreviewRef.current
     const e2 = eng.current
     if (!prev?.repair?.canApply || !e2 || e2.builder.readOnly || prev.tabId !== activeRef.current || JSON.stringify(e2.model.toJSON()) !== prev.source) return false
@@ -2597,13 +2610,11 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     if (!e2 || exportingManualRef.current) return
     if (modelPartCount(e2.model.toJSON()) === 0) {
       notify(t('toast.manualEmpty'), 'warn')
-      return
+      return {status:'failed' as const,message:t('toast.manualEmpty')}
     }
     if (needAccount('manual')) return
-    await ensureAssemblyMeshes()
-    putManualPreview(makeManualPreview(structuredClone(e2.model.toJSON()) as ModelJSON))
-    track('builder.export.manual.ask', { parts: modelPartCount(e2.model.toJSON()) })
-    setExportManualConfirm(true)
+    putManualPreview(null)
+    return await confirmExportManual()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notify, t, entryReady])
 
@@ -2617,34 +2628,22 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener(UI_ESCAPE_EVENT, cancelPending)
   }, [])
 
-  const confirmExportManual = useCallback(async (previewCover?: string | null) => {
+  const confirmExportManual = useCallback(async (_previewCover?: string | null) => {
     const e2 = eng.current
-    const preview = manualPreviewRef.current
-    if (!e2 || !preview || !preview.plan.canExport || exportingManualRef.current) return
+    if (!e2 || exportingManualRef.current) return
     if (needAccount('manual')) return
+    const data = structuredClone(manualPreviewRef.current?.data || e2.model.toJSON()) as ModelJSON
+    const preview = manualPreviewRef.current || { data, name: activeName(), tabId: activeRef.current }
     const frozen = new BuildModel()
-    if (!frozen.loadJSON(preview.data).ok) throw new Error('invalid assembly snapshot')
+    if (!frozen.loadJSON(data).ok) throw new Error('invalid assembly snapshot')
     const manualTab = tabsRef.current.find(x => x.tabId === preview.tabId)
     const output = outputCandidate(manualTab, preview.data)
     const manualObject = manualTab && tabAnalytics.get(manualTab)?.object || ''
     track('builder.export.manual.go')
     exportingManualRef.current = true
-    setExportingManual({ page: 0, total: 1 })
-    let stamp: Stamp | null = null
-    if (sharePagesEnabled()) {
-      const cover = previewCover
-      try {
-        if (!cover) throw new Error('cover')
-        stamp = await makeStamp('manual', cover, preview)
-      } catch (err) {
-        track('builder.manual.fail', { reason: 'share_page', object: manualObject })
-        console.error('Assembly manual share page failed', err)
-        exportingManualRef.current = false
-        setExportingManual(null)
-        notify(t('toast.stampFailed'), 'err')
-        return
-      }
-    }
+    const controller = new AbortController()
+    manualAbort.current = controller
+    setExportingManual({ page: 0, total: 0, phase: 'resources' })
     const locale = lang === 'zh' ? 'zh-CN' : lang === 'de' ? 'de-DE' : 'en-US'
     const b = frozen.bounds?.(2.5) as { size: number[] } | null
     const sizeLine = b
@@ -2652,18 +2651,22 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       : ''
     const fileBase = (preview.name || 'design').replace(/[\\/:*?"<>|]+/g, '_').trim() || 'design'
     try {
+      // 先绘制进度，再按高度冻结分层资料。
+      await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+      controller.signal.throwIfAborted()
+      const plan = computeLayeredManualPlan(frozen)
       const bomNow = asBom(computeBOM(frozen) as AnyRec)
       await runAssemblyPdf({
         model: frozen,
+        signal: controller.signal,
         modelJSON: preview.data,
-        plan: preview.plan,
-        assemblyConfig: preview.config,
-        order: preview.order,
+        plan,
         name: preview.name,
         bom: bomNow,
         filename: `${fileBase}-${t('manual.fileSuffix')}.pdf`,
-        onProgress: (p: { page: number; total: number }) => setExportingManual(p),
-        stamp: stamp && { ...stamp, hint: t('stamp.hint') },
+        save: !RESOURCE_MODE,
+        onDocument: RESOURCE_MODE ? ({blob}:{blob:Blob})=>deliverResourceFile(blob,`${fileBase}-${t('manual.fileSuffix')}.pdf`) : undefined,
+        onProgress: (p: { page: number; total: number; phase?: string }) => setExportingManual(p),
         copy: {
           ...assemblyPdfStrings[lang],
           product: t('app.title'),
@@ -2694,19 +2697,24 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       track('builder.export.manual.done', { object: manualObject })
       output('manual')
       notify(t('toast.manualSaved'))
+      return {status:'done' as const}
     } catch (err) {
+      if (controller.signal.aborted && err === controller.signal.reason) { notify(t('manual.cancelled')); sendResourceMessage({type:'xmf-resource:result',status:'cancelled'}); return {status:'cancelled' as const} }
       track('builder.manual.fail', { reason: (err as { code?: string })?.code === 'empty' ? 'empty' : 'render', object: manualObject })
       console.error('Assembly manual export failed', err)
       if ((err as { code?: string })?.code === 'empty') notify(t('toast.manualEmpty'), 'warn')
       else notify(t('toast.manualFailed'), 'err')
+      sendResourceMessage({type:'xmf-resource:result',status:'failed',message:t('toast.manualFailed')})
+      return {status:'failed' as const,message:t('toast.manualFailed')}
     } finally {
+      manualAbort.current = null
       exportingManualRef.current = false
       setExportingManual(null)
       bump()
     }
     // coverShot、makeStamp 每次渲染重建，只在回调里调用，不进依赖表
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bump, lang, notify, snapshotActive, t])
+  }, [bump, lang, notify, t])
 
   const shareCurrent = useCallback(async () => {
     const e2 = eng.current
@@ -2814,14 +2822,14 @@ export function EngineProvider({ children }: { children: ReactNode }) {
         data = await decodeShare(payload)
         clearSharePayload()
       } else {
-        const expectedOwner=EDITOR_EMBED?new URLSearchParams(location.search).get('editorOwner'):null
+        const expectedOwner=EDITOR_EMBED?new URLSearchParams(location.search).get('editorOwner'):RESOURCE_MODE?new URLSearchParams(location.search).get('resourceOwner'):null
         const res = await fetch(versionPublicSource(ent.src as string), { credentials: 'include',...(expectedOwner?{headers:{'X-Builder-User-ID':expectedOwner}}:{}) })
-        if (!res.ok) { track('builder.app.fail', { reason: 'source_http' }); notify(t('toast.srcFailed'), 'err');if(EDITOR_EMBED){if(res.status===423)parent.postMessage({type:'xmf-model-editor:readonly'},location.origin);else setError(t('toast.srcFailed')+' ('+res.status+')')} return }
+        if (!res.ok) { track('builder.app.fail', { reason: 'source_http' }); notify(t('toast.srcFailed'), 'err');if(EDITOR_EMBED||RESOURCE_MODE){if(EDITOR_EMBED&&res.status===423)parent.postMessage({type:'xmf-model-editor:readonly'},location.origin);else setError(t('toast.srcFailed')+' ('+res.status+')')} return }
         libraryRevision=Number(res.headers.get('X-Library-Revision')||0)||undefined
         libraryOwner=res.headers.get('X-Builder-User-ID')||undefined
         try { data = designFromText(await res.text()) } catch { data = null }
       }
-      if (!data) { track('builder.app.fail', { reason: 'source_format' }); notify(t('toast.shareInvalid'), 'err');if(EDITOR_EMBED)setError(t('toast.shareInvalid')); return }
+      if (!data) { track('builder.app.fail', { reason: 'source_format' }); notify(t('toast.shareInvalid'), 'err');if(EDITOR_EMBED||RESOURCE_MODE)setError(t('toast.shareInvalid')); return }
       const e2 = eng.current
       if (!e2) return
       const restored = tabsRef.current.find(x => x.tabId === activeRef.current)
@@ -2831,7 +2839,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       }
       if (!SINGLE_MODEL && !EDITOR_EMBED && modelPartCount(e2.model.toJSON()) > 0) createEmptyTab()
       // 当前是共享方案的标签页时 applyModelJson 自己会新开一个
-      if (!applyModelJson(data, { undoable: false })) { track('builder.app.fail', { reason: 'source_format' }); notify(t('toast.shareInvalid'), 'err'); return }
+      if (!applyModelJson(data, { undoable: false })) { track('builder.app.fail', { reason: 'source_format' }); notify(t('toast.shareInvalid'), 'err');if(RESOURCE_MODE)setError(t('toast.shareInvalid')); return }
       if (ent.background === 'grass' || (ent.background === 'home' && e2.model.homeContext)) {
         e2.scene.setBackground(ent.background)
         bump()
@@ -2852,7 +2860,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       track('builder.design.open', { from: payload ? 'share' : 'src', view: VIEW_ONLY, copy: ent.copy })
       if (ent.copy && !VIEW_ONLY) { await copyToAccount(); dropParam('copy') }
       setEntryReady(true)
-    })().catch(err => { track('builder.app.fail', { reason: 'source_load' }); notify(err instanceof Error ? err.message : String(err), 'err') })
+    })().catch(err => { track('builder.app.fail', { reason: 'source_load' }); notify(err instanceof Error ? err.message : String(err), 'err');if(RESOURCE_MODE)setError(err instanceof Error?err.message:String(err)) })
   }, [ready, applyModelJson, copyToAccount, createEmptyTab, notify, syncTabs, t])
 
   const analyticsReady = useRef(false)
@@ -3076,7 +3084,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     toast,
     tabs, activeTabId, bom, inventory,
     invRows: cmp.rows, feasible: cmp.feasible, sizeCm, room, setRoom, roomOverflow,
-    loadPreset, placeModule, exportPng, exportBomCsv, exportBomPng, exportAssemblyPdf, confirmExportManual, cancelExportManual, exportManualConfirm, exportingManual, shareCurrent,
+    loadPreset, placeModule, exportPng, exportBomCsv, exportBomPng, exportAssemblyPdf, confirmExportManual, cancelExportManual, exportManualConfirm, exportingManual, cancelManualExport, shareCurrent,
     manualPreview, updateManualConfig, saveManualConfig, reviewManualRepairs, applyManualRepairs, discardManualRepairs,
     accountAsk, answerAccount,
     assembly: {

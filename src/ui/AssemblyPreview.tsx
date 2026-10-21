@@ -13,6 +13,7 @@ import { UI_ESCAPE_EVENT } from './events'
 import { layoutAssemblyMarks } from './assemblyOverlay'
 import { loadAssemblyPartImage } from './assemblyPartImages'
 import './AssemblyPreview.css'
+import {RESOURCE_MODE} from '../entry'
 
 // 引擎计划由 Vanilla JS 提供。
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -264,7 +265,7 @@ export default function AssemblyPreview() {
     <div className="assembly-preview-body" data-testid="assembly-reading-body">
       <aside className="assembly-preview-sidebar assembly-region-sidebar">
         <h3>{s.regions} · {ordered.length}</h3>
-        <div className="assembly-preview-tools"><button className="qb-btn qb-btn-ghost qb-btn-sm" disabled={busy} onClick={auto}>{s.auto}</button><button className="qb-btn qb-btn-ghost qb-btn-sm" disabled={busy || api.readOnly || stale || !!preview.repair} onClick={() => api.saveManualConfig() ? api.notify(s.saved) : api.notify(s.failedApply, 'warn')}>{s.save}</button></div>
+        <div className="assembly-preview-tools"><button className="qb-btn qb-btn-ghost qb-btn-sm" disabled={busy} onClick={auto}>{s.auto}</button>{!RESOURCE_MODE && <button className="qb-btn qb-btn-ghost qb-btn-sm" disabled={busy || api.readOnly || stale || !!preview.repair} onClick={() => api.saveManualConfig() ? api.notify(s.saved) : api.notify(s.failedApply, 'warn')}>{s.save}</button>}</div>
         {ordered.map((r, i) => <article className="assembly-region" data-testid="assembly-region" key={r.id}>
           <span className="assembly-region-label">{plan.regions.find((region: E) => region.id === r.id)?.label || String.fromCharCode(65 + i)}</span>
           <input type="text" aria-label={s.name} key={`${r.id}-${r.name}`} defaultValue={r.name} disabled={busy} onBlur={e => { const name = e.target.value.trim(); if (name && name !== r.name) update({ ...config, regions: config.regions.map(x => x.id === r.id ? { ...x, name } : x) }) }} />

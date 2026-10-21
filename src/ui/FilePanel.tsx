@@ -15,7 +15,8 @@ import { colorStrings } from './colorStrings'
 import MyModelsLink from './MyModelsLink'
 import { DeviceDraftsLink } from './SingleModelBar'
 import { COLOR_HEX } from '../engine/colors.js'
-import { Box, BookOpen, ChevronDown, FileJson, FolderInput, Image, Link, Plus, Save, Sparkles, Upload } from 'lucide-react'
+import { ChevronDown, Download, FileJson, FolderInput, Link, Plus, Save, Sparkles, Upload } from 'lucide-react'
+import {openDownloads} from './Downloads'
 
 const btn = 'qb-file-action xmf-button xmf-button-secondary'
 const officialHexes = new Set([...Object.values(COLOR_HEX).map(hex => hex.toUpperCase()), '#2B2B2B'])
@@ -70,12 +71,7 @@ export default function FilePanel() {
       </section>
       <section aria-labelledby="qb-file-exports" className="qb-file-separated">
         <h2 id="qb-file-exports" className="qb-file-section">{t('chrome.export')}</h2>
-        <div className="qb-file-export-grid">
-          <button disabled={contentReadOnly} onClick={api.exportPng} className="qb-file-export" title={t('btn.exportPng')}><Image aria-hidden="true" /><strong>{t('chrome.image')}</strong><small>{t('chrome.imageHint')}</small></button>
-          <button disabled={contentReadOnly} onClick={api.exportJson} className="qb-file-export" title={t('btn.exportJson')}><FileJson aria-hidden="true" /><strong>{t('chrome.backup')}</strong><small>{t('chrome.backupHint')}</small></button>
-          <button disabled={contentReadOnly} onClick={api.exportQdf} className="qb-file-export" title={t('btn.exportQdf')}><Box aria-hidden="true" /><strong>{t('chrome.original')}</strong><small>{t('chrome.originalHint')}</small></button>
-          <button onClick={() => void api.exportAssemblyPdf()} disabled={contentReadOnly||!!api.exportingManual} aria-busy={!!api.exportingManual} className="qb-file-export" title={t('btn.exportManual')}><BookOpen aria-hidden="true" /><strong>{t('chrome.manual')}</strong><small>{t('chrome.manualHint')}</small></button>
-        </div>
+        <button type="button" disabled={contentReadOnly} onClick={openDownloads} className="qb-file-row"><Download aria-hidden="true"/><span>{lang==='zh'?'下载资料':lang==='de'?'Dateien herunterladen':'Download files'}</span></button>
         {api.modelColors.some(hex => !officialHexes.has(hex)) && <p className="text-xs text-gray-300 leading-relaxed px-2 mt-2">{colorStrings[lang].export}</p>}
         {!SINGLE_MODEL && <button disabled={contentReadOnly} onClick={() => void api.shareCurrent()} className="qb-file-row"><Link aria-hidden="true" /><span>{t('btn.share')}</span></button>}
       </section>
