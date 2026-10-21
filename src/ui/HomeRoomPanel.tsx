@@ -5,6 +5,7 @@ import { useEngine } from '../store/EngineContext'
 import { useI18n } from '../i18n'
 import { readRooms, readRoom, onRoomAccountInvalidated, type RoomData, type Room } from '../home/rooms'
 import { registerRoomThumbnails } from '../home/thumbnail.js'
+import {usePresence} from './motion'
 
 function GrassThumb({ blank = false }: { blank?: boolean }) {
   return <svg viewBox="0 0 48 48" className={'h-full w-full ' + (blank ? 'opacity-45 grayscale' : '')} aria-hidden="true">
@@ -33,6 +34,7 @@ export default function HomeRoomPanel({ tile = 40 }: { tile?: number }) {
   const text = useCallback((zh: string, en: string, de: string) => lang === 'zh' ? zh : lang === 'de' ? de : en, [lang])
   const demo = new URLSearchParams(location.search).has('homeDemo')
   const [open, setOpen] = useState(false), [rooms, setRooms] = useState<Room[]>([])
+  const [shown,leaving]=usePresence(open?true:null)
   const [error, setError] = useState(''), [loading, setLoading] = useState(false), [choosing, setChoosing] = useState(false)
   const [position, setPosition] = useState({ left: 12, top: 120, maxHeight: 400 })
   const root = useRef<HTMLDivElement>(null), panel = useRef<HTMLDivElement>(null), trigger = useRef<HTMLButtonElement>(null)
@@ -107,8 +109,8 @@ export default function HomeRoomPanel({ tile = 40 }: { tile?: number }) {
       onClick={() => { if (open) close(); else setOpen(true) }}>
       {api.background === 'home' && context ? <RoomThumb data={context.snapshot} /> : <GrassThumb blank={api.background === 'blank'} />}
     </button>
-    {open && createPortal(<div ref={panel} id={panelID} data-ui="scene-menu" role="menu" aria-label={text('场景', 'Scene', 'Szene')} aria-orientation="vertical"
-      className="pointer-events-auto fixed z-[60] flex flex-col items-center gap-2 overflow-y-auto overscroll-contain rounded-[14px] border border-[#ECD6C2] bg-[#FFFDF9] p-[5px] shadow-lg"
+    {shown && createPortal(<div ref={panel} id={panelID} data-ui="scene-menu" role="menu" aria-label={text('场景', 'Scene', 'Szene')} aria-orientation="vertical" inert={leaving}
+      className={`m-pop ${leaving?'m-leave pointer-events-none':'pointer-events-auto'} fixed z-[60] flex flex-col items-center gap-2 overflow-y-auto overscroll-contain rounded-[14px] border border-[#ECD6C2] bg-[#FFFDF9] p-[5px] shadow-lg`}
       style={{ ...position, width: tile + 12, '--scene-tile': `${tile}px` } as CSSProperties} onKeyDown={event => {
         if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return
         const buttons = Array.from(panel.current!.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'))

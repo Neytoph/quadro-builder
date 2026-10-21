@@ -36,6 +36,7 @@ export type ResumeExport = 'manual' | 'bom' | 'bompng' | 'shareimg' | 'qdf' | 'j
 const RESUMES: ResumeExport[] = ['manual', 'bom', 'bompng', 'shareimg', 'qdf', 'json', 'link', 'save']
 export const SINGLE_MODEL = Boolean(import.meta.env.VITE_SYNC_BASE)
 export const RECOVERY_ONLY = new URLSearchParams(location.search).get('recover') === '1'
+export const RESOURCE_MODE = new URLSearchParams(location.search).get('resources') === '1'
 
 export interface Entry {
   view: boolean
@@ -136,7 +137,7 @@ export const EDITOR_EMBED = window.parent !== window && new URLSearchParams(loca
 if(EDITOR_EMBED)document.documentElement.dataset.editorEmbed='true'
 const editorEntry = bootEntry()
 function singleSession(): string | undefined {
-  if (!SINGLE_MODEL || RECOVERY_ONLY || editorEntry.view || editorEntry.delivery || editorEntry.roomBrief || editorEntry.version) return undefined
+  if (!SINGLE_MODEL || RECOVERY_ONLY || RESOURCE_MODE || editorEntry.view || editorEntry.delivery || editorEntry.roomBrief || editorEntry.version) return undefined
   if (editorEntry.plan) return `model-editor:plan:${editorEntry.plan}`
   if (editorEntry.doc) return `model-editor:doc:${editorEntry.doc}`
   if (editorEntry.src?.match(/^\/quadro\/library\/[a-f0-9]+\/native$/)) return `model-editor:${editorEntry.src}`
@@ -153,7 +154,7 @@ export const EDITOR_SESSION = singleSession()
  * 只放一座、不读也不写这台设备上的标签页的打开方式：只看、交付查看、画房间。
  * 它们都不是这个人自己的标签页，不能盖掉。共享方案是标签页里的一个，照常读写。
  */
-export const SESSIONLESS = RECOVERY_ONLY || VIEW_ONLY || !!bootEntry().delivery || !!bootEntry().roomBrief || !!bootEntry().version
+export const SESSIONLESS = RECOVERY_ONLY || RESOURCE_MODE || VIEW_ONLY || !!bootEntry().delivery || !!bootEntry().roomBrief || !!bootEntry().version
 
 /**
  * 交付查看嵌在交付页的 iframe 里：拖动旋转、逐层拼装、全屏和版本名都由交付页自己画，

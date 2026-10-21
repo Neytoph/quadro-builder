@@ -57,7 +57,6 @@ export function BomPane() {
   const { t, lang } = useI18n()
   const bom = api.bom
   const empty = !bom || bom.totals.tubes + bom.totals.connectors + bom.totals.panels + bom.totals.other === 0
-  const exportBtn = 'qb-btn qb-btn-ghost qb-btn-sm flex-1'
 
   return (
     <>
@@ -98,10 +97,6 @@ export function BomPane() {
               <Section title={t('bom.reinforcements')} rows={bom.reinforcements} onPick={r => api.highlight(r.kind, r.id || '')} />
             </>
           )}
-        <div className="flex gap-1.5 mt-2 pt-3 border-t border-gray-800">
-          <button disabled={empty} onClick={api.exportBomCsv} className={exportBtn}>{t('bomx.csv')}</button>
-          <button disabled={empty} onClick={() => void api.exportBomPng()} className={exportBtn}>{t('bomx.png')}</button>
-        </div>
       </div>
     </>
   )

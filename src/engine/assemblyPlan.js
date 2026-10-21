@@ -388,6 +388,36 @@ function allocateBOM(model, bom, steps, owner, diagnostics) {
   return ledger;
 }
 
+/** 分层资料按模型高度组织展示，不运行安装路径或连接诊断。 */
+export function computeLayeredManualPlan(model) {
+  const layers = new Map(), owner = new Map();
+  const height = (key, part) => {
+    if (key === 'tubeIds') return Math.min(model.nodes.get(part.a).y, model.nodes.get(part.b).y);
+    if (key === 'panelIds' || key === 'textileIds') {
+      const corners = model.panelCorners(part);
+      return Math.min(...corners.map(point => point[1]));
+    }
+    return part.y;
+  };
+  for (const [key, group] of Object.entries(MAPS)) for (const part of values(model, group)) {
+    const y = Math.round(height(key, part) * 10) / 10;
+    if (!Number.isFinite(y)) throw new Error(`Invalid layer height: ${part.id}`);
+    if (!layers.has(y)) layers.set(y, Object.fromEntries(Object.keys(MAPS).map(key => [key, []])));
+    layers.get(y)[key].push(part.id);
+  }
+  const region = { id: 'layers', name: copy('整体造型', 'Whole model', 'Gesamtes Modell'), kind: 'body', label: 'A', partIds: [], ...Object.fromEntries(Object.keys(MAPS).map(key => [key, []])) };
+  const steps = [...layers].sort(([a], [b]) => a - b).map(([y, keys], index) => {
+    const partIds = Object.values(keys).flat(), parts = Object.fromEntries(GROUPS.map(group => [group, []]));
+    for (const id of partIds) owner.set(id, index);
+    for (const key of Object.keys(MAPS)) region[key].push(...keys[key]);
+    region.partIds.push(...partIds);
+    return { id: `layer-${index}`, regionId: region.id, title: copy(`${y} cm 分层`, `${y} cm layer`, `Ebene auf ${y} cm`), y, kind: 'frame', ...keys, partIds, parts, dependsOn: [], interfaceIds: [], instructions: [], operations: [], detailGroups: [], action: { type: 'build', layer: true, translation: [0, 0, 0], operations: [] } };
+  });
+  const bom = computeBOM(model), diagnostics = [], ledger = allocateBOM(model, bom, steps, owner, diagnostics);
+  for (const step of steps) for (const group of GROUPS) step[group] = step.parts[group];
+  return { version: 2, purpose: 'layers', order: 'y+', regions: steps.length ? [region] : [], interfaces: [], frameModules: [], fixingPoints: [], adjustments: [], steps, bom, ledger, levels: [...layers.keys()].sort((a, b) => a - b), diagnostics, verification: { directionChecked: false, pathChecked: false, methodChecked: false, physical: 'unverified', load: 'unverified' }, canExport: steps.length > 0 };
+}
+
 export function computeAssemblyPlan(model, config = model.assemblyConfig || {}, order = 'y+', internal = {}) {
   if (!assemblyMeshes()) throw new Error('装配网格还没加载');
   const pathQueryCache=internal.pathQueryCache||new Map();

@@ -11,7 +11,7 @@ import {
 import { connectorsForNode, textileRow, computeBOM } from "./bom.js";
 import { POOL_KINDS, BuildModel } from "./model.js";
 import { SceneManager } from "./scene.js";
-import { computeAssemblyPlan, assemblyState, assemblyDetailState } from "./assemblyPlan.js";
+import { computeLayeredManualPlan, assemblyState, assemblyDetailState } from "./assemblyPlan.js";
 import { waitSceneReady } from "./thumbShot.js";
 import { applyFrameHex, loadTune } from "./colorTune.js";
 import { componentStepLabel, componentPartId, componentOutputColor, componentFittingKey, componentSizeLabel } from './accessoryInfo.js';
@@ -1511,8 +1511,7 @@ export async function exportAssemblyPdf(opts) {
   const model = new BuildModel();
   const loaded = model.loadJSON(snapshot);
   if (!loaded.ok) throw manualError('model', `说明书模型无法载入: ${loaded.reason}`);
-  const plan = suppliedPlan || computeAssemblyPlan(model, opts.assemblyConfig, opts.order || opts.builder?.assemblyOrder || 'y+');
-  if (!plan.canExport) throw manualError('diagnostics', '模型连接诊断尚未通过，无法导出说明书', plan.diagnostics);
+  const plan = suppliedPlan || computeLayeredManualPlan(model);
   const steps = plan.steps || [];
   if (!steps.length) throw manualError('empty', '模型没有可导出的装配步骤');
   const regionDescriptors = manualRegionDescriptors(model, plan);
