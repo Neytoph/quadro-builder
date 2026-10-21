@@ -160,11 +160,14 @@ export let EDITOR_SESSION = singleSession()
 export function replaceEditorEntry(href: string) {
   const url = new URL(href, location.href)
   const owner = new URLSearchParams(location.search).get('editorOwner')
-  const allowed = ['embedded', 'editorOwner', 'lang', 'editorRename', 'draft', 'plan', 'src', 'name']
-  if (!EDITOR_EMBED || url.origin !== location.origin || url.pathname !== location.pathname || url.hash || url.username || url.password ||
+  const allowed = ['embedded', 'editorProtocol', 'editorOwner', 'lang', 'editorRename', 'draft', 'plan', 'src', 'name']
+  if (!EDITOR_EMBED || url.origin !== location.origin || url.pathname !== location.pathname || (url.hash && !url.hash.startsWith(EDITOR_HASH)) || url.username || url.password ||
     url.searchParams.get('embedded') !== 'model' || !owner || url.searchParams.get('editorOwner') !== owner ||
     [...url.searchParams.keys()].some(key => !allowed.includes(key) || url.searchParams.getAll(key).length !== 1)) throw new Error('Invalid embedded editor entry')
-  const next = readEntry(url.search, '', collab)
+  const model = new URLSearchParams(url.hash.slice(EDITOR_HASH.length))
+  if ([...model.keys()].some(key => !['src', 'plan', 'name'].includes(key) || model.getAll(key).length !== 1 || url.searchParams.has(key)) ||
+    (url.searchParams.has('editorProtocol') && url.searchParams.get('editorProtocol') !== '2')) throw new Error('Invalid embedded model entry')
+  const next = readEntry(url.search, url.hash, collab)
   if (next.src && !/^\/quadro\/library\/[a-f0-9]+\/native$/.test(next.src)) throw new Error('Invalid embedded model source')
   if (next.plan && !/^[A-Za-z0-9_-]{4,64}$/.test(next.plan)) throw new Error('Invalid embedded plan')
   if ([next.src, next.plan, url.searchParams.get('draft')].filter(Boolean).length !== 1) throw new Error('Embedded editor requires one source')
