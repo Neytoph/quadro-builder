@@ -33,4 +33,12 @@ describe('复用编辑器重新选择文档', () => {
     expect(location.href).toBe(original)
     expect(entry.bootEntry().src).toBe('/quadro/library/aa/native')
   })
+  it('固定导航的来源片段切换后，仍绑定正确文档且拒绝混合来源', async () => {
+    const entry = await embedded()
+    entry.replaceEditorEntry('/builder/?embedded=model&editorProtocol=2&editorOwner=7&lang=zh#model-editor?src=/quadro/library/cc/native&name=第三座')
+    expect(entry.bootEntry().src).toBe('/quadro/library/cc/native')
+    expect(entry.EDITOR_SESSION).toContain('/quadro/library/cc/native')
+    expect(() => entry.replaceEditorEntry('/builder/?embedded=model&editorProtocol=2&editorOwner=7&src=/quadro/library/aa/native#model-editor?src=/quadro/library/bb/native')).toThrow()
+    expect(() => entry.replaceEditorEntry('/builder/?embedded=model&editorProtocol=2&editorOwner=7#model-editor?src=/quadro/library/bb/native&view=1')).toThrow()
+  })
 })
