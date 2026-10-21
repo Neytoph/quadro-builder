@@ -74,6 +74,7 @@ export default function EmbeddedEditorBridge(){
   void(async()=>{
    await api.checkpointEditor()
    const scope=String(storage.getAccountScope())
+   document.documentElement.dataset.editorReady='true'
    parent.postMessage({type:'xmf-model-editor:ready',owner:scope.startsWith('user:')?scope.slice(5):'',name:active.name},location.origin)
    if(new URLSearchParams(location.search).get('editorRename')!=='1')return
    working.current=true
