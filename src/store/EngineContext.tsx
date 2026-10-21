@@ -32,6 +32,7 @@ import { takeModelThumb, waitSceneReady } from '../engine/thumbShot.js'
 import { bomToCsv, bomToPngDataUrl, loadImage } from '../ui/bomExport'
 import { shareImageDataUrl } from '../ui/shareImage'
 import { MOTION } from '../ui/motion'
+import { paintOpening, type ModelOpeningState } from '../ui/ModelOpening'
 import { createTabDoc, dropTabDoc, memoryDoc, openTabDoc, readPersonalState, writePersonalState, SEED_ORIGIN, type LocalDoc } from '../collab/localDocs'
 import { partCountOf, writeJSON, type ModelJSON } from '../collab/ymodel'
 import { appendTab } from './tabs'
@@ -159,6 +160,7 @@ export interface Inventory {
 }
 
 interface EngineApi {
+  opening: ModelOpeningState | null
   editorState: () => { dirty: boolean; name: string; readOnly: boolean }
   checkpointEditor: () => Promise<void>
   discardEditor: () => Promise<void>
@@ -712,6 +714,11 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const [ready, setReady] = useState(false)
+  const [opening, setOpening] = useState<ModelOpeningState | null>(null)
+  const openingRef = useRef(false)
+  useEffect(() => {
+    if (EDITOR_EMBED && opening) parent.postMessage({ type: 'xmf-model-editor:progress', phase: opening.phase }, location.origin)
+  }, [opening])
   const [saving,setSaving]=useState(false),savingRef=useRef(false)
   const libraryStatsQueue=useMemo(()=>createStatsQueue(),[])
   const capacityNotice = useRef(false)
@@ -2038,6 +2045,11 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   }, [notify, syncTabs, t])
 
   const openDoc = useCallback(async (docId: string) => {
+    if (openingRef.current) return false
+    openingRef.current = true
+    setOpening({ phase: 'read' })
+    try {
+    await paintOpening()
     await syncProbe()
     if (syncStarted()) {
       try {
@@ -2053,6 +2065,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     }
     const doc = await docs.getDoc(docId)
     if (!doc) return false
+    setOpening({ phase: 'build', name: String(doc.name) })
+    await paintOpening()
     snapshotActive()
     const existing = tabsRef.current.find(x => x.docId === docId)
     if (existing) {
@@ -2078,9 +2092,19 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     applyTab(tab)
     syncTabs()
     return true
+    } finally {
+      await paintOpening()
+      openingRef.current = false
+      setOpening(null)
+    }
   }, [applyTab, notify, reconcilePersonal, snapshotActive, syncTabs, t])
 
   const openLibraryId = useCallback(async (id: string) => {
+    if (openingRef.current) return
+    openingRef.current = true
+    setOpening({ phase: 'read', name: OFFICIAL_BY_ID.get(parseOfficialId(id) || '')?.name })
+    try {
+    await paintOpening()
     const official = parseOfficialId(id)
     let qdfText: string | null = null
     let name = t('tab.untitled')
@@ -2093,7 +2117,6 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       const cachedText = cachedOfficialQdf(cached, official)
       if (cachedText) qdfText = cachedText
       else {
-        notify(t('lib.loading', { name }))
         try {
           qdfText = await fetchOfficialQdf(official)
           const built = designEntry(libId, `${official}.qdf`, qdfText) as { name?: string; qdf?: string } | null
@@ -2120,6 +2143,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       notify(t('lib.loadFailed'), 'err')
       return
     }
+    setOpening({ phase: 'build', name })
+    await paintOpening()
     const data = parseDesign(qdfText)
     if (!data) {
       notify(t('lib.loadFailed'), 'err')
@@ -2158,13 +2183,23 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     syncTabs()
     if (official) track('builder.content.adopt', { object: 'official:' + official })
     notify(t('lib.loaded', { name }))
+    } finally {
+      await paintOpening()
+      openingRef.current = false
+      setOpening(null)
+    }
   }, [applyTab, notify, snapshotActive, syncTabs, t])
 
   const importFile = useCallback(async (file: File) => {
     const e2 = eng.current
-    if (!e2) return
+    if (!e2 || openingRef.current) return
+    openingRef.current = true
+    setOpening({ phase: 'read', name: file.name })
     try {
+      await paintOpening()
       const text = await file.text()
+      setOpening({ phase: 'build', name: file.name })
+      await paintOpening()
       const trimmed = text.trim()
       const looksJson = trimmed.startsWith('{') || file.name.toLowerCase().endsWith('.json')
       let data: unknown
@@ -2203,6 +2238,10 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       track('builder.design.import', { kind: 'unknown', ok: false })
       track('builder.import.fail', { reason: 'format' })
       notify(t('toast.importFailed', { err: err instanceof Error ? err.message : String(err) }), 'err')
+    } finally {
+      await paintOpening()
+      openingRef.current = false
+      setOpening(null)
     }
   }, [bump, notify, syncTabs, t])
 
@@ -2820,6 +2859,9 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     if (!payload && !ent.src) { if (!ent.doc) setEntryReady(true); return }
     entryOpened.current = true
     void (async () => {
+      openingRef.current = true
+      setOpening({ phase: 'read', name: ent.name || undefined })
+      await paintOpening()
       let data: unknown = null
       let libraryRevision:number|undefined,libraryOwner:string|undefined
       if (payload) {
@@ -2831,9 +2873,14 @@ export function EngineProvider({ children }: { children: ReactNode }) {
         if (!res.ok) { track('builder.app.fail', { reason: 'source_http' }); notify(t('toast.srcFailed'), 'err');if(EDITOR_EMBED||RESOURCE_MODE){if(EDITOR_EMBED&&res.status===423)parent.postMessage({type:'xmf-model-editor:readonly'},location.origin);else setError(t('toast.srcFailed')+' ('+res.status+')')} return }
         libraryRevision=Number(res.headers.get('X-Library-Revision')||0)||undefined
         libraryOwner=res.headers.get('X-Builder-User-ID')||undefined
-        try { data = designFromText(await res.text()) } catch { data = null }
+        const sourceText = await res.text()
+        setOpening({ phase: 'build', name: ent.name || undefined })
+        await paintOpening()
+        try { data = designFromText(sourceText) } catch { data = null }
       }
       if (!data) { track('builder.app.fail', { reason: 'source_format' }); notify(t('toast.shareInvalid'), 'err');if(EDITOR_EMBED||RESOURCE_MODE)setError(t('toast.shareInvalid')); return }
+      setOpening({ phase: 'build', name: ent.name || undefined })
+      await paintOpening()
       const e2 = eng.current
       if (!e2) return
       const restored = tabsRef.current.find(x => x.tabId === activeRef.current)
@@ -2864,7 +2911,11 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       track('builder.design.open', { from: payload ? 'share' : 'src', view: VIEW_ONLY, copy: ent.copy })
       if (ent.copy && !VIEW_ONLY) { await copyToAccount(); dropParam('copy') }
       setEntryReady(true)
-    })().catch(err => { track('builder.app.fail', { reason: 'source_load' }); notify(err instanceof Error ? err.message : String(err), 'err');if(RESOURCE_MODE)setError(err instanceof Error?err.message:String(err)) })
+    })().catch(err => { track('builder.app.fail', { reason: 'source_load' }); notify(err instanceof Error ? err.message : String(err), 'err');if(EDITOR_EMBED||RESOURCE_MODE)setError(err instanceof Error?err.message:String(err)) }).finally(async () => {
+      await paintOpening()
+      openingRef.current = false
+      setOpening(null)
+    })
   }, [ready, applyModelJson, copyToAccount, createEmptyTab, notify, syncTabs, t])
 
   const analyticsReady = useRef(false)
@@ -3034,7 +3085,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   }
 
   const value: EngineApi = {
-    ready, saving, entryReady, completeEntry, error, hostRef, tick,
+    ready, saving, entryReady, completeEntry, error, opening, hostRef, tick,
     editorState: () => {
       flushModel()
       const tab=tabsRef.current.find(x=>x.tabId===activeRef.current)

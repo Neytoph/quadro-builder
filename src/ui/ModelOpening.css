@@ -1,0 +1,21 @@
+.model-opening{position:absolute;inset:0;z-index:35;display:grid;place-items:center;padding:16px;background:rgba(255,244,235,.92);color:#593c2c;cursor:wait}
+.model-opening-card{box-sizing:border-box;width:min(360px,100%);max-height:100%;overflow:auto;padding:28px 26px 20px;border:1px solid #eddbc9;border-radius:20px;background:#fffcf8;box-shadow:0 12px 40px #7b492315;text-align:center}
+.model-opening-mark{display:flex;align-items:center;justify-content:center;gap:6px;height:36px;margin-bottom:14px}
+.model-opening-mark i{width:12px;height:24px;border-radius:6px;background:#f38b3c;animation:model-opening-breathe 1.6s ease-in-out infinite}
+.model-opening-mark i:nth-child(2){height:34px;background:#6d9860;animation-delay:.16s}
+.model-opening-mark i:nth-child(3){animation-delay:.32s}
+.model-opening-card :is(h2,h3){margin:0;font-size:19px;line-height:1.4;font-weight:700;color:#593c2c}
+.model-opening-name{margin:7px 0 0;font-size:13px;line-height:1.5;color:#836951;overflow-wrap:anywhere;max-height:4.5em;overflow:auto}
+.model-opening-status{margin:22px 0 10px;font-size:13px;line-height:1.5;font-weight:600;color:#9a3412}
+.model-opening-track{display:flex;gap:5px}
+.model-opening-track span{height:4px;flex:1;border-radius:4px;background:#efe7dc}
+.model-opening-track [data-state=done]{background:#7a9d68}
+.model-opening-track [data-state=active]{background:#f38b3c;animation:model-opening-glow 1.6s ease-in-out infinite}
+.model-opening-body{min-height:3.2em;margin:15px 0 20px;font-size:13px;line-height:1.6;color:#806853}
+.model-opening-tip{margin:0;padding-top:14px;border-top:1px solid #efe5d8;font-size:12px;line-height:1.6;color:#806853}
+.model-opening-touch{display:none}
+@keyframes model-opening-breathe{0%,100%{transform:translateY(2px)}50%{transform:translateY(-3px)}}
+@keyframes model-opening-glow{50%{opacity:.5}}
+@media(pointer:coarse){.model-opening-mouse{display:none}.model-opening-touch{display:inline}}
+@media(max-width:480px){.model-opening-card{padding:24px 20px 18px}.model-opening-card :is(h2,h3){font-size:18px}}
+@media(prefers-reduced-motion:reduce){.model-opening-mark i,.model-opening-track [data-state=active]{animation:none}}
