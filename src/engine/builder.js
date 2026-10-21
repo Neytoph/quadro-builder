@@ -178,6 +178,25 @@ export class Builder {
   }
 
   // --- Undo ---------------------------------------------------------------
+  dispose() {
+    this._eventAbort?.abort();
+    this._abortGesture();
+    clearTimeout(this._panelFlipTimer);
+    this._cancelSelectFlip();
+    this._clearLongPress();
+    this.scene.hideSelectBox();
+    this.scene.setCursor('default');
+    this._assemblyRequest++;
+    this._assemblyWorker?.terminate();
+    this._assemblyWorker = null;
+    this.history?.onChange(() => {});
+    this.history?.onExternal(() => {});
+    this.history = null;
+    this.transformGizmo?.dispose();
+    this.scene.selectionTransformGizmo = null;
+    this.scene.onRendererReplaced = () => {};
+    this.onChange = this.onPreview = this.onHistoryChange = this.onNotice = () => {};
+  }
   /**
    * 接上一座造型的编辑记录。文档被别处改了（撤销、重做、别人的修改、本机数据库
    * 读出来的内容）时从文档重新读出整座；拖动或粘贴进行中就等它收尾。
@@ -3297,6 +3316,9 @@ export class Builder {
   // --- Events -------------------------------------------------------------
   _attach() {
     const el = this.scene.renderer.domElement;
+    this._eventAbort?.abort();
+    this._eventAbort = new AbortController();
+    const listen = (type, handler, options = {}) => el.addEventListener(type, handler, { ...options, signal: this._eventAbort.signal });
     // Ein Zug gehoert genau EINEM Zeiger. Kommt ein zweiter Finger dazu, ist
     // das eine Zwei-Finger-Geste (Zoomen/Schieben) -- die uebernimmt
     // OrbitControls, der eigene Zug wird abgebrochen. Ohne diese Buchhaltung
@@ -3308,7 +3330,7 @@ export class Builder {
     // Sie hat zwei Lippen mit je zwei Schrauben -- die Drehung entscheidet, an
     // welchem Rohrpaar sie verschraubt wird. Das Kontextmenue bleibt sonst aus,
     // wie ueberall auf der Zeichenflaeche.
-    el.addEventListener("contextmenu", (e) => {
+    listen("contextmenu", (e) => {
       e.preventDefault();
       clearTimeout(this._panelFlipTimer);
       this._panelFlipTimer = null;
@@ -3322,7 +3344,7 @@ export class Builder {
       this.refresh();
     });
     // Doppelklick tut dasselbe -- auf dem Touchpad ist er der bequemere Weg.
-    el.addEventListener("dblclick", (e) => {
+    listen("dblclick", (e) => {
       // Der erste Klick hat einen Seitenwechsel vorgemerkt; der gilt nicht mehr.
       clearTimeout(this._panelFlipTimer);
       this._panelFlipTimer = null;
@@ -3424,17 +3446,17 @@ export class Builder {
       }
     };
     // OrbitControls 先注册了中键缩放；在捕获阶段接管框选，避免相机同时移动。
-    el.addEventListener("pointerdown", (e) => {
+    listen("pointerdown", (e) => {
       if (e.button !== 1 || this.mode !== "select" || this._paste) return;
       e.preventDefault();
       e.stopImmediatePropagation();
       onPointerDown(e);
     }, { capture: true });
-    el.addEventListener("pointerdown", onPointerDown);
+    listen("pointerdown", onPointerDown);
     // Zeiger, die nicht zum laufenden Zug gehoeren, bleiben aussen vor.
     const fremd = (e) => this._pointerId !== null && e.pointerId !== this._pointerId;
-    el.addEventListener("pointermove", (e) => { if (!fremd(e)) this._onMove(e); });
-    el.addEventListener('pointerleave', (e) => {
+    listen("pointermove", (e) => { if (!fremd(e)) this._onMove(e); });
+    listen('pointerleave', (e) => {
       this._tubeHoverPointer = null;
       this.scene.updateTubeCandidateHover?.(null);
       if (e.pointerType === 'touch') return;
@@ -3446,17 +3468,17 @@ export class Builder {
         this.scene.clearInstallationPreview?.();
       }
     });
-    el.addEventListener("pointerup", (e) => {
+    listen("pointerup", (e) => {
       if (fremd(e)) return;
       this._pointerId = null;
       this._onUp(e);
     });
     // Abgebrochene Zeiger (Geste vom System uebernommen, Finger verlassen den
     // Bildschirm) hinterlassen sonst einen halb offenen Zug.
-    el.addEventListener("pointercancel", (e) => { if (!fremd(e)) this._abortGesture(); });
+    listen("pointercancel", (e) => { if (!fremd(e)) this._abortGesture(); });
     // Mac-Trackpad: Zwei-Finger-Wisch ist ein Wheel-Event, kein Touch.
     // Ohne Zusatztaste bleibt es beim Zoomen; ⇧ oder ⌥ macht daraus Querverschieben.
-    el.addEventListener("wheel", (e) => {
+    listen("wheel", (e) => {
       if (!(e.shiftKey || e.altKey)) return;
       e.preventDefault();
       e.stopPropagation();

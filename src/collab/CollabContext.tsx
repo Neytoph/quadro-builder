@@ -17,7 +17,6 @@ import { memoryDoc } from './localDocs'
 import { docToJSON, type ModelJSON } from './ymodel'
 import { diffBom, diffModels, type BomDiffRow, type ModelDiff } from './compare'
 import { ScopedRequests } from './scopedRequests'
-import { renderModelCover } from '../store/modelCover'
 import { slotLocked } from '../sync/slotAccess'
 
 export type CollabMode = 'off' | 'plan' | 'delivery' | 'room' | 'snapshot'
@@ -139,6 +138,8 @@ function errText(err: unknown) {
 }
 
 export function CollabProvider({ children }: { children: ReactNode }) {
+  const alive = useRef(true)
+  useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
   const api = useEngine()
   const { t } = useI18n()
   const entry = useMemo(() => bootEntry(), [])
@@ -224,6 +225,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
       if (joining && (!entry.plan || planId === entry.plan)) continue
       loading.current.add(planId)
       collabApi.plan(planId).then((plan) => {
+        if (!alive.current) return
         if(plan.viewOnly){setTabAccess(tabId,{readOnly:true,idTag:''});if(EDITOR_EMBED)parent.postMessage({type:'xmf-model-editor:readonly',plan:planId,name:plan.name,coverUrl:plan.coverUrl},location.origin);else if(activePlanId===planId)location.replace('/model-preview.html?plan='+encodeURIComponent(planId));return}
         const local = tabLocal(tabId)
         if (!local) return
@@ -693,7 +695,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
     const body = exportOf(data, trimmed)
     creating.current = true
     try {
-      const cover = blank ? null : await renderModelCover(data)
+      const cover = blank ? null : await (await import('../store/modelCover')).renderModelCover(data)
       const result = await collabApi.createPlan({ ...body, ...(blank ? {} : { sourceName: activeTab.name }), ...(cover ? { cover } : {}) })
       const created = { id: result.id, name: trimmed, ...(result.coverError ? { coverError: result.coverError } : {}) }
       createdRef.current = created

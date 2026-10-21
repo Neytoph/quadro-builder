@@ -27,7 +27,6 @@ import { fetchOfficialQdf, officialCacheVersion, cachedOfficialQdf, officialLibI
 import { versionPublicSource } from '../engine/publicResources.js'
 import { readModelSource } from './modelSource'
 import { applyFrameHex, loadTune } from '../engine/colorTune.js'
-import { exportAssemblyPdf as runAssemblyPdf } from '../engine/assemblyManual.js'
 import { ACCESSORY_IDS } from '../engine/accessoryPack.js'
 import { takeModelThumb, waitSceneReady } from '../engine/thumbShot.js'
 import { bomToCsv, bomToPngDataUrl, loadImage } from '../ui/bomExport'
@@ -39,7 +38,6 @@ import { partCountOf, writeJSON, type ModelJSON } from '../collab/ymodel'
 import { appendTab } from './tabs'
 import { modelColors, selectionColor } from '../engine/customColors.js'
 import { modelContent, personalDecision, personalRecordUnconfirmed, personalSaveBaseline, readPersonalBinding, restorePersonalBinding, samePersonalBinding, savedGenerationUnchanged, savedRecordState, type PersonalState } from './personalTabs'
-import { renderModelCover } from './modelCover'
 import { computeAssemblyPlan, computeLayeredManualPlan } from '../engine/assemblyPlan.js'
 import { ensureAssemblyMeshes } from '../engine/assemblyNativeMesh.js'
 import { createAssemblyReadingPlan } from '../engine/assemblyReadingPlan.js'
@@ -52,6 +50,7 @@ import { readRoom } from '../home/rooms'
 import { refreshedRoomBackground, roomBackgroundWarnings } from '../home/refresh'
 import { installationChoices, selectInstallation, type CatalogueChoice } from './installationCatalogue'
 import { captureTool, ToolMemory, type BuilderTool, type ToolState } from './toolMemory'
+import { editorScenes } from './scenePool'
 
 // 引擎来自 Vanilla JS，这里不跟它的推断类型较劲。
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -680,6 +679,7 @@ export function asBom(raw: AnyRec): BomView {
 }
 
 export function EngineProvider({ children }: { children: ReactNode }) {
+  const sessionKey = useRef(EDITOR_SESSION).current
   const { t, lang } = useI18n()
   const hostRef = useRef<HTMLDivElement | null>(null)
   const eng = useRef<{ scene: E; model: E; builder: E } | null>(null)
@@ -843,7 +843,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
         saveState: tb.saveState, savedName: tb.savedName, conflictDocId: tb.conflictDocId,libraryId:tb.libraryId,libraryRevision:tb.libraryRevision,libraryOwner:tb.libraryOwner,
       })),
       activeTabId: activeRef.current,
-    }, EDITOR_SESSION) as Promise<void>
+    }, sessionKey) as Promise<void>
   }, [flushModel])
 
   const persistSession = useCallback(() => {
@@ -1108,6 +1108,9 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       return
     }
 
+    const sceneOwner = EDITOR_EMBED ? new URLSearchParams(location.search).get('editorOwner') : null
+    let initialized = false
+    let currentScene: InstanceType<typeof SceneManager> | null = null
     ;(async () => {
       try {
         const identityReady = syncProbe()
@@ -1121,7 +1124,10 @@ export function EngineProvider({ children }: { children: ReactNode }) {
           connectors: allConnectors(),
           accessories: accessories(),
         })
-        const scene = new SceneManager(host)
+        const scene = (sceneOwner && String(storage.getAccountScope()) === `user:${sceneOwner}` ? editorScenes.take(sceneOwner, host) : null) || new SceneManager(host)
+        currentScene = scene
+        scene.onCameraChange = () => {}
+        scene.setHomeContext(null)
         scene.setMotion(MOTION)
         scene.setTheme(false)
         // 默认开草地。没存过偏好（null）算开，只有显式关过（'0'）才关——
@@ -1157,7 +1163,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
         // 只看、交付、画房间：只放这一座，不读这台设备上记着的标签页。
         // 交付由 CollabProvider 取到以后 attachDoc 换进来。
         if (!SESSIONLESS) await docs.migrateOldDrafts()
-        const session = SESSIONLESS ? null : await docs.loadSession(EDITOR_SESSION)
+        const session = SESSIONLESS ? null : await docs.loadSession(sessionKey)
         if (dead) return
         if (session?.tabs?.length) {
           const mapped: Tab[] = []
@@ -1231,6 +1237,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
           }
         }
         syncTabsRef.current()
+        initialized = true
         setReady(true)
         // 画布这时才露面，第一次载入的动画从这一刻开始放
         scene.releaseLoadGate()
@@ -1241,7 +1248,25 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       }
     })()
 
-    return () => { dead = true }
+    return () => {
+      dead = true
+      if (!EDITOR_EMBED) return
+      if (sessionTimer.current) window.clearTimeout(sessionTimer.current)
+      const current = eng.current
+      eng.current = null
+      current?.builder.dispose()
+      const documents = tabsRef.current.map(tab => tab.local)
+      tabsRef.current = []
+      activeRef.current = null
+      for (const local of documents) {
+        local.history.destroy()
+        void (async () => { await local.persistence?.destroy(); local.doc.destroy() })().catch(error => console.error('[editor document cleanup]', error))
+      }
+      if (!currentScene) return
+      currentScene.onMeshesReady = currentScene.onCameraChange = () => {}
+      if (initialized && sceneOwner && String(storage.getAccountScope()) === `user:${sceneOwner}`) editorScenes.put(sceneOwner, currentScene)
+      else currentScene.dispose()
+    }
   }, [])
 
   useEffect(() => {
@@ -1906,6 +1931,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   async function coverSaved(docId: string, data: ModelJSON, updatedAt: number, saveId: string) {
     // 托管单模型封面由平台按当前内容生成，避免后台封面再次提交整份旧模型。
     if (SINGLE_MODEL || !syncStarted()) return
+    const { renderModelCover } = await import('./modelCover')
     const cover = await renderModelCover(data)
     if (!cover && modelPartCount(data) > 0) throw new Error('saved cover unavailable')
     if (cover) {
@@ -2478,6 +2504,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     if (!stampModel.loadJSON(data).ok) throw new Error('invalid frozen design')
     const b = stampModel.bounds(geometry().connectorSize / 2) as { size: number[] }
     const sharing=await chooseSharing(!!stampModel.homeContext,lang)
+    const { renderModelCover } = await import('./modelCover')
     const cover=await renderModelCover(sharing.attachRoom?data:productOnly(data))
     if(!cover)throw new Error('cover shot failed')
     const url = await publishSharePage({
@@ -2499,6 +2526,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     if (!e2) return
     if (needAccount('shareimg')) return
     if(RESOURCE_MODE){
+      const { renderModelCover } = await import('./modelCover')
       const cover=await renderModelCover(e2.model.toJSON())
       if(!cover){notify(t('toast.pngFailed'),'err');return}
       deliverResourceFile(await (await fetch(cover)).blob(),`${activeName()}.png`)
@@ -2707,6 +2735,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       controller.signal.throwIfAborted()
       const plan = computeLayeredManualPlan(frozen)
       const bomNow = asBom(computeBOM(frozen) as AnyRec)
+      const { exportAssemblyPdf: runAssemblyPdf } = await import('../engine/assemblyManual.js')
       await runAssemblyPdf({
         model: frozen,
         signal: controller.signal,
@@ -3116,7 +3145,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       if(sessionTimer.current)window.clearTimeout(sessionTimer.current)
       const discarded=tabsRef.current;tabsRef.current=[];activeRef.current=null;eng.current?.builder.setReadOnly(true)
       for(const tab of discarded)await dropTabDoc(tab.tabId,tab.local)
-      await docs.saveSession({tabs:[],activeTabId:null},EDITOR_SESSION)
+      await docs.saveSession({tabs:[],activeTabId:null},sessionKey)
     },
     mode: (builder?.mode as string) || 'select',
     color: (builder?.color as string) || 'random',

@@ -1,4 +1,5 @@
 import { createRoot } from 'react-dom/client'
+import { flushSync } from 'react-dom'
 import './ui/motion'
 import './ui/button-motion.js'
 const disclosureURL=import.meta.env.BASE_URL+'disclosure-motion.js?v=20261021'
@@ -9,6 +10,7 @@ import { landedFrom, startAnalytics, track } from './analytics/track'
 import { detect as detectLang } from './i18n'
 import { startSyncIfConfigured } from './sync/bootstrap'
 import { rememberSource, SESSIONLESS, VIEW_ONLY } from './entry'
+import { installEmbeddedRuntime } from './store/embeddedRuntime'
 
 rememberSource()          // 带来源标记打开的，记进 cookie；开源本地版不做
 startAnalytics()          // 未配置 VITE_ANALYTICS_URL 时为空操作
@@ -39,4 +41,8 @@ startSyncIfConfigured(undefined, SESSIONLESS ? undefined : () => {
 }, !SESSIONLESS)
 
 // 界面先挂上。账号库要等身份回来再读，这一步在引擎初始化里等 syncProbe。
-createRoot(document.getElementById('root')!).render(<App />)
+const root = createRoot(document.getElementById('root')!)
+let generation = 0
+const mount = () => root.render(<App key={++generation} />)
+installEmbeddedRuntime(mount, () => flushSync(() => root.render(null)))
+mount()

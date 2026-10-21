@@ -13,7 +13,10 @@ export default function EmbeddedEditorBridge(){
  live.current={api,collab,t}
  useEffect(()=>{
   if(!EDITOR_EMBED)return
-  const send=(type:string,detail:Record<string,unknown>={})=>parent.postMessage({type:`xmf-model-editor:${type}`,...detail},location.origin)
+  const send=(type:string,detail:Record<string,unknown>={})=>{
+   if(type==='close')window.dispatchEvent(new Event('xmf-editor:can-park'))
+   parent.postMessage({type:`xmf-model-editor:${type}`,...detail},location.origin)
+  }
   const receive=async(event:MessageEvent)=>{
    if(event.origin!==location.origin||event.source!==parent||working.current)return
    const command=event.data?.type
@@ -74,7 +77,7 @@ export default function EmbeddedEditorBridge(){
   void(async()=>{
    await api.checkpointEditor()
    const scope=String(storage.getAccountScope())
-   parent.postMessage({type:'xmf-model-editor:ready',owner:scope.startsWith('user:')?scope.slice(5):'',name:active.name},location.origin)
+   parent.postMessage({type:'xmf-model-editor:ready',reuseProtocol:1,owner:scope.startsWith('user:')?scope.slice(5):'',name:active.name},location.origin)
    if(new URLSearchParams(location.search).get('editorRename')!=='1')return
    working.current=true
    const name=await api.askName(t('chrome.renameDesign'),t('saves.saveOk'),active.name)

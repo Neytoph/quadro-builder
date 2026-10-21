@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ComponentType } from 'react'
 import './ui/manualProgress.css'
 import { LanguageProvider, useI18n } from './i18n'
 import { EngineProvider, useEngine } from './store/EngineContext'
@@ -10,7 +10,6 @@ import ProjectTabs from './ui/ProjectTabs'
 import EmbeddedEditorBridge from './ui/EmbeddedEditorBridge'
 import AssemblyBar from './ui/AssemblyBar'
 import AssemblyNavigation from './ui/AssemblyNavigation'
-import AssemblyPreview from './ui/AssemblyPreview'
 import { AssemblyStatus, useAssemblyStatus } from './ui/AssemblyStatus'
 import Onboarding from './ui/Onboarding'
 import ThumbCapture from './ui/ThumbCapture'
@@ -59,6 +58,33 @@ function Toast() {
       {toast.message}
     </div>
   )
+}
+
+function DeferredAssemblyPreview() {
+  const api = useEngine(), { t } = useI18n()
+  const [Preview, setPreview] = useState<ComponentType | null>(null)
+  const [failed, setFailed] = useState(false)
+  const [attempt, setAttempt] = useState(0)
+  const open = !!api.manualPreview && api.exportManualConfirm
+  useEffect(() => {
+    if (!open || Preview) return
+    let alive = true
+    setFailed(false)
+    void import('./ui/AssemblyPreview').then(module => { if (alive) setPreview(() => module.default) })
+      .catch(error => { console.error('[manual preview load]', error); if (alive) setFailed(true) })
+    return () => { alive = false }
+  }, [open, Preview, attempt])
+  if (Preview) return <Preview />
+  if (!open) return null
+  return <div className="m-backdrop fixed inset-0 z-[75] flex items-center justify-center bg-black/45 p-4" onClick={api.cancelExportManual}>
+    <div role="dialog" aria-modal="true" aria-labelledby="manual-preview-loading" className="m-modal qb-card p-5" onClick={event => event.stopPropagation()}>
+      <p id="manual-preview-loading" role={failed ? 'alert' : 'status'}>{t(failed ? 'manual.previewLoadFailed' : 'manual.preparing')}</p>
+      <div className="flex justify-end gap-2 mt-4">
+        <button autoFocus className="qb-btn qb-btn-ghost qb-btn-sm" onClick={api.cancelExportManual}>{t('confirm.cancel')}</button>
+        {failed && <button className="qb-btn qb-btn-sm" onClick={() => setAttempt(value => value + 1)}>{t('sync.retry')}</button>}
+      </div>
+    </div>
+  </div>
 }
 
 function NameDialog() {
@@ -528,7 +554,7 @@ function AppInner() {
       <JoinModal />
       <Toast />
       <Downloads />
-      <AssemblyPreview />
+      <DeferredAssemblyPreview />
       <AccountDialog />
       <NameDialog />
       <ManualProgress />
