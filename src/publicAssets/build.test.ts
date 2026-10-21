@@ -7,6 +7,16 @@ import { describeAssets, fallbackOrigin, publicAssetFallback } from '../../scrip
 import { Window } from 'happy-dom'
 
 describe('build-time trusted public release', () => {
+  it('rejects a broad, nested or query-bearing extra document scope', async () => {
+    for (const documentScope of ['/', '/admin/', '/builder/preview.html', '/preview.html?token=value']) {
+      const plugin = publicAssetFallback(process.cwd())
+      const config = plugin.configResolved as (value: unknown) => void
+      config({ env: { VITE_PUBLIC_ASSET_FALLBACK: 'off', VITE_PUBLIC_ASSET_DOCUMENT_SCOPE: documentScope },
+        base: '/builder/', build: { outDir: 'unused' } })
+      const write = plugin.writeBundle as (options: unknown, bundle: unknown) => Promise<void>
+      await expect(write({}, {})).rejects.toThrow('one exact root HTML path')
+    }
+  })
   it('requires the hosted deployment to provide its COS origin explicitly', async () => {
     const plugin = publicAssetFallback(process.cwd())
     const config = plugin.configResolved as (value: unknown) => void
@@ -23,7 +33,7 @@ describe('build-time trusted public release', () => {
     try {
       const plugin = publicAssetFallback(root)
       const config = plugin.configResolved as (value: unknown) => void
-      config({ env: { VITE_PUBLIC_ASSET_FALLBACK: 'off' }, base: '/builder/', build: { outDir: out } })
+      config({ env: { VITE_PUBLIC_ASSET_FALLBACK: 'off', VITE_PUBLIC_ASSET_DOCUMENT_SCOPE: '/preview-document.html' }, base: '/builder/', build: { outDir: out } })
       const write = plugin.writeBundle as (options: unknown, bundle: unknown) => Promise<void>
       await write({}, {})
       const page = new Window({ settings: { disableJavaScriptEvaluation: true, disableJavaScriptFileLoading: true, disableCSSFileLoading: true } })
@@ -33,6 +43,7 @@ describe('build-time trusted public release', () => {
       const boots = page.document.querySelectorAll('script[data-public-assets-boot="1"]')
       expect(boots).toHaveLength(1)
       expect(boots[0].textContent).toContain('register("/builder/sw.js"')
+      expect(boots[0].textContent).toContain('scope:location.pathname==="/preview-document.html"?"/preview-document.html":"/builder/"')
       for (const forbidden of ['fetch(', 'setTimeout', 'appendChild', 'CacheStorage', 'indexedDB', 'location.reload']) expect(boots[0].textContent).not.toContain(forbidden)
       const descriptor = JSON.parse(fs.readFileSync(path.join(out, 'public-assets-release.json'), 'utf8'))
       expect(descriptor.mode).toBe('public-ipv6-off')

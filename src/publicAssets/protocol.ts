@@ -21,6 +21,7 @@ export interface AssetBoot {
   release: string
   mode: AssetRelease['mode']
   base: '/builder/'
+  documentScope?: string
   entry: string
   styles: string[]
   controllerBudgetMs: number

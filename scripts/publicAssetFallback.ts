@@ -72,10 +72,14 @@ export function publicAssetFallback(root: string): Plugin {
         if (!sourceOrigin) throw new Error('COS public asset provider requires an explicit HTTPS origin')
       }
       const ipv6Origin = fallbackOrigin(sourceOrigin, previewOnly)
+      const documentScope = config.env.VITE_PUBLIC_ASSET_DOCUMENT_SCOPE
+      if (documentScope && !/^\/[A-Za-z0-9_-]+\.html$/.test(documentScope)) {
+        throw new Error('Public asset document scope must be one exact root HTML path')
+      }
       const assets = setting === '1' ? describeAssets(bundle, out) : {}
       // 相同资源也可能修复SW/boot逻辑；握手版本必须覆盖这些源码，不能误认旧controller。
       const runtimeSha256 = digest(['scripts/publicAssetFallback.ts', 'src/publicAssets/protocol.ts', 'src/publicAssets/network.ts',
-        'src/publicAssets/worker.ts', 'src/publicAssets/boot.ts'].map(file => `${file}\n${fs.readFileSync(path.join(root, file), 'utf8')}`).join('\n'))
+        'src/publicAssets/worker.ts', 'src/publicAssets/boot.ts'].map(file => `${file}\n${fs.readFileSync(path.join(root, file), 'utf8')}`).join('\n') + JSON.stringify({ documentScope }))
       let mode: AssetRelease['mode'] = 'public-ipv6-off'
       if (setting === '1') mode = provider === 'cos' ? 'public-cos-fallback' : 'public-ipv6-fallback'
       const data = { schemaVersion: 1 as const, mode,
@@ -93,12 +97,14 @@ export function publicAssetFallback(root: string): Plugin {
         entries[0].remove()
         for (const link of document.querySelectorAll('link[rel="stylesheet"],link[rel="modulepreload"]')) link.remove()
       }
-      const boot: AssetBoot = { protocol: 1, release: release.release, mode: release.mode, base: '/builder/', entry, styles, controllerBudgetMs: 1200 }
+      const boot: AssetBoot = { protocol: 1, release: release.release, mode: release.mode, base: '/builder/',
+        ...(documentScope ? { documentScope } : {}), entry, styles, controllerBudgetMs: 1200 }
       const workerCode = await compile(root, 'src/publicAssets/worker.ts', { __PUBLIC_ASSET_RELEASE__: JSON.stringify(release) })
       // 显式退出恢复Vite原入口；退场worker只异步接管同scope，不阻塞应用或清存储。
       // sw.js是安装器校验过的同字节安全别名，no-store避免旧边缘worker缓存。
+      const exitScope = documentScope ? `location.pathname===${JSON.stringify(documentScope)}?${JSON.stringify(documentScope)}:"/builder/"` : '"/builder/"'
       const bootCode = setting === 'off'
-        ? '(()=>{try{if(navigator.serviceWorker)void navigator.serviceWorker.register("/builder/sw.js",{scope:"/builder/",updateViaCache:"none"}).catch(()=>console.warn("[public assets off] worker update unavailable"))}catch{console.warn("[public assets off] worker unavailable")}})();\n'
+        ? `(()=>{try{if(navigator.serviceWorker)void navigator.serviceWorker.register("/builder/sw.js",{scope:${exitScope},updateViaCache:"none"}).catch(()=>console.warn("[public assets off] worker update unavailable"))}catch{console.warn("[public assets off] worker unavailable")}})();\n`
         : await compile(root, 'src/publicAssets/boot.ts', { __PUBLIC_ASSET_BOOT__: JSON.stringify(boot) })
       const script = document.createElement('script')
       script.setAttribute('data-public-assets-boot', '1')
