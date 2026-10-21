@@ -58,7 +58,17 @@ export default function FilePanel() {
           {active.saveState === 'failed' && <button className="qb-file-row" onClick={() => void api.retrySave(active.tabId)}>{t('sync.retry')}</button>}
         </div>}
         {!plan && <button disabled={contentReadOnly || api.saving || !api.entryReady} aria-busy={api.saving} onClick={() => void api.saveCurrent()} className={`qb-file-action qb-file-primary xmf-button`}><Save aria-hidden="true" /><span>{t('chrome.save')}</span><kbd>{t('chrome.saveShortcut')}</kbd></button>}
-        {SINGLE_MODEL && !plan && !active?.docId && !active?.libraryId && <><button onClick={() => { if (active?.dirty && !window.confirm(t('single.replace'))) return; fileRef.current?.click() }} className={btn}><Upload aria-hidden="true"/><span>{t('btn.import')}<small>{words.importHint}</small></span></button><input ref={fileRef} type="file" accept=".qdf,.json,application/json" hidden onChange={event => { const file=event.target.files?.[0];event.target.value='';if(file)void api.importFile(file) }}/></>}
+        {SINGLE_MODEL && !plan && <>
+          <button disabled={contentReadOnly || api.saving || !api.entryReady} onClick={() => {
+            if (!window.confirm(t('single.replace'))) return
+            fileRef.current?.click()
+          }} className={btn}><Upload aria-hidden="true"/><span>{t('btn.import')}<small>{words.importHint}</small></span></button>
+          <input ref={fileRef} type="file" accept=".qdf,.json,application/json" hidden onChange={event => {
+            const file = event.target.files?.[0]
+            event.target.value = ''
+            if (file && !contentReadOnly && !api.saving && api.entryReady) void api.importFile(file)
+          }}/>
+        </>}
         {!SINGLE_MODEL && !EDITOR_EMBED && <><div className="qb-file-two">
           <button onClick={() => { api.newTab(); api.notify(t('toast.newTab')) }} className={btn}><Plus aria-hidden="true" /><span>{t('btn.new')}</span></button>
           <button onClick={() => fileRef.current?.click()} className={btn}><Upload aria-hidden="true" /><span>{t('btn.import')}<small>{words.importHint}</small></span></button>
