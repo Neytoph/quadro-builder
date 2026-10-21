@@ -31,6 +31,7 @@ describe('exact public resource routing', () => {
     })
     expect(calls.map(call => call.url)).toEqual([cosRelease.ipv6Origin + path, origin + path])
     expect(calls[0].credentials).toBe('omit')
+    expect(calls[0].referrerPolicy).toBe('origin')
     expect(await result.text()).toBe(new TextDecoder().decode(content))
   })
   it('admits only exact release GETs, including a worker URL, and never changes private requests', () => {

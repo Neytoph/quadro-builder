@@ -84,7 +84,7 @@ export function fetchPublicAsset(request: Request, asset: PublicAsset, release: 
     const run = async (url: string, controller: AbortController, foreign: boolean) => {
       try {
         const response = await fetcher(foreign ? new Request(url, { mode: 'cors', credentials: 'omit',
-          redirect: 'error', referrerPolicy: 'no-referrer', signal: controller.signal })
+          redirect: 'error', referrerPolicy: 'origin', signal: controller.signal })
           : new Request(request, { signal: controller.signal, redirect: 'error' }))
         const bytes = await verifiedBytes(response, asset, controller.signal)
         if (settled) return
