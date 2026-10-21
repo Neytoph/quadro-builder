@@ -64,6 +64,9 @@ export default function StatusTip({ menuOpen }: { menuOpen: boolean }) {
   }, [text, menuOpen])
   const [shown, leaving] = usePresence(api.toast ? null : say)
 
+  // 单件的专属操作由上方选区卡片统一承载。
+  if(api.mode==='select' && api.selectionCount===1 && !api.readOnly)return null
+
   const flexi = (api.mode === 'fitting' && ['flexi', 'flexi_bolt', 'flexi_hinge'].includes(api.fittingKind))
     || (api.mode === 'select' && !!api.engine()?.builder.flexiTarget())
   if (api.engine()?.builder.clampAdjustment() && !menuOpen && !api.installationPreview && !componentForTool(api)) {
@@ -77,18 +80,7 @@ export default function StatusTip({ menuOpen }: { menuOpen: boolean }) {
     return <div data-ui="flexi-guide" className="fixed z-40 flex justify-center pointer-events-none" style={box}><FlexiGuide /></div>
   }
 
-  if (adjustment === 'panel' && !api.boxSelect && !menuOpen && !api.toast && !api.canFlipAccessory && !api.selectedPanelFixing && !api.installationPreview && !componentForTool(api)) {
-    const box = narrow ? { left: 8, right: 8, bottom: 68 } : statusTipBox(left, vw, toolbarW, pane ? right : null)
-    if (!box || (narrow && pane)) return null
-    return <div data-ui="panel-adjustment" className="fixed z-40 flex justify-center pointer-events-none" style={box}>
-      <div className="qb-card qb-flexi-guide qb-flexi-actions">
-        <span>{t('tip.adjustPanel')}</span>
-        <button type="button" onClick={() => { api.engine()?.builder.turnSelectedPanel(); api.bump() }}>{t('tip.turnPanel')}</button>
-      </div>
-    </div>
-  }
-
-  if ((mobile && KEYBOARD_TIPS.has(key)) || api.installationPreview || api.canFlipAccessory || api.selectedPanelFixing || componentForTool(api)) return null
+  if (api.selectionTransform || (mobile && KEYBOARD_TIPS.has(key)) || api.installationPreview || api.canFlipAccessory || api.selectedPanelFixing || componentForTool(api)) return null
 
   if (narrow && pane) return null
   if (narrow) {

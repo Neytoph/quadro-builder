@@ -4,7 +4,7 @@ import { useI18n } from '../i18n'
 import { labelOf } from '../names'
 import { CONN_CAT_ICON, Svg16, TOOL_ICON, tubeIcon } from './icons'
 import { UI_ESCAPE_EVENT } from './events'
-import { NARROW_MAX, toolbarTop, usePanelLayout } from './panelLayout'
+import { NARROW_MAX, PANEL_GAP, TOOLBAR_CHROME_H, toolbarTop, usePanelLayout } from './panelLayout'
 import { installationChoices, installationActive, type CatalogueTool } from '../store/installationCatalogue'
 import { CATALOGUE_TOOLS, TOOL_LABELS } from '../store/toolMemory'
 import InstallationCatalogueMenu from './InstallationCatalogueMenu'
@@ -18,11 +18,12 @@ import { useOverflowCompact } from './useOverflowCompact'
 import { useDock } from './dock'
 import { CUSTOM_COMPONENTS_EVENT } from './CustomComponentsMenu'
 import { customComponentStrings } from './customComponentStrings'
+import SelectionTransformPanel from './SelectionTransformPanel'
 
 export default function TopToolbar() {
   const api = useEngine()
   const collab = useCollab()
-  const { setPane } = useDock()
+  const { pane, setPane } = useDock()
   const commenting = collab.mode === 'plan' && collab.role !== 'guest'
   const locked = collab.mode === 'plan' && !collab.canEdit
   const { t, lang } = useI18n()
@@ -128,6 +129,9 @@ export default function TopToolbar() {
           collab.setPlacingPin(!collab.placingPin); close()
         }}><MessageSquarePlus size={16} strokeWidth={2} /><span>{t('collab.pin.tool')}</span></button></>}
       </div>
+    </div>
+    <div data-ui="selection-actions-dock" className="qb-selection-actions-dock fixed z-40 pointer-events-none" style={{top:toolbarTop(left,vw)+TOOLBAR_CHROME_H+PANEL_GAP}}>
+      <SelectionTransformPanel menuOpen={open!==null || pane!==null}/>
     </div>
     {shown && <Pop anchor={barRef.current} leaving={leaving} onClose={close} align="center" width={472} className="ic-popover" belowOnly>
       <InstallationCatalogueMenu tool={shown} requestId={requestId} entries={entries} onBrowse={browse} onClose={close} />
