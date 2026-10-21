@@ -68,7 +68,8 @@ export default function EmbeddedEditorBridge(){
   const entry=bootEntry(),active=api.tabs.find(tab=>tab.tabId===api.activeTabId)
   if(!api.ready||!api.entryReady||!active)return
   if(entry.plan&&(!collab.session?.synced||active.planId!==entry.plan))return
-  if(entry.src&&!active.libraryId)return
+  const sourceLibrary=entry.src?.match(/^\/quadro\/library\/([a-f0-9]+)\/native$/)?.[1]
+  if(sourceLibrary&&active.libraryId!==sourceLibrary)return
   announced.current=true
   void(async()=>{
    await api.checkpointEditor()

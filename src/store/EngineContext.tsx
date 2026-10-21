@@ -25,6 +25,7 @@ import { clearSharePayload, decodeShare, peekSharePayload, shareUrl, productOnly
 import { isUntitledName, labelOf as nameLabel } from '../names'
 import { fetchOfficialQdf, officialCacheVersion, cachedOfficialQdf, officialLibId, OFFICIAL_BY_ID, parseOfficialId } from '../data/official'
 import { versionPublicSource } from '../engine/publicResources.js'
+import { readModelSource } from './modelSource'
 import { applyFrameHex, loadTune } from '../engine/colorTune.js'
 import { exportAssemblyPdf as runAssemblyPdf } from '../engine/assemblyManual.js'
 import { ACCESSORY_IDS } from '../engine/accessoryPack.js'
@@ -2870,11 +2871,14 @@ export function EngineProvider({ children }: { children: ReactNode }) {
         clearSharePayload()
       } else {
         const expectedOwner=EDITOR_EMBED?new URLSearchParams(location.search).get('editorOwner'):RESOURCE_MODE?new URLSearchParams(location.search).get('resourceOwner'):null
-        const res = await fetch(versionPublicSource(ent.src as string), { credentials: 'include',...(expectedOwner?{headers:{'X-Builder-User-ID':expectedOwner}}:{}) })
+        const { response: res, text: sourceText } = await readModelSource(versionPublicSource(ent.src as string), { credentials: 'include',...(expectedOwner?{headers:{'X-Builder-User-ID':expectedOwner}}:{}) })
         if (!res.ok) { track('builder.app.fail', { reason: 'source_http' }); notify(t('toast.srcFailed'), 'err');if(EDITOR_EMBED||RESOURCE_MODE){if(EDITOR_EMBED&&res.status===423)parent.postMessage({type:'xmf-model-editor:readonly'},location.origin);else setError(t('toast.srcFailed')+' ('+res.status+')')} return }
         libraryRevision=Number(res.headers.get('X-Library-Revision')||0)||undefined
         libraryOwner=res.headers.get('X-Builder-User-ID')||undefined
-        const sourceText = await res.text()
+        if (ent.src?.match(/^\/quadro\/library\/[a-f0-9]+\/native$/) && (!Number.isSafeInteger(libraryRevision) || !libraryRevision || libraryRevision < 1 || !libraryOwner || expectedOwner && libraryOwner !== expectedOwner)) {
+          console.error('[model source] invalid library binding', { revision: libraryRevision, ownerMatches: libraryOwner === expectedOwner })
+          throw new Error(t('toast.srcInvalid'))
+        }
         setOpening({ phase: 'build', name: ent.name || undefined })
         await paintOpening()
         try { data = designFromText(sourceText) } catch { data = null }
@@ -2891,7 +2895,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       }
       if (!SINGLE_MODEL && !EDITOR_EMBED && modelPartCount(e2.model.toJSON()) > 0) createEmptyTab()
       // 当前是共享方案的标签页时 applyModelJson 自己会新开一个
-      if (!applyModelJson(data, { undoable: false })) { track('builder.app.fail', { reason: 'source_format' }); notify(t('toast.shareInvalid'), 'err');if(RESOURCE_MODE)setError(t('toast.shareInvalid')); return }
+      if (!applyModelJson(data, { undoable: false })) { track('builder.app.fail', { reason: 'source_format' }); notify(t('toast.shareInvalid'), 'err');if(EDITOR_EMBED||RESOURCE_MODE)setError(t('toast.shareInvalid')); return }
       if (ent.background === 'grass' || (ent.background === 'home' && e2.model.homeContext)) {
         e2.scene.setBackground(ent.background)
         bump()
@@ -2912,7 +2916,13 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       track('builder.design.open', { from: payload ? 'share' : 'src', view: VIEW_ONLY, copy: ent.copy })
       if (ent.copy && !VIEW_ONLY) { await copyToAccount(); dropParam('copy') }
       setEntryReady(true)
-    })().catch(err => { track('builder.app.fail', { reason: 'source_load' }); notify(err instanceof Error ? err.message : String(err), 'err');if(EDITOR_EMBED||RESOURCE_MODE)setError(err instanceof Error?err.message:String(err)) }).finally(async () => {
+    })().catch(err => {
+      console.error('[model source] opening failed', err)
+      track('builder.app.fail', { reason: 'source_load' })
+      let message=err instanceof Error ? err.message : String(err)
+      if(err instanceof TypeError || err instanceof DOMException && err.name==='TimeoutError')message=t('toast.srcReadFailed')
+      notify(message, 'err');if(EDITOR_EMBED||RESOURCE_MODE)setError(message)
+    }).finally(async () => {
       await paintOpening()
       openingRef.current = false
       setOpening(null)
