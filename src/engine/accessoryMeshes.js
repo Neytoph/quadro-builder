@@ -183,7 +183,9 @@ export function accessoryMeshes(scene, model, fitting, color) {
     add(`line:${radius}:${length.toFixed(3)}`, () => new THREE.CylinderGeometry(radius, radius, length, 10), mat,
       p.clone().add(q).multiplyScalar(0.5), new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize()));
   };
-  const origin = new THREE.Vector3((a.x + b.x) / 2, a.y, (a.z + b.z) / 2);
+  const origin = fitting.appearanceVersion
+    ? new THREE.Vector3(fitting.x,fitting.y,fitting.z)
+    : new THREE.Vector3((a.x + b.x) / 2, a.y, (a.z + b.z) / 2);
   const x = new THREE.Vector3(b.x - a.x, 0, b.z - a.z).normalize();
   const up = new THREE.Vector3(0, 1, 0), z = x.clone().cross(up);
   const rotation = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, up, z));

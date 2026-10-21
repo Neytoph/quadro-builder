@@ -102,7 +102,8 @@ describe('倾斜方框面板沿真实框边对齐', () => {
     const sameFace = model.confirmedMounts('panel_40x40').filter(p => Math.hypot(...p.pos.map((v: number, i: number) => v - first.pos[i])) < .1)
     expect(sameFace.every(p => !p.valid)).toBe(true)
     expect(model.confirmedDiagnostics({ ...part, side: -1 }).valid).toBe(true)
-    expect(model.flipPanelSide(part.id)).toBe(-1)
+    const previousSide=part.side
+    expect(model.flipPanelSide(part.id)).toBe(-previousSide)
     expect(model.confirmedDiagnostics(part).valid).toBe(true)
     expect(model.addConfirmedComponent(part, 'red')).toBeNull()
     expect(model.panels.size).toBe(1)
@@ -158,7 +159,9 @@ describe('倾斜方框面板沿真实框边对齐', () => {
     expect(imported.panels).toHaveLength(1)
     const quaternion = new THREE.Quaternion(...imported.panels[0].geom.quat).normalize()
     const axes = [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)].map(v => v.applyQuaternion(quaternion).toArray())
-    axes.forEach((axis, i) => close(axis, frame.axes[i]))
+    const rail=model._rail(part.mounts[0].tube)!
+    expect(Math.abs(axes[0].reduce((sum,v,i)=>sum+v*rail.dir[i],0))).toBeGreaterThan(.999)
+    close(axes[2],frame.axes[2])
   })
 
   it('真实穿入斜板主体的管仍阻止安装', () => {
@@ -178,7 +181,8 @@ describe('倾斜方框面板沿真实框边对齐', () => {
     const part = model.addConfirmedComponent(candidate, 'red') as any, before = confirmedFrame(model, part)!
     expect(model.turnPanel(part.id)).toBe(true)
     close(confirmedFrame(model, part)!.axes[2], before.axes[2])
-    expect(model.flipPanelSide(part.id)).toBe(-1)
+    const previousSide=part.side
+    expect(model.flipPanelSide(part.id)).toBe(-previousSide)
     const after = confirmedFrame(model, part)!
     close(after.axes[2], before.axes[2].map((v: number) => -v))
     expect(componentMountsValid(model, part)).toBe(true)

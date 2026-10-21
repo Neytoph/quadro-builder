@@ -140,9 +140,9 @@ function confirmedCopy(partId) {
 function copy(partId, part) {
   if(part?.params?.screwAxis && part.params.mountLayout!=='opposite-transparent-screws'){
     const lang=getLang(),name=partName(getPartById(partId)) || partId;
-    if(lang==='zh')return ['四边支撑，背面两条对边各两颗黑色内嵌螺丝',`${name}安装`,'检查完整框格与全部边管，在板背面的两条安装唇边上朝承载管拧紧螺丝，检查板面和周围净空。'];
-    if(lang==='de')return ['Vier Rahmenkanten, je zwei schwarze versenkte Schrauben an den rückseitigen Montagelippen',`${name} montieren`,'Den vollständigen Rahmen und alle Randrohre prüfen. Die Schrauben an den beiden rückseitigen Montagelippen in Richtung der Trägerrohre festziehen und Freiraum prüfen.'];
-    return ['Four frame edges, two black recessed screws on each rear mounting lip',`Install ${name}`,'Check the complete frame and every edge tube. Tighten the screws through the two rear mounting lips toward the support tubes and check clearance.'];
+    if(lang==='zh')return ['两条对边支撑，背面每边两颗黑色内嵌螺丝',`${name}安装`,'检查面板尺寸与所选两条对边的连续承载管，在板背面的两条安装唇边上朝承载管拧紧螺丝，检查板面和周围净空。'];
+    if(lang==='de')return ['Zwei gegenüberliegende Trägerrohre, je zwei schwarze versenkte Schrauben an den rückseitigen Montagelippen',`${name} montieren`,'Plattenmaße und durchgehende Rohre an den beiden gewählten gegenüberliegenden Seiten prüfen. Die Schrauben an den rückseitigen Montagelippen in Richtung der Trägerrohre festziehen und Freiraum prüfen.'];
+    return ['Two opposite supports, two black recessed screws on each rear mounting lip',`Install ${name}`,'Check the panel dimensions and continuous support tubes on both selected opposite edges. Tighten the screws through the two rear mounting lips toward the support tubes and check clearance.'];
   }
   if (part?.params?.mountLayout === 'opposite-transparent-screws') {
     const lang = getLang();

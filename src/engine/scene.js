@@ -2593,12 +2593,16 @@ export class SceneManager {
     if (!part?.mounts?.length) return;
     const group = new THREE.Group();
     group.name = 'accessory-installation-preview';
-    const meshes = part.kind ? accessoryMeshes(this, model, part, '#238fe4') : panelAccessoryMeshes(this, model, part);
+    // 连续定位会不断改变绳长；预览几何随预览释放，避免把每个长度都放进永久缓存。
+    const previewScene = part.kind === 'rope' ? Object.create(this) : this;
+    if (part.kind === 'rope') previewScene._cachedGeo = (_key,create) => create();
+    const meshes = part.kind ? accessoryMeshes(previewScene, model, part, '#238fe4') : panelAccessoryMeshes(this, model, part);
     for (const mesh of meshes) {
       mesh.material = mesh.material.clone();
       mesh.material.transparent = true; mesh.material.opacity = 0.45; mesh.material.depthWrite = false;
       if (!valid) mesh.material.color.set('#e03131');
       mesh.userData.previewMaterial = true;
+      if (part.kind === 'rope' || part.kind === 'gym_rings') mesh.userData.previewGeometry = true;
       group.add(mesh);
     }
     if (part.kind === 'swing') {

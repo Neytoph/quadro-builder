@@ -5,6 +5,7 @@ import { quatFromBasis, xAxisOf, yAxisOf, zAxisOf } from './util.js';
 import { panelScrewPose, panelScrewAxes, panelLipSegments, PANEL_SCREW_RADIUS, PANEL_SCREW_HEAD_DEPTH, PANEL_SCREW_SHAFT_RADIUS, PANEL_SCREW_SHAFT_LENGTH, PANEL_OUTER_FACE, PANEL_CORNER_RELIEF } from './panelScrewMounts.js';
 
 export const cSub = (a, b) => a.map((v, i) => v - b[i]);
+export const PANEL_RETAINER_LAYOUT = 'opposite-retainers';
 export const cDot = (a, b) => a.reduce((s, v, i) => s + v * b[i], 0);
 const cross = (a, b) => [a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
 const unit = a => { const l = Math.hypot(...a); return a.map(v => v/l); };
@@ -42,7 +43,7 @@ export function confirmedFrame(model, part) {
   const cor=model.panelCorners(part);
   if (!cor || cor.some(p=>!p.every(Number.isFinite))) return null;
   let x=unit(cSub(cor[1],cor[0])), y=unit(cSub(cor[3],cor[0]));
-  if((hasInsetScrews(part) && part.params?.screwAxis!=='horizontal') || Math.abs(Math.hypot(...cSub(cor[1],cor[0]))-spec.width)>0.5) [x,y]=[y,x];
+  if(((hasInsetScrews(part) || part.params?.mountLayout===PANEL_RETAINER_LAYOUT) && part.params?.screwAxis!=='horizontal') || Math.abs(Math.hypot(...cSub(cor[1],cor[0]))-spec.width)>0.5) [x,y]=[y,x];
   let z=unit(cross(x,y));
   if(Math.abs(z[1])<0.01) {
     // 竖直平面内的斜框保留实际框边；方板选更朝上的边作为高度轴。
@@ -101,13 +102,17 @@ export function supportsPanelFixing(panelId) {
   return panelId==='panel_40x40_busy' || spec?.placement==='panel' && spec.feature!=='basketball';
 }
 
+export function isOuterScrewPanel(panelId) {
+  return !!confirmedSpec(panelId) && supportsPanelFixing(panelId) && !INSET_PANEL_IDS.has(panelId);
+}
+
 export function panelRailScrewAxis(model,probe,frame=confirmedFrame(model,probe)) {
   const rail=model._rail(probe.a);
   if(!frame || !rail)return null;
   return Math.abs(cDot(rail.dir,frame.axes[0]))>.999 ? 'horizontal' : 'vertical';
 }
 
-export function confirmedPanelDiagnostics(model,probe,{legacyInset=false,screwAxis=probe.params?.screwAxis || 'vertical'}={}) {
+export function confirmedPanelDiagnostics(model,probe,{legacyInset=false,screwAxis=probe.params?.screwAxis}={}) {
   const spec=confirmedSpec(probe.panelId); if(!spec)return bad('frame_size',probe);
   const cor=model.panelCorners(probe);if(!cor)return bad('missing_support',probe);
   const lengths=[Math.hypot(...cSub(cor[1],cor[0])),Math.hypot(...cSub(cor[3],cor[0]))].sort((a,b)=>a-b),dims=[spec.width,spec.height].sort((a,b)=>a-b);
@@ -115,18 +120,29 @@ export function confirmedPanelDiagnostics(model,probe,{legacyInset=false,screwAx
   const normal=unit(cross(cSub(cor[1],cor[0]),cSub(cor[3],cor[0])));
   if(spec.mountType==='horizontal-frame' && Math.abs(normal[1])<0.999)return bad('horizontal_frame',probe);
   const inset=INSET_PANEL_IDS.has(spec.id),legacy=legacyInset || (probe.appearanceVersion===2 && Array.isArray(probe.mounts) && probe.params?.mountLayout==null);
+  const outer=isOuterScrewPanel(spec.id),legacyOuter=outer && legacy;
+  screwAxis ??= outer && !legacyOuter ? panelRailScrewAxis(model,probe) : 'vertical';
   if((inset || probe.params?.screwAxis!=null) && !['vertical','horizontal'].includes(screwAxis))return bad('missing_support',probe);
   const frameForSupports=confirmedFrame(model,probe);
-  let supports=inset && !legacy ? oppositeScrewSupports(model,frameForSupports,spec.width,spec.height,{screwAxis}) : edgeSupports(model,cor);
-  if(!supports)return bad(inset && !legacy?'opposite_edges':'four_edges',probe);
-  // 外扣板仍检查完整四边，扣件只落在用户选中的两条对边。
-  if(!inset && supportsPanelFixing(spec.id) && probe.params?.screwAxis!=null){
-    const opposite=oppositeScrewSupports(model,frameForSupports,spec.width,spec.height,{screwAxis});
-    if(!opposite)return bad('opposite_edges',probe);
-    supports={...supports,mounts:opposite.mounts.map(m=>({...m,role:'retainer',width:2}))};
+  const retainers=outer && (!legacyOuter || probe.params?.screwAxis!=null);
+  const legacyRetainers=retainers && probe.appearanceVersion===2 && Array.isArray(probe.mounts) && probe.params?.mountLayout==null;
+  const opposite=inset && !legacy || retainers;
+  let supports=opposite ? oppositeScrewSupports(model,frameForSupports,spec.width,spec.height,{screwAxis}) : edgeSupports(model,cor);
+  if(!supports)return bad(opposite?'opposite_edges':'four_edges',probe);
+  if(retainers){
+    const legacySupports=legacyRetainers?edgeSupports(model,cor):supports;
+    if(!legacySupports)return bad('four_edges',probe);
+    supports={...legacySupports,mounts:supports.mounts.map(m=>({...m,role:'retainer',width:2}))};
   }
   const result={...probe,...supports,appearanceVersion:2,params:{...spec},valid:true,reason:null};
-  if(!inset && probe.params?.screwAxis!=null)result.params.screwAxis=screwAxis;
+  if(retainers || !inset && probe.params?.screwAxis!=null)result.params.screwAxis=screwAxis;
+  if(retainers && !legacyRetainers){
+    // 几何引用跟随实际固定管，删除未固定的框边后仍能重开和变换。
+    result.params.mountLayout=PANEL_RETAINER_LAYOUT;
+    Object.assign(result,insetPanelReference(model,frameForSupports,spec.width,spec.height,supports,{screwAxis}));
+    result.side=1;
+    if(cDot(confirmedFrame(model,result).axes[2],frameForSupports.axes[2])<0)result.side=-1;
+  }
   if(inset && !legacy){
     Object.assign(result,insetPanelReference(model,frameForSupports,spec.width,spec.height,supports,{screwAxis}));
     if(probe.appearanceVersion!==2 || probe.params?.screwAxis!=null)result.params.screwAxis=screwAxis;
@@ -195,7 +211,7 @@ export function ropeCandidate(model,first,second) {
   const x=unit(cSub(b,a)),z=unit(cross(x,Math.abs(x[1])>0.9?[1,0,0]:[0,1,0])),y=cross(z,x),frame={pos:center([a,b]),axes:[x,y,z],quat:quatFromBasis(x,y,z)};
   return {...asFitting(spec,{tube:first.tube,a:first.tube,b:second.tube},frame,{mounts:[first,second].map(m=>({...m,role:'knot',width:1})),supportTubes:[first.tube,second.tube]}),ropeLength:length};
 }
-function railCandidates(model,spec,{legacyInset=false,deduplicate=true}={}) {
+function railCandidates(model,spec,{legacyInset=false,deduplicate=true,screwAxis='vertical',oppositeRetainers=false}={}) {
   const out=[],seen=new Set();
   for(const tube of model.tubes.values())for(const partner of model.panelPartners(tube.id,[spec.width,spec.height])) {
     const count=Math.max(1,Math.floor((partner.hi-partner.lo+0.5)/partner.len));
@@ -203,6 +219,11 @@ function railCandidates(model,spec,{legacyInset=false,deduplicate=true}={}) {
     if(spec.mountType==='rails' && Math.abs(partner.len-spec.height)>0.5)continue;
     for(let k=0;k<count;k++) {
       const probe={a:tube.id,b:partner.id,t0:partner.lo+k*partner.len,len:partner.len};
+      const retainers=oppositeRetainers && supportsPanelFixing(spec.id) && !INSET_PANEL_IDS.has(spec.id);
+      if(retainers){
+        if(Math.abs(probe.len-(screwAxis==='horizontal'?spec.width:spec.height))>.5)continue;
+        probe.params={screwAxis,mountLayout:PANEL_RETAINER_LAYOUT};
+      }
       const cor=model.panelCorners(probe);if(!cor)continue;
       const key=cor.map(p=>p.map(v=>v.toFixed(2)).join(',')).sort().join('|');if(deduplicate && seen.has(key))continue;seen.add(key);
       const frame=confirmedFrame(model,{...probe,panelId:spec.id,side:1});if(!frame)continue;
@@ -214,7 +235,7 @@ function railCandidates(model,spec,{legacyInset=false,deduplicate=true}={}) {
           const rail=model._rail(id),positions=spec.feature==='bridge'?rungPositions(probe.len).map(p=>p/probe.len):spec.feature==='rope'?[0.5]:[0.25,0.75];
           for(const position of positions) {const p=cor[id===probe.a?0:3].map((v,i)=>v+(cor[id===probe.a?1:2][i]-v)*position);mounts.push({tube:id,t:cDot(cSub(p,rail.p0),rail.dir)/rail.len,role:spec.feature==='bridge'?'rung':spec.feature==='rope'?'knot':'sleeve',width:spec.feature==='bridge'?3:2});}
         }supports={mounts,supportTubes:[probe.a,probe.b]};
-      } else supports=INSET_PANEL_IDS.has(spec.id) && !legacyInset ? oppositeScrewSupports(model,frame,spec.width,spec.height) : edgeSupports(model,cor,density);
+      } else supports=INSET_PANEL_IDS.has(spec.id) && !legacyInset || oppositeRetainers && supportsPanelFixing(spec.id) ? oppositeScrewSupports(model,frame,spec.width,spec.height,{screwAxis}) : edgeSupports(model,cor,density);
       if(!supports)continue;
       out.push(asFitting(spec,probe,frame,supports));
     }
@@ -242,38 +263,35 @@ function curvedCandidates(model,spec) {
     }
   }return out;
 }
+// 引擎记录按部件类型动态扩展，显式数组类型保留调用方的回调类型推断。
+/** @returns {Array<Record<string, any>>} */
 export function confirmedCandidates(model,id,options={}) {
   const spec=confirmedSpec(id);if(!spec)return [];
+  if(isOuterScrewPanel(id) && options.screwAxis==null){
+    const candidates=['vertical','horizontal'].flatMap(screwAxis=>confirmedCandidates(model,id,{...options,screwAxis,deduplicate:false}));
+    return selectPanelCandidates(model,candidates,options);
+  }
+  if(isOuterScrewPanel(id))options={...options,oppositeRetainers:true};
   if(spec.placement==='panel') {
     const fake={...spec,placement:'fitting'};
-    const fixing=options.screwAxis && (options.oppositeRetainers || INSET_PANEL_IDS.has(id)) && supportsPanelFixing(id) ? {params:{screwAxis:options.screwAxis}} : {};
+    const fixing=options.screwAxis && (options.oppositeRetainers || INSET_PANEL_IDS.has(id)) && supportsPanelFixing(id) ? {params:{screwAxis:options.screwAxis,...(!INSET_PANEL_IDS.has(id)?{mountLayout:PANEL_RETAINER_LAYOUT}:{})}} : {};
     const candidates=railCandidates(model,fake,{...options,deduplicate:false}).map(p=>confirmedPanelDiagnostics(model,{a:p.a,b:p.b,t0:p.t0,len:p.len,panelId:spec.id,side:1,...fixing},options));
     const inset=INSET_PANEL_IDS.has(spec.id);
     if(!inset || !options.legacyInset){
-      const seen=new Set(candidates.map(p=>model.panelCorners(p)?.map(c=>c.map(v=>v.toFixed(2)).join(',')).sort().join('|')));
+      const seen=new Set(candidates.filter(p=>p.valid).map(p=>model.panelCorners(p)?.map(c=>c.map(v=>v.toFixed(2)).join(',')).sort().join('|')));
       const horizontal=options.screwAxis==='horizontal';
-      // 普通板也识别多根短管拼成的连续框边；实际四边及固定点仍由诊断核对。
+      // 普通板也识别多根短管拼成的连续框边；实际固定边由诊断核对。
       let sizes=[[spec.width,spec.height]];
-      if(inset && horizontal)sizes=[[spec.height,spec.width]];
+      if((inset || fixing.params) && horizontal)sizes=[[spec.height,spec.width]];
+      else if(fixing.params)sizes=[[spec.width,spec.height]];
       else if(!inset && spec.width!==spec.height)sizes.push([spec.height,spec.width]);
-      for(const [width,height] of sizes)for(const probe of insetPanelProbes(model,width,height,{segmentedOnly:!inset})){
+      for(const [width,height] of sizes)for(const probe of insetPanelProbes(model,width,height,{deduplicate:false})){
         const key=model.panelCorners(probe)?.map(c=>c.map(v=>v.toFixed(2)).join(',')).sort().join('|');if(seen.has(key))continue;
         const candidate=confirmedPanelDiagnostics(model,{...probe,panelId:spec.id,side:1,...fixing,...(inset?{params:{mountLayout:INSET_MOUNT_LAYOUT,screwAxis:options.screwAxis||'vertical'}}:{})},options);
         if(candidate.valid){candidates.push(candidate);seen.add(key);}
       }
     }
-    // 同一框格可能有多个承载方向；实际安装检查后才选择一个方案。
-    // 批量装配需要保留这些方向，联合选择相邻面板的固定位置。
-    if(options.deduplicate===false)return candidates;
-    const faces=new Map();
-    for(const candidate of candidates){
-      const cor=model.panelCorners(candidate);if(!cor)continue;
-      const key=cor.map(p=>p.map(v=>(Math.abs(v)<.005?0:v).toFixed(2)).join(',')).sort().join('|');
-      const previous=faces.get(key);if(previous?.accepted)continue;
-      const accepted=candidate.valid && (options.isPanelCandidateValid?.(candidate) ?? true);
-      if(!previous || accepted && !previous.accepted)faces.set(key,{candidate,accepted});
-    }
-    return [...faces.values()].map(({candidate})=>candidate);
+    return selectPanelCandidates(model,candidates,options);
   }
   if(spec.mountType==='curved-frame')return curvedCandidates(model,spec);
   if(spec.feature==='trampoline')return trampolineCandidates(model,spec);
@@ -305,6 +323,20 @@ export function confirmedCandidates(model,id,options={}) {
   return spec.feature==='rope'?candidates.map(p=>ropeCandidate(model,...p.mounts)):candidates;
 }
 
+// 同一框格保留实际可用的固定方向；批量装配可保留全部方案。
+function selectPanelCandidates(model,candidates,options) {
+  if(options.deduplicate===false)return candidates;
+  const faces=new Map();
+  for(const candidate of candidates){
+    const cor=model.panelCorners(candidate);if(!cor)continue;
+    const key=cor.map(p=>p.map(v=>(Math.abs(v)<.005?0:v).toFixed(2)).join(',')).sort().join('|');
+    const previous=faces.get(key);if(previous?.accepted)continue;
+    const accepted=candidate.valid && (options.isPanelCandidateValid?.(candidate) ?? true);
+    if(!previous || accepted && !previous.accepted)faces.set(key,{candidate,accepted});
+  }
+  return [...faces.values()].map(({candidate})=>candidate);
+}
+
 export function confirmedStructuralValid(model,part) {
   const spec=confirmedSpec(part.panelId||part.kind||part.partId);if(!spec || part.appearanceVersion!==2)return false;
   if(!Array.isArray(part.mounts) || !part.mounts.length || !Array.isArray(part.supportTubes) || !part.supportTubes.length || !confirmedFrame(model,part))return false;
@@ -318,6 +350,7 @@ export function confirmedStructuralValid(model,part) {
     if((key==='width'||key==='height'?size[key]:spec[key])!==part.params?.[key])return false;
   }
   if(INSET_PANEL_IDS.has(spec.id) && part.params?.mountLayout!=null && part.params.mountLayout!==INSET_MOUNT_LAYOUT)return false;
+  if(!INSET_PANEL_IDS.has(spec.id) && supportsPanelFixing(spec.id) && part.params?.mountLayout!=null && part.params.mountLayout!==PANEL_RETAINER_LAYOUT)return false;
   if(part.params?.screwAxis!=null && !['vertical','horizontal'].includes(part.params.screwAxis))return false;
   if(spec.feature==='lego' && part.params?.studHeight!=null && part.params.studHeight!==spec.studHeight)return false;
   if(spec.feature==='rope') {

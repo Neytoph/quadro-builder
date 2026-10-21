@@ -58,8 +58,8 @@ describe('普通板共边安装', () => {
     expect(blocked).toMatchObject({ reason: 'mount_occupied', obstacle: { id: fitting.id, tube: mount.tube, t: mount.t } })
     setLang(lang)
     const message = installationReason(model, blocked)!
-    // 40cm节点间距含两端各2.5cm接头；固定点距35cm管材实际端部1.5cm。
-    expect(message).toContain('1.5 cm')
+    // 对边螺丝距节点中心6cm；扣除端部2.5cm接头后距实际管端3.5cm。
+    expect(message).toContain('3.5 cm')
     expect(message).toContain('35')
     expect(message).not.toContain('accessory_')
     expect(model.addNativePanel(probe, 'green')).toBeNull()

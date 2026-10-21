@@ -99,7 +99,7 @@ const de = {
   notice_sleeve_pick: 'Ein Rohr anklicken: Polster drauf. Das Polster anklicken: wieder runter.',
   notice_sleeve_on: 'Polster aufgezogen.',
   notice_accessory_pick: 'Eine markierte Montagestelle auswählen.',
-  notice_rope_second: 'Ersten Seilknoten gewählt. Jetzt den Punkt am zweiten Tragrohr wählen.',
+  notice_rope_second: 'Erster Endpunkt fixiert. Den zweiten Punkt stufenlos am anderen Rohr wählen; Esc verwirft die Auswahl.',
   notice_accessory_added: 'Zubehör angebracht.',
   notice_panel_facing_space_adjusted: name => `Zubehör angebracht. Die zur Ansicht gerichtete Seite würde sich mit „${name}“ überlappen; Übereinanderlegen ist nicht möglich. Die Ausrichtung wurde automatisch geändert.`,
   notice_panel_facing_adjusted: reason => `Zubehör angebracht. Die zur Ansicht gerichtete Seite kann hier nicht montiert werden; die Ausrichtung wurde automatisch geändert. Grund: ${reason}`,
@@ -720,7 +720,7 @@ const en = {
   notice_sleeve_pick: 'Click a tube to put a sleeve on it. Click the sleeve to take it off.',
   notice_sleeve_on: 'Sleeve put on.',
   notice_accessory_pick: 'Choose a highlighted mounting point.',
-  notice_rope_second: 'First rope endpoint selected. Choose the point on the second support tube.',
+  notice_rope_second: 'First endpoint fixed. Move along the other tube to position the second endpoint; Esc cancels.',
   notice_accessory_added: 'Accessory installed.',
   notice_panel_facing_space_adjusted: name => `Accessory installed. The side facing this view would overlap with “${name}”; stacking is not allowed. The orientation was automatically changed.`,
   notice_panel_facing_adjusted: reason => `Accessory installed. The side facing this view cannot be mounted here; the orientation was automatically changed. Reason: ${reason}`,
@@ -1334,7 +1334,7 @@ const zh = {
   notice_sleeve_pick: '点一根管子套上软包；点软包本身就取下来。',
   notice_sleeve_on: '软包套上了。',
   notice_accessory_pick: '请选择高亮安装位置。',
-  notice_rope_second: '已选第一处绳结，请点击第二根承载管上的安装点。',
+  notice_rope_second: '第一端已固定，沿另一根管连续定位第二端，预览绳索后点击连接；Esc 取消。',
   notice_accessory_added: '配件已安装。',
   notice_panel_facing_space_adjusted: name => `配件已安装。朝向当前视角时会与“${name}”重叠，不能叠放，已自动改变朝向。`,
   notice_panel_facing_adjusted: reason => `配件已安装。朝向当前视角时无法安装，已自动改变朝向。原因：${reason}`,
@@ -1447,7 +1447,7 @@ const componentReasons = {
   de: { straight_tube: 'Ein waagerechtes gerades Rohr ist erforderlich; Bögen und Verbindungskanten sind keine Träger.', horizontal_tube: 'Das Tragrohr muss waagerecht sein.', missing_support: 'Ein Tragrohr oder Endpunkt fehlt.', tube_short: 'Das Rohr ist für zwei Befestigungen mit Montageabstand an beiden Enden zu kurz.', ground_clearance: 'Der Abstand zum Boden reicht nicht aus.', mount_occupied: 'Eine Befestigungsstelle ist durch ein Zubehörteil oder Polster belegt.', component_space: 'Das Zubehör überschneidet sich mit einem Rohr, einer Platte oder einem anderen Teil.', swing_clearance: 'Im Schwenkbereich von ±30° liegt ein Hindernis. Hindernis entfernen oder andere Montagestelle wählen.', frame_size: 'Die Rahmenmaße passen nicht zum ausgewählten Bauteil.', horizontal_frame: 'Das ausgewählte Bauteil benötigt einen waagerechten Rahmen.', four_edges: 'Alle vier Rahmenkanten benötigen vollständige gerade Rohrträger.', four_corners: 'Eine Befestigungsstelle an einer Ecke fehlt.', opening_occupied: 'In dieser Öffnung befindet sich bereits eine Platte oder ein Textil.' },
 };
 for (const [lang, dict] of Object.entries({ de, en, zh })) {
-  componentReasons[lang].opposite_edges = lang==='zh' ? '所选两条对边需要连续直管支撑，每边固定两颗透明螺丝。' : lang==='de' ? 'Die beiden ausgewählten gegenüberliegenden Seiten benötigen durchgehende gerade Rohre mit je zwei transparenten Schrauben.' : 'Both selected opposite edges need continuous straight tubes with two transparent screws on each edge.';
+  componentReasons[lang].opposite_edges = lang==='zh' ? '所选两条对边需要连续直管支撑，每边固定两颗螺丝。' : lang==='de' ? 'Die beiden ausgewählten gegenüberliegenden Seiten benötigen durchgehende gerade Rohre mit je zwei Schrauben.' : 'Both selected opposite edges need continuous straight tubes with two screws on each edge.';
   for (const [key, text] of Object.entries(componentReasons[lang])) dict['accessory_reason_' + key] = text;
   for (const action of ['move', 'rotate', 'mirror']) {
     dict['notice_' + action + '_accessory_mounts'] = lang === 'zh' ? '此操作会拆开多点固定。请一并选择组件和完整承载框架。' : lang === 'de' ? 'Dieser Vorgang würde Befestigungen trennen. Zubehör und vollständigen Tragrahmen gemeinsam auswählen.' : 'This would separate fixing points. Select the component and its complete support frame together.';

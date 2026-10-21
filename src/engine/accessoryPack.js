@@ -1,9 +1,10 @@
 import { quatFromBasis, xAxisOf, yAxisOf, zAxisOf } from './util.js';
 import { CONFIRMED_COMPONENTS, CONFIRMED_PANEL_IDS, CONFIRMED_FITTING_IDS, confirmedSpec } from './componentPack.js';
-import { confirmedCandidates, confirmedPanelDiagnostics, confirmedStructuralValid, confirmedFrame, confirmedVolumes, curvePoint, ropeCandidate, trampolineCandidate } from './confirmedComponentModel.js';
+import { confirmedCandidates, confirmedPanelDiagnostics, confirmedStructuralValid, confirmedFrame, confirmedVolumes, curvePoint, ropeCandidate, trampolineCandidate, isOuterScrewPanel, PANEL_RETAINER_LAYOUT } from './confirmedComponentModel.js';
 import { INSET_MOUNT_LAYOUT, INSET_PANEL_EDGE_INSET, hasInsetScrews, oppositeScrewSupports, insetFrameTubeIds, insetScrewVolumes, insetPanelReference } from './insetPanelMounts.js';
 import { geometry } from './catalog.js';
 import { isSoftPart } from './softParts.js';
+import { gymRingPlacement } from './gymRingSupport.js';
 
 export const ACCESSORY_PACK = [
   { id: 'steering_wheel', name: '方向盘', name_en: 'Steering wheel', name_de: 'Lenkrad', placement: 'fitting', mount: 'horizontal', diameter: 24, clampSpacing: 8, shaft: 8, width: 24, drop: 0 },
@@ -50,7 +51,7 @@ export function componentFrame(model, part) {
     if(!Array.isArray(q) || q.length!==4 || !q.every(Number.isFinite) || Math.abs(Math.hypot(...q)-1)>.001)return null;
     return {pos:[part.x,part.y,part.z],axes:[xAxisOf(q),yAxisOf(q),zAxisOf(q)],quat:q};
   }
-  if (part.appearanceVersion === 2) return confirmedFrame(model, part);
+  if (part.appearanceVersion === 2 || part.params?.mountLayout===PANEL_RETAINER_LAYOUT) return confirmedFrame(model, part);
   if (ACCESSORY_IDS.has(part.kind)) {
     const tube = model.tubes.get(part.tube);
     const a = tube && model.nodes.get(tube.a), b = tube && model.nodes.get(tube.b);
@@ -222,7 +223,7 @@ export function componentObstacle(model, part, { sweep = false, collisionCache =
   // 先用保守世界包围盒排除远处部件；精确盒体和圆管检查继续决定真实碰撞。
   const bounded=volumes.map(box=>({box,bounds:volumeBounds(box)})),bounds=combinedBounds(bounded);
   const supports = new Set(Array.isArray(part.supportTubes) ? part.supportTubes : [part.tube, part.a, part.b].filter(Boolean));
-  if(hasInsetScrews(part)) {
+  if(hasInsetScrews(part) || part.params?.screwAxis && confirmedSpec(part.panelId)) {
     const spec=accessorySpec(part.panelId);
     for(const id of insetFrameTubeIds(model,componentFrame(model,part),spec.width,spec.height))supports.add(id);
   }
@@ -240,7 +241,13 @@ export function componentObstacle(model, part, { sweep = false, collisionCache =
         prev = next;
       }
     } else {
-      const start=point(a),end=point(b);
+      let start=point(a),end=point(b);
+      if(isOuterScrewPanel(part.panelId)){
+        // 接头中心到实际管端有半个接头的距离，邻框管端不能膨胀到板内。
+        const length=Math.hypot(...sub(end,start)),inset=Math.min(geometry().connectorSize/2,length/2);
+        const offset=sub(end,start).map(v=>v/length*inset);
+        start=start.map((v,i)=>v+offset[i]);end=end.map((v,i)=>v-offset[i]);
+      }
       if(segmentNearBounds(bounds,start,end,2.45) && bounded.some(({box,bounds})=>segmentNearBounds(bounds,start,end,2.45) && segmentHits(box,start,end)))return {kind:'tube',id:tube.id};
     }
   }
@@ -266,8 +273,7 @@ export function componentObstacle(model, part, { sweep = false, collisionCache =
 
 function separatePanelRetainers(model, candidate, part, a, b) {
   if (!candidate.panelId || !part.panelId || a.role !== 'retainer' || b.role !== 'retainer') return false;
-  const standard = ['panel_40x40', 'panel_40x20', 'panel_30x30', 'hole_panel_40x40'];
-  if (!standard.includes(candidate.panelId) && !standard.includes(part.panelId)) return false;
+  if (!isOuterScrewPanel(candidate.panelId) || !isOuterScrewPanel(part.panelId)) return false;
   const rail = model._rail(a.tube), first = componentFrame(model, candidate), second = componentFrame(model, { ...part, appearanceVersion: 2 });
   const point = mountPoint(model, a);
   if (!rail || !first || !second || !point) return false;
@@ -275,7 +281,7 @@ function separatePanelRetainers(model, candidate, part, a, b) {
     const delta = sub(frame.pos, point), along = dot(delta, rail.dir);
     return unit(sub(delta, rail.dir.map(v => v * along)));
   };
-  // 普通板扣朝各自开口内侧；不同侧共边仍交由实际部件空间检查。
+  // 外扣板螺丝朝各自开口内侧，共边后仍检查实际部件空间。
   return dot(inward(first), inward(second)) <= 0.01;
 }
 
@@ -318,14 +324,18 @@ export function accessoryDiagnostics(model, kind, tubeId, opts = {}) {
   if (Math.abs(a.y - b.y) > 0.01) return invalid('horizontal_tube');
   const len = Math.hypot(...sub(point(b), point(a)));
   const spacing = spec.clampSpacing || spec.hangerSpacing || 18;
-  if (len < spacing + 12) return invalid('tube_short');
+  const saved = opts.ignoreId && model.fittings.get(opts.ignoreId);
+  const position = opts.position || (kind === 'gym_rings' && saved ? [saved.x,saved.y,saved.z] : null);
+  const ringMount = kind === 'gym_rings' ? gymRingPlacement(model,tubeId,position) : null;
+  if (kind === 'gym_rings' ? !ringMount : len < spacing + 12) return invalid('tube_short');
   if (kind !== 'steering_wheel' && a.y < spec.drop + 8) return invalid('ground_clearance');
   const x = unit(sub(point(b), point(a))), y = [0, 1, 0], z = cross(x, y);
   const facing = opts.facing < 0 ? -1 : 1;
   const quat = quatFromBasis(x.map(n => n * facing), y, z.map(n => n * facing));
-  const mounts = [-1, 1].map(side => ({ tube: tubeId, t: 0.5 + side * spacing / (2 * len), width: 2.5, role: kind === 'steering_wheel' ? 'clamp' : 'hanger' }));
-  const part = { kind, tube: tubeId, ...Object.fromEntries(['x', 'y', 'z'].map((key, i) => [key, mid(point(a), point(b))[i]])), quat,
-    mounts, supportTubes: [tubeId], appearanceVersion: APPEARANCE_VERSION, facing, params: { ...spec }, id: opts.ignoreId };
+  const mounts = ringMount?.mounts || [-1, 1].map(side => ({ tube: tubeId, t: 0.5 + side * spacing / (2 * len), width: 2.5, role: kind === 'steering_wheel' ? 'clamp' : 'hanger' }));
+  const center = ringMount?.pos || mid(point(a),point(b));
+  const part = { kind, tube: ringMount?.tube || tubeId, ...Object.fromEntries(['x', 'y', 'z'].map((key, i) => [key, center[i]])), quat,
+    mounts, supportTubes: ringMount?.supportTubes || [tubeId], appearanceVersion: APPEARANCE_VERSION, facing, params: { ...spec }, id: opts.ignoreId };
   if (kind === 'steering_wheel' && componentVolumes(model, part).some(box => {
     const lowest = box.pos[1] - box.axes.reduce((height, axis, i) => height + Math.abs(axis[1]) * box.half[i], 0);
     return model.isBelowGround(lowest);
@@ -403,6 +413,7 @@ export function componentMountsValid(model, part) {
     return distance>=0 && distance<=rail.len && Math.hypot(...sub(delta,rail.dir.map(v=>v*distance)))<.1 && Math.abs(dot(frame.axes[0],rail.dir))>.999;
   }
   if (part.appearanceVersion === 2) return confirmedStructuralValid(model, part);
+  if (!part.appearanceVersion && part.params?.mountLayout===PANEL_RETAINER_LAYOUT) return confirmedStructuralValid(model,{...part,appearanceVersion:2});
   if (part.appearanceVersion !== APPEARANCE_VERSION) return false;
   const expected = part.kind ? 2 : 4;
   if (!Array.isArray(part.mounts) || part.mounts.length !== expected || !Array.isArray(part.supportTubes) || !part.supportTubes.length) return false;
@@ -414,7 +425,7 @@ export function componentMountsValid(model, part) {
   for (const key of ['diameter', 'clampSpacing', 'shaft', 'width', 'height', 'depth', 'drop', 'hangerSpacing']) {
     if (spec[key] != null && part.params?.[key] !== spec[key]) return false;
   }
-  const candidate = part.kind ? accessoryDiagnostics(model, part.kind, part.tube, { facing: part.facing, ignoreId: part.id }) : panelAccessoryDiagnostics(model, part);
+  const candidate = part.kind ? accessoryDiagnostics(model, part.kind, part.tube, { facing: part.facing, ignoreId: part.id, position:part.kind==='gym_rings' ? [part.x,part.y,part.z] : undefined }) : panelAccessoryDiagnostics(model, part);
   if (!candidate.mounts || candidate.mounts.length !== expected) return false;
   if (candidate.supportTubes.length !== part.supportTubes.length || candidate.supportTubes.some(id => !part.supportTubes.includes(id))) return false;
   const unmatched = candidate.mounts.slice();

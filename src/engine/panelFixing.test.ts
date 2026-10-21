@@ -17,6 +17,10 @@ import { createDirectInstallationFrame } from './directInstallationExample.js'
 import { panelLipProfiles, panelLipSegments, PANEL_LIP_CLEARANCE, PANEL_LIP_THICKNESS, PANEL_LIP_JOIN_DEPTH } from './panelScrewMounts.js'
 import { ModelHistory } from '../collab/history'
 import { docFromJSON } from '../collab/ymodel'
+import { segmentedPanelFrame } from '../../scripts/segmented-panel-frame.js'
+import { computeSafety } from './safety.js'
+import { oppositeScrewSupports, insetFrameTubeIds } from './insetPanelMounts.js'
+import { confirmedSpec } from './componentPack.js'
 
 beforeAll(async () => { await loadCatalog() })
 // JavaScript引擎使用动态记录；any仅用于断言尚未建立TypeScript类型的模型字段。
@@ -30,6 +34,96 @@ function controller(model: BuildModel) {
 }
 
 describe('板件实际固定对边', () => {
+  it.each(['panel_40x40','panel_40x20'].flatMap(id=>['vertical','horizontal'].map(axis=>[id,axis])))('%s %s缺边QDF往返保持板面和可用固定管',(id,axis)=>{
+    const {model}=createConfirmedComponentFixture(id,{install:false})
+    const part=model.addPanelAccessory(model.panelAccessoryMounts(id,{screwAxis:axis,oppositeRetainers:true})[0],'blue') as any
+    const supports=new Set(part.supportTubes),corners=model.panelCorners(part)!
+    for(const t of [...model.tubes.values()])if(!supports.has(t.id))model.removeTube(t.id)
+    const data=parseQDF(buildQDF(model).text,{tubes:buildableTubes(),panels:panels(),connectorSize:geometry().connectorSize,mergeEps:2})
+    const reopened=new BuildModel();expect(reopened.loadJSON(data).ok).toBe(true)
+    const restored=[...reopened.panels.values()][0]
+    expect(restored).toBeTruthy()
+    expect(reopened.panelCorners(restored)!.map(p=>p.join(',')).sort()).toEqual(corners.map(p=>p.join(',')).sort())
+    expect(reopened.setPanelFixing(restored.id,axis)).toBe(true)
+    expect(componentMountsValid(reopened,reopened.panels.get(restored.id)!)).toBe(true)
+  })
+  it.each(['panel_40x40','panel_40x20','panel_40x40_lego'])('%s 旧四边引用存档保持有效，编辑固定边后采用实际两边引用',id=>{
+    const {model}=createConfirmedComponentFixture(id,{install:false})
+    const part=model.addConfirmedComponent(model.panelAccessoryMounts(id)[0],'blue') as any,spec=confirmedSpec(id)!
+    delete part.params.mountLayout
+    part.params.screwAxis='vertical'
+    part.supportTubes=insetFrameTubeIds(model,componentFrame(model,part),spec.width,spec.height)
+    part.mounts=oppositeScrewSupports(model,componentFrame(model,part),spec.width,spec.height)!.mounts.map((m:any)=>({...m,role:'retainer',width:2}))
+    const saved=model.toJSON(),reopened=new BuildModel()
+    expect(reopened.loadJSON(saved).ok).toBe(true)
+    expect(reopened.toJSON()).toEqual(saved)
+    expect(componentMountsValid(reopened,reopened.panels.get(part.id)!)).toBe(true)
+    expect(reopened.setPanelFixing(part.id,'vertical')).toBe(true)
+    expect(reopened.panels.get(part.id)!.supportTubes).toHaveLength(2)
+    expect(componentMountsValid(reopened,reopened.panels.get(part.id)!)).toBe(true)
+  })
+  it.each(ids.flatMap(id => ['vertical','horizontal'].map(axis => [id,axis])))('%s %s固定允许缺少非固定边，并保持保存和换边约束', (id,axis) => {
+    const model = id === 'panel_40x40_busy' ? createDirectInstallationFrame(80,40,{vertical:true}) : createConfirmedComponentFixture(id,{install:false}).model
+    const seed=model.panelAccessoryMounts(id,{screwAxis:axis,oppositeRetainers:true})[0] as any
+    expect(seed).toBeTruthy()
+    const corners=model.panelCorners(seed)!,support=new Set(seed.supportTubes)
+    const unfastened=[...model.tubes.values()].filter(t=>!support.has(t.id) && corners.some((a,i)=>{
+      const b=corners[(i+1)%4],delta=b.map((v,k)=>v-a[k]),length=Math.hypot(...delta),direction=delta.map(v=>v/length)
+      return [t.a,t.b].every(n=>{
+        const node=model.nodes.get(n)!,point=[node.x,node.y,node.z],offset=point.map((v,k)=>v-a[k]),along=offset.reduce((s,v,k)=>s+v*direction[k],0)
+        return along>=-.01 && along<=length+.01 && Math.hypot(...offset.map((v,k)=>v-along*direction[k]))<.01
+      })
+    }))
+    expect(unfastened.length).toBeGreaterThanOrEqual(2)
+    // 逐根拆除两条非固定边，验证三边和仅剩两条固定边两种实际模型。
+    for(const tube of unfastened){
+      model.removeTube(tube.id)
+      const candidate=model.panelAccessoryMounts(id,{screwAxis:axis,oppositeRetainers:true}).find((p:any)=>p.pos.every((v:number,i:number)=>Math.abs(v-seed.pos[i])<.01)) as any
+      expect(candidate).toBeTruthy()
+      const part=model.addPanelAccessory(candidate,'blue') as any
+      expect(part).toBeTruthy();expect(componentMountsValid(model,part)).toBe(true)
+      expect(part.mounts).toHaveLength(4)
+      expect(new Set(part.mounts.map((m:any)=>m.tube))).toEqual(support)
+      const before=model.toJSON()
+      expect(model.setPanelFixing(part.id,axis==='vertical'?'horizontal':'vertical')).toBe(false)
+      expect(model.toJSON()).toEqual(before)
+      const reopened=new BuildModel();expect(reopened.loadJSON(before).ok).toBe(true)
+      expect(reopened.toJSON()).toEqual(before)
+      expect(componentMountsValid(reopened,reopened.panels.get(part.id)!)).toBe(true)
+      reopened.removeTube(part.mounts[0].tube);expect(reopened.panels.has(part.id)).toBe(false)
+      model.removePanel(part.id)
+    }
+  })
+
+  it.each(['horizontal','vertical','tilted'])('短管%s框只保留两条固定边，自动挂位和实际螺丝仍有效',orientation=>{
+    const {model}=segmentedPanelFrame({orientation})
+    const seed=model.panelAccessoryMounts('panel_40x40',{screwAxis:'auto'})[0] as any
+    const support=new Set(seed.supportTubes)
+    for(const id of [...model.tubes.keys()])if(!support.has(id))model.removeTube(id)
+    const mount=model.panelAccessoryMounts('panel_40x40',{screwAxis:'auto'})[0] as any
+    expect(mount).toBeTruthy()
+    const part=model.addPanelAccessory(mount,'blue') as any
+    expect(componentMountsValid(model,part)).toBe(true)
+    expect(part.supportTubes).toHaveLength(4)
+    expect(new Set([part.a,part.b].map(id=>support.has(id)))).toEqual(new Set([true]))
+  })
+
+  it('完整框换边后删除未固定的原引用管，面板姿态和存档保持',()=>{
+    const {model}=segmentedPanelFrame({split:40})
+    const part=model.addPanelAccessory(model.panelAccessoryMounts('panel_40x40',{screwAxis:'auto'})[0],'blue') as any
+    const originalReferences=[part.a,part.b]
+    expect(model.setPanelFixing(part.id,part.params.screwAxis==='vertical'?'horizontal':'vertical')).toBe(true)
+    const frame=componentFrame(model,part)!
+    for(const id of originalReferences)model.removeTube(id)
+    expect(model.panels.has(part.id)).toBe(true)
+    expect(componentFrame(model,part)).toEqual(frame)
+    expect(componentMountsValid(model,part)).toBe(true)
+    const reopened=new BuildModel();expect(reopened.loadJSON(model.toJSON()).ok).toBe(true)
+    expect(componentMountsValid(reopened,reopened.panels.get(part.id)!)).toBe(true)
+    expect(computeSafety(model).findings.some(f=>f.rule==='accessory_mounts')).toBe(false)
+    expect(computeSafety(model).findings.some(f=>f.rule==='deck_edges')).toBe(true)
+  })
+
   it.each(ids.flatMap(id => [false, true].map(reverse => [id, reverse] as const)))('%s 点击两根对边管，反向=%s', (id, reverse) => {
     const model = id === 'panel_40x40_busy' ? createDirectInstallationFrame(80, 40, { vertical: true }) : createConfirmedComponentFixture(id, { install: false }).model
     const seed = model.panelAccessoryMounts(id).find((p: any) => p.valid) as any

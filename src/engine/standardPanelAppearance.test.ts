@@ -27,7 +27,7 @@ function scene(native:boolean) {
 describe('标准板外形与塑料材质',()=>{
   for(const native of [true,false])it.each(['panel_40x40','panel_40x20','panel_30x30','hole_panel_40x40'])('%s 外边接到框格管轴，顶面位于管顶 '+(native?'工厂网格':'加载前'),id=>{
     const {model,part}=createConfirmedComponentFixture(id),frame=confirmedFrame(model,part)!,spec=confirmedSpec(id)!,saved=model.toJSON()
-    const mesh=confirmedComponentMeshes(scene(native),model,part)[0],positions=mesh.geometry.getAttribute('position')
+    const mesh=confirmedComponentMeshes(scene(native),model,part).find(m=>m.name.startsWith('plate:'))!,positions=mesh.geometry.getAttribute('position')
     mesh.updateMatrix()
     const box=new THREE.Box3()
     for(let i=0;i<positions.count;i++)box.expandByPoint(new THREE.Vector3(...worldToLocal(frame,new THREE.Vector3().fromBufferAttribute(positions,i).applyMatrix4(mesh.matrix).toArray())))
@@ -44,7 +44,7 @@ describe('标准板外形与塑料材质',()=>{
     const {model,part}=createConfirmedComponentFixture('panel_40x20'),value=scene(true)
     for(const side of [1,-1])for(const turned of [false,true]){
       Object.assign(part!,{side,turned})
-      const frame=confirmedFrame(model,part)!,mesh=confirmedComponentMeshes(value,model,part)[0]
+      const frame=confirmedFrame(model,part)!,mesh=confirmedComponentMeshes(value,model,part).find(m=>m.name.startsWith('plate:'))!
       const p=mesh.geometry.getAttribute('position');mesh.updateMatrix()
       const box=new THREE.Box3()
       for(let i=0;i<p.count;i++)box.expandByPoint(new THREE.Vector3(...worldToLocal(frame,new THREE.Vector3().fromBufferAttribute(p,i).applyMatrix4(mesh.matrix).toArray())))

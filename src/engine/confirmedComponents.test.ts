@@ -81,7 +81,7 @@ describe('确认组件数据及装配边界',()=>{
     const lego=createConfirmedComponentFixture('panel_40x40_lego'),old=lego.part as any
     old.color='red'
     expect(confirmedColor(old)).toBe(COLOR_HEX.green)
-    for(const mesh of meshes(lego.model,old))expect((mesh.material as THREE.MeshPhysicalMaterial).color.getHexString()).toBe('2fcb5a')
+    for(const mesh of meshes(lego.model,old).filter(m=>m.name.startsWith('plate:')||m.name.startsWith('lego-stud:')))expect((mesh.material as THREE.MeshPhysicalMaterial).color.getHexString()).toBe('2fcb5a')
     expect(old.color).toBe('red')
   })
   it('新握点两个金属螺钉在主体前方且保持原占用深度',()=>{
