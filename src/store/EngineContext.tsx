@@ -291,7 +291,7 @@ interface EngineApi {
   pushDoc: (docId: string, options?: PushDocOptions) => Promise<boolean>
   importFile: (file: File) => Promise<void>
   openLibraryId: (id: string) => Promise<void>
-  exportQdf: () => void
+  exportQdf: () => boolean
   exportJson: () => void
   setAssembly: (on: boolean) => void
   stepAssembly: (delta: number) => void
@@ -2208,8 +2208,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
 
   const exportQdf = useCallback(() => {
     const e2 = eng.current
-    if (!e2) return
-    if (needAccount('qdf')) return
+    if (!e2) return false
+    if (needAccount('qdf')) return false
     let out: { text?: string; warnings?: Array<{ code: string; partId: string; id: string }> } | string
     try {
       out = buildQDF(e2.model, { camera: e2.scene.cameraForQdf?.() })
@@ -2226,6 +2226,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     else if (simplified) notify(t('accessory.qdf.simplified', { parts: simplified }), 'warn')
     else if (!warnings && [...e2.model.fittings.values()].some((f: AnyRec) => ACCESSORY_IDS.has(f.kind))) notify(t('toast.exportedQdfNoAccessories'), 'warn')
     else notify(t(qdfWillMapColors(e2.model) ? 'toast.exportedQdfMapped' : 'toast.exported'))
+    return true
     // needAccount 每次渲染重建，只在回调里调用，不进依赖表
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notify, t])
