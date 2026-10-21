@@ -10,7 +10,7 @@ import {usePresence} from './motion'
 export const OPEN_DOWNLOADS='quadro:downloads'
 let inlineManualViews=0
 export function hasInlineManualProgress(){return inlineManualViews>0}
-const words={zh:['下载资料','正在读取造型资料…','关闭'],en:['Download files','Loading model information…','Close'],de:['Dateien herunterladen','Modellinformationen werden geladen…','Schließen']}
+const words={zh:['导出','正在读取造型资料…','关闭'],en:['Export','Loading model information…','Close'],de:['Exportieren','Modellinformationen werden geladen…','Schließen']}
 export function openDownloads(){window.dispatchEvent(new Event(OPEN_DOWNLOADS))}
 export async function exportResource(api:ReturnType<typeof useEngine>,action:string){
   if(api.readOnly)throw new Error('423')
