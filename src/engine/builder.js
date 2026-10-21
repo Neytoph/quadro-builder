@@ -22,6 +22,11 @@ import { insetPanelProbes } from './insetPanelMounts.js';
 import { installationReason, installationFacingNotice } from './installationReason.js';
 import { panelInstallationFacing } from './panelInstallationFacing.js';
 import { gymRingSupport } from './gymRingSupport.js';
+import { selectionBounds, connectedTransformSelection, incompleteRigidSelection } from './selectionTransform.js';
+import { SelectionTransformSession } from './selectionTransformSession.js';
+import { SelectionTransformGizmo } from './selectionTransformGizmo.js';
+import { SelectionTransformPreview } from './selectionTransformPreview.js';
+import { selectionTransformStrings } from '../ui/selectionTransformStrings';
 import { pickStepAnchor, stepCandidates, stepCandidatesFromSelection, stepNeighbor } from "./stepAnchor.js";
 
 // Kupplungen, die auf einem Rohr sitzen statt im Raster: QDF-Art -> Katalogteil.
@@ -158,10 +163,15 @@ export class Builder {
     this._boxSelected = new Map();
     this._paste = null;              // Kopie, die gerade am Zeiger haengt
     this._lastPointer = null;        // letzte Zeigerstelle (fuer Strg+V)
+    this.transformMode='translate';
+    this.transformSnap=false;
+    this.transformError=null;
+    this.transformGizmo=new SelectionTransformGizmo(this);
+    this.scene.selectionTransformGizmo=this.transformGizmo;
     this._attach();
     // Wird der Renderer ersetzt (Kantenglaettung), haengt das alte Canvas nicht
     // mehr im DOM -- die Zeiger-Listener muessen ans neue.
-    this.scene.onRendererReplaced = () => this._attach();
+    this.scene.onRendererReplaced = () => {this.transformGizmo.bindCanvas();this._attach();};
     this.refresh();
   }
 
@@ -171,6 +181,7 @@ export class Builder {
    * 读出来的内容）时从文档重新读出整座；拖动或粘贴进行中就等它收尾。
    */
   setHistory(history) {
+    if(this.history!==history){this.transformGizmo?.cancel();this.cancelSelectionTransform(false);this.transformRotation=null;}
     this._colorPreview = null;
     if (this.history !== history) this._cancelHingeDrag();
     if (this.history !== history) this._rotationDirections = new Map();
@@ -190,7 +201,7 @@ export class Builder {
    * 中间状态。
    */
   busy() {
-    return !!(this.held || this._paste || this._clampDrag || this._hingeDrag);
+    return !!(this.held || this._paste || this._clampDrag || this._hingeDrag || this._selectionTransform);
   }
 
   _externalChange() {
@@ -201,6 +212,8 @@ export class Builder {
 
   /** 从文档读出来的整座造型换进模型，选择里已经不存在的零件去掉。 */
   applyExternal(json) {
+    this.cancelSelectionTransform(false);
+    this.transformRotation=null;
     this._cancelClampDrag();
     this._colorPreview = null;
     const res = this.model.loadJSON(json);
@@ -215,10 +228,12 @@ export class Builder {
   }
 
   setReadOnly(on) {
+    if(on){this.transformGizmo?.cancel();this.cancelSelectionTransform(false);}
     if (on) this._cancelClampDrag();
     if (on) this._colorPreview = null;
     if (on) this._cancelHingeDrag();
     this.readOnly = !!on;
+    this.transformGizmo?.sync();
     if (this.readOnly && this.mode !== "select" && this.mode !== "assembly") this.setMode("select");
   }
 
@@ -249,6 +264,7 @@ export class Builder {
    * wechselt erst beim naechsten Escape den Modus.
    */
   clearMarks() {
+    if(this._selectionTransform){this.transformGizmo?.cancel();this.cancelSelectionTransform();return true;}
     if (this.installationPreview) { this.cancelInstallation(); return true; }
     if (this._hingeDrag) { this._cancelHingeDrag(); return true; }
     const had = this.selection.size > 0 || !!this.highlight || !!this.panelRail ||
@@ -290,6 +306,8 @@ export class Builder {
 
   // --- oeffentliche Steuerung --------------------------------------------
   setMode(mode) {
+    this.transformGizmo?.cancel();
+    this.cancelSelectionTransform(false);
     this._cancelClampDrag();
     if (this._down?.box) this._abortGesture();
     this.boxSelect = false;
@@ -795,6 +813,119 @@ export class Builder {
   }
 
   // --- Verschieben --------------------------------------------------------
+  selectionTransformState() {
+    if(this.mode!=='select' || this.readOnly || this._paste || this.selection.size<2)return null;
+    const bounds=this._selectionTransform?.visualPreview?.bounds || selectionBounds(this._selectionTransform?.model || this.model,this.selection);
+    if(!bounds)return null;
+    const key=[...this.selection.keys()].sort().join(',');
+    const rotation=this.transformRotation?.key===key ? this.transformRotation : null;
+    return {key,rotation,mode:this.transformMode || 'translate',snap:!!this.transformSnap,
+      position:[bounds.center[0],bounds.height,bounds.center[2]].map(round2),busy:!!this._selectionTransform,error:this.transformError};
+  }
+
+  setSelectionRotationReadout(axis,degrees=0,notify=true) {
+    if(axis!==null && (!['X','Y','Z','free'].includes(axis) || !Number.isFinite(degrees)))return false;
+    const revision=(this._transformRotationRevision || 0)+1;
+    this._transformRotationRevision=revision;
+    this.transformRotation=axis===null ? null : {axis,degrees:round2(degrees),revision,key:[...this.selection.keys()].sort().join(',')};
+    if(notify)this.onPreview();
+    return true;
+  }
+
+  selectTransformBlock() {
+    if(this.busy() || this.readOnly)return;
+    this._cancelSelectFlip();
+    this.selection=connectedTransformSelection(this.model,this.selection);
+    this.refresh();
+  }
+
+  setSelectionTransformMode(mode) {
+    if(!['translate','rotate'].includes(mode) || this.readOnly)return;
+    this.transformGizmo?.cancel();this.cancelSelectionTransform(false);
+    this._cancelSelectFlip();this.transformMode=mode;this.transformError=null;this.refresh();
+  }
+
+  beginSelectionTransform({visualPreview=false}={}) {
+    if(this.readOnly || this.mode!=='select' || this.selection.size<2 || this.busy() || !selectionBounds(this.model,this.selection))return false;
+    this._cancelSelectFlip();this.transformError=null;
+    const rotationBefore=this.selectionTransformState().rotation;
+    this._selectionTransform=new SelectionTransformSession(this);
+    this._selectionTransform.rotationBefore=rotationBefore;
+    if(visualPreview){
+      if(incompleteRigidSelection(this.model,this._selectionTransform.bounds.targets)){
+        this._selectionTransform=null;this.transformError=this._transformReason('accessory_mounts');this.onPreview();return false;
+      }
+      this._selectionTransform.visualPreview=new SelectionTransformPreview(this.scene,this.model,this._selectionTransform.bounds);
+      this._transformPreviewNotify=performance.now();this.onPreview();
+    }else this._selectionTransform.preview();
+    return true;
+  }
+
+  previewSelectionTransform(value) {
+    const session=this._selectionTransform;
+    if(!session)return false;
+    if(session.visualPreview){
+      const valid=session.visualPreview.update(value);
+      this.transformError=valid ? null : this._transformReason(session.visualPreview.reason);
+      const now=performance.now();
+      if(now-this._transformPreviewNotify>=66){this._transformPreviewNotify=now;this.onPreview();}
+      return valid;
+    }
+    const valid=session.preview(value);
+    this.transformError=valid ? null : this._transformReason(session.reason);
+    this.refresh();return valid;
+  }
+
+  _transformReason(reason) {
+    const s=selectionTransformStrings[getLang()];
+    if(reason==='accessory_mounts')return s.incomplete;
+    if(reason==='empty')return s.number;
+    if(reason==='accessory_space')return installationReason(this.model,{reason:'component_space'});
+    if(['ground','collision','connector'].includes(reason))return t(`notice_move_${reason}`);
+    return s.invalid;
+  }
+
+  finishSelectionTransform() {
+    const session=this._selectionTransform;
+    if(!session)return false;
+    const visual=!!session.visualPreview;
+    if(session.visualPreview){
+      const preview=session.visualPreview;
+      if(preview.reason==='empty'){session.valid=false;session.reason='empty';}
+      else session.preview(preview.value);
+      this.transformError=session.valid ? null : this._transformReason(session.reason);
+      preview.dispose();session.visualPreview=null;
+    }
+    const ok=session.commit();this._selectionTransform=null;
+    if(!ok && visual)this.setSelectionRotationReadout(session.rotationBefore?.axis || null,session.rotationBefore?.degrees || 0,false);
+    if(!ok && !this.transformError)this.transformError=selectionTransformStrings[getLang()].changed;
+    this.refresh();return ok;
+  }
+
+  cancelSelectionTransform(refresh=true) {
+    if(!this._selectionTransform)return false;
+    const before=this._selectionTransform.rotationBefore;
+    this._selectionTransform.visualPreview?.dispose();
+    this._selectionTransform=null;this.transformError=null;
+    this.setSelectionRotationReadout(before?.axis || null,before?.degrees || 0,false);
+    if(refresh)this.refresh();return true;
+  }
+
+  setSelectionPosition(position) {
+    const bounds=selectionBounds(this.model,this.selection);
+    if(!bounds || !Array.isArray(position) || position.length!==3 || !position.every(Number.isFinite) || !this.beginSelectionTransform())return false;
+    this.previewSelectionTransform({translation:[position[0]-bounds.center[0],Math.max(0,position[1])-bounds.height,position[2]-bounds.center[2]]});
+    return this.finishSelectionTransform();
+  }
+
+  rotateSelectionAxis(axis,degrees) {
+    if(!['X','Y','Z'].includes(axis) || !Number.isFinite(degrees) || !this.beginSelectionTransform())return false;
+    this.previewSelectionTransform({axis:['X','Y','Z'].map(key=>key===axis ? 1 : 0),angle:degrees*Math.PI/180});
+    const ok=this.finishSelectionTransform();
+    if(ok)this.setSelectionRotationReadout(axis,degrees,false);
+    return ok;
+  }
+
   /**
    * Auswahl um einen Rasterschritt in Richtung dir verschieben (Pfeiltasten).
    * dir ist ein Einheitsvektor auf einer Achse.
@@ -815,6 +946,7 @@ export class Builder {
         return true;
       }
     }
+    if(this.selection.size<2)return false;
     const before = JSON.stringify(this.model.toJSON());
     const res = this._move(dir[0] * step, dir[1] * step, dir[2] * step);
     if (!res.ok) { this.onNotice(t("notice_move_" + res.reason), "warn"); return false; }
@@ -850,6 +982,7 @@ export class Builder {
     // 单选一根弯管：绕它接着的那头转 90 度，和放置时点它转是同一个动作。
     const bow = this._selectedLoneBow();
     if (bow) return this._turnBow(bow, steps);
+    if(this.selection.size<2)return false;
     const before = JSON.stringify(this.model.toJSON());
     const options = { merge: true, validate: infeasibleConnectors, grid: SNAP_STEP };
     const key = `selection:${[...this.selection.keys()].sort().join(",")}`;
@@ -927,6 +1060,16 @@ export class Builder {
     const [id] = [...this.selection][0];
     this._cancelSelectFlip();
     return this._adjustPlacedPart(id, "panelTurn");
+  }
+
+  adjustSelectedPart() {
+    if(this.readOnly || this.busy())return false;
+    const action=this.selectedPartAdjustment();
+    if(!action || ['bolt','hinge'].includes(action))return false;
+    const [id]=this.selection.keys();
+    this._cancelSelectFlip();
+    if(action==='curve')return this._flipDomesticCurve(id);
+    return this._adjustPlacedPart(id,action);
   }
 
   /** 安装工具与选择模式共用调整路径，限制、反馈和撤销记录一致。 */
@@ -1603,6 +1746,7 @@ export class Builder {
    * Zaehler starten wieder bei 1) -- _pruneSelection findet das nicht.
    */
   modelReplaced() {
+    this.transformRotation=null;
     this.boxSelect = false;
     this._boxSelected?.clear();
     this._colorPreview = null;
@@ -1976,6 +2120,9 @@ export class Builder {
   }
 
   refresh() {
+    if(this._selectionTransform?.visualPreview){this.scene.requestRender();this.onPreview();return;}
+    const transformKey=[...this.selection.keys()].sort().join(',');
+    if(transformKey!==this._transformSelectionKey){this._transformSelectionKey=transformKey;this.transformError=null;this.transformRotation=null;}
     // 框选着色仅跟随仍被选中的同一种零件，取消选择后恢复原材质。
     for (const [id, kind] of this._boxSelected || []) {
       if (this.selection.get(id) !== kind) this._boxSelected.delete(id);
@@ -2019,21 +2166,22 @@ export class Builder {
     const selected = (this.mode === "select" || this.mode === "assembly") && this.selection.size
       ? this.selection : null;
     // 粘贴位置有冲突时，将整份副本标红。
-    const invalid = this._paste && !this._paste.valid && this._paste.sel
+    let invalid = this._paste && !this._paste.valid && this._paste.sel
       ? new Set(this._paste.sel.keys())
       : null;
+    if(this._selectionTransform && !this._selectionTransform.valid)invalid=new Set(this.selection.keys());
     // 安装引导独立绘制，已安装零件保留自身材质。清单高亮仍沿原来的弱化逻辑。
     const firstRails = this._firstRailCandidates();
     const panelPlacement = this.mode === 'panel' && (!this.highlight || this.panelRail);
     this._panelGuideIds = panelPlacement ? this.highlight || firstRails : null;
     this._panelHoverKey = null;
-    const displayModel = this._colorPreview?.hex
-      ? colorPreviewModel(this.model, this._colorPreview.selection, this._colorPreview.hex) : this.model;
+    let displayModel=this._selectionTransform?.model || this.model;
+    if(this._colorPreview?.hex)displayModel=colorPreviewModel(this.model,this._colorPreview.selection,this._colorPreview.hex);
     this.scene.renderModel(displayModel, this.selectedNodeId,
       { labelFor, slideNameFor, labelIds, soloId, soloLabel, assembly, suggest, reinforce, reinforcementPartId: this.reinforcementPartId,
         selected: this._colorPreview ? null : selected,
         preserveSelectionAppearance: this.mode === 'select',
-        solidSelected: this._boxSelected,
+        solidSelected: this.mode==='select' && selected?.size>1 && !this.highlight ? selected : this._boxSelected,
         interactionMode: this.mode,
         profileSelection: this._profilGewaehlt() ? this._profilAuswahl : null,
         highlight: this._colorPreview || panelPlacement ? null : this.highlight || firstRails, invalid, tints: this.tints,
@@ -2041,7 +2189,8 @@ export class Builder {
         panelPlacementMode: this.mode === 'panel',
         focusId: this.panelRail ? this.panelRail.id : this.reinforceRail,
         keepPanelFacesOpaque: this.mode === 'panel',
-        preview: !!(this._paste || this._clampDrag || this._hingeDrag || this._colorPreview) });
+        preview: !!(this._paste || this._clampDrag || this._hingeDrag || this._colorPreview || this._selectionTransform) });
+    this.transformGizmo?.sync();
     this._buildHandles();
     if (this.mode === 'panel' && this.panelRail && this.inputType === 'touch') {
       this._showPanelPlacementHover({ data: { kind: 'tube', id: this.panelRail.id } });
@@ -2053,7 +2202,7 @@ export class Builder {
     // mit, obwohl der Stand noch gar nicht gilt. Beim Absetzen wird ohnehin neu
     // gezeichnet -- dann laeuft es einmal. Nur die Knoepfe, die vom Zustand
     // abhaengen (Drehen), werden nachgezogen.
-    if (!this._paste && !this._clampDrag && !this._hingeDrag && !this._colorPreview) this.onChange();
+    if (!this._paste && !this._clampDrag && !this._hingeDrag && !this._colorPreview && !this._selectionTransform) this.onChange();
     else this.onPreview();
   }
 
