@@ -18,6 +18,7 @@ export function installEmbeddedRuntime(mount: () => void, unmount: () => void) {
       if (type === 'xmf-model-editor:park') {
         if (!canPark || parked || !owner || String(getAccountScope()) !== `user:${owner}`) { send('park-rejected'); return }
         unmount()
+        delete document.documentElement.dataset.editorReady
         parked = true
         canPark = false
         send('parked')

@@ -512,6 +512,10 @@ function outputCandidate(tab: Tab | undefined, data: ModelJSON) {
 
 const EMPTY_MODEL: ModelJSON = { format: 2, nodes: [], tubes: [] }
 
+function reportStartup(step: string) {
+  if (EDITOR_EMBED) parent.postMessage({ type: 'xmf-model-editor:progress', phase: 'prepare', step }, location.origin)
+}
+
 /** 让引擎按它的规矩读一遍再导出：旧格式升上来、坐标取整，写进文档的都是当前格式。 */
 function normalizeModel(data: unknown): ModelJSON | null {
   const m = new BuildModel()
@@ -1114,6 +1118,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     ;(async () => {
       try {
         const identityReady = syncProbe()
+        reportStartup('catalog')
         await loadCatalog()
         if (dead) return
         setCatalog({
@@ -1124,6 +1129,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
           connectors: allConnectors(),
           accessories: accessories(),
         })
+        reportStartup('scene')
         const scene = (sceneOwner && String(storage.getAccountScope()) === `user:${sceneOwner}` ? editorScenes.take(sceneOwner, host) : null) || new SceneManager(host)
         currentScene = scene
         scene.onCameraChange = () => {}
@@ -1157,11 +1163,13 @@ export function EngineProvider({ children }: { children: ReactNode }) {
         // 开发模式下把引擎挂到 window 上，浏览器测试脚本靠它摆相机、查手柄
         if (import.meta.env.DEV) (window as unknown as { __quadroDev?: unknown }).__quadroDev = eng.current
         // 账号库必须等身份回来。界面已经在画，这一步只挡住存档。
+        reportStartup('identity')
         await identityReady
         if (dead) return
 
         // 只看、交付、画房间：只放这一座，不读这台设备上记着的标签页。
         // 交付由 CollabProvider 取到以后 attachDoc 换进来。
+        reportStartup('session')
         if (!SESSIONLESS) await docs.migrateOldDrafts()
         const session = SESSIONLESS ? null : await docs.loadSession(sessionKey)
         if (dead) return
@@ -1173,7 +1181,9 @@ export function EngineProvider({ children }: { children: ReactNode }) {
             const tabId = String(tb.tabId)
             // 旧版本把造型 JSON 记在会话里：本机还没有这一页的文档时，拿它生成一份
             const legacy = tb.model ? normalizeModel(tb.model) : null
+            reportStartup('document')
             const local = await openTabDoc(tabId, legacy)
+            reportStartup('document-ready')
             if (dead) return
             const restored: Tab = {
               tabId,
@@ -1202,6 +1212,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
             }
           }
           tabsRef.current = mapped
+          reportStartup('reconcile')
           for (const tb of [...mapped]) {
             await reconcileRef.current(tb)
             if (dead) return
@@ -1213,6 +1224,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
             ? session.activeTabId
             : tabsRef.current[0].tabId
           activeRef.current = wanted
+          reportStartup('view')
           applyTabRef.current(tabsRef.current.find(x => x.tabId === wanted)!)
         } else {
           const tab = makeTab(EMPTY_MODEL, t('tab.untitled'), null)
@@ -1222,6 +1234,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
           applyTabRef.current(tab)
         }
         if (SINGLE_MODEL && !SESSIONLESS) {
+          reportStartup('draft')
           const scope=String(storage.getAccountScope()),owner=scope.startsWith('user:')?scope.slice(5):null
           const seed=await entryDraft(owner,()=>window.confirm(t('single.claim')))
           if(seed){
@@ -1238,6 +1251,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
         }
         syncTabsRef.current()
         initialized = true
+        reportStartup('engine-ready')
         setReady(true)
         // 画布这时才露面，第一次载入的动画从这一刻开始放
         scene.releaseLoadGate()

@@ -23,6 +23,7 @@
 //	?import=qdf                    打开后直接进入批量导入 .qdf
 //	?room=brief:<id>               画房间边界，画完写回需求单
 //	?doc=<doc id>                  打开自己「我的设计」里的这一座；没登录先去登录，登录完回到这个地址
+//	?embedded=model#model-editor?src=...  嵌入工作区使用固定导航，来源片段仍决定同一份草稿与账号读取
 //	?new=1                         托管版新建独立草稿；离线版在原会话中新开标签页
 //	?draft=<UUID>                  托管版当前临时造型，刷新只恢复这一份
 //	?recover=1                     本机草稿列表，不启动三维编辑器或完整模型同步
@@ -78,12 +79,17 @@ function sameSite(p: string | null): string | null {
 }
 
 const SOURCE_RE = /^(pro|plan|invite|delivery):[A-Za-z0-9_-]+$/
+const EDITOR_HASH = '#model-editor?'
 
 const collab = Boolean(import.meta.env.VITE_SYNC_BASE)
 
 /** 按地址上的参数读出打开方式；collab 是托管版有没有设 VITE_SYNC_BASE */
 export function readEntry(search: string, hash: string, collab: boolean): Entry {
   const q = new URLSearchParams(search)
+  if (q.get('embedded') === 'model' && hash.startsWith(EDITOR_HASH)) {
+    const model = new URLSearchParams(hash.slice(EDITOR_HASH.length))
+    for (const key of ['src', 'plan', 'name']) if (model.has(key)) q.set(key, model.get(key)!)
+  }
   const lockedView = q.get('view') === 'locked'
   if (lockedView) collab = false
   const lang = q.get('lang')
@@ -208,6 +214,12 @@ export function fullBuilderUrl(): string {
 export function dropParam(key: string) {
   const q = new URLSearchParams(location.search)
   q.delete(key)
+  let hash = location.hash
+  if (q.get('embedded') === 'model' && hash.startsWith(EDITOR_HASH)) {
+    const model = new URLSearchParams(hash.slice(EDITOR_HASH.length))
+    model.delete(key)
+    hash = model.size ? EDITOR_HASH + model.toString() : ''
+  }
   const rest = q.toString()
-  history.replaceState(null, '', `${location.pathname}${rest ? `?${rest}` : ''}${location.hash}`)
+  history.replaceState(null, '', `${location.pathname}${rest ? `?${rest}` : ''}${hash}`)
 }

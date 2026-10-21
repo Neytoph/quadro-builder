@@ -2,6 +2,29 @@ import { describe, expect, it } from 'vitest'
 import { dropParam, readEntry } from './entry'
 import { appendTab } from './store/tabs'
 
+describe('嵌入编辑器来源片段',()=>{
+  it('私人来源和名称仍按原入口规则解析',()=>{
+    const hash='#model-editor?'+new URLSearchParams({src:'/quadro/library/abc/native',name:'复杂造型 & 小屋'}).toString()
+    const entry=readEntry('?embedded=model&editorOwner=4',hash,true)
+    expect(entry.src).toBe('/quadro/library/abc/native');expect(entry.origin).toBe(entry.src);expect(entry.name).toBe('复杂造型 & 小屋')
+  })
+  it('协作仍依赖托管配置，片段不会接受额外权限参数或站外来源',()=>{
+    const hash='#model-editor?plan=p1&copy=1&src=https%3A%2F%2Fother.test%2Fprivate'
+    expect(readEntry('?embedded=model',hash,true).plan).toBe('p1')
+    expect(readEntry('?embedded=model',hash,false).plan).toBeNull()
+    expect(readEntry('?embedded=model',hash,true).src).toBeNull()
+    expect(readEntry('?embedded=model',hash,true).copy).toBe(false)
+    expect(readEntry('',hash,true).plan).toBeNull()
+  })
+  it('完成一次性导入后也移除片段里的来源，刷新继续恢复草稿',()=>{
+    history.replaceState(null,'','/builder/?embedded=model&draft=one#model-editor?src=%2Ffile.json&name=one')
+    dropParam('src')
+    expect(readEntry(location.search,location.hash,true).src).toBeNull()
+    expect(readEntry(location.search,location.hash,true).name).toBe('one')
+    history.replaceState(null,'','/')
+  })
+})
+
 describe('锁定模型预览', () => {
   it('保持来源并禁用复制、导出、导入及协作写入入口', () => {
     const entry = readEntry('?view=locked&src=/admin/people/2/designs/3/model&copy=1&export=qdf&import=qdf&plan=p1&invite=i1&createShared=1&delivery=d1&new=1&doc=m1', '', true)
