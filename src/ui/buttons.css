@@ -17,6 +17,7 @@
   --button-weight: 700;
   --button-shadow: 0 6px 20px -6px #EA580C70;
   --button-hover-shadow: 0 9px 22px -5px #EA580C70,inset 0 1px 0 #FFFFFF40;
+  --button-inset-shadow: inset 0 0 0 2px #FFFFFFA6,inset 0 0 0 3px #B84B1540;
   box-sizing: border-box;
   position: relative;
   display: inline-flex;
@@ -50,6 +51,7 @@
   --button-weight: 500;
   --button-shadow: none;
   --button-hover-shadow: 0 7px 16px -8px #C5753655;
+  --button-inset-shadow: inset 0 0 0 1px #DB6B0B;
 }
 :is(.xmf-button-text,[data-button="text"],.btn.danger,.btn.armed,.btn-danger,.xmf-button-danger,[data-button="danger"]) {
   --button-bg: transparent;
@@ -61,6 +63,7 @@
   --button-weight: 500;
   --button-shadow: none;
   --button-hover-shadow: 0 7px 16px -8px #C5753655;
+  --button-inset-shadow: inset 0 0 0 1px currentColor;
 }
 :is(.btn.danger,.btn.armed,.btn-danger,.xmf-button-danger,[data-button="danger"]) { --button-ink: #AD4935; }
 :is(.btn.mini,.btn.sm,.btn.xs,.qb-btn-sm,.xmf-button-small) { --button-height:32px; --button-size:13px; --button-busy-padding:2px; padding:5px 12px; }
@@ -74,6 +77,13 @@ body[data-page="landing"] :is(.hero-cta,.scene .acts,.end-cta) .btn,a.cmty-cta,[
 }
 :is(.btn,.qb-btn,.xmf-button):active:not(:disabled):not(.off):not([aria-disabled="true"]):not([aria-busy="true"]) {
   background:var(--button-pressed-bg); filter:brightness(.98); box-shadow:inset 0 1px 3px #A24F2620;
+}
+/* 边缘及紧凑动作固定，描边全部画在按钮内部，不占用额外空间。 */
+:root :is(.btn,.qb-btn,.xmf-button)[data-button-hover="inset"] {
+  --button-shadow:none;
+  --button-hover-shadow:var(--button-inset-shadow);
+  translate:none;scale:none;transform:none;
+  transition-property:background-color,color,border-color,box-shadow,filter;
 }
 :is(.btn,.qb-btn,.xmf-button):is(:disabled,.off,[aria-disabled="true"]) {
   background:var(--button-disabled);color:#A28D78;border-color:#EAD9C6;box-shadow:none;opacity:1;cursor:default;filter:none;
