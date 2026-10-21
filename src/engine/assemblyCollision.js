@@ -1,6 +1,7 @@
 import { resolveNodeConnection, hasStandaloneFileC45 } from './bom.js';
 import { geometry } from './catalog.js';
 import { assemblyMeshes } from './assemblyNativeMesh.js';
+import { c45FrameFor } from './c45Pose.js';
 let nativeEnvelopes = {}, surfaceTriangles = {}, connectorTriangles = {}, connectorMasks = {}, accessoryTriangles = {};
 function useMeshes() {
   const loaded = assemblyMeshes();
@@ -75,7 +76,7 @@ function computeEnvelope(model,id) {
   }
   const node=model.nodes.get(id);
   if(node){
-    if(node.c45body){const arm=[...model.tubes.values()].find(t=>t.arm&&(t.a===id||t.b===id)),base=arm&&model.nodes.get(arm.a===id?arm.b:arm.a);if(base){let basis;if(base.c45quat)basis=axes(base.c45quat);else {const ex=unit(node.c45axis||base.c45axis||[1,0,0]),v=sub(xyz(node),xyz(base)),ey=unit(v.map((n,i)=>n-ex[i]*dot(v,ex)));basis=[ex,ey,cross(ex,ey)];}const pos=xyz(base);return accessoryTriangles.connector45_2.map(points=>({kind:'triangle',points:points.map(point=>pos.map((v,i)=>v+basis.reduce((sum,axis,k)=>sum+axis[i]*point[k],0)))}));}}
+    if(node.c45body){const arm=[...model.tubes.values()].find(t=>t.arm&&(t.a===id||t.b===id)),base=arm&&model.nodes.get(arm.a===id?arm.b:arm.a),basis=base&&c45FrameFor(model,base,node);if(basis){const pos=xyz(base);return accessoryTriangles.connector45_2.map(points=>({kind:'triangle',points:points.map(point=>pos.map((v,i)=>v+basis.reduce((sum,axis,k)=>sum+axis[i]*point[k],0)))}));}}
     // Scene renders a standalone file adapter in addition to its base connector.
     // Keep both full native meshes; a regular connector match cannot return early.
     const pos=xyz(node),fileAdapter=hasStandaloneFileC45(model,node)&&node.c45quat?.length===4?accessoryTriangles.connector45_2.map(points=>{const frame=axes(node.c45quat);return {kind:'triangle',points:points.map(point=>pos.map((v,i)=>v+frame.reduce((sum,axis,k)=>sum+axis[i]*point[k],0)))};}):[];

@@ -1,6 +1,7 @@
 // Bau-Interaktion: Auswahl, Anbau ueber Richtungs-Handles, Loeschen.
 
 import { DIRECTIONS, DIAGONAL_DIRECTIONS, DIR_ALIGN_TOL, ARM_ALIGN_TOL, CLAMP_LINK_DIST, C45_SLEEVE_LEN, C45_ARM_LEN, CONN_TYPE_MASK } from "./config.js";
+import { c45CollisionContext } from './c45Placement.js';
 import { Vector3 } from "three";
 import { ALUMINIUM_CONNECTOR, reinforcementGuide, aluminiumConnectorTargets } from './reinforcement.js';
 import { buildableTubes, geometry, getTube, spacingFor, getPanel, defaultPanel, diagonalTubeId, slideKindLabel, slideKindName, isCurvedTube, gridSpacing, partName, partForFitting, getPartById, getConnector, poolLinerFor, reinforcementPart, textilePart } from "./catalog.js";
@@ -2532,6 +2533,7 @@ export class Builder {
    * gesetzte Kupplung dreht sie um 90 Grad weiter.
    */
   _buildC45Handles() {
+    const collisionContext = c45CollisionContext(this.model);
     // Die Punkte sitzen dort, WO die Winkelkupplung ansetzt: an jedem freien
     // Arm einer Kupplung, gruen wie die uebrigen Bau-Punkte. In welche Schraege
     // sie dann zeigt, entscheidet der erste passende Wert -- weiterdrehen laesst
@@ -2547,7 +2549,7 @@ export class Builder {
       const tubeDir = this.model.c45TubeDir(node);
       // 裸管口直接插入45°件；先装普通接头后才提供其外侧插臂，避免同心安装点混淆。
       const bareEnd = tubeDir && !node.preferType && !node.arms?.length;
-      for (const m of bareEnd ? [] : this._c45MountsFor(node)) {
+      for (const m of bareEnd ? [] : this._c45MountsFor(node, collisionContext)) {
         this.scene.addHandle(
           [node.x, node.y, node.z],
           { c45mount: true, nodeId: node.id, axis: m.axis, dir: m.dir, arrowDir: m.axis }, "dir");
@@ -2557,13 +2559,14 @@ export class Builder {
       // auf ihr. Gesetzt tritt die Winkelkupplung an ihre Stelle, und am
       // anderen Ende der Huelse entsteht eine neue Dummy-Kupplung.
       const achsen = this.model.c45SleeveAxes(tubeDir);
-      if (achsen.length) {
+      const sleeveAxis = achsen.find(axis => !this.model.c45OnTubeCollision(node.id, axis, C45_SLEEVE_LEN, C45_ARM_LEN));
+      if (sleeveAxis) {
         // Er sitzt MITTEN auf der Dummy-Kupplung und ist etwas groesser: die
         // Punkte weiter aussen setzen die Winkelkupplung auf einen Stutzen,
         // dieser eine steckt sie ins Rohr. Auf der Rohrachse weiter aussen
         // waere er nicht zu unterscheiden -- dort sitzt schon der Stutzen-Punkt.
         this.scene.addHandle([node.x, node.y, node.z],
-          { c45mount: true, inTube: true, nodeId: node.id, axis: achsen[0] }, "dir", 3.6);
+          { c45mount: true, inTube: true, nodeId: node.id, axis: sleeveAxis }, "dir", 3.6);
       }
     }
   }
@@ -2628,7 +2631,7 @@ export class Builder {
    * ein Arm bekommt, entscheidet die erste freie, moeglichst nach oben; die
    * uebrigen erreicht man durch Weiterdrehen.
    */
-  _c45MountsFor(node) {
+  _c45MountsFor(node, collisionContext) {
     const { ex, ey, ez } = this._nodeFrame(node);
     const nachWelt = (v) => [
       ex[0] * v[0] + ey[0] * v[1] + ez[0] * v[2],
@@ -2650,6 +2653,7 @@ export class Builder {
         // Schraege schon belegt? Geometrisch pruefen -- Namen aus
         // `_occupiedDirs` gelten nur fuer die ungedrehte Kupplung.
         if (this._armOccupied(node, dir)) continue;
+        if (this.model.c45AdapterCollision(node.id, axis, dir, C45_SLEEVE_LEN, C45_ARM_LEN, collisionContext)) continue;
         if (!beste || (dir[1] > 0.3 && !(beste.dir[1] > 0.3))) beste = { axis, dir };
       }
       if (beste) out.push(beste);
@@ -2689,6 +2693,7 @@ export class Builder {
             C45_SLEEVE_LEN, C45_ARM_LEN);
       });
       if (res && res.ground) this.onNotice(t("notice_ground"), "warn");
+      else if (res && res.collision) this.onNotice(t("notice_collision"), "warn");
       else if (res && res.body) this.onNotice(t("notice_placed", partName(getConnector("diagonal"))));
       this.refresh();
       return;

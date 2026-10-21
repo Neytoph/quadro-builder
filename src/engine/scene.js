@@ -21,8 +21,9 @@ import { assemblyProfilePosition, assemblyProfileFallbackVisible } from './assem
 import { loadConnectorMeshes, loadSlideMeshes, loadFittingMeshes,
   loadSurfaceMeshes } from "./meshes.js";
 import { CONNECTOR_ARM_BITS } from "./qdfimport.js";
-import { preferPanelCell } from "./pickcell.js";
+import { preferPanelCell, preferGuideHandle } from "./pickcell.js";
 import { resolveNodeConnection, hasStandaloneFileC45 } from "./bom.js";
+import { c45FrameFor } from './c45Pose.js';
 import { DEFAULT_TUNE, DEFAULT_GRADE, gradeHex, displayHex } from "./colorTune.js";
 import { createOutdoorVisuals, OUTDOOR_AREA } from './outdoor.js';
 import { PanelPlacementGuides } from './panelPlacementGuides.js';
@@ -1674,25 +1675,8 @@ export class SceneManager {
     const basis = this._c45BaseNode(model, n);
     if (!basis) return null;
     const pos = new THREE.Vector3(basis.x, basis.y, basis.z);
-    if (basis.c45quat && basis.c45quat.length === 4) {
-      const q = new THREE.Quaternion(
-        basis.c45quat[0], basis.c45quat[1], basis.c45quat[2], basis.c45quat[3]).normalize();
-      return new THREE.Matrix4().compose(pos, q, ONE);
-    }
-    const achse = n.c45axis || basis.c45axis;
-    if (!achse) return null;
-    const ex = new THREE.Vector3(achse[0], achse[1], achse[2]).normalize();
-    // Richtung des 45-Grad-Arms: zum Adapter-Koerper, sonst aus der Schraege.
-    const ziel = n.c45body ? n : null;
-    const arm = ziel
-      ? new THREE.Vector3(ziel.x - basis.x, ziel.y - basis.y, ziel.z - basis.z)
-      : (this._c45ArmDirAt ? null : null);
-    if (!arm || arm.lengthSq() < 1e-6) return null;
-    const ey = arm.addScaledVector(ex, -arm.dot(ex));
-    if (ey.lengthSq() < 1e-6) return null;
-    ey.normalize();
-    const ez = new THREE.Vector3().crossVectors(ex, ey);
-    return new THREE.Matrix4().makeBasis(ex, ey, ez).setPosition(pos);
+    const frame = c45FrameFor(model, basis, n.c45body ? n : null);
+    return frame ? new THREE.Matrix4().makeBasis(...frame.map(axis => new THREE.Vector3(...axis))).setPosition(pos) : null;
   }
 
   /**
@@ -5507,6 +5491,7 @@ export class SceneManager {
     }, userData);
 
     const ends = userData.previewEnds;
+    group.userData.guideSegment = ends || [origin.slice(), origin.map((value, i) => value + dir.getComponent(i) * GUIDE.half)];
     const parallelMid = ends ? new THREE.Vector3(...ends[0]).add(new THREE.Vector3(...ends[1]))
       .multiplyScalar(0.5).sub(group.position).dot(dir) : null;
     const parallelSpan = ends ? new THREE.Vector3(...ends[0]).distanceTo(new THREE.Vector3(...ends[1])) : null;
@@ -5641,6 +5626,10 @@ export class SceneManager {
     if (!mesh) return;
     if (mesh.position.x === position[0] && mesh.position.y === position[1]
       && mesh.position.z === position[2]) return;
+    if (mesh.userData.guideSegment) {
+      const delta = position.map((value, i) => value - mesh.position.getComponent(i));
+      mesh.userData.guideSegment = mesh.userData.guideSegment.map(point => point.map((value, i) => value + delta[i]));
+    }
     mesh.position.set(position[0], position[1], position[2]);
     this._needsRender = true;
   }
@@ -6036,10 +6025,13 @@ export class SceneManager {
     // 候选面叠在一起时不认最前面那块，认指针对着的那块（见 pickcell.js）
     const r = this.renderer.domElement.getBoundingClientRect();
     const toScreen = (pos) => {
-      const p = pos.clone().project(this.camera);
+      const p = (Array.isArray(pos) ? new THREE.Vector3(...pos) : pos.clone()).project(this.camera);
+      if (p.z < -1 || p.z > 1) return null;
       return [(p.x + 1) / 2 * r.width + r.left, (1 - p.y) / 2 * r.height + r.top];
     };
-    const hit = preferPanelCell(hits, clientX, clientY, toScreen);
+    const panelHit = preferPanelCell(hits, clientX, clientY, toScreen);
+    const hit = panelHit?.object.userData.panelCell ? panelHit
+      : preferGuideHandle(hits, clientX, clientY, toScreen);
     // Verdeckte Ankerpunkte gelten nicht: liegt ein Bauteil deutlich davor,
     // sieht man den Punkt nicht und darf dort auch nichts setzen -- sonst baut
     // man durch das Modell hindurch. HANDLE_CLEAR Zentimeter Spiel, weil viele

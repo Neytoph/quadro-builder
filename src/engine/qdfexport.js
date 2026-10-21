@@ -27,7 +27,8 @@ import { confirmedSpec, confirmedColor } from './componentPack.js';
 import { QDF_FEATURE_KEYS } from './qdfFeatures.js';
 import { QDF_FITTING_KINDS, QDF_SLIDE_KINDS } from './qdfimport.js';
 import { officialColorId } from "./colors.js";
-import { panelNormal, modelMiddle } from "./util.js";
+import { panelNormal, modelMiddle, quatFromBasis } from "./util.js";
+import { c45FrameFor } from './c45Pose.js';
 import { isHolePart, HOLE_MASKS, BLACK_FITTINGS, isBoltPart, boltAxis, boltDepth, hingeDir, fixedFittingColor } from "./model.js";
 import { connectorFrameOf, connectorsForNode, resolveNodeConnection } from './bom.js';
 
@@ -572,10 +573,22 @@ export function buildQDF(model, opts = {}) {
     // verschiedene Quaternionen. Kam sie aus einer Datei, geht sie unveraendert
     // wieder hinaus; sonst bleibt es bei der Wuerfel-Lage.
     if (c45) {
-      const q45 = n.c45quat && n.c45quat.length === 4
+      const bodies = [...model.tubes.values()].filter(t => t.arm && (t.a === n.id || t.b === n.id))
+        .map(t => node(t.a === n.id ? t.b : t.a)).filter(body => body?.c45body);
+      if (bodies.length) {
+        for (const body of bodies) {
+          const frame = c45FrameFor(model, n, body);
+          if (!frame) throw new Error('45°件缺少有效安装姿态');
+          const quat45 = quatFromBasis(...frame);
+          const q45 = encodeQuat([quat45[3], ...quat45.slice(0, 3)]);
+          lines.push(`connector45_2{${CONNECTOR_MAT}, ${tuple(q45, n.x, n.y, n.z)}, 1, 0, 0}`);
+        }
+      } else {
+        const q45 = n.c45quat && n.c45quat.length === 4
         ? encodeQuat([n.c45quat[3], n.c45quat[0], n.c45quat[1], n.c45quat[2]])
         : q;
-      lines.push(`connector45_2{${CONNECTOR_MAT}, ${tuple(q45, n.x, n.y, n.z)}, 1, 0, 0}`);
+        lines.push(`connector45_2{${CONNECTOR_MAT}, ${tuple(q45, n.x, n.y, n.z)}, 1, 0, 0}`);
+      }
     }
     stats.connectors++;
   }
