@@ -7,6 +7,14 @@ import { describeAssets, fallbackOrigin, publicAssetFallback } from '../../scrip
 import { Window } from 'happy-dom'
 
 describe('build-time trusted public release', () => {
+  it('requires the hosted deployment to provide its COS origin explicitly', async () => {
+    const plugin = publicAssetFallback(process.cwd())
+    const config = plugin.configResolved as (value: unknown) => void
+    config({ env: { VITE_PUBLIC_ASSET_FALLBACK: '1', VITE_PUBLIC_ASSET_PROVIDER: 'cos' },
+      base: '/builder/', build: { outDir: 'unused' } })
+    const write = plugin.writeBundle as (options: unknown, bundle: unknown) => Promise<void>
+    await expect(write({}, {})).rejects.toThrow('requires an explicit HTTPS origin')
+  })
   it('builds an explicit exit with the original single module and styles, without waiting for a worker', async () => {
     const root = process.cwd()
     const out = path.join(root, '.work', `public-off-test-${Date.now()}`)

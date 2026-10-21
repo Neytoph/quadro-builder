@@ -2,7 +2,7 @@ import type { AssetRelease, PublicAsset } from './protocol'
 
 /** 仅当前发布的精确URL；所有附加参数及带私有语义的请求按原请求处理。 */
 export function matchPublicAsset(request: Request, origin: string, release: AssetRelease): PublicAsset | null {
-  if (release.mode !== 'public-ipv6-fallback' || request.method !== 'GET' || request.mode === 'navigate'
+  if (!['public-ipv6-fallback', 'public-cos-fallback'].includes(release.mode) || request.method !== 'GET' || request.mode === 'navigate'
     || request.destination === 'document' || request.headers.has('Authorization') || request.headers.has('Range')) return null
   const url = new URL(request.url)
   if (url.origin !== origin || url.search || url.hash || !url.pathname.startsWith(release.base)) return null

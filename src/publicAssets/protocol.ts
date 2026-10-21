@@ -6,7 +6,7 @@ export interface PublicAsset {
 
 export interface AssetRelease {
   schemaVersion: 1
-  mode: 'public-ipv6-fallback' | 'public-ipv6-off'
+  mode: 'public-ipv6-fallback' | 'public-cos-fallback' | 'public-ipv6-off'
   release: string
   base: '/builder/'
   ipv6Origin: string

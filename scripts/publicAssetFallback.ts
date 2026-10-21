@@ -60,15 +60,25 @@ export function publicAssetFallback(root: string): Plugin {
       const setting = config.env.VITE_PUBLIC_ASSET_FALLBACK
       if (!setting || setting === '0') return
       if (setting !== '1' && setting !== 'off') throw new Error('Unknown public asset fallback mode')
+      const provider = config.env.VITE_PUBLIC_ASSET_PROVIDER || 'ipv6'
+      if (!['ipv6', 'cos'].includes(provider)) throw new Error('Unknown public asset provider')
       if (config.base !== '/builder/') throw new Error('Public asset fallback requires the exact /builder/ base')
       const out = path.resolve(root, config.build.outDir)
       const previewOnly = config.env.VITE_PUBLIC_ASSET_PREVIEW === '1'
-      const ipv6Origin = fallbackOrigin(config.env.VITE_PUBLIC_ASSET_IPV6_ORIGIN || 'https://v6-test.xiaomaifang.com', previewOnly)
+      // 保留现有描述字段，保证旧控制器、显式退出和安装回执继续兼容。
+      let sourceOrigin = config.env.VITE_PUBLIC_ASSET_IPV6_ORIGIN || 'https://v6-test.xiaomaifang.com'
+      if (provider === 'cos') {
+        sourceOrigin = config.env.VITE_PUBLIC_ASSET_COS_ORIGIN
+        if (!sourceOrigin) throw new Error('COS public asset provider requires an explicit HTTPS origin')
+      }
+      const ipv6Origin = fallbackOrigin(sourceOrigin, previewOnly)
       const assets = setting === '1' ? describeAssets(bundle, out) : {}
       // 相同资源也可能修复SW/boot逻辑；握手版本必须覆盖这些源码，不能误认旧controller。
       const runtimeSha256 = digest(['scripts/publicAssetFallback.ts', 'src/publicAssets/protocol.ts', 'src/publicAssets/network.ts',
         'src/publicAssets/worker.ts', 'src/publicAssets/boot.ts'].map(file => `${file}\n${fs.readFileSync(path.join(root, file), 'utf8')}`).join('\n'))
-      const data = { schemaVersion: 1 as const, mode: setting === '1' ? 'public-ipv6-fallback' as const : 'public-ipv6-off' as const,
+      let mode: AssetRelease['mode'] = 'public-ipv6-off'
+      if (setting === '1') mode = provider === 'cos' ? 'public-cos-fallback' : 'public-ipv6-fallback'
+      const data = { schemaVersion: 1 as const, mode,
         base: '/builder/' as const, ipv6Origin, previewOnly, policy: { fallbackDelayMs: 1000, ipv6TimeoutMs: 4000, totalTimeoutMs: 60000 }, runtimeSha256, assets }
       const release: AssetRelease = { ...data, release: digest(JSON.stringify(data)) }
       const page = new Window({ settings: { disableJavaScriptEvaluation: true, disableJavaScriptFileLoading: true, disableCSSFileLoading: true } })
