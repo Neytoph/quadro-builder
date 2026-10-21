@@ -1,6 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { useI18n } from '../i18n'
 import { flushNow, track } from '../analytics/track'
+import { EDITOR_EMBED } from '../entry'
 
 // 崩溃打点。只发得出去"在哪个组件崩的"和"错误属于哪一类"，
 // 发不出去 error.message——消息里极可能带模型名、文件名、
@@ -44,6 +45,7 @@ class ErrorBoundaryInner extends Component<InnerProps, InnerState> {
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error(error, info.componentStack)
     window.dispatchEvent(new Event('qh:builder:error'))
+    if (EDITOR_EMBED && document.documentElement.dataset.editorReady !== 'true') parent.postMessage({ type: 'xmf-model-editor:error', message: this.props.t('error.title') + ': ' + error.message }, location.origin)
     // 崩溃后页面已经是废的，4 秒的批量窗口多半等不到——
     // 立刻冲一次，别让最该看见的这条跟着页面一起没了。
     try {

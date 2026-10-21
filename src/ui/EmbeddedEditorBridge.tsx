@@ -59,7 +59,7 @@ export default function EmbeddedEditorBridge(){
   const leaving=()=>send('loading')
   window.addEventListener('message',receive);window.addEventListener('quadro-account-invalidated',identity)
   window.addEventListener('pagehide',leaving)
-  send('mounted')
+  send('mounted',{protocol:2})
   return()=>{window.removeEventListener('message',receive);window.removeEventListener('quadro-account-invalidated',identity);window.removeEventListener('pagehide',leaving)}
  },[])
  useEffect(()=>{
@@ -74,7 +74,8 @@ export default function EmbeddedEditorBridge(){
   void(async()=>{
    await api.checkpointEditor()
    const scope=String(storage.getAccountScope())
-   parent.postMessage({type:'xmf-model-editor:ready',owner:scope.startsWith('user:')?scope.slice(5):'',name:active.name},location.origin)
+   document.documentElement.dataset.editorReady='true'
+   parent.postMessage({type:'xmf-model-editor:ready',protocol:2,owner:scope.startsWith('user:')?scope.slice(5):'',name:active.name,libraryId:active.libraryId||null,planId:active.planId||null},location.origin)
    if(new URLSearchParams(location.search).get('editorRename')!=='1')return
    working.current=true
    const name=await api.askName(t('chrome.renameDesign'),t('saves.saveOk'),active.name)
