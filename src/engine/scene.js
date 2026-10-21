@@ -5456,14 +5456,35 @@ export class SceneManager {
     const geo = isBox
       ? new THREE.BoxGeometry(size, size, size)
       : new THREE.SphereGeometry(radius, 16, 12);
-    const mat = this._handleMaterial(kind);
+    // 管上候选默认透明，指到对应管子时再显示；点击范围保持。
+    const tubeMount = data.clampTube || data.fittingMount?.tubeId || data.ropeMount
+      || data.gymRingMount || data.accessoryTube || data.sleeveTube;
+    const mat = tubeMount ? this._arrowHitMaterial() : this._handleMaterial(kind);
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set(position[0], position[1], position[2]);
-    mesh.userData = Object.assign({ kind: "handle" }, data);
+    mesh.userData = Object.assign({ kind: "handle", tubeCandidateKind: tubeMount ? kind : null }, data);
     mesh.renderOrder = 999;
     this.handleGroup.add(mesh);
     this.handleMeshes.push(mesh);
     return mesh;
+  }
+
+  updateTubeCandidateHover(pointer) {
+    const candidates = this.handleMeshes.filter(mesh => mesh.userData.tubeCandidateKind);
+    if (!candidates.length) return;
+    const tubeId = pointer ? this.pickTube(pointer.x, pointer.y)?.data.id : null;
+    for (const mesh of candidates) {
+      const data = mesh.userData;
+      const candidateTube = data.clampTube?.tubeId || data.fittingMount?.tubeId
+        || data.ropeMount?.tube || data.gymRingMount?.tube || data.accessoryTube || data.sleeveTube;
+      const active = tubeId != null && candidateTube === tubeId;
+      const mat = active ? this._handleMaterial(data.tubeCandidateKind) : this._arrowHitMaterial();
+      const scale = active ? 1.6 : 1;
+      if (mesh.material === mat && mesh.scale.x === scale) continue;
+      mesh.material = mat;
+      mesh.scale.setScalar(scale);
+      this._needsRender = true;
+    }
   }
 
   /**

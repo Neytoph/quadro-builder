@@ -164,6 +164,7 @@ export class Builder {
     this._boxSelected = new Map();
     this._paste = null;              // Kopie, die gerade am Zeiger haengt
     this._lastPointer = null;        // letzte Zeigerstelle (fuer Strg+V)
+    this._tubeHoverPointer = null;
     this.transformMode='translate';
     this.transformSnap=false;
     this.transformError=null;
@@ -2193,6 +2194,8 @@ export class Builder {
         preview: !!(this._paste || this._clampDrag || this._hingeDrag || this._colorPreview || this._selectionTransform) });
     this.transformGizmo?.sync();
     this._buildHandles();
+    if (this._tubeHoverPointer) this._trackTubeHandles(this._tubeHoverPointer.x, this._tubeHoverPointer.y);
+    this.scene.updateTubeCandidateHover?.(this._tubeHoverPointer);
     if (this.mode === 'panel' && this.panelRail && this.inputType === 'touch') {
       this._showPanelPlacementHover({ data: { kind: 'tube', id: this.panelRail.id } });
     }
@@ -3432,6 +3435,8 @@ export class Builder {
     const fremd = (e) => this._pointerId !== null && e.pointerId !== this._pointerId;
     el.addEventListener("pointermove", (e) => { if (!fremd(e)) this._onMove(e); });
     el.addEventListener('pointerleave', (e) => {
+      this._tubeHoverPointer = null;
+      this.scene.updateTubeCandidateHover?.(null);
       if (e.pointerType === 'touch') return;
       this._panelHoverKey = null;
       this.scene.clearPanelPlacementPreview?.();
@@ -3538,6 +3543,7 @@ export class Builder {
   _onMove(e) {
     // Zeigerstelle merken -- Strg+V setzt die Kopie dorthin.
     this._lastPointer = { x: e.clientX, y: e.clientY };
+    this._tubeHoverPointer = this._lastPointer;
     // Wer den Finger bewegt, will nicht halten -- er dreht die Ansicht.
     if (this._longPress && this._down
         && Math.hypot(e.clientX - this._down.x, e.clientY - this._down.y) > CLICK_TOLERANCE) {
@@ -3793,6 +3799,7 @@ export class Builder {
     }
     this.scene.setHoverPart(null);
     this.scene.setHover(obj, this.mode === "add" && !this.placeConnectorId ? arrowFocus : undefined);
+    this.scene.updateTubeCandidateHover?.(this._tubeHoverPointer);
   }
 
   _onUp(e) {
