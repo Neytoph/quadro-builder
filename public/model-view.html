@@ -14,15 +14,25 @@ const words={zh:['正在加载 3D…','3D 预览加载失败','重试','拖动�
 const status=document.getElementById('status'),hint=document.getElementById('hint');
 let viewer;
 async function load(){
-  status.hidden=false;status.textContent=words[0];hint.hidden=true;
+  viewer?.dispose();viewer=null;
+  document.documentElement.dataset.ready='false';
+  status.hidden=false;status.textContent=words[0];status.setAttribute('role','status');hint.hidden=true;
   try{
     const src=new URLSearchParams(location.search).get('display');
     if(!src||!src.startsWith('/')||src.startsWith('//')||new URL(src,location.href).origin!==location.origin)throw new Error('Invalid preview source');
-    viewer=await (await import('./home/model-cover.js')).mountModelDisplay(document.getElementById('preview'),src);
+    const [module,asset]=await Promise.all([
+      import('./home/model-cover.js'),
+      fetch(src,{credentials:'same-origin',cache:'no-store',signal:AbortSignal.timeout(60000)}).then(response=>{
+        if(!response.ok)throw new Error(`3D preview: ${response.status}`);
+        return response.json();
+      })
+    ]);
+    viewer=await module.mountModelDisplay(document.getElementById('preview'),asset);
     status.hidden=true;hint.textContent=words[3];hint.hidden=false;
     document.documentElement.dataset.ready='true';
   }catch(error){
     console.error(error);status.textContent=words[1]+' ';status.setAttribute('role','alert');
+    const detail=document.createElement('small');detail.textContent=error.message;status.append(detail);
     const retry=document.createElement('button');retry.textContent=words[2];retry.onclick=load;status.append(retry);
   }
 }
