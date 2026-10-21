@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>3D · Builder</title>
+<style>
+html,body,#preview{width:100%;height:100%;margin:0;overflow:hidden;background:#fff4eb;font-family:"Noto Sans SC",sans-serif}#preview{position:relative;touch-action:none}#preview canvas{display:block;width:100%;height:100%}#status{position:absolute;inset:0;display:grid;place-content:center;padding:24px;text-align:center;color:#5a6270}#hint{position:absolute;bottom:10px;left:12px;right:12px;text-align:center;font-size:12px;color:#444;background:#fff9;padding:5px 8px;border-radius:8px;pointer-events:none}button{font:inherit;border:1px solid #e0b892;border-radius:10px;background:#fff1e6;color:#1f2430;padding:10px 18px;cursor:pointer}#status[hidden],#hint[hidden]{display:none}
+</style>
+<div id="preview" aria-label="3D"></div><div id="status" role="status"></div><div id="hint" hidden></div>
+<script type="module">
+const language=new URLSearchParams(location.search).get('lang')||'zh';
+document.documentElement.lang=language;
+const words={zh:['正在加载 3D…','3D 预览加载失败','重试','拖动旋转 · 滚轮或双指缩放'],en:['Loading 3D…','Unable to load 3D preview','Retry','Drag to rotate · Scroll or pinch to zoom'],de:['3D wird geladen…','3D-Vorschau konnte nicht geladen werden','Erneut versuchen','Ziehen zum Drehen · Scrollen oder mit zwei Fingern zoomen']}[language]||['Loading 3D…','Unable to load 3D preview','Retry','Drag to rotate · Scroll or pinch to zoom'];
+const status=document.getElementById('status'),hint=document.getElementById('hint');
+let viewer;
+async function load(){
+  status.hidden=false;status.textContent=words[0];hint.hidden=true;
+  try{
+    const src=new URLSearchParams(location.search).get('display');
+    if(!src||!src.startsWith('/')||src.startsWith('//')||new URL(src,location.href).origin!==location.origin)throw new Error('Invalid preview source');
+    viewer=await (await import('./home/model-cover.js')).mountModelDisplay(document.getElementById('preview'),src);
+    status.hidden=true;hint.textContent=words[3];hint.hidden=false;
+    document.documentElement.dataset.ready='true';
+  }catch(error){
+    console.error(error);status.textContent=words[1]+' ';status.setAttribute('role','alert');
+    const retry=document.createElement('button');retry.textContent=words[2];retry.onclick=load;status.append(retry);
+  }
+}
+window.addEventListener('pagehide',()=>viewer?.dispose());
+void load();
+</script>
+</html>

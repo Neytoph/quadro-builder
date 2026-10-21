@@ -1,7 +1,7 @@
 import { BuildModel, SceneManager, loadCatalog } from '../engine-api'
 import { waitSceneReady } from '../engine/thumbShot.js'
 import { applyFrameHex, loadTune } from '../engine/colorTune.js'
-import { Color, MeshBasicMaterial, Raycaster, Vector2, Vector3, type Mesh, type Object3D } from 'three'
+import { BufferGeometry, Color, MeshBasicMaterial, ObjectLoader, MOUSE, TOUCH, Raycaster, Vector2, Vector3, type Mesh, type Object3D } from 'three'
 
 let queue: Promise<unknown> = Promise.resolve()
 
@@ -67,7 +67,7 @@ function fitSilhouette(scene: InstanceType<typeof SceneManager>) {
 }
 
 /** 独立模型与场景生成保存快照封面；标签切换与实时编辑不会改变这次截图。 */
-export function renderModelCover(data: unknown): Promise<string | null> {
+export function renderModelCover(data: unknown, display = false): Promise<string | null> {
   const snapshot = structuredClone(data)
   const run = queue.then(async () => {
     await loadCatalog()
@@ -97,6 +97,19 @@ export function renderModelCover(data: unknown): Promise<string | null> {
       const bounds = scene.homeProductBounds()
       if (bounds) {frameCover(scene,model,bounds);fitSilhouette(scene)}
       else if (model.homeContext) scene.frameHome()
+      if (display) {
+        // 只发送渲染几何，移除零件标识、连接关系和编辑元数据。
+        const group = scene.buildGroup.clone(true)
+        group.traverse((object: Object3D) => {
+          object.userData = {}; object.name = ''
+          const mesh = object as Mesh
+          // 保留 Builder 写入的顶点颜色等属性，避免参数几何序列化时丢失它们。
+          if (mesh.geometry) { mesh.geometry = new BufferGeometry().copy(mesh.geometry); mesh.geometry.userData = {} }
+        })
+        return JSON.stringify({ format: 'builder-display/1', object: group.toJSON(),
+          background, home: model.homeContext ? {...model.homeContext, roomId: null, roomRev: 0} : null,
+          camera: scene.getCameraPose() })
+      }
       const image = scene.snapshot({ hideGrid: true, hideLabels: true, hideRoom: false,
         width: 480, height: 360, pixelRatio: 2, mime: 'image/jpeg', quality: .88 })
       if (typeof image !== 'string') throw new Error('Cover image encoding failed')
@@ -112,4 +125,29 @@ export function renderModelCover(data: unknown): Promise<string | null> {
   })
   queue = run.then(() => undefined, () => undefined)
   return run
+}
+
+/** 分享的只读几何复用 Builder 场景和相机，不创建编辑模型或账号存档。 */
+export async function mountModelDisplay(host: HTMLElement, url: string) {
+  const response = await fetch(url, {credentials: 'same-origin', cache: 'no-store'})
+  if (!response.ok) throw new Error(`3D preview: ${response.status}`)
+  const asset = await response.json()
+  if (asset.format !== 'builder-display/1') throw new Error('Invalid 3D preview')
+  await loadCatalog()
+  const object = await new ObjectLoader().parseAsync(asset.object)
+  const scene = new SceneManager(host)
+  scene.setMotion(false)
+  scene.setTheme(false)
+  scene.setHomeContext(asset.home)
+  scene.setBackground(asset.background)
+  scene.buildGroup.add(object)
+  scene.setCameraPose(asset.camera)
+  scene.setViewCubeEnabled(false)
+  if (scene._grid) scene._grid.visible = false
+  scene.controls.mouseButtons.LEFT = MOUSE.ROTATE
+  scene.controls.touches.ONE = TOUCH.ROTATE
+  scene.controls.addEventListener('change', () => scene.requestRender())
+  scene._shadowsDirty()
+  scene.requestRender()
+  return {scene, dispose() { scene.dispose(); scene.renderer!.forceContextLoss() }}
 }
