@@ -9,6 +9,7 @@ import { insetPanelProbes, INSET_PANEL_IDS, INSET_MOUNT_LAYOUT, oppositeScrewSup
 import { validAssemblyConfig } from './assemblyConfig.js';
 import { validHomeContext } from '../home/context.js';
 import { isSoftPart } from './softParts.js';
+import { incompleteRigidSelection } from './selectionTransform.js';
 import { nativePanelDiagnostics, nativePanelMounts, nativePanelGeometry } from './nativePanelDiagnostics.js';
 import { reinforcementPaths, aluminiumConnectorMounts, aluminiumConnectorSupport, isAluminiumConnector, validReinforcementRecords, explicitReinforcementGroups } from './reinforcement.js';
 
@@ -42,7 +43,7 @@ export function slopeArmDirsAt(model, node) {
     ...DIRECTIONS.filter((entry) => Math.abs(entry.vec[rotationAxis]) > DIR_ALIGN_TOL),
   ];
 }
-import { round2 as round, quatFromXAxis, quatFromBasis, xAxisOf, yAxisOf, zAxisOf } from "./util.js";
+import { round2 as round, quatFromXAxis, quatFromBasis, xAxisOf, yAxisOf, zAxisOf, panelNormal, modelMiddle } from "./util.js";
 
 // Wohin ein Anbauteil gehoert, gemessen an den 799 Vorkommen in den Dateien des
 // Herstellers: `at` ist der Anker (Kupplung oder Rohr), `offset` der Abstand in
@@ -5579,6 +5580,80 @@ export class BuildModel {
       for (const id of validate(this)) if (!badBefore.has(id)) return fail("connector");
     }
     return { ok: true, merged, detached };
+  }
+
+  /** 三轴刚体旋转，沿用移动的安装、碰撞和连接件检查。 */
+  rotateSelectionAxis(sel, axis, radians, pivot, { validate = null, connectorSize = 5 } = {}) {
+    if (!Array.isArray(axis) || axis.length !== 3 || !axis.every(Number.isFinite)
+        || Math.hypot(...axis) < 1e-9 || !Number.isFinite(radians)
+        || !Array.isArray(pivot) || pivot.length !== 3 || !pivot.every(Number.isFinite)) return {ok:false,reason:'empty'};
+    const tg = this.moveTargets(sel);
+    if (incompleteRigidSelection(this,tg)) return {ok:false,reason:'accessory_mounts'};
+    if(!tg.nodes.size && !tg.clamps.size && !tg.slides.size && !tg.fittings.size)return {ok:false,reason:'empty'};
+    const snapshot=this.toJSON(), movedTubes=this.tubesAt(tg.nodes);
+    const collidedBefore=this.collisions({only:movedTubes}), badBefore=validate?.(this);
+    const invalidBefore=this._invalidComponents();
+    const fail=reason=>{this.loadJSON(snapshot);return {ok:false,reason};};
+    const u=axis.map(value=>value/Math.hypot(...axis)), co=Math.cos(radians), si=Math.sin(radians);
+    const point=p=>rodriguesAt(p,pivot,u,co,si).map(round);
+    const direction=v=>rodriguesDir(v,u,co,si).map(round4);
+    const spin=q=>spinAroundAxis(q || [0,0,0,1],u,radians);
+    const move=part=>{[part.x,part.y,part.z]=point([part.x,part.y,part.z]);};
+    const bearingDone=new Set();
+    // 普通旧板没有显式姿态；旋转前固化当前朝向，翻过竖直位置时也不换面。
+    for(const part of this.panels.values()) {
+      if(part.geom || part.appearanceVersion)continue;
+      const rails=[this.tubes.get(part.a),this.tubes.get(part.b)];
+      if(!rails.every(tube=>tube && tg.nodes.has(tube.a) && tg.nodes.has(tube.b)))continue;
+      const corners=this.panelCorners(part);if(!corners)continue;
+      const along=corners[1].map((v,i)=>v-corners[0][i]),across=corners[3].map((v,i)=>v-corners[0][i]);
+      const center=corners[0].map((_,i)=>corners.reduce((sum,p)=>sum+p[i],0)/4);
+      const normal=panelNormal(along,across,center,modelMiddle(this.nodes.values())).map(v=>v*(part.side<0 ? -1 : 1));
+      const x=norm3(part.turned ? across : along),y=cross3(normal,x);
+      const spanX=Math.hypot(...(part.turned ? across : along)),spanZ=Math.hypot(...(part.turned ? along : across));
+      part.geom={p:center,quat:quatFromBasis(x,y,normal),h:spanX-connectorSize,w:spanZ-connectorSize,padW:0,padH:0};
+    }
+    for (const id of tg.nodes) {
+      const node=this.nodes.get(id);
+      move(node);
+      this._spinNodeAround(node,{o:pivot,u},co,si,radians);
+      if (node.bearingOn) bearingDone.add(node.bearingOn);
+    }
+    for (const key of ['clamps','slides','fittings']) for (const id of tg[key]) {
+      if (bearingDone.has(id)) continue;
+      const part=this[key].get(id);
+      move(part);
+      if (part.quat || key!=='clamps') part.quat=spin(part.quat);
+      if (part.dir) part.dir=direction(part.dir);
+      if (part.off) part.off=rodriguesDir(part.off,u,co,si).map(round);
+      if (part.hook) part.hook=point(part.hook);
+      if (part.foot?.p0) part.foot={...part.foot,p0:point(part.foot.p0),dir:direction(part.foot.dir)};
+    }
+    for (const tube of this.tubes.values()) if (tg.nodes.has(tube.a) && tg.nodes.has(tube.b)) {
+      if (tube.bowCenter) tube.bowCenter=point(tube.bowCenter);
+      if (tube.geom) tube.geom={...tube.geom,p0:point(tube.geom.p0),dir:direction(tube.geom.dir),
+        ...(tube.geom.up ? {up:direction(tube.geom.up)} : {})};
+    }
+    for (const map of [this.panels,this.textiles]) for (const part of map.values()) {
+      const supports=part.supportTubes || [part.a,part.b];
+      if (!supports.every(id=>{const tube=this.tubes.get(id);return tube && tg.nodes.has(tube.a) && tg.nodes.has(tube.b);})) continue;
+      if (part.geom?.p) part.geom={...part.geom,p:point(part.geom.p),...(part.geom.quat ? {quat:spin(part.geom.quat)} : {})};
+      if (part.pool?.p) part.pool={...part.pool,p:point(part.pool.p),quat:spin(part.pool.quat)};
+      if (Number.isFinite(part.x)) {move(part);if(part.quat)part.quat=spin(part.quat);}
+    }
+    for (const id of tg.nodes) if (this.isBelowGround(this.nodes.get(id).y)) return fail('ground');
+    for (const key of ['clamps','slides','fittings']) for(const id of tg[key]) {
+      const part=this[key].get(id);
+      if(this.isBelowGround(part.y) || part.off && this.isBelowGround(part.y+part.off[1]))return fail('ground');
+    }
+    for (const tube of this.tubes.values()) if (tube.bowCenter && tg.nodes.has(tube.a) && tg.nodes.has(tube.b)) {
+      const a=this.nodes.get(tube.a),b=this.nodes.get(tube.b);
+      if (this.isBelowGround(this._bowLowestY([a.x,a.y,a.z],[b.x,b.y,b.z],tube.bowCenter))) return fail('ground');
+    }
+    for (const id of this.collisions({only:movedTubes})) if (!collidedBefore.has(id)) return fail('collision');
+    if ([...this._invalidComponents()].some(id=>!invalidBefore.has(id))) return fail('accessory_space');
+    if (badBefore && [...validate(this)].some(id=>!badBefore.has(id))) return fail('connector');
+    return {ok:true,merged:0,detached:0};
   }
 
   /**

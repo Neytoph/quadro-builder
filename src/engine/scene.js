@@ -459,6 +459,7 @@ export class SceneManager {
   }
 
   _renderMainScene() {
+    this.selectionTransformGizmo?.updateCamera();
     // 模型、家具和地面共用当前场景的灯光、色调映射与阴影。
     // 室内使用房间灯光；切换背景及隐藏房间导出由 _applyHomeStyle 统一处理。
     this._panelPlacementGuides?.update(this.camera, this._appearing, this._sceneOn ? 'grass' : 'home');
@@ -687,6 +688,7 @@ export class SceneManager {
 
   /** 不再用的画面（版本对照关掉时）：停下渲染循环，放掉渲染器和画布。 */
   dispose() {
+    this.selectionTransformGizmo?.dispose();
     this._clearHoverOverlay();
     this.clearPanelPlacementPreview();
     this._clearPanelPlacementFlash();
@@ -4951,8 +4953,8 @@ export class SceneManager {
         const role = mesh.userData.role;
         mesh.userData = { kind: "fitting", id: f.id, role };
         const base = mesh.material;
-        // Wasser bleibt blau -- es ist kein Bauteil, Orange wuerde wie ein Kasten wirken.
-        mesh.material = role === "water" ? base
+        // 水面平时保持蓝色，多选或框选时随整件统一着橙色。
+        mesh.material = role === "water" && !this._solidSelectedParts?.has(f.id) ? base
           : matFor(f.id, (suggest && suggest.has(f.id)) ? this._suggestMaterial(base)
           : base);
         this.buildGroup.add(mesh);
@@ -7477,6 +7479,9 @@ export class SceneManager {
    */
   snapshot(opts = {}) {
     this._finishMotion();
+    this.selectionTransformGizmo?.flushPreview();
+    const transformPreview=this.selectionTransformPreview;
+    transformPreview?.apply(true);
     const hideGrid = opts.hideGrid !== false;
     const hideLabels = opts.hideLabels !== false;
     const hideRoom = opts.hideRoom === true;
@@ -7497,6 +7502,7 @@ export class SceneManager {
     const versteckt = [
       hideGrid ? this._grid : null,
       this.handleGroup,
+      this.selectionTransformGizmo?.helper,
       hideLabels ? this.labelGroup : null,
       this._hoverPartGroup,
       hideRoom ? this._roomGroup : null,
@@ -7519,6 +7525,7 @@ export class SceneManager {
         ? this.renderer.domElement.toDataURL(mime, quality ?? 0.82)
         : this.renderer.domElement.toDataURL(mime);
     } finally {
+      transformPreview?.apply();
       for (const [o, sichtbar] of versteckt) o.visible = sichtbar;
       if (hiddenHome) { this._homeOutputHidden = false; this._applyHomeStyle(); this._shadowsDirty(); }
       if (resized) {

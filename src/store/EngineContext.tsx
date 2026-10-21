@@ -181,6 +181,12 @@ interface EngineApi {
   canUndo: boolean
   canRedo: boolean
   selectionCount: number
+  selectionTransform: {key:string;mode:string;snap:boolean;position:number[];busy:boolean;error:string|null;rotation:{axis:'X'|'Y'|'Z'|'free';degrees:number;revision:number}|null} | null
+  setSelectionTransformMode: (mode:'translate'|'rotate')=>void
+  setSelectionTransformSnap: (on:boolean)=>void
+  setSelectionPosition: (position:number[])=>boolean
+  rotateSelectionAxis: (axis:'X'|'Y'|'Z',degrees:number)=>boolean
+  selectTransformBlock: ()=>void
   boxSelect: boolean
   setBoxSelect: (on: boolean) => void
   installationPreview: InstallationPreview | null
@@ -3105,6 +3111,12 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     canUndo: !!builder?.canUndo?.(),
     canRedo: !!builder?.canRedo?.(),
     selectionCount: builder?.selection?.size ?? 0,
+    selectionTransform: builder?.selectionTransformState?.() ?? null,
+    setSelectionTransformMode: mode=>{builder?.setSelectionTransformMode(mode);bump()},
+    setSelectionTransformSnap: on=>{if(builder){builder.transformSnap=on;bump()}},
+    setSelectionPosition: position=>{const ok=!!builder?.setSelectionPosition(position);bump();return ok},
+    rotateSelectionAxis: (axis,degrees)=>{const ok=!!builder?.rotateSelectionAxis(axis,degrees);bump();return ok},
+    selectTransformBlock: ()=>{builder?.selectTransformBlock();bump()},
     boxSelect: !!builder?.boxSelect,
     setBoxSelect: (on) => { rememberTool(); clearBomHighlight(); builder?.setBoxSelect(on); bump() },
     installationPreview: builder?.installationPreview ?? null,
