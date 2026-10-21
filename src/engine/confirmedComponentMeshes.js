@@ -39,7 +39,7 @@ function feltBump(scene) {
   const map=new THREE.DataTexture(data,size,size);map.wrapS=map.wrapT=THREE.RepeatWrapping;map.repeat.set(12,12);map.needsUpdate=true;
   scene._confirmedFiberBump=map;return map;
 }
-function componentEnvironment(scene) {
+export function componentEnvironment(scene) {
   if(!scene.renderer?.isWebGLRenderer)return null;
   if(scene._confirmedEnvironmentRenderer!==scene.renderer){
     scene._confirmedEnvironmentTarget?.dispose();

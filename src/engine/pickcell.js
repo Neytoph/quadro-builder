@@ -25,3 +25,33 @@ export function preferPanelCell(hits, sx, sy, toScreen) {
   }
   return best || hits[0];
 }
+
+/** 重叠的方向拾取区按可见线段的屏幕距离排序，悬停和点击共用。 */
+export function preferGuideHandle(hits, sx, sy, toScreen) {
+  if (!hits.length) return null;
+  if (!hits[0].object.userData.arrowRoot) return hits[0];
+  const candidates = [];
+  const roots = new Set();
+  for (const hit of hits) {
+    const root = hit.object.userData.arrowRoot;
+    if (!root || root.visible === false || roots.has(root)) continue;
+    roots.add(root);
+    const segment = root.userData.guideSegment;
+    if (!segment) continue;
+    const a = toScreen(segment[0]), b = toScreen(segment[1]);
+    if (!a || !b) continue;
+    const dx = b[0] - a[0], dy = b[1] - a[1], lengthSq = dx * dx + dy * dy;
+    // 正对镜头而缩成一个点的方向不抢走其他线段的点击。
+    if (lengthSq < 4) continue;
+    const along = Math.max(0, Math.min(1, ((sx - a[0]) * dx + (sy - a[1]) * dy) / lengthSq));
+    const distance = Math.hypot(sx - a[0] - along * dx, sy - a[1] - along * dy);
+    candidates.push({ hit, distance, originDistance: Math.hypot(sx - a[0], sy - a[1]) });
+  }
+  candidates.sort((a, b) => a.distance - b.distance || a.hit.distance - b.hit.distance);
+  const best = candidates[0];
+  if (!best) return null;
+  // 多条线的公共根部无法区分方向时，不安装到另一个方向。
+  if (best.originDistance < 3 && candidates[1]?.originDistance < 3
+      && candidates[1].distance - best.distance < 0.5) return null;
+  return best.hit;
+}

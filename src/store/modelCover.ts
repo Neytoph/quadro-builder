@@ -1,7 +1,9 @@
 import { BuildModel, SceneManager, loadCatalog } from '../engine-api'
 import { waitSceneReady } from '../engine/thumbShot.js'
 import { applyFrameHex, loadTune } from '../engine/colorTune.js'
-import { BufferGeometry, Color, MeshBasicMaterial, ObjectLoader, MOUSE, TOUCH, Raycaster, Vector2, Vector3, type Mesh, type Object3D } from 'three'
+import { Color, MeshBasicMaterial, ObjectLoader, MOUSE, TOUCH, Raycaster, Vector2, Vector3, type Mesh, type Object3D, type Object3DJSON, type MeshStandardMaterial } from 'three'
+import { componentEnvironment } from '../engine/confirmedComponentMeshes.js'
+import { displayObject, usesDisplayEnvironment } from './displayAsset'
 
 let queue: Promise<unknown> = Promise.resolve()
 
@@ -99,14 +101,7 @@ export function renderModelCover(data: unknown, display = false): Promise<string
       else if (model.homeContext) scene.frameHome()
       if (display) {
         // 只发送渲染几何，移除零件标识、连接关系和编辑元数据。
-        const group = scene.buildGroup.clone(true)
-        group.traverse((object: Object3D) => {
-          object.userData = {}; object.name = ''
-          const mesh = object as Mesh
-          // 保留 Builder 写入的顶点颜色等属性，避免参数几何序列化时丢失它们。
-          if (mesh.geometry) { mesh.geometry = new BufferGeometry().copy(mesh.geometry); mesh.geometry.userData = {} }
-        })
-        return JSON.stringify({ format: 'builder-display/1', object: group.toJSON(),
+        return JSON.stringify({ format: 'builder-display/1', object: displayObject(scene.buildGroup),
           background, home: model.homeContext ? {...model.homeContext, roomId: null, roomRev: 0} : null,
           camera: scene.getCameraPose() })
       }
@@ -128,26 +123,48 @@ export function renderModelCover(data: unknown, display = false): Promise<string
 }
 
 /** 分享的只读几何复用 Builder 场景和相机，不创建编辑模型或账号存档。 */
-export async function mountModelDisplay(host: HTMLElement, url: string) {
-  const response = await fetch(url, {credentials: 'same-origin', cache: 'no-store'})
-  if (!response.ok) throw new Error(`3D preview: ${response.status}`)
-  const asset = await response.json()
+type DisplayAsset = { format: string; object: Object3DJSON; home: unknown; background: string; camera: Parameters<InstanceType<typeof SceneManager>['setCameraPose']>[0] }
+
+export async function mountModelDisplay(host: HTMLElement, input: string | DisplayAsset) {
+  const asset = typeof input === 'string' ? await (async () => {
+    const response = await fetch(input, {credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(60000)})
+    if (!response.ok) throw new Error(`3D preview: ${response.status}`)
+    return response.json()
+  })() : input
   if (asset.format !== 'builder-display/1') throw new Error('Invalid 3D preview')
   await loadCatalog()
   const object = await new ObjectLoader().parseAsync(asset.object)
   const scene = new SceneManager(host)
-  scene.setMotion(false)
-  scene.setTheme(false)
-  scene.setHomeContext(asset.home)
-  scene.setBackground(asset.background)
-  scene.buildGroup.add(object)
-  scene.setCameraPose(asset.camera)
-  scene.setViewCubeEnabled(false)
-  if (scene._grid) scene._grid.visible = false
-  scene.controls.mouseButtons.LEFT = MOUSE.ROTATE
-  scene.controls.touches.ONE = TOUCH.ROTATE
-  scene.controls.addEventListener('change', () => scene.requestRender())
-  scene._shadowsDirty()
-  scene.requestRender()
-  return {scene, dispose() { scene.dispose(); scene.renderer!.forceContextLoss() }}
+  const dispose = () => { scene.dispose(); scene.renderer!.forceContextLoss() }
+  try {
+    scene.setMotion(false)
+    scene.setTheme(false)
+    scene.setHomeContext(asset.home)
+    scene.setBackground(asset.background)
+    object.traverse((object: Object3D) => {
+      const mesh = object as Mesh
+      for (const material of Array.isArray(mesh.material) ? mesh.material : mesh.material ? [mesh.material] : []) {
+        const surface = material as MeshStandardMaterial
+        if (usesDisplayEnvironment(surface)) {
+          surface.envMap = componentEnvironment(scene)
+          surface.needsUpdate = true
+        }
+      }
+    })
+    scene.buildGroup.add(object)
+    scene.setCameraPose(asset.camera)
+    scene.setViewCubeEnabled(false)
+    if (scene._grid) scene._grid.visible = false
+    scene.controls.mouseButtons.LEFT = MOUSE.ROTATE
+    scene.controls.touches.ONE = TOUCH.ROTATE
+    scene.controls.addEventListener('change', () => scene.requestRender())
+    scene._shadowsDirty()
+    // 首帧必须实际画成功，渲染异常由调用方显示为失败。
+    scene._renderMainScene()
+    scene.requestRender()
+    return {scene, dispose}
+  } catch (error) {
+    dispose()
+    throw error
+  }
 }

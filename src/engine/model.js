@@ -9,8 +9,10 @@ import { insetPanelProbes, INSET_PANEL_IDS, INSET_MOUNT_LAYOUT, oppositeScrewSup
 import { validAssemblyConfig } from './assemblyConfig.js';
 import { validHomeContext } from '../home/context.js';
 import { isSoftPart } from './softParts.js';
+import { incompleteRigidSelection } from './selectionTransform.js';
 import { nativePanelDiagnostics, nativePanelMounts, nativePanelGeometry } from './nativePanelDiagnostics.js';
 import { reinforcementPaths, aluminiumConnectorMounts, aluminiumConnectorSupport, isAluminiumConnector, validReinforcementRecords, explicitReinforcementGroups } from './reinforcement.js';
+import { c45PlacementBlocked } from './c45Placement.js';
 
 // Zellweite des Rasters, mit dem die Kollisionspruefung Nachbarn sucht. Etwas
 // groesser als das laengste Rohr (75 cm + Kupplung): ein Rohr liegt damit in
@@ -42,7 +44,7 @@ export function slopeArmDirsAt(model, node) {
     ...DIRECTIONS.filter((entry) => Math.abs(entry.vec[rotationAxis]) > DIR_ALIGN_TOL),
   ];
 }
-import { round2 as round, quatFromXAxis, quatFromBasis, xAxisOf, yAxisOf, zAxisOf } from "./util.js";
+import { round2 as round, quatFromXAxis, quatFromBasis, xAxisOf, yAxisOf, zAxisOf, panelNormal, modelMiddle } from "./util.js";
 
 // Wohin ein Anbauteil gehoert, gemessen an den 799 Vorkommen in den Dateien des
 // Herstellers: `at` ist der Anker (Kupplung oder Rohr), `offset` der Abstand in
@@ -5581,6 +5583,80 @@ export class BuildModel {
     return { ok: true, merged, detached };
   }
 
+  /** 三轴刚体旋转，沿用移动的安装、碰撞和连接件检查。 */
+  rotateSelectionAxis(sel, axis, radians, pivot, { validate = null, connectorSize = 5 } = {}) {
+    if (!Array.isArray(axis) || axis.length !== 3 || !axis.every(Number.isFinite)
+        || Math.hypot(...axis) < 1e-9 || !Number.isFinite(radians)
+        || !Array.isArray(pivot) || pivot.length !== 3 || !pivot.every(Number.isFinite)) return {ok:false,reason:'empty'};
+    const tg = this.moveTargets(sel);
+    if (incompleteRigidSelection(this,tg)) return {ok:false,reason:'accessory_mounts'};
+    if(!tg.nodes.size && !tg.clamps.size && !tg.slides.size && !tg.fittings.size)return {ok:false,reason:'empty'};
+    const snapshot=this.toJSON(), movedTubes=this.tubesAt(tg.nodes);
+    const collidedBefore=this.collisions({only:movedTubes}), badBefore=validate?.(this);
+    const invalidBefore=this._invalidComponents();
+    const fail=reason=>{this.loadJSON(snapshot);return {ok:false,reason};};
+    const u=axis.map(value=>value/Math.hypot(...axis)), co=Math.cos(radians), si=Math.sin(radians);
+    const point=p=>rodriguesAt(p,pivot,u,co,si).map(round);
+    const direction=v=>rodriguesDir(v,u,co,si).map(round4);
+    const spin=q=>spinAroundAxis(q || [0,0,0,1],u,radians);
+    const move=part=>{[part.x,part.y,part.z]=point([part.x,part.y,part.z]);};
+    const bearingDone=new Set();
+    // 普通旧板没有显式姿态；旋转前固化当前朝向，翻过竖直位置时也不换面。
+    for(const part of this.panels.values()) {
+      if(part.geom || part.appearanceVersion)continue;
+      const rails=[this.tubes.get(part.a),this.tubes.get(part.b)];
+      if(!rails.every(tube=>tube && tg.nodes.has(tube.a) && tg.nodes.has(tube.b)))continue;
+      const corners=this.panelCorners(part);if(!corners)continue;
+      const along=corners[1].map((v,i)=>v-corners[0][i]),across=corners[3].map((v,i)=>v-corners[0][i]);
+      const center=corners[0].map((_,i)=>corners.reduce((sum,p)=>sum+p[i],0)/4);
+      const normal=panelNormal(along,across,center,modelMiddle(this.nodes.values())).map(v=>v*(part.side<0 ? -1 : 1));
+      const x=norm3(part.turned ? across : along),y=cross3(normal,x);
+      const spanX=Math.hypot(...(part.turned ? across : along)),spanZ=Math.hypot(...(part.turned ? along : across));
+      part.geom={p:center,quat:quatFromBasis(x,y,normal),h:spanX-connectorSize,w:spanZ-connectorSize,padW:0,padH:0};
+    }
+    for (const id of tg.nodes) {
+      const node=this.nodes.get(id);
+      move(node);
+      this._spinNodeAround(node,{o:pivot,u},co,si,radians);
+      if (node.bearingOn) bearingDone.add(node.bearingOn);
+    }
+    for (const key of ['clamps','slides','fittings']) for (const id of tg[key]) {
+      if (bearingDone.has(id)) continue;
+      const part=this[key].get(id);
+      move(part);
+      if (part.quat || key!=='clamps') part.quat=spin(part.quat);
+      if (part.dir) part.dir=direction(part.dir);
+      if (part.off) part.off=rodriguesDir(part.off,u,co,si).map(round);
+      if (part.hook) part.hook=point(part.hook);
+      if (part.foot?.p0) part.foot={...part.foot,p0:point(part.foot.p0),dir:direction(part.foot.dir)};
+    }
+    for (const tube of this.tubes.values()) if (tg.nodes.has(tube.a) && tg.nodes.has(tube.b)) {
+      if (tube.bowCenter) tube.bowCenter=point(tube.bowCenter);
+      if (tube.geom) tube.geom={...tube.geom,p0:point(tube.geom.p0),dir:direction(tube.geom.dir),
+        ...(tube.geom.up ? {up:direction(tube.geom.up)} : {})};
+    }
+    for (const map of [this.panels,this.textiles]) for (const part of map.values()) {
+      const supports=part.supportTubes || [part.a,part.b];
+      if (!supports.every(id=>{const tube=this.tubes.get(id);return tube && tg.nodes.has(tube.a) && tg.nodes.has(tube.b);})) continue;
+      if (part.geom?.p) part.geom={...part.geom,p:point(part.geom.p),...(part.geom.quat ? {quat:spin(part.geom.quat)} : {})};
+      if (part.pool?.p) part.pool={...part.pool,p:point(part.pool.p),quat:spin(part.pool.quat)};
+      if (Number.isFinite(part.x)) {move(part);if(part.quat)part.quat=spin(part.quat);}
+    }
+    for (const id of tg.nodes) if (this.isBelowGround(this.nodes.get(id).y)) return fail('ground');
+    for (const key of ['clamps','slides','fittings']) for(const id of tg[key]) {
+      const part=this[key].get(id);
+      if(this.isBelowGround(part.y) || part.off && this.isBelowGround(part.y+part.off[1]))return fail('ground');
+    }
+    for (const tube of this.tubes.values()) if (tube.bowCenter && tg.nodes.has(tube.a) && tg.nodes.has(tube.b)) {
+      const a=this.nodes.get(tube.a),b=this.nodes.get(tube.b);
+      if (this.isBelowGround(this._bowLowestY([a.x,a.y,a.z],[b.x,b.y,b.z],tube.bowCenter))) return fail('ground');
+    }
+    for (const id of this.collisions({only:movedTubes})) if (!collidedBefore.has(id)) return fail('collision');
+    if ([...this._invalidComponents()].some(id=>!invalidBefore.has(id))) return fail('accessory_space');
+    if (badBefore && [...validate(this)].some(id=>!badBefore.has(id))) return fail('connector');
+    return {ok:true,merged:0,detached:0};
+  }
+
   /**
    * Die eigentliche Drehung: Lage UND Ausrichtung aller betroffenen Teile.
    * Ein Viertel um die Hochachse ist reine Vertauschung -- ohne Sinus und
@@ -6061,6 +6137,7 @@ export class BuildModel {
     const from = this.nodes.get(fromId);
     if (!from) return null;
     if (!this.canExtendFrom(from, c45axis)) return null;
+    if (this.c45AdapterCollision(fromId, c45axis, dir, sleeveLen, armLen)) return { collision: true };
     const bx = from.x + c45axis[0] * sleeveLen + dir[0] * armLen;
     const by = from.y + c45axis[1] * sleeveLen + dir[1] * armLen;
     const bz = from.z + c45axis[2] * sleeveLen + dir[2] * armLen;
@@ -6081,6 +6158,7 @@ export class BuildModel {
     body.c45body = true;
     body.c45axis = c45axis.slice();
     this.addArm(from.id, body.id);
+    this._updateC45Quat(body, from);
     const to = snap || this.addNode(round(target.x), round(target.y), round(target.z));
     const tube = this.addTube(body.id, to.id, tubeId, color, length);
     return { node: to, tube, body };
@@ -6165,6 +6243,9 @@ export class BuildModel {
     const by = body.y - axis[1] * sleeveLen - dir[1] * armLen;
     const bz = body.z - axis[2] * sleeveLen - dir[2] * armLen;
     if (this.isBelowGround(by)) return { ground: true };
+    const candidateBase = { x: round(bx), y: round(by), z: round(bz) };
+    const candidateBody = { ...body, c45axis: axis };
+    if (c45PlacementBlocked(this, candidateBase, candidateBody)) return { collision: true };
     const base = this.addNode(round(bx), round(by), round(bz));
     // Ihre Wuerfelachsen folgen der Huelse: lokal +X zeigt zum Adapter.
     base.quat = quatFromXAxis(axis);
@@ -6173,7 +6254,19 @@ export class BuildModel {
     body.c45axis = axis.slice();
     this.addArm(base.id, body.id);
     this._syncC45Flag(base.id);
+    this._updateC45Quat(body, base);
     return { body, base };
+  }
+
+  c45OnTubeCollision(nodeId, axis, sleeveLen, armLen) {
+    const body = this.nodes.get(nodeId), dir = this.c45TubeDir(body);
+    if (!body || !dir) return true;
+    const base = {
+      x: round(body.x - axis[0] * sleeveLen - dir[0] * armLen),
+      y: round(body.y - axis[1] * sleeveLen - dir[1] * armLen),
+      z: round(body.z - axis[2] * sleeveLen - dir[2] * armLen),
+    };
+    return c45PlacementBlocked(this, base, { ...body, c45axis: axis });
   }
 
   /**
@@ -6212,6 +6305,9 @@ export class BuildModel {
     const r = dreh([base.x - body.x, base.y - body.y, base.z - body.z]);
     const p = { x: body.x + r[0], y: body.y + r[1], z: body.z + r[2] };
     if (this.isBelowGround(p.y)) return false;
+    const candidateBase = { ...base, x: round(p.x), y: round(p.y), z: round(p.z) };
+    const candidateBody = { ...body, c45axis: achse };
+    if (c45PlacementBlocked(this, candidateBase, candidateBody)) return false;
     base.x = round(p.x); base.y = round(p.y); base.z = round(p.z);
     const L = Math.hypot(achse[0], achse[1], achse[2]) || 1;
     const r4 = (v) => Math.round((v / L) * 1e4) / 1e4;
@@ -6272,6 +6368,26 @@ export class BuildModel {
     return null;
   }
 
+  c45AdapterCollision(fromId, axis, dir, sleeveLen, armLen, context) {
+    const base = this.nodes.get(fromId);
+    if (!base) return true;
+    for (const tube of this.tubes.values()) {
+      if (tube.link) continue;
+      let otherId = null;
+      if (tube.a === fromId) otherId = tube.b;
+      else if (tube.b === fromId) otherId = tube.a;
+      const other = this.nodes.get(otherId);
+      if (!other) continue;
+      const occupied = tube.arm && other.c45axis ? other.c45axis : this._tubeDirAt(tube, base, other);
+      if (dot3(norm3(occupied), norm3(axis)) > ARM_ALIGN_TOL) return true;
+    }
+    const body = { id: null, c45axis: axis,
+      x: round(base.x + axis[0] * sleeveLen + dir[0] * armLen),
+      y: round(base.y + axis[1] * sleeveLen + dir[1] * armLen),
+      z: round(base.z + axis[2] * sleeveLen + dir[2] * armLen) };
+    return c45PlacementBlocked(this, base, body, context);
+  }
+
   addC45Adapter(fromId, axis, dir, sleeveLen, armLen) {
     const from = this.nodes.get(fromId);
     if (!from) return null;
@@ -6279,12 +6395,14 @@ export class BuildModel {
     const by = from.y + axis[1] * sleeveLen + dir[1] * armLen;
     const bz = from.z + axis[2] * sleeveLen + dir[2] * armLen;
     if (this.isBelowGround(by)) return { ground: true };
+    if (this.c45AdapterCollision(fromId, axis, dir, sleeveLen, armLen)) return { collision: true };
     const body = this.addNode(round(bx), round(by), round(bz));
     body.c45 = true;
     body.c45body = true;
     body.c45axis = axis.slice();
     this.addArm(from.id, body.id);
     this._syncC45Flag(from.id);
+    this._updateC45Quat(body, from);
     return { body };
   }
 
@@ -6328,6 +6446,14 @@ export class BuildModel {
     seen.delete(baseId);
     const zweig = [...seen].map((id) => this.nodes.get(id)).filter(Boolean).map((n) => ({ n, p: dreh(n) }));
     if (zweig.some((e) => this.isBelowGround(e.p.y))) return false;
+    const preview = { nodes: new Map(this.nodes), tubes: this.tubes };
+    for (const { n, p } of zweig) preview.nodes.set(n.id, { ...n, x: round(p.x), y: round(p.y), z: round(p.z) });
+    for (const { n } of zweig) {
+      if (!n.c45body) continue;
+      const arm = [...this.tubes.values()].find(t => t.arm && (t.a === n.id || t.b === n.id));
+      const carrier = arm && preview.nodes.get(arm.a === n.id ? arm.b : arm.a);
+      if (carrier && c45PlacementBlocked(preview, carrier, preview.nodes.get(n.id))) return false;
+    }
     for (const e of zweig) { e.n.x = round(e.p.x); e.n.y = round(e.p.y); e.n.z = round(e.p.z); }
     this._updateC45Quat(body, base);
     const bewegt = new Set(zweig.map((e) => e.n.id));
@@ -6342,7 +6468,9 @@ export class BuildModel {
     const span = [body.x - base.x, body.y - base.y, body.z - base.z];
     const along = dot3(span, ex);
     const ey = norm3(span.map((value, i) => value - ex[i] * along));
-    base.c45quat = quatFromBasis(ex, ey, cross3(ex, ey));
+    body.c45quat = quatFromBasis(ex, ey, cross3(ex, ey));
+    const adapters = [...this.tubes.values()].filter(t => t.arm && (t.a === base.id || t.b === base.id));
+    if (adapters.length === 1) base.c45quat = body.c45quat.slice();
   }
 
   // Aussenmasse des Modells in cm. Die Bounding-Box laeuft ueber alle Kupplungen
