@@ -1,8 +1,13 @@
-type Access = { active: boolean; endsAt?: string; object?: { id: string; docId?: string; backend: string }; kind: string }
+type Access = { id?: number; active: boolean; endsAt?: string; object?: { id: string; docId?: string; backend: string }; kind: string }
 let current: Access[] = []
 let initialized=false
 export function clearSlotAccess(){current=[];initialized=false}
 export function updateSlotAccess(slots: Access[]) { current = slots;initialized=true }
+export function recordCreatedSlot(id: number, kind: string, object: { id: string; backend: string }) {
+  const previous = current.find(slot => slot.id === id)
+  const created = { ...previous, id, kind, active: true, object }
+  current = [...current.filter(slot => slot.id !== id), created]
+}
 export function saveCapacityFull(): boolean { return initialized && !current.some(slot => slot.kind === 'save' && slot.active && !slot.object) }
 export function collaborationSpace(): boolean | undefined { return initialized ? current.some(slot => slot.kind === 'shared' && slot.active && !slot.object) : undefined }
 export function slotAccess(docId?: string | null, libraryId?: string, planId?: string | null): Access | undefined {

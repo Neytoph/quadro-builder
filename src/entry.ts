@@ -160,7 +160,7 @@ export let EDITOR_SESSION = singleSession()
 export function replaceEditorEntry(href: string) {
   const url = new URL(href, location.href)
   const owner = new URLSearchParams(location.search).get('editorOwner')
-  const allowed = ['embedded', 'editorProtocol', 'editorOwner', 'lang', 'editorRename', 'draft', 'plan', 'src', 'name']
+  const allowed = ['embedded', 'editorProtocol', 'editorOwner', 'lang', 'editorRename', 'draft', 'plan', 'src', 'name', 'newModelKind', 'newModelSlot']
   if (!EDITOR_EMBED || url.origin !== location.origin || url.pathname !== location.pathname || (url.hash && !url.hash.startsWith(EDITOR_HASH)) || url.username || url.password ||
     url.searchParams.get('embedded') !== 'model' || !owner || url.searchParams.get('editorOwner') !== owner ||
     [...url.searchParams.keys()].some(key => !allowed.includes(key) || url.searchParams.getAll(key).length !== 1)) throw new Error('Invalid embedded editor entry')
@@ -173,6 +173,10 @@ export function replaceEditorEntry(href: string) {
   if ([next.src, next.plan, url.searchParams.get('draft')].filter(Boolean).length !== 1) throw new Error('Embedded editor requires one source')
   const draft = url.searchParams.get('draft')
   if (draft && !/^[a-f0-9-]{36}$/.test(draft)) throw new Error('Invalid embedded draft')
+  if (url.searchParams.has('newModelKind') || url.searchParams.has('newModelSlot')) {
+    const kind = url.searchParams.get('newModelKind'), slot = Number(url.searchParams.get('newModelSlot'))
+    if (!draft || !['share', 'shared'].includes(kind || '') || !Number.isSafeInteger(slot) || slot <= 0) throw new Error('Invalid new model target')
+  }
   history.replaceState(null, '', url)
   entry = next
   EDITOR_SESSION = singleSession()
