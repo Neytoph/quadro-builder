@@ -3,30 +3,21 @@ import { useEngine } from '../store/EngineContext'
 import { useI18n } from '../i18n'
 import { colorLabel, labelOf } from '../names'
 import { builderComponents, componentHintKey, componentDimensions } from '../store/builderComponents'
-import { NARROW_MAX, statusTipBox, usePanelLayout } from './panelLayout'
-import { useDock } from './dock'
 import PartThumbnail from './PartThumbnail'
 
 export default function AccessoryInstallation({ menuOpen, embedded = false }: { menuOpen: boolean; embedded?: boolean }) {
   const api = useEngine()
   const { t } = useI18n()
-  const { left, right, vw, toolbarW } = usePanelLayout()
-  const { pane } = useDock()
   if (api.mode !== 'select') return null
-  const narrow = vw <= NARROW_MAX
   const preview = api.installationPreview
   const selected = api.selectedPanelFixing
   const partId = preview?.partId || selected?.partId
   const part = partId ? builderComponents().find(p => p.id === partId || p.kind === partId) : undefined
-  if (menuOpen || (!embedded && narrow && pane) || (!preview && !part && !api.canFlipAccessory)) return null
-  // 可变换的选区统一在上方卡片调整；安装中和只读仍沿用原提示位置。
-  if (!embedded && (api.selectionTransform || api.selectionCount===1 && !api.readOnly)) return null
-  const box = narrow ? null : statusTipBox(left, vw, toolbarW, pane ? right : null)
-  if (!embedded && !narrow && !box) return null
+  if (menuOpen || (!preview && !part && !api.canFlipAccessory)) return null
   const disabled = api.readOnly || !!api.selectionTransform?.busy
   const Notes = embedded ? 'details' : 'div'
 
-  const content = <section data-ui={embedded ? 'selection-accessory' : undefined} className={embedded ? 'qb-transform-accessory' : 'qb-card pointer-events-auto max-w-full w-[440px] px-3 py-2.5 text-xs leading-relaxed'} aria-label={t('accessory.preview')}>
+  return <section data-ui={embedded ? 'selection-accessory' : 'accessory-installation'} className={embedded ? 'qb-transform-accessory' : 'qb-card qb-transform-panel pointer-events-auto'} aria-label={t('accessory.preview')}>
       {part && <>
         <div className="flex items-center gap-2">
           <PartThumbnail id={part.id} />
@@ -52,8 +43,4 @@ export default function AccessoryInstallation({ menuOpen, embedded = false }: { 
         <button type="button" className="qb-btn qb-btn-sm flex items-center gap-1" data-ui="flip-accessory" onClick={api.flipAccessory} disabled={disabled}><RotateCcw size={14} />{t('accessory.flip')}</button>
       </div>}
     </section>
-  if (embedded) return content
-  return <div data-ui="accessory-installation" className={`fixed z-40 flex justify-center pointer-events-none bottom-[68px] ${narrow ? 'left-2 right-2' : ''}`} style={box ? { ...box, top: undefined } : undefined}>
-    {content}
-  </div>
 }

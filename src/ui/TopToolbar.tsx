@@ -11,14 +11,13 @@ import InstallationCatalogueMenu from './InstallationCatalogueMenu'
 import { MOTION, usePresence } from './motion'
 import { Pop } from './Pop'
 import StatusTip from './StatusTip'
-import AccessoryInstallation from './AccessoryInstallation'
 import { LayoutGrid, MessageSquarePlus, Shapes } from 'lucide-react'
 import { useCollab } from '../collab/CollabContext'
 import { useOverflowCompact } from './useOverflowCompact'
 import { useDock } from './dock'
 import { CUSTOM_COMPONENTS_EVENT } from './CustomComponentsMenu'
 import { customComponentStrings } from './customComponentStrings'
-import SelectionTransformPanel from './SelectionTransformPanel'
+import ComponentAdjustmentPanel from './ComponentAdjustmentPanel'
 
 export default function TopToolbar() {
   const api = useEngine()
@@ -131,12 +130,11 @@ export default function TopToolbar() {
       </div>
     </div>
     <div data-ui="selection-actions-dock" className="qb-selection-actions-dock fixed z-40 pointer-events-none" style={{top:toolbarTop(left,vw)+TOOLBAR_CHROME_H+PANEL_GAP}}>
-      <SelectionTransformPanel menuOpen={open!==null || pane!==null}/>
+      <ComponentAdjustmentPanel menuOpen={open!==null || pane!==null}/>
     </div>
     {shown && <Pop anchor={barRef.current} leaving={leaving} onClose={close} align="center" width={472} className="ic-popover" belowOnly>
       <InstallationCatalogueMenu tool={shown} requestId={requestId} entries={entries} onBrowse={browse} onClose={close} />
     </Pop>}
     <StatusTip menuOpen={open !== null} />
-    <AccessoryInstallation menuOpen={open !== null} />
   </>
 }

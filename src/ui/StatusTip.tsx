@@ -6,7 +6,6 @@ import { useDock } from './dock'
 import { usePresence } from './motion'
 import { componentForTool } from '../store/builderComponents'
 import { useMobileControls } from './useMobileControls'
-import FlexiGuide from './FlexiGuide'
 
 const BY_MODE: Record<string, string> = {
   select: 'tip.select',
@@ -63,18 +62,14 @@ export default function StatusTip({ menuOpen }: { menuOpen: boolean }) {
   }, [text, menuOpen])
   const [shown, leaving] = usePresence(api.toast ? null : say)
 
-  // 单件的专属操作由上方选区卡片统一承载。
+  // 组件操作由右侧操作区域统一承载。
   if(api.mode==='select' && api.selectionCount===1 && !api.readOnly)return null
   // 双管活动组的调整同样由右侧操作区域承载。
   if(api.engine()?.builder.clampAdjustment())return null
 
   const flexi = (api.mode === 'fitting' && ['flexi', 'flexi_bolt', 'flexi_hinge'].includes(api.fittingKind))
     || (api.mode === 'select' && !!api.engine()?.builder.flexiTarget())
-  if (flexi && !api.boxSelect && !menuOpen && !api.readOnly) {
-    const box = narrow ? { left: 8, right: 8, bottom: 68 } : statusTipBox(left, vw, toolbarW, pane ? right : null)
-    if (!box || (narrow && pane)) return null
-    return <div data-ui="flexi-guide" className="fixed z-40 flex justify-center pointer-events-none" style={box}><FlexiGuide /></div>
-  }
+  if (flexi && !api.boxSelect && !api.readOnly) return null
 
   if (api.selectionTransform || (mobile && KEYBOARD_TIPS.has(key)) || api.installationPreview || api.canFlipAccessory || api.selectedPanelFixing || componentForTool(api)) return null
 

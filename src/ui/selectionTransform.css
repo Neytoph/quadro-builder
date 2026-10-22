@@ -1,4 +1,5 @@
 .qb-selection-actions-dock{right:12px;width:min(340px,calc(100vw - 24px))}
+.qb-selection-actions-dock>.qb-card,.qb-selection-actions-dock>[data-ui$="-guide"]>.qb-card{max-height:calc(100dvh - 220px);overflow-y:auto;overscroll-behavior:contain}
 .qb-transform-panel{width:100%;padding:10px 12px;font-size:12px;line-height:1.5}
 .qb-transform-actions,.qb-transform-modes{display:flex;align-items:center;gap:4px}
 .qb-transform-actions{gap:8px;flex-wrap:wrap}
@@ -29,5 +30,6 @@
 .qb-single-actions .qb-flexi-guide{border:0;background:transparent;box-shadow:none;padding:8px 0 0}
 .qb-single-actions .qb-btn{white-space:normal}
 @media(max-width:600px){.qb-transform-accessory .qb-accessory-notes summary{min-height:44px}.qb-transform-accessory .qb-btn,.qb-single-actions .qb-btn{min-height:44px}}
+@media(max-width:600px){.qb-selection-actions-dock>[data-ui="accessory-installation"] .qb-btn{min-height:44px}}
 @media(max-width:600px){.qb-transform-panel{padding:8px 10px}.qb-transform-actions{gap:4px}.qb-transform-actions .qb-btn,.qb-transform-snap{min-height:44px}.qb-transform-whole{max-width:120px;white-space:normal}.qb-transform-fields{gap:8px}.qb-transform-fields input,.qb-transform-fields select{height:44px}}
 @media(max-width:767px){.qb-selection-actions-dock{right:8px;width:min(320px,calc(100vw - 16px))}}

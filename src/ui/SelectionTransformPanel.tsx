@@ -5,8 +5,6 @@ import {useI18n} from '../i18n'
 import {selectionTransformStrings} from './selectionTransformStrings'
 import './selectionTransform.css'
 import AccessoryInstallation from './AccessoryInstallation'
-import SingleSelectionPanel from './SingleSelectionPanel'
-import ClampGuide from './ClampGuide'
 
 export default function SelectionTransformPanel({menuOpen}:{menuOpen:boolean}) {
   const api=useEngine(),{lang,t}=useI18n(),s=selectionTransformStrings[lang],state=api.selectionTransform
@@ -25,8 +23,6 @@ export default function SelectionTransformPanel({menuOpen}:{menuOpen:boolean}) {
     setAxis(rotation?.axis || 'Y');setAngle(String(rotation?.degrees ?? 0));setRotationDirty(false)
   },[rotation?.axis,rotation?.degrees,rotation?.revision,state?.key,api.activeTabId])
   if(menuOpen || api.readOnly)return null
-  if(api.mode==='select' && api.selectionCount===1)return <SingleSelectionPanel/>
-  if(api.engine()?.builder.clampAdjustment())return <div data-ui="clamp-guide"><ClampGuide/></div>
   if(!state)return null
   const submit=(event:FormEvent)=>{
     event.preventDefault()
