@@ -4,6 +4,7 @@ import {BuildModel} from './model.js'
 import {loadCatalog} from './catalog.js'
 import {SelectionTransformGizmo} from './selectionTransformGizmo.js'
 import {SceneManager} from './scene.js'
+import {Builder} from './builder.js'
 
 beforeAll(async()=>{await loadCatalog()})
 
@@ -14,6 +15,7 @@ describe('真实Three操作轴生命周期',()=>{
     const canvas=document.createElement('canvas')
     const scene={scene:new Scene(),renderer:{domElement:canvas},camera:new PerspectiveCamera() as PerspectiveCamera|OrthographicCamera,controls:{enabled:true},requestRender:vi.fn(),setCursor:vi.fn()}
     const builder={model,scene,selection:new Map([[a.id,'node'],[b.id,'node']]),mode:'select',readOnly:false,transformMode:'translate',transformSnap:false,cancelSelectionTransform:vi.fn(),setSelectionRotationReadout:vi.fn()}
+    Object.setPrototypeOf(builder,Builder.prototype)
     return {builder,scene,canvas,gizmo:new SelectionTransformGizmo(builder)}
   }
 
@@ -25,6 +27,21 @@ describe('真实Three操作轴生命周期',()=>{
     builder.readOnly=false;builder.selection.delete([...builder.selection.keys()][0]);gizmo.sync()
     expect(gizmo.helper.visible).toBe(false);expect(gizmo.control.enabled).toBe(false)
     builder.selection.clear();gizmo.sync();expect(gizmo.helper.visible).toBe(false)
+    gizmo.dispose()
+  })
+
+  it('双管活动组选中多件仍隐藏通用操作轴，加入固定管后恢复',()=>{
+    const {builder,gizmo}=fixture(),{model}=builder
+    const base=[...model.tubes.values()][0]
+    const a=model.addNode(0,30,5),b=model.addNode(40,30,5)
+    const second=model.addTube(a.id,b.id,'T35','green',35)!
+    const clamp=model.addClamp(20,30,0)
+    clamp.dir=[1,0,0];clamp.off=[0,0,5]
+    builder.selection=new Map([[second.id,'tube'],[clamp.id,'clamp']])
+    gizmo.sync()
+    expect(gizmo.helper.visible).toBe(false);expect(gizmo.control.enabled).toBe(false)
+    builder.selection.set(base.id,'tube');gizmo.sync()
+    expect(gizmo.helper.visible).toBe(true);expect(gizmo.control.enabled).toBe(true)
     gizmo.dispose()
   })
 

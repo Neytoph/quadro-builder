@@ -32,6 +32,76 @@ function fixture(axis = [1, 0, 0], screenAxis = [100, 0]) {
 }
 
 describe('双管连接旋转与沿轴平移', () => {
+  it('重叠管在延迟单击时可穿透点选，悬停与拖动起点仍命中前面的第二根管', () => {
+    const { builder, tube, base } = fixture()
+    const front = { data: { id: tube.id, kind: 'tube' }, distance: 100 }
+    const back = { data: { id: base.id, kind: 'tube' }, distance: 105 }
+    builder.scene.pickClamp = () => null
+    builder.scene.pickAllForDelete = () => [front, back]
+    builder._pickSelect = Builder.prototype._pickSelect
+    builder._selectClick = { x: 200, y: 200, t: performance.now() - 1000, id: tube.id }
+    expect(builder._pickSelect(200, 200)).toBe(back)
+    expect(builder._pickSelect(200, 200, false)).toBe(front)
+  })
+
+  it('点击第二根管只选中本管，保留关节调整且不产生历史', () => {
+    const { model, builder, clamp, tube } = fixture()
+    builder.selection.clear()
+    const before = model.toJSON()
+    builder._clickSelect({ clientX: 200, clientY: 200 })
+    expect([...builder.selection]).toEqual([[tube.id, 'tube']])
+    expect(builder.clampAdjustment()).toEqual({ id: clamp.id, mode: 'rotate' })
+    expect(builder.selectionTransformState()).toBeNull()
+    expect(model.toJSON()).toEqual(before)
+    expect(builder.history.canUndo()).toBe(false)
+  })
+
+  it('Shift 点第二根管只增减本管，不带选连接器或活动侧其他管', () => {
+    const { builder, tube, base } = fixture()
+    builder.selection = new Map([[base.id, 'tube']])
+    builder._clickSelect({ clientX: 200, clientY: 200, shiftKey: true })
+    expect([...builder.selection]).toEqual([[base.id, 'tube'], [tube.id, 'tube']])
+    builder._selectClick = null
+    builder._clickSelect({ clientX: 200, clientY: 200, shiftKey: true })
+    expect([...builder.selection]).toEqual([[base.id, 'tube']])
+  })
+
+  it('明确选连接器活动组时，通用面板及直接变换接口均不接管关节', () => {
+    const { model, builder, clamp, base, tube } = fixture()
+    builder._selectClampCohort(clamp.id, false)
+    const before = model.toJSON()
+    expect(builder.selection.has(clamp.id)).toBe(true)
+    expect(builder.selection.has(tube.id)).toBe(true)
+    expect(builder.selectionTransformState()).toBeNull()
+    expect(builder.beginSelectionTransform()).toBe(false)
+    expect(builder.setSelectionPosition([20, 100, 5])).toBe(false)
+    expect(builder.rotateSelectionAxis('Y', 30)).toBe(false)
+    expect(model.toJSON()).toEqual(before)
+    expect(builder.history.canUndo()).toBe(false)
+    builder.selection.set(base.id, 'tube')
+    expect(builder.clampAdjustment()).toBeNull()
+    expect(builder.selectionTransformState()).not.toBeNull()
+  })
+
+  it('只选第二根管后沿管平移与绕管旋转保持固定管，支持撤销重做', () => {
+    const { model, builder, tube, base } = fixture()
+    builder._rotationDirections = new Map()
+    builder.selection.clear()
+    builder._clickSelect({ clientX: 200, clientY: 200 })
+    const before = model.toJSON()
+    expect(builder.slideSelectedClampBy(5)).toBe(true)
+    expect(builder.rotateSelectionBy()).toBe(true)
+    const after = model.toJSON()
+    expect(model.nodes.get(tube.a)!.x).toBe(5)
+    for (const id of [base.a, base.b]) expect(after.nodes.find(n => n.id === id)).toEqual(before.nodes.find(n => n.id === id))
+    expect(model.clamps.get(builder.clampAdjustment().id)!.off).not.toEqual([0, 0, 5])
+    expect([...builder.selection]).toEqual([[tube.id, 'tube']])
+    builder.history.undo(); builder.history.undo()
+    expect(model.toJSON()).toEqual(before)
+    builder.history.redo(); builder.history.redo()
+    expect(model.toJSON()).toEqual(after)
+  })
+
   function slopedPanel() {
     const f = fixture()
     const a = f.model.addNode(0, 80, 45), b = f.model.addNode(40, 80, 45)

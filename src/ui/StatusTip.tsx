@@ -7,7 +7,6 @@ import { usePresence } from './motion'
 import { componentForTool } from '../store/builderComponents'
 import { useMobileControls } from './useMobileControls'
 import FlexiGuide from './FlexiGuide'
-import ClampGuide from './ClampGuide'
 
 const BY_MODE: Record<string, string> = {
   select: 'tip.select',
@@ -66,14 +65,11 @@ export default function StatusTip({ menuOpen }: { menuOpen: boolean }) {
 
   // 单件的专属操作由上方选区卡片统一承载。
   if(api.mode==='select' && api.selectionCount===1 && !api.readOnly)return null
+  // 双管活动组的调整同样由右侧操作区域承载。
+  if(api.engine()?.builder.clampAdjustment())return null
 
   const flexi = (api.mode === 'fitting' && ['flexi', 'flexi_bolt', 'flexi_hinge'].includes(api.fittingKind))
     || (api.mode === 'select' && !!api.engine()?.builder.flexiTarget())
-  if (api.engine()?.builder.clampAdjustment() && !menuOpen && !api.installationPreview && !componentForTool(api)) {
-    const box = narrow ? { left: 8, right: 8, bottom: 68 } : statusTipBox(left, vw, toolbarW, pane ? right : null)
-    if (!box || (narrow && pane)) return null
-    return <div data-ui="clamp-guide" className="fixed z-40 flex justify-center pointer-events-none" style={box}><ClampGuide /></div>
-  }
   if (flexi && !api.boxSelect && !menuOpen && !api.readOnly) {
     const box = narrow ? { left: 8, right: 8, bottom: 68 } : statusTipBox(left, vw, toolbarW, pane ? right : null)
     if (!box || (narrow && pane)) return null
