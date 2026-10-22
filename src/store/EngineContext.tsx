@@ -34,7 +34,7 @@ import { shareImageDataUrl } from '../ui/shareImage'
 import { MOTION } from '../ui/motion'
 import { paintOpening, type ModelOpeningState } from '../ui/ModelOpening'
 import { createTabDoc, dropTabDoc, memoryDoc, openTabDoc, readPersonalState, writePersonalState, SEED_ORIGIN, type LocalDoc } from '../collab/localDocs'
-import { partCountOf, writeJSON, type ModelJSON } from '../collab/ymodel'
+import { partCountOf, writeJSON, setPlanName, type ModelJSON } from '../collab/ymodel'
 import { appendTab } from './tabs'
 import { modelColors, selectionColor } from '../engine/customColors.js'
 import { modelContent, personalDecision, personalRecordUnconfirmed, personalSaveBaseline, readPersonalBinding, restorePersonalBinding, samePersonalBinding, savedGenerationUnchanged, savedRecordState, type PersonalState } from './personalTabs'
@@ -51,12 +51,14 @@ import { refreshedRoomBackground, roomBackgroundWarnings } from '../home/refresh
 import { installationChoices, selectInstallation, type CatalogueChoice } from './installationCatalogue'
 import { captureTool, ToolMemory, type BuilderTool, type ToolState } from './toolMemory'
 import { editorScenes } from './scenePool'
+import { newModelTarget, pendingNewModel, finishNewModel } from './newModel'
+import { recordCreatedSlot } from '../sync/slotAccess'
 
 // 引擎来自 Vanilla JS，这里不跟它的推断类型较劲。
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type E = any
 type AnyRec = Record<string, E>
-type ToastKind = 'ok' | 'warn' | 'err'
+type ToastKind = 'ok' | 'warn' | 'err' | 'saved'
 type NameAsk = { title: string; ok: string; value: string; resolve: (name: string | null) => void }
 export type SidePanel = 'bom' | 'inventory'
 export type AssemblyConfig = { version: 1; regions: Array<{ id: string; name: string; partIds: string[] }>; order: string[] }
@@ -200,7 +202,7 @@ interface EngineApi {
   confirmInstallation: () => void
   cancelInstallation: () => void
   flipAccessory: () => void
-  toast: { message: string; kind: ToastKind } | null
+  toast: { message: string; kind: ToastKind; id: number } | null
   tabs: TabInfo[]
   activeTabId: string | null
   bom: BomView | null
@@ -738,7 +740,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const completeEntry = useCallback(() => setEntryReady(true), [])
   const [error, setError] = useState<string | null>(null)
   const [tick, setTick] = useState(0)
-  const [toast, setToast] = useState<{ message: string; kind: ToastKind } | null>(null)
+  const [toast, setToast] = useState<{ message: string; kind: ToastKind; id: number } | null>(null)
+  const toastSequence = useRef(0)
   const [tabs, setTabs] = useState<TabInfo[]>([])
   const [activeTabId, setActiveTabId] = useState<string | null>(null)
   const [inventory, setInventory] = useState<Inventory>(loadInv)
@@ -757,7 +760,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
         updateSlotAccess(result.slots)
         const draft=tabsRef.current.find(tab=>tab.tabId===activeRef.current)
         const entry=bootEntry()
-        if(saveCapacityFull()&&draft&&!draft.docId&&!draft.libraryId&&!draft.planId&&!entry.plan&&!entry.src&&!entry.doc&&!capacityNotice.current){capacityNotice.current=true;notifyRef.current(t('capacity.cloudFull'),'warn')}
+        if(saveCapacityFull()&&draft&&!draft.docId&&!draft.libraryId&&!draft.planId&&!newModelTarget(draft.local)&&!entry.plan&&!entry.src&&!entry.doc&&!capacityNotice.current){capacityNotice.current=true;notifyRef.current(t('capacity.cloudFull'),'warn')}
         else if(!saveCapacityFull())capacityNotice.current=false
         for(const tab of tabsRef.current){
           if(tab.planId)continue
@@ -807,8 +810,13 @@ export function EngineProvider({ children }: { children: ReactNode }) {
 
   const bump = useCallback(() => setTick(n => n + 1), [])
   const notify = useCallback((message: string, kind: ToastKind = 'ok') => {
-    setToast({ message, kind })
+    setToast({ message, kind, id: ++toastSequence.current })
   }, [])
+  const dismissToast = useCallback(() => setToast(null), [])
+  useEffect(() => {
+    const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
+    if (SINGLE_MODEL && ready && tab && !tab.docId && !tab.libraryId && !tab.planId) newModelTarget(tab.local)
+  }, [ready, activeTabId])
 
   /**
    * 模型里有、文档里还没有的改动写进文档。编辑都经 Builder 的 recordHistory 交给文档，
@@ -1816,6 +1824,57 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     if(SINGLE_MODEL && String(storage.getAccountScope())==='anonymous'){
       await saveSessionNow();needAccount('save');return null
     }
+    const creation = SINGLE_MODEL && !tab.docId && !tab.libraryId && !tab.planId ? newModelTarget(tab.local) : null
+    if (creation) {
+      if (e2.builder.busy()) { notify(t('sync.waiting'), 'warn'); return null }
+      let saveName = name || tab.name
+      if (!name && isUntitledName(tab.name)) {
+        const typed = await askName(t('saves.saveTitle'), t('saves.saveOk'), '')
+        if (typed === null) return null
+        saveName = typed.trim() || t('tab.untitled')
+      }
+      if (!tabsRef.current.includes(tab)) return null
+      const owner = String(storage.getAccountScope()), epoch = storage.getAccountEpoch()
+      const body = pendingNewModel(tab.local, creation, saveName, structuredClone(exportTab(tab)))
+      // 重试沿用同一快照与请求号；回执丢失也不会重复占位。
+      await saveSessionNow()
+      tab.readOnly = true; e2.builder.setReadOnly(true); syncTabs()
+      try {
+        const res = await fetch('/quadro/library', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', 'X-Builder-User-ID': owner.slice(5) }, body: JSON.stringify(body) })
+        if (!res.ok) throw new Error(t('sync.failed') + ' (' + res.status + ')')
+        const result = await res.json() as { id: string; backend: string; revision: number }
+        if (storage.getAccountEpoch() !== epoch || String(storage.getAccountScope()) !== owner || !tabsRef.current.includes(tab)) return null
+        tab.savedContent = modelContent(body.data); tab.savedName = body.name
+        tab.dirty = modelContent(exportTab(tab)) !== tab.savedContent || tab.name !== body.name && !isUntitledName(tab.name)
+        if (!tab.dirty) tab.name = body.name
+        tab.saveState = tab.dirty ? 'unsaved' : 'synced'
+        if (creation.kind === 'shared') {
+          // 用当前快照接入协作，不把本机草稿的历史及元数据传给成员。
+          const planTab = makePlanTab(result.backend, tab.name)
+          writeJSON(planTab.local.doc, structuredClone(exportTab(tab)), SEED_ORIGIN)
+          setPlanName(planTab.local.doc, result.backend, tab.name)
+          planTab.readOnly = true
+          tabsRef.current = tabsRef.current.map(existing => existing === tab ? planTab : existing)
+          if (activeRef.current === tab.tabId) { activeRef.current = planTab.tabId; applyTab(planTab) }
+          void dropTabDoc(tab.tabId, tab.local)
+        }
+        else { tab.libraryId = result.id; tab.libraryOwner = owner.slice(5); tab.libraryRevision = result.revision }
+        finishNewModel(tab.local)
+        recordCreatedSlot(creation.slot, creation.kind, result)
+        syncTabs(); notify(t('toast.saved', { name: body.name }), 'saved')
+        return { docId: result.id, name: body.name, data: body.data }
+      } catch (error) {
+        console.warn('[create model]', error)
+        if (storage.getAccountEpoch() === epoch) notify(error instanceof Error ? error.message : t('sync.failed'), 'err')
+        return null
+      } finally {
+        if (storage.getAccountEpoch() === epoch && tabsRef.current.includes(tab)) {
+          tab.readOnly = !!tab.planId
+          if (activeRef.current === tab.tabId) e2.builder.setReadOnly(!!tab.planId)
+          syncTabs()
+        }
+      }
+    }
     if(tab.libraryId){
       if(e2.builder.busy())return null
       if(!navigator.onLine){notify(t('sync.failed'),'err');return null}
@@ -1834,7 +1893,9 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       if(tab.libraryId!==binding.id||tab.libraryOwner!==binding.owner)return null
       const result=await res.json() as {revision:number};tab.libraryRevision=result.revision
       if((tab.editGeneration||0)===generation){tab.dirty=false;tab.name=name||tab.name;tab.savedName=tab.name;tab.savedContent=modelContent(data);tab.saveState='synced'}
-      syncTabs();return {docId:tab.libraryId,name:name||tab.name,data}
+      syncTabs()
+      notify(t('toast.saved', { name: name || tab.name }), 'saved')
+      return {docId:tab.libraryId,name:name||tab.name,data}
     }
     if (tab.planId) {
       notify(t('collab.autoSynced'))
@@ -1972,6 +2033,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       if (result.status === 'synced') {
         tab.baseRev = result.rev
         if (!tab.dirty) tab.saveState = 'synced'
+        notify(t('toast.saved', { name }), 'saved')
       } else if (result.status === 'conflict') {
         const read = await readPersonalBinding(tab, binding, () => tabsRef.current.includes(tab),
           () => docs.getDoc(result.copyId) as Promise<AnyRec | null>)
@@ -1993,6 +2055,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       syncTabs()
     }
     if (result.status !== 'synced') return
+    if (!tab) notify(t('toast.saved', { name }), 'saved')
     window.dispatchEvent(new CustomEvent('quadro:design-saved', {
       detail: { docId, name, parts: modelPartCount(data) },
     }))
@@ -3222,7 +3285,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     pasting: !!builder?.pasting,
     pasteHeightCm: builder?.pasteHeightCm ?? null,
     side, setSide, notify,
-    dismissToast: () => setToast(null),
+    dismissToast,
     placingConnector: (builder?.placeConnectorId as string) || null,
     bump, setMode, activateTool, toggleLastTool, setColor, setTube, setPanel, setSlide, setFitting, setClamp, startPool, startC45, startReinforce, reinforcementPartId: builder?.reinforcementPartId || 'reinforce80', placeConnector,
     buildStep: (dir) => { bumpCount('builder.edit.step'); builder?.buildStep?.(dir); bump() },

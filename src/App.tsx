@@ -38,27 +38,7 @@ import Downloads, {DownloadContents,exportResource,hasInlineManualProgress} from
 import {resourceFileDelivered,sendResourceMessage} from './resourceDownload'
 import {installResourceStyle} from '../public/model-resources.js'
 import {RESOURCE_MODE} from './entry'
-
-function Toast() {
-  const { toast: live, dismissToast } = useEngine()
-  const [toast, leaving] = usePresence(live)
-  useEffect(() => {
-    if (!live) return
-    // 警告和出错往往是一整句要读完的话，多留一会儿
-    const id = window.setTimeout(dismissToast, live.kind === 'ok' ? 2800 : 6000)
-    return () => window.clearTimeout(id)
-  }, [live, dismissToast])
-  if (!toast) return null
-  const tone = toast.kind === 'err' ? 'text-red-700' : toast.kind === 'warn' ? 'text-amber-700' : 'text-gray-100'
-  return (
-    // key 跟着消息走：连着两条提示时，第二条重新演一遍入场。
-    // 压在顶栏、右侧面板和下拉菜单上面：手机上右侧面板盖满画布，
-    // 在「文件」里点保存，提示要浮在面板上才看得见。确认框（z-75）仍在它上面。
-    <div data-ui="toast" key={toast.message} className={`qb-floating-toast m-toast qb-card fixed top-[9.5rem] left-1/2 -translate-x-1/2 w-max max-w-[calc(100vw-2rem)] text-center ${tone} text-sm font-medium px-4 py-2 z-[70] pointer-events-none ${leaving ? 'm-leave' : ''}`}>
-      {toast.message}
-    </div>
-  )
-}
+import Toast from './ui/Toast'
 
 function DeferredAssemblyPreview() {
   const api = useEngine(), { t } = useI18n()
