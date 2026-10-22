@@ -687,8 +687,33 @@ export class SceneManager {
     this._animate();
   }
 
-  /** 不再用的画面（版本对照关掉时）：停下渲染循环，放掉渲染器和画布。 */
+  /** 同一账号重新打开时，将现有画布与几何缓存接回新的编辑器。 */
+  attachContainer(container) {
+    if (this._disposed) throw new Error('Cannot reuse a disposed scene');
+    this._resizeObserver?.disconnect();
+    this.container = container;
+    container.appendChild(this.renderer.domElement);
+    if (this._spinner) container.appendChild(this._spinner);
+    if (this._selectBox) container.appendChild(this._selectBox);
+    this._resizeObserver?.observe(container);
+    this.onResize();
+  }
+
+  canReuse() {
+    return !this._disposed && !this.renderer.getContext().isContextLost();
+  }
+
+  setPaused(paused) {
+    if (this._disposed || this._suspended === paused) return;
+    this._suspended = paused;
+    if (paused) cancelAnimationFrame(this._animationFrame);
+    else { this.onResize(); this._needsRender = true; this._animate(); }
+  }
+
+  /** 停止渲染循环并释放不再使用的场景。 */
   dispose() {
+    if (this._disposed) return;
+    cancelAnimationFrame(this._animationFrame);
     this.selectionTransformGizmo?.dispose();
     this._clearHoverOverlay();
     this.clearPanelPlacementPreview();
@@ -1035,6 +1060,7 @@ export class SceneManager {
   }
 
   onResize() {
+    if (this._disposed || this._suspended || !this.container.clientWidth || !this.container.clientHeight) return;
     this._needsRender = true;
     const w = this.container.clientWidth, h = this.container.clientHeight;
     if (!w || !h) return;
@@ -7811,8 +7837,8 @@ export class SceneManager {
   }
 
   _animate() {
-    if (this._disposed) return;
-    requestAnimationFrame(this._animate);
+    if (this._disposed || this._suspended) return;
+    this._animationFrame = requestAnimationFrame(this._animate);
     if (this._stepCameraAnimation()) this._needsRender = true;
     if (this._stepCameraFly()) this._needsRender = true;
     if (this._stepMotion()) this._needsRender = true;

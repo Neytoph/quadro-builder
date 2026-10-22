@@ -141,8 +141,8 @@ export const VIEW_ONLY = bootEntry().view
 
 export const EDITOR_EMBED = window.parent !== window && new URLSearchParams(location.search).get('embedded') === 'model'
 if(EDITOR_EMBED)document.documentElement.dataset.editorEmbed='true'
-const editorEntry = bootEntry()
 function singleSession(): string | undefined {
+  const editorEntry = bootEntry()
   if (!SINGLE_MODEL || RECOVERY_ONLY || RESOURCE_MODE || editorEntry.view || editorEntry.delivery || editorEntry.roomBrief || editorEntry.version) return undefined
   if (editorEntry.plan) return `model-editor:plan:${editorEntry.plan}`
   if (editorEntry.doc) return `model-editor:doc:${editorEntry.doc}`
@@ -154,7 +154,29 @@ function singleSession(): string | undefined {
   history.replaceState(null, '', url)
   return `single-draft:${draft}`
 }
-export const EDITOR_SESSION = singleSession()
+export let EDITOR_SESSION = singleSession()
+
+/** 仅在嵌入应用已卸载后替换来源；下一份文档重新走完整读取和权限检查。 */
+export function replaceEditorEntry(href: string) {
+  const url = new URL(href, location.href)
+  const owner = new URLSearchParams(location.search).get('editorOwner')
+  const allowed = ['embedded', 'editorProtocol', 'editorOwner', 'lang', 'editorRename', 'draft', 'plan', 'src', 'name']
+  if (!EDITOR_EMBED || url.origin !== location.origin || url.pathname !== location.pathname || (url.hash && !url.hash.startsWith(EDITOR_HASH)) || url.username || url.password ||
+    url.searchParams.get('embedded') !== 'model' || !owner || url.searchParams.get('editorOwner') !== owner ||
+    [...url.searchParams.keys()].some(key => !allowed.includes(key) || url.searchParams.getAll(key).length !== 1)) throw new Error('Invalid embedded editor entry')
+  const model = new URLSearchParams(url.hash.slice(EDITOR_HASH.length))
+  if ([...model.keys()].some(key => !['src', 'plan', 'name'].includes(key) || model.getAll(key).length !== 1 || url.searchParams.has(key)) ||
+    (url.searchParams.has('editorProtocol') && url.searchParams.get('editorProtocol') !== '2')) throw new Error('Invalid embedded model entry')
+  const next = readEntry(url.search, url.hash, collab)
+  if (next.src && !/^\/quadro\/library\/[a-f0-9]+\/native$/.test(next.src)) throw new Error('Invalid embedded model source')
+  if (next.plan && !/^[A-Za-z0-9_-]{4,64}$/.test(next.plan)) throw new Error('Invalid embedded plan')
+  if ([next.src, next.plan, url.searchParams.get('draft')].filter(Boolean).length !== 1) throw new Error('Embedded editor requires one source')
+  const draft = url.searchParams.get('draft')
+  if (draft && !/^[a-f0-9-]{36}$/.test(draft)) throw new Error('Invalid embedded draft')
+  history.replaceState(null, '', url)
+  entry = next
+  EDITOR_SESSION = singleSession()
+}
 
 /**
  * 只放一座、不读也不写这台设备上的标签页的打开方式：只看、交付查看、画房间。

@@ -7,6 +7,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { publicResources } from './scripts/publicResources'
 import { publicAssetFallback } from './scripts/publicAssetFallback'
+import { startupResources } from './scripts/startupResources'
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url))
 let opsTelemetryEnabled = false
@@ -67,6 +68,7 @@ export default defineConfig({
       },
     },
     publicResources(rootDir),
+    startupResources(),
     publicAssetFallback(rootDir),
     react(),
     tailwindcss(),
@@ -157,6 +159,17 @@ export default defineConfig({
   ],
   server: {
     host: '0.0.0.0',
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('/node_modules/three/')) return 'three'
+          if (/\/node_modules\/(?:react|react-dom|scheduler)\//.test(id)) return 'react'
+          if (/\/node_modules\/(?:yjs|y-indexeddb|y-protocols|y-websocket|lib0)\//.test(id)) return 'sync'
+        },
+      },
+    },
   },
   worker: {
     format: 'es',
