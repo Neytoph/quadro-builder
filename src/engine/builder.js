@@ -817,6 +817,7 @@ export class Builder {
   // --- Verschieben --------------------------------------------------------
   selectionTransformState() {
     if(this.mode!=='select' || this.readOnly || this._paste || this.selection.size<2)return null;
+    if(this.clampAdjustment())return null;
     const bounds=this._selectionTransform?.visualPreview?.bounds || selectionBounds(this._selectionTransform?.model || this.model,this.selection);
     if(!bounds)return null;
     const key=[...this.selection.keys()].sort().join(',');
@@ -849,6 +850,7 @@ export class Builder {
 
   beginSelectionTransform({visualPreview=false}={}) {
     if(this.readOnly || this.mode!=='select' || this.selection.size<2 || this.busy() || !selectionBounds(this.model,this.selection))return false;
+    if(this.clampAdjustment())return false;
     this._cancelSelectFlip();this.transformError=null;
     const rotationBefore=this.selectionTransformState().rotation;
     this._selectionTransform=new SelectionTransformSession(this);
@@ -3400,7 +3402,7 @@ export class Builder {
         }
       }
       if (e.button === 0 && !this._down.box && this.mode === "select" && !this._down.add && !e.altKey) {
-        const pick = this._pickSelect(e.clientX, e.clientY);
+        const pick = this._pickSelect(e.clientX, e.clientY, false);
         const adjustment = this.clampAdjustment();
         const driver = adjustment?.mode === 'slide' ? this._flapDriverForPick(pick) : this._rotationDriverForPick(pick);
         const key = this._rotationPickKey(pick);
@@ -3788,7 +3790,7 @@ export class Builder {
     }
     if (this.mode === "select" || this.mode === "delete") {
       const raw = this.mode === "select"
-        ? this._pickSelect(x, y)
+        ? this._pickSelect(x, y, false)
         : this.scene.pickForDelete(x, y);
       const p = raw;
       this.scene.setHover(null);
@@ -4005,7 +4007,7 @@ export class Builder {
   // das Rohr stellt einen beliebigen Winkel ein. Das Rohr in ihre freie
   // Oeffnung kommt im BAU-Modus dazu, nicht hier.
 
-  _pickSelect(x, y) {
+  _pickSelect(x, y, cycle = true) {
     const clampHit = this.scene.pickClamp(x, y);
     const hits = this.scene.pickAllForDelete ? this.scene.pickAllForDelete(x, y) : [];
     let allHit = hits.length ? hits[0] : this.scene.pickForDelete(x, y);
@@ -4013,7 +4015,8 @@ export class Builder {
     // （见 _clickSelectRaw），不往里选。快的两下还是选整块，不冲突。
     const last = this._selectClick;
     const cur = this.selection.size === 1 ? [...this.selection][0] : null;
-    if (hits.length > 1 && cur && cur[1] !== "panel" && !this._clickRotationKind(cur[0], cur[1]) && this.model.slides.get(cur[0])?.kind !== "curved-slide-domestic80" && last
+    // 悬停和拖动起点保持前方命中；松手确认单击后才穿透到后面的零件。
+    if (cycle && hits.length > 1 && cur && cur[1] !== "panel" && !this._clickRotationKind(cur[0], cur[1]) && this.model.slides.get(cur[0])?.kind !== "curved-slide-domestic80" && last
         && Math.hypot(x - last.x, y - last.y) < CLICK_TOLERANCE
         && performance.now() - last.t >= SELECT_BLOCK_MS) {
       const idx = hits.findIndex((h) => h.data && h.data.id === cur[0]);
@@ -5664,19 +5667,18 @@ export class Builder {
         this._selectConnectedFromPick(pick, add);
         return;
       }
-      if (kind === "panel" || kind === "textile") {
-        if (kind === "panel" && !add && this._panelFlipsOnClick(id)) {
-          this._queueSelectFlip(id, e);
-          return;
-        }
-        if (!add) this.selection.clear();
-        if (add && this.selection.has(id)) this.selection.delete(id);
-        else this.selection.set(id, kind);
-        this._profilAuswahl = null;
-        this.refresh();
+      if (kind === "panel" && !add && this._panelFlipsOnClick(id)) {
+        this._queueSelectFlip(id, e);
         return;
       }
-      this._selectClampCohort(slideOwner, add);
+      // 点到活动侧零件只选本件，关节仍由所选零件推导，拖动时带动连接结构。
+      const selected = this.selection.has(id);
+      const only = this.selection.size === 1 && selected;
+      if (!add) this.selection.clear();
+      if (add && selected) this.selection.delete(id);
+      else if (!only || add || kind !== "tube") this.selection.set(id, kind);
+      this._profilAuswahl = null;
+      this.refresh();
       return;
     }
     // Ein Scharnier der Flexikupplung ist ein eigenes Teil, obwohl es am

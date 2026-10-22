@@ -30,7 +30,7 @@ export class SelectionTransformGizmo {
 
   sync() {
     const b=this.builder,bounds=selectionBounds(b.model,b.selection);
-    const visible=b.mode==='select' && b.selection.size>1 && !b.readOnly && !b.boxSelect && !b._paste && !b._clampDrag && !b._hingeDrag && !b.held && !!bounds;
+    const visible=b.mode==='select' && b.selection.size>1 && !b.readOnly && !b.boxSelect && !b._paste && !b._clampDrag && !b._hingeDrag && !b.held && !b.clampAdjustment() && !!bounds;
     this.control.camera=this.scene.camera;
     this.control.enabled=visible;this.helper.visible=visible;
     if(!visible){this.cancel();return;}
