@@ -272,6 +272,17 @@ export function confirmedCandidates(model,id,options={}) {
     return selectPanelCandidates(model,candidates,options);
   }
   if(isOuterScrewPanel(id))options={...options,oppositeRetainers:true};
+  if(spec.feature==='net'){
+    const candidates=railCandidates(model,spec),seen=new Set(candidates.map(p=>model.panelCorners(p)?.map(c=>c.map(v=>v.toFixed(2)).join(',')).sort().join('|')));
+    for(const probe of insetPanelProbes(model,spec.width,spec.height,{deduplicate:false})){
+      const corners=model.panelCorners(probe),key=corners?.map(c=>c.map(v=>v.toFixed(2)).join(',')).sort().join('|');
+      if(!corners||seen.has(key))continue;
+      const supports=edgeSupports(model,corners,10),frame=confirmedFrame(model,{...probe,panelId:spec.id,side:1});
+      if(!supports||!frame)continue;
+      candidates.push(asFitting(spec,probe,frame,supports));seen.add(key);
+    }
+    return candidates;
+  }
   if(spec.placement==='panel') {
     const fake={...spec,placement:'fitting'};
     const fixing=options.screwAxis && (options.oppositeRetainers || INSET_PANEL_IDS.has(id)) && supportsPanelFixing(id) ? {params:{screwAxis:options.screwAxis,...(!INSET_PANEL_IDS.has(id)?{mountLayout:PANEL_RETAINER_LAYOUT}:{})}} : {};
