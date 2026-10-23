@@ -31,11 +31,16 @@ export const CONFIRMED_COMPONENTS = [
 export const CONFIRMED_PANEL_IDS = new Set(CONFIRMED_COMPONENTS.filter(p => p.placement === 'panel').map(p => p.id));
 export const CONFIRMED_FITTING_IDS = new Set(CONFIRMED_COMPONENTS.filter(p => p.placement === 'fitting').flatMap(p => [p.id, p.kind || p.id]));
 export function confirmedSpec(id) { return CONFIRMED_COMPONENTS.find(p => p.id === id || p.kind === id) || null; }
+export function usesCustomClimbingColor(part) {
+  return confirmedSpec(part?.panelId || part?.partId || part?.kind)?.feature === 'climbing' && part?.params?.colorMode === 'custom';
+}
 export function confirmedColor(part) {
   if(part?.appearanceVersion!==2)return part?.color;
   const spec=confirmedSpec(part.panelId || part.partId || part.kind);
   // 旧固定粉色蜂窝仍保留存档字段，呈现与清单共用经典蓝回退。
   if(spec?.feature==='honeycomb' && part.params?.paletteVersion!==2 && part.color==='#ec9eb2')return 'blue';
+  // 仅显式选择自定义底板色的攀岩板按存档颜色呈现；既有目录固定色保持。
+  if(usesCustomClimbingColor(part))return part.color || spec.fixedColor;
   return spec?.fixedColor || part.color || spec?.defaultColor;
 }
 export function legoStudHeight(part) { return part.params?.studHeight ?? 0.7; }

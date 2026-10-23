@@ -17,7 +17,7 @@ import { TUBE_FITTINGS, POOL_KINDS, isHolePart, holeArmDirs, holeClampDirsAt, HO
   POOL_SETS, ARM_FITTINGS, armFittingDirsAt, fixedFittingColor, fixedTubeColor, slopeArmDirsAt, SLIDE_PARTS, SLIDE_SPECS, ROTATABLE_FITTINGS } from "./model.js";
 import { CONNECTOR_ARM_BITS } from "./qdfimport.js";
 import { ACCESSORY_IDS, PANEL_ACCESSORY_IDS, componentFrame } from './accessoryPack.js';
-import { confirmedSpec } from './componentPack.js';
+import { confirmedSpec, usesCustomClimbingColor } from './componentPack.js';
 import { supportsPanelFixing, panelRailScrewAxis } from './confirmedComponentModel.js';
 import { insetPanelProbes } from './insetPanelMounts.js';
 import { installationReason, installationFacingNotice } from './installationReason.js';
@@ -662,13 +662,13 @@ export class Builder {
       }
       for (const [kind, map] of [['panel', this.model.panels], ['textile', this.model.textiles], ['slide', this.model.slides]]) {
         for (const el of map.values()) {
-          if (el.appearanceVersion === 2 && confirmedSpec(el.panelId || el.partId || el.kind)?.fixedColor) continue;
+          if (el.appearanceVersion === 2 && confirmedSpec(el.panelId || el.partId || el.kind)?.fixedColor && !usesCustomClimbingColor(el)) continue;
           const next = pick();
           if (this.model.setColorOf(kind, el.id, next)) changed++;
         }
       }
       for (const f of this.model.fittings.values()) {
-        if (f.appearanceVersion === 2 && confirmedSpec(f.partId || f.kind)?.fixedColor) continue;
+        if (f.appearanceVersion === 2 && confirmedSpec(f.partId || f.kind)?.fixedColor && !usesCustomClimbingColor(f)) continue;
         if (fixedFittingColor(f.kind)) continue;
         const next = pick();
         if (this.model.setColorOf('fitting', f.id, next)) changed++;

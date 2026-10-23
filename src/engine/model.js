@@ -3,7 +3,7 @@
 
 import { MERGE_EPS, FORMAT_VERSION, DIAGONAL_SNAP_TOL, DIRECTIONS, DIAGONAL_DIRECTIONS, DIR_ALIGN_TOL, ARM_ALIGN_TOL, CONN_TYPE_MASK, anchorGap } from "./config.js";
 import { ACCESSORY_IDS, PANEL_ACCESSORY_IDS, accessoryMount, accessoryDiagnostics, panelAccessoryDiagnostics, componentMountsValid, componentVolumes, componentFrame, confirmedDiagnostics, nativeWheelComponentObstacle } from './accessoryPack.js';
-import { confirmedSpec } from './componentPack.js';
+import { confirmedSpec, usesCustomClimbingColor } from './componentPack.js';
 import { confirmedCandidates, ropeCandidate, supportsPanelFixing, PANEL_RETAINER_LAYOUT } from './confirmedComponentModel.js';
 import { insetPanelProbes, INSET_PANEL_IDS, INSET_MOUNT_LAYOUT, oppositeScrewSupports, insetPanelReference } from './insetPanelMounts.js';
 import { validAssemblyConfig } from './assemblyConfig.js';
@@ -1482,7 +1482,9 @@ export class BuildModel {
   setPanelFixing(id,screwAxis) {
     const candidate=this.panelFixingDiagnostics(id,screwAxis),part=this.panels.get(id);
     if(!candidate.valid || !part)return false;
+    const customColor=usesCustomClimbingColor(part);
     for(const key of ['a','b','t0','len','side','params','mounts','supportTubes','appearanceVersion'])part[key]=structuredClone(candidate[key]);
+    if(customColor)part.params.colorMode='custom';
     return true;
   }
 
@@ -3692,7 +3694,7 @@ export class BuildModel {
     if (!map) return false;
     const el = map.get(id);
     if (!el || el.color === color) return false;
-    if (el.appearanceVersion === 2 && confirmedSpec(el.panelId || el.partId || el.kind)?.fixedColor) return false;
+    if (el.appearanceVersion === 2 && confirmedSpec(el.panelId || el.partId || el.kind)?.fixedColor && !usesCustomClimbingColor(el)) return false;
     if (kind === 'tube' && fixedTubeColor(el.tubeId)) return false;
     // Arm-/Link-Kanten (C45-Adapter, Doppelrohr-Verbindung) sind keine echten
     // Rohre und werden nicht eingefaerbt.

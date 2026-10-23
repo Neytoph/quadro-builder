@@ -58,6 +58,18 @@ describe('确认组件实际安装与生命周期',()=>{
 })
 
 describe('确认组件数据及装配边界',()=>{
+  it('显式自定义攀岩底板色保存后仍可编辑，旧目录板保持固定色',()=>{
+    const {model,part}=createConfirmedComponentFixture('panel_40x40_climbing');
+    part.color='red';expect(confirmedColor(part)).toBe('#39a7df');expect(model.setColorOf('panel',part.id,'green')).toBe(false);
+    part.params={...part.params,colorMode:'custom'};
+    expect(confirmedColor(part)).toBe('red');expect(model.setColorOf('panel',part.id,'green')).toBe(true);expect(confirmedColor(part)).toBe('green');
+    expect(model.setPanelFixing(part.id,'vertical')).toBe(true);expect(part.params.colorMode).toBe('custom');expect(confirmedColor(part)).toBe('green');
+    const body=meshes(model,part).find(m=>m.name.startsWith('plate:'))!;
+    expect((body.material as THREE.MeshPhysicalMaterial).color.getHexString()).toBe('2fcb5a');
+    const restored=new BuildModel();expect(restored.loadJSON(model.toJSON()).ok).toBe(true);
+    const saved=[...restored.panels.values()].find(p=>p.id===part.id)!;expect(confirmedColor(saved)).toBe('green');
+    expect(restored.setColorOf('panel',saved.id,'red')).toBe(true);expect(confirmedColor(saved)).toBe('red');
+  });
   it('批量装配可获取同一面板的不同承载方向，默认挂位保持按框格去重',()=>{
     const {model}=createConfirmedComponentFixture('panel_40x40',{install:false})
     const faceKey=(p: Parameters<BuildModel['panelCorners']>[0])=>model.panelCorners(p)!.map(c=>c.join(',')).sort().join('|')

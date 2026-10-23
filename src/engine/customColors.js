@@ -1,6 +1,6 @@
 import { colorHex } from './catalog.js';
 import { fixedTubeColor, fixedFittingColor } from './model.js';
-import { confirmedSpec } from './componentPack.js';
+import { confirmedSpec, usesCustomClimbingColor } from './componentPack.js';
 
 export const COLOR_MAPS = ['tubes', 'panels', 'textiles', 'slides', 'fittings'];
 
@@ -8,7 +8,7 @@ function partColor(map, part) {
   let value = part.color;
   if (map === 'tubes') value = fixedTubeColor(part.tubeId) || value;
   if (map === 'fittings') value = fixedFittingColor(part.kind) || value;
-  if (part.appearanceVersion === 2) value = confirmedSpec(part.panelId || part.partId || part.kind)?.fixedColor || value;
+  if (part.appearanceVersion === 2 && !usesCustomClimbingColor(part)) value = confirmedSpec(part.panelId || part.partId || part.kind)?.fixedColor || value;
   return value ? normalizeColor(colorHex(value)) : null;
 }
 
