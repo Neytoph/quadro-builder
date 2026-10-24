@@ -10,6 +10,7 @@ import { insetScrewMeshes } from './insetPanelMeshes.js';
 import { hasInsetScrews, INSET_PANEL_EDGE_INSET } from './insetPanelMounts.js';
 import { panelScrewPose, panelLipProfiles, PANEL_SCREW_RADIUS, PANEL_SCREW_HEAD_DEPTH, PANEL_SCREW_SHAFT_RADIUS, PANEL_SCREW_SHAFT_LENGTH, PANEL_OUTER_FACE, PANEL_CORNER_RELIEF } from './panelScrewMounts.js';
 import { COLOR_HEX } from './colors.js';
+import { readComponentAppearance, diamondNetSegments } from './componentAppearance.js';
 import { geometry } from './catalog.js';
 import { confirmedFrame, curvePoint, worldToLocal, rungPositions } from './confirmedComponentModel.js';
 const font=new FontLoader().parse(fontData);
@@ -358,6 +359,18 @@ export function confirmedComponentMeshes(scene,model,part) {
     if(curved)for(let v=0.15;v<1-margin;v+=0.14)f.tube('curve-quilt:'+v,Array.from({length:16},(_,k)=>local(margin+k*(1-2*margin)/15,v)),0.06,'#d0d5ab','cloth');
   }
   if(spec.feature==='net') {
+    const appearance=readComponentAppearance(part);
+    if(appearance?.variant==='diamond_net') {
+      for(const [index,ends] of diamondNetSegments().entries()) {
+        const points=Array.from({length:25},(_,i)=>local(ends[0][0]+(ends[1][0]-ends[0][0])*i/24,ends[0][1]+(ends[1][1]-ends[0][1])*i/24));
+        f.tube('net-diamond:'+index,points,.16,appearance.color);
+      }
+      for(const mount of part.mounts) {
+        const p=worldToLocal(frame,curvePoint(model,mount.tube,mount.t));
+        f.torus('net-diamond-lacing-loop',2.7,.22,appearance.color,p,new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),Math.PI/2));
+      }
+      return f.meshes;
+    }
     for(let i=0;i<=4;i++)for(const along of [true,false]) {
       const pts=Array.from({length:25},(_,k)=>local(along?i/4:k/24,along?k/24:i/4));f.tube('net-strand:'+i+':'+along,pts,0.35,colors[(i+(along?0:2))%6]);
     }

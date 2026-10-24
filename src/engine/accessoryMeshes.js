@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { readComponentAppearance } from './componentAppearance.js';
 import { ParametricGeometry } from 'three/examples/jsm/geometries/ParametricGeometry.js';
 import { accessorySpec, componentFrame, mountPoint } from './accessoryPack.js';
 import { confirmedComponentMeshes } from './confirmedComponentMeshes.js';
@@ -52,6 +53,17 @@ function steeringMeshes(scene, model, fitting) {
   cuffs(f, 8);
   box('steering-base', [10.5, 7.2, 2.4], 'dark', [0, 0, 3.2], 1.2);
   disc('steering-shaft', 1.45, 5.6, 'dark', [0, 0, 6.2]);
+  const appearance = readComponentAppearance(fitting);
+  if (appearance?.variant === 'four_spoke') {
+    add('steering-four-spoke-wheel', () => new THREE.TorusGeometry(10.65, 1.35, 18, 80), 'plastic', appearance.color, [0, 0, 9.4]);
+    for (let i = 0; i < 4; i++) {
+      const angle = i * Math.PI / 2;
+      const rotation = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), angle - Math.PI / 2);
+      box(`steering-four-spoke:${i}`, [2.4, 9.8, 1.7], appearance.color, [Math.cos(angle) * 5, Math.sin(angle) * 5, 9.4], 0.85, rotation);
+    }
+    disc('steering-four-spoke-hub', 2.6, 2.2, appearance.color, [0, 0, 9.7]);
+    return f.result;
+  }
   add('steering-wheel', () => new THREE.TorusGeometry(10.65, 1.35, 18, 80), 'plastic', 'blue', [0, 0, 9.4]);
   for (let i = 0; i < 3; i++) {
     const a = i * Math.PI * 2 / 3 + Math.PI / 2;
