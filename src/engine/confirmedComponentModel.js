@@ -272,7 +272,7 @@ export function confirmedCandidates(model,id,options={}) {
     return selectPanelCandidates(model,candidates,options);
   }
   if(isOuterScrewPanel(id))options={...options,oppositeRetainers:true};
-  if(spec.feature==='net'){
+  if(spec.mountType==='net-frame'){
     const candidates=railCandidates(model,spec),seen=new Set(candidates.map(p=>model.panelCorners(p)?.map(c=>c.map(v=>v.toFixed(2)).join(',')).sort().join('|')));
     for(const probe of insetPanelProbes(model,spec.width,spec.height,{deduplicate:false})){
       const corners=model.panelCorners(probe),key=corners?.map(c=>c.map(v=>v.toFixed(2)).join(',')).sort().join('|');
