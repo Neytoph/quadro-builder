@@ -1791,6 +1791,7 @@ export class BuildModel {
       if (this.isBelowGround(p[1])) return false;
       extras.push({ part, p });
     }
+    this._syncAutomaticConnectorFrames(moved.map(e => e.n));
     for (const e of moved) {
       if (isHolePart(e.n.part) && !e.n.partQuat) e.n.partQuat = [0, 0, 0, 1];
       [e.n.x, e.n.y, e.n.z] = e.p.map(round); this._spinNodeAround(e.n, ax, co, si, radians);
@@ -2654,6 +2655,7 @@ export class BuildModel {
       this.hingeRotationFailure = "ground"; return false;
     }
     const snapshot = this.toJSON(), collidedBefore = this.collisions({ only: branch.tubes });
+    this._syncAutomaticConnectorFrames([...positions.keys()].map(id => this.nodes.get(id)));
     for (const [id, p] of positions) {
       const n = this.nodes.get(id); [n.x, n.y, n.z] = p;
       this._spinNodeAround(n, ax, co, si, radians);
@@ -3909,6 +3911,41 @@ export class BuildModel {
       ? center[1] + radius * (un[1] * Math.cos(minimumAngle) + wn[1] * Math.sin(minimumAngle))
       : Infinity;
     return Math.min(a[1], b[1], interior);
+  }
+
+  /** 批量枚举关联管件，拖动期间不逐节点扫描整个模型。 */
+  _syncAutomaticConnectorFrames(nodes) {
+    const entries = new Map(nodes.filter(n => !n.part && !n.preferType && !n.ownConnector && !n.c45
+      && !n.c45body && !n.c45file && !n.bearingOn && !n.stub && !n.armDirs?.length)
+      .map(n => [n.id, { node: n, tubes: [] }]));
+    if (!entries.size) return;
+    for (const tube of this.tubes.values()) {
+      if (tube.arm || tube.link) continue;
+      entries.get(tube.a)?.tubes.push(tube);
+      entries.get(tube.b)?.tubes.push(tube);
+    }
+    for (const { node, tubes } of entries.values()) this._syncAutomaticConnectorFrame(node, tubes);
+  }
+
+  /** 自动接头的坐标随实际直角管件恢复，保留手动型号及空插口。 */
+  _syncAutomaticConnectorFrame(n, tubes) {
+    const dirs = [];
+    for (const tube of tubes) {
+      const other = this.nodes.get(tube.a === n.id ? tube.b : tube.a);
+      if (other) dirs.push(norm3(this._tubeDirAt(tube, n, other)));
+    }
+    if (dirs.length < 2 || dirs.some((d, i) => dirs.slice(0, i).some(e => dot3(d, e) > .99))) return;
+    const axes = n.quat?.length === 4 ? [xAxisOf(n.quat), yAxisOf(n.quat), zAxisOf(n.quat)]
+      : [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+    if (dirs.every(d => axes.some(axis => Math.abs(dot3(d, axis)) > .99999))) return;
+    // 文件里的额外空插口代表独立的实体形状，不能按已接管件缩减。
+    if (n.arms?.some(arm => !dirs.some(d => dot3(norm3(arm), d) > .99))) return;
+    const ex = dirs[0], second = dirs.find(d => Math.abs(dot3(ex, d)) < .01);
+    if (!second) return;
+    const along = dot3(ex, second), ey = norm3(second.map((v, i) => v - along * ex[i])), ez = cross3(ex, ey);
+    if (!dirs.every(d => [ex, ey, ez].some(axis => Math.abs(dot3(d, axis)) > .99999))) return;
+    n.quat = quatFromBasis(ex, ey, ez);
+    if (n.arms?.length) n.arms = dirs.map(d => d.slice());
   }
 
   /** Ausrichtung eines Knotens um Achse `ax.u` mitdrehen (Stutzen, Quaternion). */
@@ -6163,11 +6200,10 @@ export class BuildModel {
     // Der neue Knoten steht in derselben Lage wie der, von dem gebaut wird --
     // sonst boete er am Ende einer gedrehten Reihe wieder die Weltachsen an und
     // das naechste Rohr knickte weg.
-    if (from.quat && !to.quat) to.quat = from.quat.slice();
-    if (!existing && !to.quat && isBoltPart(from.part) && Math.abs(dot3(norm3(dirVec),boltAxis(from)))<.01) {
+    if (!existing && isBoltPart(from.part) && Math.abs(dot3(norm3(dirVec),boltAxis(from)))<.01) {
       const ex=norm3(dirVec),ey=boltAxis(from),ez=cross3(ex,ey);
       to.quat=quatFromBasis(ex,ey,ez).map(round4);
-    }
+    } else if (from.quat && !to.quat) to.quat = from.quat.slice();
     const tube = this.addTube(from.id, to.id, tubeId, color, length);
     return { node: to, tube };
   }
@@ -7084,6 +7120,8 @@ export class BuildModel {
       delete node.arms;
       delete node.armDirs;
     }
+    // 旧旋转记录可能保存了固定侧朝向并漏掉活动侧插口，只恢复自动直角接头。
+    this._syncAutomaticConnectorFrames([...this.nodes.values()].filter(node => node.quat));
     this._seq = maxSeq + 1;
     return { ok: true };
   }
