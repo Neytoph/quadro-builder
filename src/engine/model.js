@@ -13,6 +13,7 @@ import { incompleteRigidSelection } from './selectionTransform.js';
 import { nativePanelDiagnostics, nativePanelMounts, nativePanelGeometry } from './nativePanelDiagnostics.js';
 import { reinforcementPaths, aluminiumConnectorMounts, aluminiumConnectorSupport, isAluminiumConnector, validReinforcementRecords, explicitReinforcementGroups } from './reinforcement.js';
 import { c45PlacementBlocked } from './c45Placement.js';
+import { bearingEndpoints, bearingConnectionProbe, coaxial } from './bearingConnections.js';
 
 // Zellweite des Rasters, mit dem die Kollisionspruefung Nachbarn sucht. Etwas
 // groesser als das laengste Rohr (75 cm + Kupplung): ein Rohr liegt damit in
@@ -1601,7 +1602,7 @@ export class BuildModel {
   rotationJoint(ref, cs = 5) {
     const n = this.nodes.get(ref.nodeId);
     if (!n) return null;
-    const j = { ...ref, nodes: new Set(), tubes: new Set(), clamps: new Set(), blocked: false };
+    const j = { ...ref, nodes: new Set(), tubes: new Set(), clamps: new Set(), sharedHinges: [], blocked: false };
     const frozen = new Set(), frozenTubes = new Set();
     if (ref.kind === 'bearing') {
       const f = n.bearingOn && this.fittings.get(n.bearingOn);
@@ -1638,6 +1639,7 @@ export class BuildModel {
       j.axis = norm3([b.x - a.x, b.y - a.y, b.z - a.z]); j.dir = n.stub.slice();
       j.nodes.add(n.id); frozen.add(a.id); frozen.add(b.id); frozenTubes.add(t.id);
     } else return null;
+    for (const node of this.nodes.values()) if (isBoltPart(node.part) && coaxial(j.origin,j.axis,this.nodePos(node.id),boltAxis(node))) frozen.add(node.id);
     const addTube = id => {
       if (!this.tubes.has(id)) return;
       if (frozenTubes.has(id)) { j.blocked = true; return; }
@@ -1667,7 +1669,7 @@ export class BuildModel {
         }
         if (j.nodes.has(node.id)) {
           // 同一固定管上共同托住活动框架的轴承，围绕同一轴一起转。
-          if (ref.kind === 'tubeClamp' && node.clampOn.tubeId === n.clampOn.tubeId) continue;
+          if (node.bearingOn && this._jointCoaxialTube(j,node.clampOn.tubeId)) continue;
           addTube(node.clampOn.tubeId);
         }
       }
@@ -1686,11 +1688,19 @@ export class BuildModel {
       const t = this.tubes.get(id);
       for (const nid of [t.a, t.b]) if (frozen.has(nid)) {
         const other = this.nodes.get(t.a === nid ? t.b : t.a);
-        const dir = norm3([other.x - n.x, other.y - n.y, other.z - n.z]);
-        if (ref.kind !== 'hinge' || nid !== n.id || dot3(dir, j.dir) < 0.99) j.blocked = true;
+        const shared=this.nodes.get(nid);
+        const index=isBoltPart(shared?.part)&&coaxial(j.origin,j.axis,this.nodePos(nid),boltAxis(shared))
+          ? (shared.hinges||[]).findIndex(angle=>dot3(norm3([other.x-shared.x,other.y-shared.y,other.z-shared.z]),hingeDir(shared,angle))>.99) : -1;
+        if(index<0)j.blocked=true;
+        else if(!j.sharedHinges.some(h=>h.nodeId===nid&&h.index===index))j.sharedHinges.push({nodeId:nid,index});
       }
     }
     return j;
+  }
+
+  _jointCoaxialTube(j,tubeId) {
+    const tube=this.tubes.get(tubeId),a=tube&&this.nodes.get(tube.a),b=tube&&this.nodes.get(tube.b);
+    return !!a&&!!b&&!tube.bow&&coaxial(j.origin,j.axis,[a.x,a.y,a.z],[b.x-a.x,b.y-a.y,b.z-a.z]);
   }
 
   _jointSupports(part) {
@@ -1741,7 +1751,15 @@ export class BuildModel {
       for (let step = 1; step <= steps; step++) if (others.some(g => hingeGap(from + delta * step / steps, g) < HINGE_MIN_GAP - 1e-6)) return false;
       hingeAngle = round4(((from + delta) % 360 + 360) % 360);
     }
-    const affected = new Set(j.nodes);
+    const sharedAngles=[];
+    for(const shared of j.sharedHinges||[]){
+      if(j.kind==='hinge'&&shared.nodeId===j.nodeId&&shared.index===j.index)continue;
+      const node=this.nodes.get(shared.nodeId),delta=dot3(j.axis,boltAxis(node).map(v=>-v))*radians*180/Math.PI;
+      const angle=node.hinges[shared.index],others=node.hinges.filter((_,i)=>i!==shared.index);
+      for(let k=1;k<=Math.max(1,Math.ceil(Math.abs(delta)/2));k++)if(others.some(g=>hingeGap(angle+delta*k/Math.max(1,Math.ceil(Math.abs(delta)/2)),g)<HINGE_MIN_GAP-1e-6))return false;
+      sharedAngles.push({node,index:shared.index,angle:round4(((angle+delta)%360+360)%360)});
+    }
+    const affected = new Set([...j.nodes,...sharedAngles.map(h=>h.node.id)]);
     if (j.kind === 'hinge') affected.add(n.id);
     if (this._incompleteComponentMove({ nodes: affected })) return false;
     const co = Math.cos(radians), si = Math.sin(radians), ax = { o: j.origin, u: j.axis };
@@ -1790,6 +1808,7 @@ export class BuildModel {
       if (part.hook) part.hook = turn(part.hook).map(round);
     }
     if (typeof hingeAngle === 'number') n.hinges[j.index] = hingeAngle;
+    for(const shared of sharedAngles)shared.node.hinges[shared.index]=shared.angle;
     this._moveTubeGeom(j.nodes); this._movePanelGeom(j.nodes);
     return true;
   }
@@ -2152,6 +2171,24 @@ export class BuildModel {
     return node;
   }
 
+  bearingEndpoints() { return bearingEndpoints(this); }
+
+  bearingConnectionProbe(nodeId,tubeId,point,cs=5) {
+    const probe=bearingConnectionProbe(this,nodeId,tubeId,point,cs);
+    if(probe.center)probe.fitting={kind:'bearing-connector4',x:probe.center[0],y:probe.center[1],z:probe.center[2],quat:bearingQuat(probe.stub.map(v=>-v),probe.axis)};
+    return probe;
+  }
+
+  connectExistingBearing(nodeId,tubeId,point,cs=5) {
+    const probe=this.bearingConnectionProbe(nodeId,tubeId,point,cs);
+    if(!probe.valid)return probe;
+    const node=this.nodes.get(nodeId),quat=bearingQuat(probe.stub.map(v=>-v),probe.axis);
+    const fitting=this.addFitting('bearing-connector4',...probe.center,{quat});
+    node.bearingOn=fitting.id;node.clampOn={tubeId,t:round(probe.t)};
+    node.stub=probe.stub.slice();node.quat=quat.slice();
+    return {...probe,fittingId:fitting.id};
+  }
+
   /**
    * Freie Arme, an die eine Lagerkupplung passt: je Kupplung jede Achsrichtung,
    * in der kein Rohr steckt und die nicht schon belegt ist. Der Punkt liegt
@@ -2508,7 +2545,7 @@ export class BuildModel {
       const aligned = !tube.link && dot3(norm3(this._tubeDirAt(tube, node, end)), direction) > 0.9;
       (aligned ? roots : fixed).add(id);
     }
-    const adj = this._nodeAdj();
+    const adj = this._nodeAdj({origin:[node.x,node.y,node.z],axis:boltAxis(node)});
     const join = (ids) => {
       for (const id of ids) for (const other of ids) {
         if (id === other) continue;
@@ -2546,6 +2583,8 @@ export class BuildModel {
           || tube.a === node.id && roots.has(tube.b)
           || tube.b === node.id && roots.has(tube.a)) tubes.add(tube.id);
     }
+    const joint={origin:[node.x,node.y,node.z],axis:boltAxis(node)};
+    for(const id of nodes){const part=this.nodes.get(id);if(part.clampOn&&!tubes.has(part.clampOn.tubeId)&&(!part.bearingOn||!this._jointCoaxialTube(joint,part.clampOn.tubeId)))return null;}
     return { nodes, tubes };
   }
 
@@ -4342,7 +4381,7 @@ export class BuildModel {
     return tagged;
   }
 
-  _nodeAdj() {
+  _nodeAdj(rotationAxis = null) {
     const adj = new Map();
     const link = (a, b) => {
       if (!a || !b || a === b) return;
@@ -4354,6 +4393,7 @@ export class BuildModel {
     for (const t of this.tubes.values()) link(t.a, t.b);
     for (const n of this.nodes.values()) {
       const t = n.clampOn && this.tubes.get(n.clampOn.tubeId);
+      if (t && rotationAxis && n.bearingOn && this._jointCoaxialTube(rotationAxis,t.id)) continue;
       if (t) { link(n.id, t.a); link(n.id, t.b); }
     }
     return adj;
@@ -6124,6 +6164,10 @@ export class BuildModel {
     // sonst boete er am Ende einer gedrehten Reihe wieder die Weltachsen an und
     // das naechste Rohr knickte weg.
     if (from.quat && !to.quat) to.quat = from.quat.slice();
+    if (!existing && !to.quat && isBoltPart(from.part) && Math.abs(dot3(norm3(dirVec),boltAxis(from)))<.01) {
+      const ex=norm3(dirVec),ey=boltAxis(from),ez=cross3(ex,ey);
+      to.quat=quatFromBasis(ex,ey,ez).map(round4);
+    }
     const tube = this.addTube(from.id, to.id, tubeId, color, length);
     return { node: to, tube };
   }

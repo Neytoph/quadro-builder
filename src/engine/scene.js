@@ -2634,6 +2634,28 @@ export class SceneManager {
     this.requestRender();
   }
 
+  showBearingConnectionPreview(probe) {
+    this.clearInstallationPreview();
+    if(!probe?.fitting)return;
+    if(this._q().meshes){this._ensureMeshes('fittings');this._ensureMeshes('connectors');}
+    const group=new THREE.Group();group.name='bearing-connection-preview';
+    const color=probe.valid?'#1FA85A':'#e03131';
+    const meshes=this._fittingMeshes(probe.fitting);
+    const quat=new THREE.Quaternion(...probe.fitting.quat),dirs=[{d:probe.stub},{d:probe.stub.map(v=>-v)}];
+    const actual=this._q().meshes?this._connMeshFor(dirs,quat,'straight'):null;
+    const connector=new THREE.Mesh(actual?.geo||this._connGeometry(),this._connMaterial(false));connector.position.fromArray(probe.pos);
+    connector.quaternion.copy(actual?.quat||quat);meshes.push(connector);
+    if(!actual){
+      const cs=geometry().connectorSize,len=cs*.85,offset=cs/2+len/2-.4;
+      const geo=this._tubeGeometry(geometry().armRadius,len,Math.max(6,this._q().tube-4));
+      for(const {d} of dirs){const axis=new THREE.Vector3(...d),stub=new THREE.Mesh(geo,this._connMaterial(false));stub.position.fromArray(probe.pos).addScaledVector(axis,offset);stub.quaternion.setFromUnitVectors(UP,axis);meshes.push(stub);}
+    }
+    for(const mesh of meshes){mesh.material=mesh.material.clone();mesh.material.color.set(color);mesh.material.transparent=true;mesh.material.opacity=.5;mesh.material.depthWrite=false;mesh.userData.previewMaterial=true;mesh.castShadow=false;group.add(mesh);}
+    const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(...probe.pos),new THREE.Vector3(...probe.center)]),new THREE.LineBasicMaterial({color,depthTest:false,transparent:true,opacity:.8}));
+    line.userData.previewGeometry=true;line.userData.previewMaterial=true;group.add(line);
+    this._installationGroup=group;this.scene.add(group);this.requestRender();
+  }
+
   _placeFitting(mesh, f, q) {
     mesh.quaternion.copy(q);
     mesh.position.set(f.x, f.y, f.z);
@@ -5483,7 +5505,7 @@ export class SceneManager {
       ? new THREE.BoxGeometry(size, size, size)
       : new THREE.SphereGeometry(radius, 16, 12);
     // 管上候选默认透明，指到对应管子时再显示；点击范围保持。
-    const tubeMount = data.clampTube || data.fittingMount?.tubeId || data.ropeMount
+    const tubeMount = data.bearingSupport || data.clampTube || data.fittingMount?.tubeId || data.ropeMount
       || data.gymRingMount || data.accessoryTube || data.sleeveTube;
     const mat = tubeMount ? this._arrowHitMaterial() : this._handleMaterial(kind);
     const mesh = new THREE.Mesh(geo, mat);
@@ -5501,7 +5523,7 @@ export class SceneManager {
     const tubeId = pointer ? this.pickTube(pointer.x, pointer.y)?.data.id : null;
     for (const mesh of candidates) {
       const data = mesh.userData;
-      const candidateTube = data.clampTube?.tubeId || data.fittingMount?.tubeId
+      const candidateTube = data.bearingSupport || data.clampTube?.tubeId || data.fittingMount?.tubeId
         || data.ropeMount?.tube || data.gymRingMount?.tube || data.accessoryTube || data.sleeveTube;
       const active = tubeId != null && candidateTube === tubeId;
       const mat = active ? this._handleMaterial(data.tubeCandidateKind) : this._arrowHitMaterial();

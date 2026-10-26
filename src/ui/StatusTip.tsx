@@ -46,9 +46,11 @@ export default function StatusTip({ menuOpen }: { menuOpen: boolean }) {
     : api.assembly.active ? 'status.assembly'
     : api.boxSelect ? boxTip
     : adjusting ? 'tip.adjustSelected'
+    : api.mode==='fitting'&&api.fittingKind==='bearing-clamp' ? (api.engine()?.builder.bearingConnection?.selected?'status.bearingConnect':'status.bearing')
     : api.mode === 'reinforce' && api.reinforcementPartId === 'alu_connector' ? 'status.aluConnector'
     : (BY_MODE[api.mode] || 'tip.select')
-  const text = t(key, { h: api.pasteHeightCm ?? 0 })
+  const bearing=api.mode==='fitting'&&api.fittingKind==='bearing-clamp'?api.engine()?.builder.bearingConnection:null
+  const text = bearing?.selected&&bearing.status() || t(key, { h: api.pasteHeightCm ?? 0 })
 
   const [say, setSay] = useState<string | null>(text)
   useEffect(() => {
@@ -78,7 +80,7 @@ export default function StatusTip({ menuOpen }: { menuOpen: boolean }) {
     return (
       <div data-ui="status-tip" className="fixed left-2 right-2 bottom-[68px] z-30 pointer-events-none flex justify-center">
         {shown && (
-          <p key={key} className={`m-say m-say-up qb-card text-gray-100 max-w-full px-3 py-1.5 text-[12px] leading-snug ${api.boxSelect ? 'whitespace-normal' : 'truncate'} ${leaving ? 'm-leave' : ''}`}>
+          <p key={key} className={`m-say m-say-up qb-card text-gray-100 max-w-full px-3 py-1.5 text-[12px] leading-snug ${api.boxSelect||bearing?.selected ? 'whitespace-normal' : 'truncate'} ${leaving ? 'm-leave' : ''}`}>
             {shown}
           </p>
         )}

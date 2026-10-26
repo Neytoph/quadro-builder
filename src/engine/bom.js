@@ -164,7 +164,7 @@ export function connectorFrameOf(model, node) {
 // 从真实直角管端恢复整体倾斜后的接头朝向，保留坐标舍入误差。
 // 所有管端都必须落在同一组正交轴上，锐角连接仍由诊断拦截。
 function orthogonalFrame(dirs) {
-  if (dirs.length < 2 || dirs.every(d => isAxisDir(d))) return null;
+  if (dirs.length < 2 || dirs.every(d => Math.max(...d.map(Math.abs))>1-1e-8)) return null;
   const dot = (a, b) => a.reduce((sum, v, i) => sum + v * b[i], 0);
   const ex = dirs[0];
   const second = dirs.find(d => Math.abs(dot(ex, d)) < 0.01);

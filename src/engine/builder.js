@@ -29,6 +29,7 @@ import { SelectionTransformGizmo } from './selectionTransformGizmo.js';
 import { SelectionTransformPreview } from './selectionTransformPreview.js';
 import { selectionTransformStrings } from '../ui/selectionTransformStrings';
 import { pickStepAnchor, stepCandidates, stepCandidatesFromSelection, stepNeighbor } from "./stepAnchor.js";
+import { BearingConnectionController } from './bearingConnectionController.js';
 
 // Kupplungen, die auf einem Rohr sitzen statt im Raster: QDF-Art -> Katalogteil.
 // Teile, die sich um ein Rohr klemmen lassen. Die Lochzapfenkupplung gehört
@@ -202,6 +203,7 @@ export class Builder {
    * 读出来的内容）时从文档重新读出整座；拖动或粘贴进行中就等它收尾。
    */
   setHistory(history) {
+    if(this.history!==history)this.bearingConnection?.cancel();
     if(this.history!==history){this.transformGizmo?.cancel();this.cancelSelectionTransform(false);this.transformRotation=null;}
     this._colorPreview = null;
     if (this.history !== history) this._cancelHingeDrag();
@@ -233,6 +235,7 @@ export class Builder {
 
   /** 从文档读出来的整座造型换进模型，选择里已经不存在的零件去掉。 */
   applyExternal(json) {
+    this.bearingConnection?.cancel();
     this.cancelSelectionTransform(false);
     this.transformRotation=null;
     this._cancelClampDrag();
@@ -249,6 +252,7 @@ export class Builder {
   }
 
   setReadOnly(on) {
+    if(on)this.bearingConnection?.cancel();
     if(on){this.transformGizmo?.cancel();this.cancelSelectionTransform(false);}
     if (on) this._cancelClampDrag();
     if (on) this._colorPreview = null;
@@ -285,6 +289,7 @@ export class Builder {
    * wechselt erst beim naechsten Escape den Modus.
    */
   clearMarks() {
+    if(this.bearingConnection?.selected){this.bearingConnection.cancel();this.refresh();return true;}
     if(this._selectionTransform){this.transformGizmo?.cancel();this.cancelSelectionTransform();return true;}
     if (this.installationPreview) { this.cancelInstallation(); return true; }
     if (this._hingeDrag) { this._cancelHingeDrag(); return true; }
@@ -327,6 +332,7 @@ export class Builder {
 
   // --- oeffentliche Steuerung --------------------------------------------
   setMode(mode) {
+    this.bearingConnection?.cancel();
     this.transformGizmo?.cancel();
     this.cancelSelectionTransform(false);
     this._cancelClampDrag();
@@ -558,6 +564,7 @@ export class Builder {
   setClampPart(id, { refresh = true } = {}) { this.clampPart = id; if (refresh && this.mode === "clamp") this.refresh(); }
 
   setFitting(kind, partId = null, { refresh = true } = {}) {
+    this.bearingConnection?.cancel();
     this._installationPart = null; this.installationPreview = null; this.scene.clearInstallationPreview?.();
     const confirmed = confirmedSpec(partId || kind);
     this.fittingKind = confirmed?.placement === 'fitting' ? confirmed.kind || confirmed.id : kind === 'wheel' ? 'multi-wheel2' : kind;
@@ -1769,6 +1776,7 @@ export class Builder {
    * Zaehler starten wieder bei 1) -- _pruneSelection findet das nicht.
    */
   modelReplaced() {
+    this.bearingConnection?.cancel();
     this.transformRotation=null;
     this.boxSelect = false;
     this._boxSelected?.clear();
@@ -2143,6 +2151,7 @@ export class Builder {
   }
 
   refresh() {
+    this.bearingConnection?.validate();
     if(this._selectionTransform?.visualPreview){this.scene.requestRender();this.onPreview();return;}
     const transformKey=[...this.selection.keys()].sort().join(',');
     if(transformKey!==this._transformSelectionKey){this._transformSelectionKey=transformKey;this.transformError=null;this.transformRotation=null;}
@@ -2221,6 +2230,7 @@ export class Builder {
       this._showPanelPlacementHover({ data: { kind: 'tube', id: this.panelRail.id } });
     }
     if (this._installationPart) this.scene.showInstallationPreview(this.model, this._installationPart, this.installationPreview.valid);
+    if(this.bearingConnection?.selected&&this.bearingConnection.preview)this.scene.showBearingConnectionPreview(this.bearingConnection.preview);
     this.scene.requestRender();
     // Waehrend einer Vorschau (Ziehen, Kopie am Zeiger) bleibt die Oberflaeche
     // aussen vor: Stueckliste und Sitzung rechnen sonst bei jedem Rasterschritt
@@ -2896,6 +2906,7 @@ export class Builder {
   // Anbauteile: an jeder Montagestelle des gewaehlten Teils ein Ankerpunkt.
   // Wo dasselbe Teil schon steckt, wird keiner gezeigt -- gestapelt wird nicht.
   _buildFittingHandles() {
+    if(this.fittingKind==='bearing-clamp'&&this._bearingController().selected){this.bearingConnection.buildHandles();return;}
     // Merkt sich, an welchen Kupplungen das gewaehlte Teil sitzen darf -- der
     // Zeiger zeigt dort eine Hand, auch wenn er den Ankerpunkt knapp verfehlt.
     this._fittingMountNodes = new Set();
@@ -3027,6 +3038,7 @@ export class Builder {
         for (const m of this.model.bearingArmMounts(cs)) {
           this.scene.addHandle(m.handle || m.pos, { bearingArm: m }, "dir");
         }
+        this._bearingController().buildHandles();
       }
     }
   }
@@ -3721,6 +3733,8 @@ export class Builder {
         else this.scene.clearInstallationPreview?.();
       }
       obj=h?.object || (mount ? pick?.object : null);
+    } else if (this.mode === 'fitting' && this.fittingKind === 'bearing-clamp' && this._bearingController().selected) {
+      obj=this.bearingConnection.hover(e);
     } else if (this.mode === 'fitting' && this.fittingKind === 'rope') {
       this._trackTubeHandles(x, y);
       const {handle:h, pick, mount} = this._ropePointerMount(x, y);
@@ -5060,6 +5074,7 @@ export class Builder {
    * Ein Klick auf eine gesetzte Kupplung nimmt sie weg.
    */
   _clickTubeClamp(e) {
+    if(this.fittingKind==='bearing-clamp'&&this._bearingController().click(e))return;
     const part = TUBE_CLAMP_PARTS[this.fittingKind];
     const h = this.scene.pickHandle(e.clientX, e.clientY);
     if (h && h.data && h.data.bearingArm) {
@@ -5135,6 +5150,8 @@ export class Builder {
    * Freier Arm einer Kupplung, der dem Klickpunkt am naechsten liegt. Belegt
    * sind Richtungen, in denen schon ein Rohr steckt.
    */
+  _bearingController(){return this.bearingConnection||(this.bearingConnection=new BearingConnectionController(this));}
+
   _freeArmTowards(node, point) {
     const belegt = [];
     for (const tb of this.model.tubes.values()) {
