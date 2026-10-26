@@ -28,6 +28,7 @@ import { DEFAULT_TUNE, DEFAULT_GRADE, gradeHex, displayHex } from "./colorTune.j
 import { createOutdoorVisuals, OUTDOOR_AREA } from './outdoor.js';
 import { PanelPlacementGuides } from './panelPlacementGuides.js';
 import { PANEL_OUTER_FACE, PANEL_CORNER_RELIEF } from './panelScrewMounts.js';
+import { rainbowRibbonLayout, createRainbowRibbonSheet, createRainbowRibbonSleeve } from './rainbowTextile.js';
 
 const outdoor = createOutdoorVisuals(THREE);
 
@@ -4929,17 +4930,15 @@ export class SceneManager {
       }
       const plain = st === "future" || (asm && st === "done");
       if (tx.variant === "rainbow") {
-        // 彩虹带：和布面一样是两头包在管子上的薄片，只是切成七色的细条并排，
-        // 条与条之间留一指宽的缝。每条 = 中间一片平布 + 两头各一个半圆包着管。
-        const n = Math.max(2, Math.round(u.length() / 6));
-        const gap = 1.2;
-        const bw = Math.max(1.5, u.length() / n - gap);
         const L = w.length();
-        const { sheet, wrap } = this._textileSheetGeos(bw, L);
-        for (let i = 0; i < n; i++) {
-          const pos = va.clone().addScaledVector(u, (i + 0.5) / n);
+        const radius = geometry().tubeRadius + 0.12;
+        for (const ribbon of rainbowRibbonLayout(u.length(), geometry().connectorSize)) {
+          const key = `${ribbon.width.toFixed(4)}:${L.toFixed(4)}:${radius.toFixed(4)}`;
+          const sheet = this._cachedGeo(`rainbow-sheet:${key}`, () => createRainbowRibbonSheet(ribbon.width, L, radius));
+          const wrap = this._cachedGeo(`rainbow-sleeve:${ribbon.width.toFixed(4)}:${radius.toFixed(4)}`, () => createRainbowRibbonSleeve(ribbon.width, radius));
+          const pos = va.clone().addScaledVector(xAxis, ribbon.center);
           const base = new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis).setPosition(pos);
-          const rm = plain ? mat : matFor(tx.id, this._feltMaterial(RAINBOW[i % RAINBOW.length]));
+          const rm = plain ? mat : matFor(tx.id, this._feltMaterial(ribbon.color));
           this._batchAdd(sheet, rm, base, "textile", tx.id, this.pickTextiles);
           this._batchAdd(wrap, rm, base, "textile", tx.id, this.pickTextiles);
           this._batchAdd(wrap, rm, base.clone().multiply(new THREE.Matrix4().makeTranslation(0, 0, L)), "textile", tx.id, this.pickTextiles);

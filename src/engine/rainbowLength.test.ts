@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest'
-import { BuildModel } from './model.js'
+import { BuildModel, hingeDir } from './model.js'
 import { Builder } from './builder.js'
 import { buildableTubes, geometry, loadCatalog, panels } from './catalog.js'
 import { computeBOM } from './bom.js'
@@ -33,6 +33,31 @@ function controller(model: BuildModel, part = 'textile_rainbow') {
 }
 
 describe('彩虹门按实际尺寸安装', () => {
+  it.each([false, true])('轴承连接体补齐短横管承托，彩虹带覆盖整根25厘米上管；下管反向=%s', reverse => {
+    const model = new BuildModel()
+    const a = model.addNode(0, 0, 0), b = model.addNode(0, 40, 0), pivot = model.addNode(0, 60, 0)
+    const support = model.addTube(a.id, b.id, 'T35', 'blue', 35)!
+    model.addTube(b.id, pivot.id, 'T15', 'blue', 15)
+    model.addBolt(pivot.id); model.addHinge(pivot.id); model.rotateHingeBy(pivot.id, 0, 90)
+    const top = model.extend(pivot.id, hingeDir(pivot, 90), 'T25', 'red', 25, 30)!
+    const right = model.extend(top.node!.id, [0, -1, 0], 'T35', 'green', 35, 40)!
+    const bottom = model.extend(right.node!.id, [-1, 0, 0], 'T15', 'yellow', 15, 20)!
+    const topTube = [...model.tubes.values()].find(t => t.tubeId === 'T25')!
+    const bottomTube = [...model.tubes.values()].find(t => t.a === right.node!.id && t.b === bottom.node!.id)!
+    if (reverse) [bottomTube.a, bottomTube.b] = [bottomTube.b, bottomTube.a]
+    const partner = () => model.latticePartners(topTube.id, 1.5, null, true).find(p => p.id === bottomTube.id)!
+    expect(partner()).toMatchObject({ lo: 10, hi: 30, len: 20 })
+    expect(model.connectExistingBearing(bottom.node!.id, support.id, [0, 20, 0]).valid).toBe(true)
+    expect(partner()).toMatchObject({ lo: 0, hi: 30, len: 30 })
+    expect(model.latticePartners(bottomTube.id, 1.5, null, true).find(p => p.id === topTube.id)!.len).toBe(30)
+    expect(model.latticePartners(topTube.id, 1.5, { along: 20, gap: 40 }).find(p => p.id === bottomTube.id)!.len).toBe(20)
+    model.rotateHingeBy(pivot.id, 0, 35)
+    expect(partner().len).toBeCloseTo(30, 1)
+    const bearingId = bottom.node!.bearingOn
+    model.fittings.delete(bearingId)
+    expect(partner().len).toBeCloseTo(20, 1)
+  })
+
   it.each([[40, 40], [40, 60], [60, 40], [60, 60], [20, 60], [80, 57.5], [200, 40]])(
     '沿管 %s、管间距 %s：不按整格截断，不限制四格上限', (length, gap) => {
       const { model, a, b } = rails(length, gap), builder = controller(model)

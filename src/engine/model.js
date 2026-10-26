@@ -2811,6 +2811,24 @@ export class BuildModel {
     return [round4(quer[0] / L), round4(quer[1] / L), round4(quer[2] / L)];
   }
 
+  _textileRailRange(tubeId, rail) {
+    const tube = this.tubes.get(tubeId);
+    const range = { lo: 0, hi: rail.len };
+    // 轴承的横向连接体与横管组成连续承托，不把布带截在管端接头处。
+    for (const [id, start] of [[tube.a, true], [tube.b, false]]) {
+      const node = this.nodes.get(id);
+      const bearing = node?.bearingOn && this.fittings.get(node.bearingOn);
+      if (!bearing || bearing.kind !== 'bearing-connector4') continue;
+      const offset = [bearing.x - rail.p0[0], bearing.y - rail.p0[1], bearing.z - rail.p0[2]];
+      const along = dot3(offset, rail.dir);
+      const distance = Math.hypot(...offset.map((v, i) => v - along * rail.dir[i]));
+      if (distance > .05) continue;
+      if (start) range.lo = Math.min(range.lo, along);
+      else range.hi = Math.max(range.hi, along);
+    }
+    return range;
+  }
+
   /**
    * Gegenrohre fuer ein Netz. Anders als eine Platte hat das Netz keine
    * feste Groesse -- die Datei speichert seine Masse -- deshalb passt jeder
@@ -2824,7 +2842,7 @@ export class BuildModel {
    * @param {string} railId
    * @param {number} [tol]
    * @param {{ along: number, gap: number } | null} [size]
-   * @param {boolean} [flexible] 彩虹门按实际管间距和重叠长度安装。
+   * @param {boolean} [flexible] 彩虹门按实际管间距和连续承托长度安装。
    */
   latticePartners(railId, tol = 1.5, size = null, flexible = false) {
     const gaps = size ? [size.gap] : LATTICE_GAPS;
@@ -2832,6 +2850,7 @@ export class BuildModel {
     const max = size ? size.along : LATTICE_MAX;
     const ra = this._rail(railId);
     if (!ra) return [];
+    const aRange = flexible ? this._textileRailRange(railId, ra) : { lo: 0, hi: ra.len };
     const out = [];
     for (const t of this.tubes.values()) {
       if (t.id === railId || t.arm || t.link || t.bow) continue;
@@ -2844,9 +2863,10 @@ export class BuildModel {
       const perp = [off[0] - ra.dir[0] * along, off[1] - ra.dir[1] * along, off[2] - ra.dir[2] * along];
       const gap = Math.hypot(perp[0], perp[1], perp[2]);
       if (flexible ? gap <= 5 : !gaps.some((g) => Math.abs(g - gap) <= tol)) continue;
-      const e = along + rb.len * dot;
-      const lo = Math.max(0, Math.min(along, e));
-      const hi = Math.min(ra.len, Math.max(along, e));
+      const bRange = flexible ? this._textileRailRange(t.id, rb) : { lo: 0, hi: rb.len };
+      const b0 = along + bRange.lo * dot, b1 = along + bRange.hi * dot;
+      const lo = Math.max(aRange.lo, Math.min(b0, b1));
+      const hi = Math.min(aRange.hi, Math.max(b0, b1));
       const span = hi - lo;
       if (flexible ? span <= 5 : span < step - tol) continue;
       const len = flexible ? span : Math.min(max, Math.floor((span + tol) / step) * step);
