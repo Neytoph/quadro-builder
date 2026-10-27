@@ -1536,6 +1536,13 @@ export class BuildModel {
    * Rohr) bleiben, wo sie sind.
    */
   rotateFitting(id) {
+    const wheel = this.fittings.get(id);
+    if (wheel?.kind === "multi-wheel2") {
+      const [x, y, z, w] = wheel.quat || [0, 0, 0, 1];
+      // Half turn around the wheel's local Y axis, keeping its centre fixed.
+      wheel.quat = [-z, w, x, -y].map(v => Math.abs(v) < 1e-10 ? 0 : v);
+      return true;
+    }
     const step = this._nextFittingMount(id);
     if (!step) return false;
     const { f, mount } = step;
@@ -1556,6 +1563,7 @@ export class BuildModel {
 
   /** Laesst sich dieses Anbauteil weiterdrehen? (fuer Zeiger und Meldung) */
   canRotateFitting(id) {
+    if (this.fittings.get(id)?.kind === "multi-wheel2") return true;
     return !!this._nextFittingMount(id);
   }
 

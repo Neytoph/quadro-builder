@@ -1979,9 +1979,14 @@ export class SceneManager {
         return [mesh];
       }
       case "multi-wheel2": {            // Speichenrad: Scheibe mit Kranz
-        geo = this._wheelGeometry(WHEEL_R, 2.4, true);
-        mat = this._fittingMaterial(hex, false);
-        break;
+        const wheel = new THREE.Mesh(this._wheelGeometry(WHEEL_R, 2.4, true), this._fittingMaterial(hex, false));
+        const hub = new THREE.Mesh(this._cachedGeo("multiWheelFaceHub", () => {
+          const g = new THREE.CylinderGeometry(3.5, 3.5, 0.8, Math.max(12, this._q().tube));
+          g.rotateZ(Math.PI / 2);
+          g.translate(1.6, 0, 0);
+          return g;
+        }), this._fittingMaterial(hex, false));
+        return [wheel, hub].map(m => this._placeFitting(m, f, q));
       }
       case "floating-wheel2": {         // Schwimmrad, knapp 15 cm dick
         geo = this._wheelGeometry(WHEEL_R, 14, false);

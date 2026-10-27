@@ -5,6 +5,9 @@ import { loadCatalog } from './catalog.js'
 import { CONN_TYPE_MASK } from './config.js'
 import { ModelHistory } from '../collab/history'
 import { docFromJSON } from '../collab/ymodel'
+import * as THREE from 'three'
+import { buildQDF } from './qdfexport.js'
+import { parseQDF } from './qdfimport.js'
 
 beforeAll(async () => { await loadCatalog() })
 afterEach(() => { vi.useRealTimers() })
@@ -69,6 +72,49 @@ function parity(model: BuildModel, id: string, kind: string, action: string,
 }
 
 describe('已安装组件在选择模式与安装工具中的调整一致', () => {
+  it('多用轮在管上点击翻面，位置不变且可撤销重做和保存', () => {
+    const { model, tube } = carrier()
+    const mount = model.tubeFittingMount(tube.id, [20, 60, 0], 'multi-wheel2')!
+    const wheel = model.addFittingAt('multi-wheel2', mount, 'blue')!
+    const builder = editor(model, wheel.id, 'fitting')
+    const before = json(builder.model)
+    const original = builder.model.fittings.get(wheel.id)!
+    const position = [original.x, original.y, original.z]
+    const axis = new THREE.Vector3(1, 0, 0).applyQuaternion(new THREE.Quaternion(...original.quat!))
+    selectedClick(builder)
+    const flipped = builder.model.fittings.get(wheel.id)!
+    const flippedAxis = new THREE.Vector3(1, 0, 0).applyQuaternion(new THREE.Quaternion(...flipped.quat!))
+    expect(flippedAxis.dot(axis)).toBeCloseTo(-1)
+    expect([flipped.x, flipped.y, flipped.z]).toEqual(position)
+    const after = json(builder.model)
+    const restored = new BuildModel(); restored.loadJSON(JSON.parse(after))
+    expect(json(restored)).toBe(after)
+    const imported = parseQDF(buildQDF(builder.model).text).fittings.find(f => f.kind === 'multi-wheel2')!
+    const importedAxis = new THREE.Vector3(1, 0, 0).applyQuaternion(new THREE.Quaternion(...imported.quat!))
+    expect(importedAxis.dot(flippedAxis)).toBeCloseTo(1)
+    expect([imported.x, imported.y, imported.z]).toEqual(position)
+    builder.history.undo(); expect(json(builder.model)).toBe(before)
+    builder.history.redo(); expect(json(builder.model)).toBe(after)
+    const placement = editor(model, wheel.id, 'fitting')
+    placement.mode = 'fitting'; placement.fittingKind = 'multi-wheel2'
+    placement._clickTubeFitting(click)
+    expect(json(placement.model)).toBe(after)
+  })
+
+  it('轴承上的多用轮翻面不移动轴承，并可再次翻回', () => {
+    const { model } = carrier()
+    const bearing = model.addFittingAt('bearing2', model.fittingMounts('bearing2')[0], 'blue')!
+    const wheel = model.addFittingAt('multi-wheel2', model.fittingMounts('multi-wheel2')[0], 'blue')!
+    const builder = editor(model, wheel.id, 'fitting')
+    const beforeBearing = JSON.stringify(builder.model.fittings.get(bearing.id))
+    const axis = (q: number[]) => new THREE.Vector3(1, 0, 0).applyQuaternion(new THREE.Quaternion(...q))
+    const before = axis(builder.model.fittings.get(wheel.id)!.quat!)
+    selectedClick(builder)
+    expect(axis(builder.model.fittings.get(wheel.id)!.quat!).dot(before)).toBeCloseTo(-1)
+    expect(JSON.stringify(builder.model.fittings.get(bearing.id))).toBe(beforeBearing)
+    selectedClick(builder)
+    expect(axis(builder.model.fittings.get(wheel.id)!.quat!).dot(before)).toBeCloseTo(1)
+  })
   for (const type of Object.keys(CONN_TYPE_MASK)) {
     it(`${type} 普通接头换向，管子保持连接`, () => {
       const { model, node } = carrier()

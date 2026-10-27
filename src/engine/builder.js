@@ -1055,6 +1055,7 @@ export class Builder {
     if (kind === "panel" && this.model.panels.has(id)) return "panel";
     if (kind === "clamp" && this.model.clamps.has(id)) return "clamp";
     if (kind === "fitting") {
+      if (this.model.fittings.get(id)?.kind === "multi-wheel2") return "fitting";
       if (ROTATABLE_FITTINGS.has(this.model.fittings.get(id)?.kind)) return "fitting";
       if (POOL_KINDS.has(this.model.fittings.get(id)?.kind)) return "pool";
       if (this._bearingNodeFor(id)) return "bearing";
