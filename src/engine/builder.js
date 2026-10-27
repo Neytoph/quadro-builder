@@ -1681,7 +1681,9 @@ export class Builder {
 
   _pickPanelPlacement(x, y) {
     const rail = this._panelGuideIds?.size && this.scene.pickAmong(x, y, this._panelGuideIds);
-    return rail || this.scene.pickForDelete(x, y);
+    if (rail) return rail;
+    const pick = this.scene.pickForDelete(x, y);
+    return pick?.data.kind === "slide" ? (this.scene.pickTube(x, y) || pick) : pick;
   }
 
   _showPanelPlacementHover(pick) {
