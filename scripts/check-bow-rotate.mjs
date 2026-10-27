@@ -1,9 +1,10 @@
-// 选中一根弯管，Q / E 绕它接着的那头转 90 度；另一头接着东西就不转。
+// 选中一根弯管，Q / E 绕固定端转 90 度；点击可选择要转动的端点。
 //   npx --yes vite-node scripts/check-bow-rotate.mjs
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import assert from 'node:assert/strict'
+import { PerspectiveCamera, Scene } from 'three'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const parts = JSON.parse(readFileSync(join(root, 'public/data/parts.json'), 'utf8'))
@@ -21,7 +22,7 @@ await loadCatalog()
 
 function fakeScene() {
   const el = { addEventListener() {}, removeEventListener() {}, style: {}, getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }) }
-  const base = { renderer: { domElement: el }, container: el, addHandle: () => ({}), clearHandles: () => {} }
+  const base = { renderer: { domElement: el }, container: el, scene: new Scene(), camera: new PerspectiveCamera(), addHandle: () => ({}), clearHandles: () => {} }
   return new Proxy(base, { get(t, k) { return k in t ? t[k] : () => null } })
 }
 
@@ -64,16 +65,17 @@ function setup() {
   ok(m.tubes.size === 2 && [...m.nodes.values()].length === 3, '转来转去不该留下孤儿接头')
 }
 
-// 2. 另一头接着东西：不转，提示
+// 2. 两端都连接时，Q / E 固定起点并断开另一端
 {
   const { m, b, bow, notices } = setup()
   const end = m.nodes.get(bow.b)
   const beyond = m.addNode(end.x, end.y + 40, end.z)
   m.addTube(end.id, beyond.id, 'T35', 'red', 35)
   const before = pos(m, bow.b)
-  ok(b.rotateSelectionBy(1) === false, '两头都接着东西该拒绝')
-  ok(same(pos(m, bow.b), before), '拒绝之后什么都没动')
-  ok(notices.some((s) => s.includes('另一头') || s.includes('other end') || s.includes('andere Ende')), `该提示另一头接着东西，得到 ${notices}`)
+  ok(b.rotateSelectionBy(1) === true, '两头都连接时可以旋转')
+  ok(!same(pos(m, bow.b), before), '另一端应转到新位置')
+  ok(m.degree(end.id) === 1, '原结构仍在原处')
+  ok(notices.some((s) => s.includes('断开') || s.includes('disconnected') || s.includes('gelöst')), `该提示连接已断开，得到 ${notices}`)
 }
 
 // 3. 起点那头空着、终点那头接着东西：绕终点转，起点搬家
@@ -104,13 +106,14 @@ function setup() {
   ok(b._selectedLoneBow() === null, '多选时不算单选弯管')
 }
 
-// 5. 放置模式下点弯管转：另一头接着东西也拒绝（同一个检查）
+// 5. 两端连接时点击靠近要转动的一端，固定另一端
 {
   const { m, b, bow } = setup()
   const end = m.nodes.get(bow.b)
   const beyond = m.addNode(end.x, end.y + 40, end.z)
   m.addTube(end.id, beyond.id, 'T35', 'red', 35)
-  ok(b._bowPivotFor(bow) === null, '两头都接着东西，放置模式的检查也该拒绝')
+  ok(b._bowPivotFor(bow, end) === bow.a, '点终点应固定起点')
+  ok(b._bowPivotFor(bow, m.nodes.get(bow.a)) === bow.b, '点起点应固定终点')
 }
 
 console.log(`弯管旋转检查通过，${n} 项断言`)

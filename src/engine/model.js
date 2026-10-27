@@ -4,7 +4,8 @@
 import { MERGE_EPS, FORMAT_VERSION, DIAGONAL_SNAP_TOL, DIRECTIONS, DIAGONAL_DIRECTIONS, DIR_ALIGN_TOL, ARM_ALIGN_TOL, CONN_TYPE_MASK, anchorGap } from "./config.js";
 import { ACCESSORY_IDS, PANEL_ACCESSORY_IDS, accessoryMount, accessoryDiagnostics, panelAccessoryDiagnostics, componentMountsValid, componentVolumes, componentFrame, confirmedDiagnostics, nativeWheelComponentObstacle } from './accessoryPack.js';
 import { confirmedSpec, usesCustomClimbingColor } from './componentPack.js';
-import { confirmedCandidates, ropeCandidate, supportsPanelFixing, PANEL_RETAINER_LAYOUT } from './confirmedComponentModel.js';
+import { confirmedCandidates, ropeCandidate, supportsPanelFixing, PANEL_RETAINER_LAYOUT, curvePoint } from './confirmedComponentModel.js';
+import { segmentDistance } from './segmentDistance.js';
 import { insetPanelProbes, INSET_PANEL_IDS, INSET_MOUNT_LAYOUT, oppositeScrewSupports, insetPanelReference } from './insetPanelMounts.js';
 import { validAssemblyConfig } from './assemblyConfig.js';
 import { validHomeContext } from '../home/context.js';
@@ -2033,6 +2034,7 @@ export class BuildModel {
       const C = t.bowCenter;
       // Ecke gegenueber dem Mittelpunkt: dort sitzt der Bezugspunkt des Tuchs.
       bows.push({
+        id: t.id,
         O: [a.x + b.x - C[0], a.y + b.y - C[1], a.z + b.z - C[2]],
         u: norm3([a.x - (a.x + b.x - C[0]), a.y - (a.y + b.y - C[1]), a.z - (a.z + b.z - C[2])]),
         v: norm3([b.x - (a.x + b.x - C[0]), b.y - (a.y + b.y - C[1]), b.z - (a.z + b.z - C[2])]),
@@ -2057,7 +2059,7 @@ export class BuildModel {
         // entscheidet die Rechtshaendigkeit gegen die Achse zum zweiten Bogen.
         let ey = p.u, ex = [-p.v[0], -p.v[1], -p.v[2]];
         if (dot3(cross3(ex, ey), ez) < 0) { ey = p.v; ex = [-p.u[0], -p.u[1], -p.u[2]]; }
-        out.push({ pos: p.O, dir: ex, quat: quatFromBasis(ex, ey, ez) });
+        out.push({ pos: p.O, dir: ex, quat: quatFromBasis(ex, ey, ez), tubeIds: [p.id, s.id] });
       }
     }
     return out;
@@ -6737,21 +6739,34 @@ export class BuildModel {
    * Builder 记住点击方向时传 reverseOnBlock:false，由控制器处理换向。
    * @param {string} id
    * @param {number} [steps]
-   * @param {{ pivot?: string, reverseOnBlock?: boolean }} [options]
+   * @param {{ pivot?: string, reverseOnBlock?: boolean, tubeRadius?: number, connectorSize?: number }} [options]
    */
-  rotateBow(id, steps = 1, { pivot, reverseOnBlock = true } = {}) {
+  rotateBow(id, steps = 1, { pivot, reverseOnBlock = true, tubeRadius = 2.45, connectorSize = 5 } = {}) {
     const t = this.tubes.get(id);
     if (!t || !t.bow || !t.bowCenter) return null;
+    const usesTube = (part) => part.tube === id || part.a === id || part.b === id
+      || (Array.isArray(part.supportTubes) && part.supportTubes.includes(id))
+      || (Array.isArray(part.mounts) && part.mounts.some((mount) => mount?.tube === id));
+    const roundCovers = [...this.fittings.values()].filter((f) => f.kind === "textil-round2" && f.quat);
+    const supportedByRoundCover = roundCovers.length && this._roundCoverMounts().some((mount) =>
+      mount.tubeIds.includes(id) && roundCovers.some((cover) =>
+        Math.hypot(cover.x - mount.pos[0], cover.y - mount.pos[1], cover.z - mount.pos[2]) < 2
+        && Math.abs(cover.quat.reduce((sum, value, i) => sum + value * mount.quat[i], 0)) > 0.999));
+    if (supportedByRoundCover || [this.fittings, this.panels, this.textiles].some((parts) => [...parts.values()].some(usesTube))
+        || [...this.nodes.values()].some((node) => node.clampOn?.tubeId === id)) return { blocked: true };
     const reversed = pivot != null && pivot === t.b;
     const startId = reversed ? t.b : t.a, endId = reversed ? t.a : t.b;
     const a = this.nodes.get(startId), b = this.nodes.get(endId);
     if (!a || !b) return null;
     const c = { x: t.bowCenter[0], y: t.bowCenter[1], z: t.bowCenter[2] };
-    const R = Math.hypot(c.x - a.x, c.y - a.y, c.z - a.z);
+    const geom = t.geom?.p0 && t.geom.dir && t.geom.up && Number.isFinite(t.geom.len) ? t.geom : null;
+    const R = geom ? geom.len + (geom.pad || 0) + connectorSize : Math.hypot(c.x - a.x, c.y - a.y, c.z - a.z);
     if (R < 1) return null;
-    const n = [(c.x - a.x) / R, (c.y - a.y) / R, (c.z - a.z) / R];
+    const n = geom ? unit((reversed ? geom.dir.map(value => -value) : geom.up))
+      : [(c.x - a.x) / R, (c.y - a.y) / R, (c.z - a.z) / R];
     // Tangente am Anfang: Sehne minus Radiusanteil, normiert.
-    const t0 = unit([(b.x - a.x) / R - n[0], (b.y - a.y) / R - n[1], (b.z - a.z) / R - n[2]]);
+    const t0 = geom ? unit(reversed ? geom.up.map(value => -value) : geom.dir)
+      : unit([(b.x - a.x) / R - n[0], (b.y - a.y) / R - n[1], (b.z - a.z) / R - n[2]]);
     // 优先转指定方向 90 度；受阻就反向转 90 度，不跳过障碍转 180 度。
     const perp = cross(t0, n);
     const anti = [-perp[0], -perp[1], -perp[2]];
@@ -6768,17 +6783,67 @@ export class BuildModel {
       if (this.bowBelowGround(a, t0, n2, R)) { blocked = { ground: true }; continue; }
       const hit = this.findNodeNear(target.x, target.y, target.z);
       if (hit && hit.id !== endId && this.tubeBetween(startId, hit.id)) { blocked = { duplicate: true }; continue; }
+      const xyz = (node) => [node.x, node.y, node.z];
+      const arc = Array.from({ length: 33 }, (_, i) => {
+        const angle = Math.PI * i / 64;
+        return xyz(a).map((value, axis) => value + R * (Math.sin(angle) * t0[axis] + (1 - Math.cos(angle)) * n2[axis]));
+      });
+      const clearance = 2 * tubeRadius - 0.03 + R * (1 - Math.cos(Math.PI / 128));
+      const collides = [...this.tubes.values()].some((other) => {
+        if (other.id === id || other.link || other.arm) return false;
+        const p = this.nodes.get(other.a), q = this.nodes.get(other.b);
+        if (!p || !q) return false;
+        const points = other.bow && other.bowCenter
+          ? Array.from({ length: 33 }, (_, i) => curvePoint(this, other.id, i / 32))
+          : other.geom?.p0 && other.geom.dir
+            ? [connectorSize / 2, other.geom.len + (other.geom.pad || 0) + connectorSize / 2]
+              .map((distance) => other.geom.p0.map((value, axis) => value + other.geom.dir[axis] * distance))
+            : [xyz(p), xyz(q)];
+        if (points.some((point) => !point)) return false;
+        const sharesStart = other.a === startId || other.b === startId;
+        const sharesEnd = hit && (other.a === hit.id || other.b === hit.id);
+        for (let i = 0; i < arc.length - 1; i++) {
+          const mid = arc[i].map((value, axis) => (value + arc[i + 1][axis]) / 2);
+          if (sharesStart && Math.hypot(...mid.map((value, axis) => value - xyz(a)[axis])) < connectorSize) continue;
+          if (sharesEnd && Math.hypot(...mid.map((value, axis) => value - xyz(hit)[axis])) < connectorSize) continue;
+          for (let j = 0; j < points.length - 1; j++) {
+            if (segmentDistance(arc[i], arc[i + 1], points[j], points[j + 1]) < clearance) return true;
+          }
+        }
+        return false;
+      });
+      if (collides) { blocked = { blocked: true }; continue; }
+      if (hit && hit.id !== endId) {
+        const incoming = n2.map((value) => -value);
+        const occupied = [...this.tubes.values()].some((other) => {
+          if (other.id === id || other.link) return false;
+          const otherId = other.a === hit.id ? other.b : other.b === hit.id ? other.a : null;
+          const node = otherId && this.nodes.get(otherId);
+          if (!node) return false;
+          const dir = this._tubeDirAt(other, hit, node);
+          const length = Math.hypot(...dir);
+          return length > 0 && dir.reduce((sum, value, i) => sum + value * incoming[i], 0) / length > ARM_ALIGN_TOL;
+        });
+        if (occupied || !this.canExtendFrom(hit, incoming)
+            || armFittingDirsAt(this, hit).some((dir) => dir.reduce((sum, value, i) => sum + value * incoming[i], 0) > ARM_ALIGN_TOL)) {
+          blocked = { blocked: true }; continue;
+        }
+      }
 
       const oldEnd = endId;
+      const detached = this.degree(oldEnd) > 1 || !!(b.part || b.bearingOn || b.c45body || b.clampOn || b.stub || b.preferType)
+        || [...this.fittings.values()].some((f) => Math.hypot(f.x - b.x, f.y - b.y, f.z - b.z) < 2);
+      if (detached) this._releaseArms(t, oldEnd);
       const to = hit || this.addNode(target.x, target.y, target.z);
       if (to.id === startId) { blocked = { duplicate: true }; continue; }
       t.a = startId;
       t.b = to.id;
       t.bowCenter = [round(a.x + n2[0] * R), round(cy), round(a.z + n2[2] * R)];
+      if (t.geom) t.geom = { ...t.geom, p0: [a.x, a.y, a.z], dir: t0, up: n2 };
       // Zurueckgebliebener Knoten ohne Rohr verschwindet.
-      if (oldEnd !== to.id && this.degree(oldEnd) === 0) this.nodes.delete(oldEnd);
+      if (oldEnd !== to.id && this.degree(oldEnd) === 0 && !detached) this.nodes.delete(oldEnd);
       this._prunePanels();
-      return { node: to };
+      return { node: to, detached };
     }
     return blocked || null;
   }

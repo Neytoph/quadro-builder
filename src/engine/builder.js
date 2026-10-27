@@ -755,10 +755,10 @@ export class Builder {
   }
 
   // 翻面或旋转等双击窗口过后执行，双击选整块时取消待执行操作。
-  _queueSelectFlip(id, e, action = "panel") {
+  _queueSelectFlip(id, e, action = "panel", point = null) {
     this._cancelSelectFlip();
     const timer = setTimeout(() => this._runSelectFlip(), SELECT_BLOCK_MS);
-    this._selectFlip = { id, x: e.clientX, y: e.clientY, timer, action };
+    this._selectFlip = { id, x: e.clientX, y: e.clientY, timer, action, point };
   }
 
   _cancelSelectFlip() {
@@ -781,7 +781,7 @@ export class Builder {
       return;
     }
     if (!this._partTurnsOnClick(f.id)) return;
-    this._adjustPlacedPart(f.id, f.action);
+    this._adjustPlacedPart(f.id, f.action, f.point);
   }
 
   _flipPanel(id) {
@@ -1103,7 +1103,7 @@ export class Builder {
   }
 
   /** 安装工具与选择模式共用调整路径，限制、反馈和撤销记录一致。 */
-  _adjustPlacedPart(id, action) {
+  _adjustPlacedPart(id, action, point = null) {
     if (this.readOnly) return false;
     if (action === "panel") {
       const result = this._flipPanel(id);
@@ -1114,7 +1114,7 @@ export class Builder {
       const ref = splitHingeKey(id);
       return ref ? this.turnFlexiHinge(ref.index) : false;
     }
-    if (action === "bow") return this._turnBow(this.model.tubes.get(id));
+    if (action === "bow") return this._turnBow(this.model.tubes.get(id), 1, point);
     if (action === "c45") {
       const node = this.model.nodes.get(id);
       const body = node?.c45body ? node : this._c45BodyAt(id);
@@ -1150,19 +1150,20 @@ export class Builder {
     this.refresh();
     return !!result;
   }
-  _turnBow(bow, steps = 1) {
+  _turnBow(bow, steps = 1, point = null) {
     if (this.readOnly || !bow?.bow) return false;
-    const pivot = this._bowPivotFor(bow);
-    if (!pivot) { this.onNotice(t("notice_bow_attached"), "warn"); return false; }
+    const pivot = this._bowPivotFor(bow, point);
+    if (!pivot) return false;
     let res;
     this.recordHistory(() => {
-      res = this._rotateWithDirection(`bow:${bow.id}`, steps,
-        (direction) => this.model.rotateBow(bow.id, direction, { pivot, reverseOnBlock: false }),
-        (result) => !!result?.node, (result) => !!(result?.ground || result?.duplicate));
+      res = this._rotateWithDirection(`bow:${bow.id}:${pivot}`, steps,
+        (direction) => this.model.rotateBow(bow.id, direction, { pivot, reverseOnBlock: false,
+          tubeRadius: geometry().tubeRadius, connectorSize: geometry().connectorSize }),
+        (result) => !!result?.node, (result) => !!(result?.ground || result?.duplicate || result?.blocked));
     });
     if (res?.ground) this.onNotice(t("notice_ground"), "warn");
-    else if (res?.duplicate) this.onNotice(t("notice_bow_blocked"), "warn");
-    else if (res?.node) this.onNotice(t("notice_bow_turned"));
+    else if (res?.duplicate || res?.blocked) this.onNotice(t("notice_bow_blocked"), "warn");
+    else if (res?.node) this.onNotice(t(res.detached ? "notice_bow_detached" : "notice_bow_turned"));
     this.refresh();
     return !!res?.node;
   }
@@ -1192,16 +1193,27 @@ export class Builder {
   }
 
   /**
-   * 弯管绕哪一头转：另一头得空着——只有这根管，接头上也没装配件。
-   * 两头都接着东西就转不了（返回 null）；两头都空着就绕 a 头。
+   * 有自由端时固定另一端；两端都连接时点击靠近要转动的端点。
    */
-  _bowPivotFor(tube) {
+  _bowPivotForFree(tube) {
     const a = this.model.nodes.get(tube.a), b = this.model.nodes.get(tube.b);
     if (!a || !b) return null;
-    const free = (n) => this.model.degree(n.id) === 1 && !n.part && !n.bearingOn && !n.c45body;
-    if (free(b)) return tube.a;
-    if (free(a)) return tube.b;
+    const free = (n) => this.model.degree(n.id) === 1 && !n.part && !n.bearingOn && !n.c45body && !n.clampOn && !n.stub && !n.preferType
+      && ![...this.model.fittings.values()].some((f) => Math.hypot(f.x - n.x, f.y - n.y, f.z - n.z) < 2);
+    const aFree = free(a), bFree = free(b);
+    if (bFree && !aFree) return tube.a;
+    if (aFree && !bFree) return tube.b;
     return null;
+  }
+
+  _bowPivotFor(tube, point = null) {
+    const a = this.model.nodes.get(tube.a), b = this.model.nodes.get(tube.b);
+    if (!a || !b) return null;
+    const freePivot = this._bowPivotForFree(tube);
+    if (freePivot) return freePivot;
+    if (!point) return tube.a;
+    const distance = (n) => Math.hypot(n.x - point.x, n.y - point.y, n.z - point.z);
+    return distance(a) <= distance(b) ? tube.b : tube.a;
   }
 
   /** Die Kopie am Zeiger dreht sich an Ort und Stelle mit. */
@@ -5551,7 +5563,7 @@ export class Builder {
     const front = this.scene.pickBuild(e.clientX, e.clientY);
     const bow = front && front.data.kind === "tube" ? this.model.tubes.get(front.data.id) : null;
     if (bow && bow.bow && (!h || front.distance < h.distance)) {
-      this._turnBow(bow);
+      this._turnBow(bow, 1, front.point);
       return;
     }
     if (h) {
@@ -5756,7 +5768,7 @@ export class Builder {
     const rotation = this._clickRotationKind(id, kind);
     if (rotation && rotation !== "panel" && !add && this._partTurnsOnClick(id)) {
       this._selectClick = null;
-      this._queueSelectFlip(id, e, rotation);
+      this._queueSelectFlip(id, e, rotation, pick.point);
       return;
     }
     if (this._isBlockClick(e, ids[0])) {
@@ -5786,6 +5798,9 @@ export class Builder {
     } else {
       this.selection.clear();
       for (const [x, k] of kinds) this.selection.set(x, k);
+    }
+    if (!add && kind === "tube" && this.model.tubes.get(id)?.bow && !this._bowPivotForFree(this.model.tubes.get(id))) {
+      this.onNotice(t("notice_bow_choose_pivot"), "info");
     }
     this.refresh();
   }

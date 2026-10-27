@@ -1,0 +1,2 @@
+// 两条有限线段之间的最短距离。
+export function segmentDistance(a,b,c,d){const sub=(p,q)=>p.map((v,i)=>v-q[i]),dot=(p,q)=>p.reduce((s,v,i)=>s+v*q[i],0);const u=sub(b,a),v=sub(d,c),w=sub(a,c),aa=dot(u,u),bb=dot(u,v),cc=dot(v,v),dd=dot(u,w),ee=dot(v,w),det=aa*cc-bb*bb;let s=det>1e-8?Math.max(0,Math.min(1,(bb*ee-cc*dd)/det)):0,t=cc>1e-8?(bb*s+ee)/cc:0;if(t<0){t=0;s=aa>1e-8?Math.max(0,Math.min(1,-dd/aa)):0;}else if(t>1){t=1;s=aa>1e-8?Math.max(0,Math.min(1,(bb-dd)/aa)):0;}return Math.hypot(...w.map((x,i)=>x+s*u[i]-t*v[i]));}

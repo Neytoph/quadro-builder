@@ -8,6 +8,7 @@ import { C45_SLEEVE_LEN, C45_ARM_LEN } from './config.js'
 import { xAxisOf, yAxisOf } from './util.js'
 import { buildQDF } from './qdfexport.js'
 import { parseQDF } from './qdfimport.js'
+import { createConfirmedComponentFixture } from './confirmedComponentExample.js'
 
 beforeAll(async () => { await loadCatalog() })
 
@@ -199,6 +200,53 @@ describe('受阻后反向旋转', () => {
 })
 
 describe('选择模式下再次点击弯管和斜角接头', () => {
+  it.each(['lattice_curved', 'panel_sector_40'])('%s 的弯管支撑不能单独转动', (partId) => {
+    const { model, part } = createConfirmedComponentFixture(partId)
+    const supports = (part as any).supportTubes as string[]
+    const bows = supports.filter(id => model.tubes.get(id)?.bow)
+    expect(bows.length).toBeGreaterThan(0)
+    const before = model.toJSON()
+    for (const id of bows) expect(model.rotateBow(id)).toMatchObject({ blocked: true })
+    expect(model.toJSON()).toEqual(before)
+  })
+
+  it('旧圆弧布墙的两根支撑弯管不能单独转动', () => {
+    const model = new BuildModel()
+    const a = model.addNode(0, 40, 0), b = model.addNode(0, 40, 80)
+    const first = model.extendBow(a.id, [1, 0, 0], [0, 1, 0], 'TC1', 'blue', 40)!.tube!
+    const second = model.extendBow(b.id, [1, 0, 0], [0, 1, 0], 'TC1', 'blue', 40)!.tube!
+    const mount = model.fittingMounts('textil-round2')[0]
+    expect(mount).toBeTruthy()
+    expect(model.addFittingAt('textil-round2', mount, 'blue')).toBeTruthy()
+    const before = model.toJSON()
+    expect(model.rotateBow(first.id)).toMatchObject({ blocked: true })
+    expect(model.rotateBow(second.id)).toMatchObject({ blocked: true })
+    expect(model.toJSON()).toEqual(before)
+  })
+
+  it.each([false, true])('导入 QDF 的弯管转动后重新导出保留姿态和补长（反向支点 %s）', (reversed) => {
+    const original = new BuildModel(), start = original.addNode(0, 41, 0)
+    const base = original.addNode(-40, 41, 0)
+    original.addTube(base.id, start.id, 'T35', 'blue', 35)
+    const created = original.extendBow(start.id, [1, 0, 0], [0, 1, 0], 'TC1', 'blue', 40)!.tube!
+    ;(created as any).geom = { p0: [0, 40, 0], dir: [1, 0, 0], up: [0, 1, 0], len: 30, pad: 5 }
+    const imported = new BuildModel()
+    expect(imported.loadJSON(parseQDF(buildQDF(original).text)).ok).toBe(true)
+    const bow = [...imported.tubes.values()].find(t => t.bow)!
+    expect(bow.geom?.pad).toBe(5)
+    expect(imported.nodes.get(bow.a)!.y).toBe(41)
+    expect(bow.geom?.p0[1]).toBe(40)
+    expect(imported.rotateBow(bow.id, 1, { pivot: reversed ? bow.b : bow.a })?.node).toBeTruthy()
+    const expected = imported.nodes.get(bow.b)!
+    const reopened = new BuildModel()
+    expect(reopened.loadJSON(parseQDF(buildQDF(imported).text)).ok).toBe(true)
+    const rotated = [...reopened.tubes.values()].find(t => t.bow)!
+    const endpoint = reopened.nodes.get(rotated.b)!
+    expect(endpoint.x).toBeCloseTo(expected.x, 1)
+    expect(endpoint.y).toBeCloseTo(expected.y, 1)
+    expect(endpoint.z).toBeCloseTo(expected.z, 1)
+    expect(rotated.geom?.pad).toBe(5)
+  })
   it('单选弯管的再次点击转 90 度，支点保持原位，撤销完整恢复', () => {
     const model = new BuildModel()
     const a = model.addNode(0, 40, 0)
@@ -216,13 +264,107 @@ describe('选择模式下再次点击弯管和斜角接头', () => {
     expect(model.toJSON()).toEqual(before)
   })
 
-  it('弯管两端都接着其他管子时拒绝点击旋转，连接不变', () => {
+  it('弯管两端连接时点击要转动的一端，脱开并吸附目标，撤销恢复', () => {
     const model = new BuildModel()
     const a = model.addNode(0, 40, 0), base = model.addNode(0, 0, 0)
     model.addTube(base.id, a.id, 'T35', 'blue', 35)
     const bow = model.extendBow(a.id, [1, 0, 0], [0, 1, 0], 'TC1', 'blue', 40)!.tube!
     const end = model.nodes.get(bow.b)!, other = model.addNode(end.x + 40, end.y, end.z)
     model.addTube(end.id, other.id, 'T35', 'blue', 35)
+    const target = model.addNode(40, 40, 40)
+    const before = model.toJSON()
+    const builder = editor(model, new Map([[bow.id, 'tube']]))
+    builder._queueSelectFlip(bow.id, { clientX: 20, clientY: 20 }, 'bow', end)
+    builder._runSelectFlip()
+    expect(bow.a).toBe(a.id)
+    expect(bow.b).toBe(target.id)
+    expect(model.degree(end.id)).toBe(1)
+    const saved = new BuildModel()
+    expect(saved.loadJSON(model.toJSON()).ok).toBe(true)
+    expect(saved.toJSON().tubes.find(t => t.id === bow.id)).toEqual(model.toJSON().tubes.find(t => t.id === bow.id))
+    builder.history.undo()
+    expect(model.toJSON()).toEqual(before)
+  })
+
+  it('点击另一端转动它并保留原端点的结构', () => {
+    const model = new BuildModel()
+    const a = model.addNode(0, 40, 0), base = model.addNode(-40, 40, 0)
+    model.addTube(base.id, a.id, 'T35', 'blue', 35)
+    const bow = model.extendBow(a.id, [1, 0, 0], [0, 1, 0], 'TC1', 'blue', 40)!.tube!
+    const end = model.nodes.get(bow.b)!, other = model.addNode(end.x, end.y + 40, end.z)
+    model.addTube(end.id, other.id, 'T35', 'blue', 35)
+    const builder = editor(model, new Map([[bow.id, 'tube']]))
+    expect(builder._turnBow(bow, 1, a)).toBe(true)
+    expect(bow.a).toBe(end.id)
+    expect(model.degree(a.id)).toBe(1)
+  })
+
+  it('两端都空时按点击选择转动端；单端连接时自动固定连接端', () => {
+    const model = new BuildModel()
+    const a = model.addNode(0, 40, 0)
+    const bow = model.extendBow(a.id, [1, 0, 0], [0, 1, 0], 'TC1', 'blue', 40)!.tube!
+    const end = model.nodes.get(bow.b)!
+    const builder = editor(model, new Map([[bow.id, 'tube']]))
+    expect(builder._bowPivotFor(bow, a)).toBe(end.id)
+    expect(builder._bowPivotFor(bow, end)).toBe(a.id)
+    expect(builder._bowPivotFor(bow)).toBe(a.id)
+    const base = model.addNode(-40, 40, 0)
+    model.addTube(base.id, a.id, 'T35', 'blue', 35)
+    expect(builder._bowPivotFor(bow, a)).toBe(a.id)
+    expect(builder._bowPivotFor(bow, end)).toBe(a.id)
+  })
+
+  it('目标插口被占时保持原位置且不产生撤销记录', () => {
+    const model = new BuildModel()
+    const a = model.addNode(0, 40, 0)
+    const bow = model.extendBow(a.id, [1, 0, 0], [0, 1, 0], 'TC1', 'blue', 40)!.tube!
+    for (const z of [-40, 40]) {
+      const target = model.addNode(40, 40, z), other = model.addNode(40, 40, 0)
+      model.addTube(target.id, other.id, 'T35', 'red', 35)
+    }
+    const before = model.toJSON()
+    const builder = editor(model, new Map([[bow.id, 'tube']]))
+    expect(builder._turnBow(bow)).toBe(false)
+    expect(model.toJSON()).toEqual(before)
+    expect(builder.history.canUndo()).toBe(false)
+  })
+
+  it.each([0, 1, 3])('障碍管相对目标圆弧横向偏移 %s cm 时拒绝并保持模型', (offset) => {
+    const model = new BuildModel(), a = model.addNode(0, 40, 0)
+    const bow = model.extendBow(a.id, [1, 0, 0], [0, 1, 0], 'TC1', 'blue', 40)!.tube!
+    for (const sign of [-1, 1]) {
+      const x = 40 * Math.SQRT1_2 + offset, z = sign * (40 - 40 * Math.SQRT1_2)
+      const p = model.addNode(x, 20, z), q = model.addNode(x, 60, z)
+      model.addTube(p.id, q.id, 'T35', 'red', 35)
+    }
+    const before = model.toJSON()
+    const builder = editor(model, new Map([[bow.id, 'tube']]))
+    expect(builder._turnBow(bow)).toBe(false)
+    expect(model.toJSON()).toEqual(before)
+    expect(builder.history.canUndo()).toBe(false)
+  })
+
+  it('目标弧线与其他管有足够间距时允许转动，共用起点的管保持连接', () => {
+    const model = new BuildModel(), a = model.addNode(0, 40, 0), base = model.addNode(-40, 40, 0)
+    const rail = model.addTube(base.id, a.id, 'T35', 'blue', 35)!
+    const bow = model.extendBow(a.id, [1, 0, 0], [0, 1, 0], 'TC1', 'blue', 40)!.tube!
+    const x = 40 * Math.SQRT1_2 + 8, z = 40 - 40 * Math.SQRT1_2
+    const p = model.addNode(x, 20, z), q = model.addNode(x, 60, z)
+    model.addTube(p.id, q.id, 'T35', 'red', 35)
+    expect(model.rotateBow(bow.id, 1, { reverseOnBlock: false })?.node).toBeTruthy()
+    expect(model.tubeBetween(base.id, a.id)?.id).toBe(rail.id)
+    expect(bow.a).toBe(a.id)
+  })
+
+  it('导入管的实际几何位置穿过弧线时拒绝，即使接头连线在安全距离外', () => {
+    const model = new BuildModel(), a = model.addNode(0, 40, 0)
+    const bow = model.extendBow(a.id, [1, 0, 0], [0, 1, 0], 'TC1', 'blue', 40)!.tube!
+    for (const sign of [-1, 1]) {
+      const x = 40 * Math.SQRT1_2, z = sign * (40 - 40 * Math.SQRT1_2)
+      const p = model.addNode(x + 8, 20, z), q = model.addNode(x + 8, 60, z)
+      const obstacle = model.addTube(p.id, q.id, 'T35', 'red', 35)!
+      ;(obstacle as any).geom = { p0: [x + 6, 17.5, z], dir: [0, 1, 0], len: 35, pad: 5 }
+    }
     const before = model.toJSON()
     const builder = editor(model, new Map([[bow.id, 'tube']]))
     expect(builder._turnBow(bow)).toBe(false)

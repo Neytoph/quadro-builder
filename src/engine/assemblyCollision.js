@@ -18,6 +18,7 @@ import { C45_SLEEVE_LEN, C45_ARM_LEN } from './config.js';
 import { structuralBearingSupport } from './assemblyStructuralBearings.js';
 import { aluminiumConnectorDisplay } from './reinforcement.js';
 import { xAxisOf, yAxisOf, zAxisOf, panelNormal, modelMiddle } from './util.js';
+import { segmentDistance } from './segmentDistance.js';
 
 const xyz = p => [p.x, p.y, p.z];
 const sub = (a,b) => a.map((v,i)=>v-b[i]);
@@ -118,7 +119,6 @@ function computeEnvelope(model,id) {
   }
   return [];
 }
-function segmentDistance(a,b,c,d){const u=sub(b,a),v=sub(d,c),w=sub(a,c),aa=dot(u,u),bb=dot(u,v),cc=dot(v,v),dd=dot(u,w),ee=dot(v,w),det=aa*cc-bb*bb;let s=det>1e-8?Math.max(0,Math.min(1,(bb*ee-cc*dd)/det)):0,t=cc>1e-8?(bb*s+ee)/cc:0;if(t<0){t=0;s=aa>1e-8?Math.max(0,Math.min(1,-dd/aa)):0;}else if(t>1){t=1;s=aa>1e-8?Math.max(0,Math.min(1,(bb-dd)/aa)):0;}return Math.hypot(...w.map((x,i)=>x+s*u[i]-t*v[i]));}
 function boxSegment(box,a,b,r,padding=[0,0,0]){
   const p=box.axes.map(axis=>dot(sub(a,box.pos),axis)),d=box.axes.map(axis=>dot(sub(b,a),axis));
   const half=box.half.map((h,i)=>h+Math.abs(dot(padding,box.axes[i]))),breaks=[0,1];
