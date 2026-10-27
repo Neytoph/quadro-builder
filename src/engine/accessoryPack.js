@@ -28,6 +28,35 @@ const mid = (a, b) => a.map((v, i) => (v + b[i]) / 2);
 const at = (frame, p) => frame.pos.map((v, i) => v + frame.axes.reduce((n, a, k) => n + a[i] * p[k], 0));
 const invalid = reason => ({ valid: false, reason, mounts: [], supportTubes: [] });
 
+// A flat platform behind the entrance shares the mounting rail with the slide.
+// The coarse 20 cm slide clearance must not treat that joint as an obstruction.
+function isSlideEntryPlatform(model, part, slide) {
+  const spec = confirmedSpec(part.panelId);
+  if (!spec || spec.depth > 1.2 || !part.a || !part.b || slide.kind === 'slide-end2') return false;
+  const corners = model.panelCorners(part), entry = model.slideEntry(slide);
+  if (!corners || !entry || corners.some(p => Math.abs(p[1] - entry.y) > .6)) return false;
+  const origin = point(entry);
+  let direction;
+  if (slide.hook || !model.slideExit(slide)) {
+    const x = xAxisOf(slide.quat || [0, 0, 0, 1]);
+    direction = [-x[2], 0, x[0]];
+  } else {
+    const z = zAxisOf(slide.quat || [0, 0, 0, 1]);
+    direction = [z[0], 0, z[2]];
+  }
+  const length = Math.hypot(...direction);
+  if (length < .99) return false;
+  direction = direction.map(v => v / length);
+  const along = corners.map(p => dot(sub(p, origin), direction));
+  if (Math.max(...along) > .6 || Math.min(...along) > -1) return false;
+  return corners.some((a, i) => {
+    const b = corners[(i + 1) % corners.length], edge = sub(b, a), n = Math.hypot(...edge);
+    if (n < 1 || Math.abs(dot(edge, direction)) > .6) return false;
+    const axis = edge.map(v => v / n), delta = sub(origin, a), t = dot(delta, axis);
+    return t >= -.6 && t <= n + .6 && Math.hypot(...sub(delta, axis.map(v => v * t))) < .6;
+  });
+}
+
 export function accessorySpec(kind) {
   if (confirmedSpec(kind)) return confirmedSpec(kind);
   const spec = [...ACCESSORY_PACK, ...PANEL_COMPONENT_PACK].find(part => part.id === kind);
@@ -266,7 +295,7 @@ export function componentObstacle(model, part, { sweep = false, collisionCache =
   for (const slide of model.slides.values()) {
     const origin = [slide.x, slide.y, slide.z];
     const end = slide.hook || origin;
-    if (volumes.some(box => segmentHits(box, origin, end, 20))) return { kind: 'slide', id: slide.id };
+    if (volumes.some(box => segmentHits(box, origin, end, 20)) && !isSlideEntryPlatform(model, part, slide)) return { kind: 'slide', id: slide.id };
   }
   return null;
 }
