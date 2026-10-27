@@ -9,7 +9,12 @@ const jobs = new Set();
 export function normalizeRoomPreview(data) {
   const room = data?.room, items = data?.items;
   if (!room || !['w', 'h', 'd'].every(key => Number.isFinite(room[key]) && room[key] > 0 && room[key] <= 2000) || !Array.isArray(items) || items.length > 61) throw new Error('Invalid room preview');
-  return { room: { w: room.w, h: room.h, d: room.d }, items: items.map(item => {
+  if (data.openings !== undefined && (!Array.isArray(data.openings) || data.openings.length > 20)) throw new Error('Invalid room openings');
+  const openings = (data.openings || []).map(o => {
+    if (!o || !['window', 'door'].includes(o.kind) || !['back', 'front', 'left', 'right'].includes(o.wall) || ![o.offset, o.width, o.height, o.elevation].every(Number.isInteger) || o.offset < 0 || o.width < 1 || o.height < 1 || o.elevation < 0 || o.offset + o.width > (['back', 'front'].includes(o.wall) ? room.w : room.d) || o.elevation + o.height > room.h || o.kind === 'door' && o.elevation !== 0) throw new Error('Invalid room opening');
+    return { kind: o.kind, wall: o.wall, offset: o.offset, width: o.width, height: o.height, elevation: o.elevation };
+  });
+  return { room: { w: room.w, h: room.h, d: room.d }, openings, items: items.map(item => {
     if (!item || !['furniture', 'reserved', 'usable'].includes(item.kind) || !['x', 'z', 'w', 'd', 'h', 'elevation'].every(key => Number.isFinite(item[key])) || item.w <= 0 || item.d <= 0 || item.h <= 0 || item.elevation < 0 || item.x < 0 || item.z < 0 || item.x + item.w > room.w || item.z + item.d > room.d || item.elevation + item.h > room.h || (item.rotation !== undefined && ![0, 90, 180, 270].includes(item.rotation))) throw new Error('Invalid room preview item');
     return { type: item.type, kind: item.kind, x: item.x, z: item.z, w: item.w, d: item.d, h: item.h, elevation: item.elevation, rotation: furnitureRotation(item) };
   }) };
@@ -54,7 +59,7 @@ export function captureRoomThumbnail(data, width = 960) {
   const output = getRenderer(), scene = new THREE.Scene(), root = new THREE.Group(), camera = new THREE.OrthographicCamera();
   scene.add(root);
   try {
-    root.add(visuals.roomShell(state.room));
+    root.add(visuals.roomShell(state.room, state.openings));
     for (const item of state.items) {
       const group = item.kind === 'furniture' ? visuals.furniture(item.type, item.d > item.w, item.rotation) : visuals.zone(item);
       group.position.set(item.x, item.elevation, item.z); group.scale.set(item.w, item.h, item.d); root.add(group);

@@ -63,17 +63,41 @@ export function createHomeVisuals(THREE, RoundedBoxGeometry) {
     edges.userData.volume = true; group.add(edges); return group;
   }
 
-  function roomShell(room) {
+  function roomShell(room, openings = []) {
     const group = new THREE.Group(); group.name = 'home-room-shell';
-    const add = (size, position, color) => {
-      const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), new THREE.MeshStandardMaterial({ color, roughness: .94 }));
-      mesh.position.set(...position); mesh.receiveShadow = true; group.add(mesh); return mesh;
+    const add = (parent, size, position, color, materialOptions = {}) => {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), new THREE.MeshStandardMaterial({ color, roughness: .94, ...materialOptions }));
+      mesh.position.set(...position); mesh.receiveShadow = true; parent.add(mesh); return mesh;
     };
-    add([room.w + 12, 8, room.d + 12], [room.w / 2, -4, room.d / 2], '#e4d3b7');
-    add([room.w + 12, room.h, 6], [room.w / 2, room.h / 2, -3], '#ede5d6').userData.wall = 'z';
-    add([6, room.h, room.d], [-3, room.h / 2, room.d / 2], '#e4ddcf').userData.wall = 'x';
-    add([room.w, 7, 1], [room.w / 2, 3.5, 1], '#d7c9b2').userData.wall = 'z';
-    add([1, 7, room.d], [1, 3.5, room.d / 2], '#d7c9b2').userData.wall = 'x';
+    add(group, [room.w + 12, 8, room.d + 12], [room.w / 2, -4, room.d / 2], '#e4d3b7');
+    for (const [name, axis, limit, length] of [['back', 'z', 0, room.w], ['front', 'z', room.d, room.w], ['left', 'x', 0, room.d], ['right', 'x', room.w, room.d]]) {
+      const wall = new THREE.Group(), maxSide = name === 'front' || name === 'right';
+      wall.userData.wall = axis; wall.userData.wallLimit = limit; wall.userData.wallMaxSide = maxSide;
+      wall.visible = !maxSide; group.add(wall);
+      const cuts = openings.filter(o => o.wall === name);
+      const xs = [...new Set([0, length, ...cuts.flatMap(o => [o.offset, o.offset + o.width])])].sort((a, b) => a - b);
+      const ys = [...new Set([0, room.h, ...cuts.flatMap(o => [o.elevation, o.elevation + o.height])])].sort((a, b) => a - b);
+      const wallCenter = limit + (maxSide ? 3 : -3), color = axis === 'z' ? '#ede5d6' : '#e4ddcf';
+      const part = (start, y, width, height, depth, tint, options = {}) => {
+        const size = axis === 'z' ? [width, height, depth] : [depth, height, width];
+        const position = axis === 'z' ? [start + width / 2, y + height / 2, wallCenter] : [wallCenter, y + height / 2, start + width / 2];
+        return add(wall, size, position, tint, options);
+      };
+      for (let x = 0; x < xs.length - 1; x++) for (let y = 0; y < ys.length - 1; y++) {
+        const a = xs[x], b = xs[x + 1], low = ys[y], high = ys[y + 1], mid = (a + b) / 2, midY = (low + high) / 2;
+        if (!cuts.some(o => mid > o.offset && mid < o.offset + o.width && midY > o.elevation && midY < o.elevation + o.height)) part(a, low, b - a, high - low, 6, color);
+      }
+      for (const o of cuts) {
+        const frame = Math.min(4, o.width / 4, o.height / 4);
+        part(o.offset, o.elevation, frame, o.height, 7, '#c9ad8d');
+        part(o.offset + o.width - frame, o.elevation, frame, o.height, 7, '#c9ad8d');
+        part(o.offset, o.elevation + o.height - frame, o.width, frame, 7, '#c9ad8d');
+        if (o.kind === 'window') {
+          part(o.offset, o.elevation, o.width, frame, 7, '#c9ad8d');
+          part(o.offset + frame, o.elevation + frame, o.width - frame * 2, o.height - frame * 2, 1, '#c7e3e6', { transparent: true, opacity: .48, depthWrite: false });
+        }
+      }
+    }
     const positions = [];
     for (let x = 0; x <= room.w; x += HOME_STYLE.gridCell) positions.push(x, .15, 0, x, .15, room.d);
     for (let z = 0; z <= room.d; z += HOME_STYLE.gridCell) positions.push(0, .15, z, room.w, .15, z);

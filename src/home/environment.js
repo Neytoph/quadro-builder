@@ -24,7 +24,7 @@ export function createHomeEnvironment(context) {
   if (!validHomeContext(context)) throw new Error('Invalid home context');
   const root = new THREE.Group(), { room: r, items } = context.snapshot;
   root.name = 'my-home-environment';
-  const shell = visuals.roomShell(r), lights = visuals.lighting();
+  const shell = visuals.roomShell(r, context.snapshot.openings || []), lights = visuals.lighting();
   root.add(shell, lights);
   for (const i of items) {
     const object = i.kind === 'furniture' ? visuals.furniture(i.type, i.d > i.w, furnitureRotation(i)) : visuals.zone(i);
@@ -40,7 +40,7 @@ export function createHomeEnvironment(context) {
   visuals.fitLighting(lights.userData.sun, r, root);
   root.userData.updateWalls = camera => {
     const local = root.worldToLocal(camera.getWorldPosition(new THREE.Vector3()));
-    for (const object of shell.children) if (object.userData.wall) object.visible = local[object.userData.wall] >= 0;
+    for (const object of shell.children) if (object.userData.wall) object.visible = object.userData.wallMaxSide ? local[object.userData.wall] <= object.userData.wallLimit : local[object.userData.wall] >= object.userData.wallLimit;
   };
   root.userData.frame = { center: root.localToWorld(new THREE.Vector3(r.w / 2, r.h * .25, r.d / 2)), size: Math.max(r.w, r.d, r.h) };
   return root;

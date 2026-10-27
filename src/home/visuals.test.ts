@@ -35,3 +35,22 @@ describe('家具旋转保持真实形状', () => {
     expect(furnitureRotation({ type: 'cabinet', w: 45, d: 120, rotation: 180 })).toBe(180)
   })
 })
+
+describe('墙面开口', () => {
+  it('门洞穿过墙体，旁边墙面保留，四面墙均可设置开口', () => {
+    const room = { w: 450, d: 350, h: 260 }
+    for (const [wall, origin, direction, solid] of [
+      ['back', [100, 100, -30], [0, 0, 1], [20, 100, -30]],
+      ['front', [100, 100, 380], [0, 0, -1], [20, 100, 380]],
+      ['left', [-30, 100, 100], [1, 0, 0], [-30, 100, 20]],
+      ['right', [480, 100, 100], [-1, 0, 0], [480, 100, 20]]
+    ] as const) {
+      const shell = visuals.roomShell(room, [{ id: 'door', kind: 'door', wall, offset: 50, width: 100, height: 200, elevation: 0 }])
+      shell.updateMatrixWorld(true)
+      const wallGroup = shell.children.find((o: THREE.Object3D) => o.userData.wall === (wall === 'back' || wall === 'front' ? 'z' : 'x') && o.userData.wallMaxSide === (wall === 'front' || wall === 'right'))!
+      const ray = (p: readonly number[]) => new THREE.Raycaster(new THREE.Vector3(...p as [number, number, number]), new THREE.Vector3(...direction))
+      expect(ray(origin).intersectObject(wallGroup, true)).toHaveLength(0)
+      expect(ray(solid).intersectObject(wallGroup, true).length).toBeGreaterThan(0)
+    }
+  })
+})

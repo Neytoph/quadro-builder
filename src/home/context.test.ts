@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import * as Y from 'yjs'
-import { Box3, HemisphereLight, LineSegments, Matrix4, Mesh, Vector3 } from 'three'
+import { Box3, HemisphereLight, LineSegments, Matrix4, Mesh, Object3D, Vector3 } from 'three'
 import { loadCatalog } from '../engine/catalog.js'
 import { BuildModel } from '../engine/model.js'
 import { docFromJSON, docToJSON, type ModelJSON } from '../collab/ymodel'
@@ -61,6 +61,22 @@ describe('房间与原生模型的存档关系', () => {
     expect(docToJSON(second).homeContext).toEqual(context)
     const copy = new BuildModel(); expect(copy.loadJSON(docToJSON(second)).ok).toBe(true)
     expect(copy.toJSON()).toEqual(model.toJSON()); first.destroy(); second.destroy()
+  })
+  it('房间中的窗户和门洞随模型保存，并参与三维房间绘制', () => {
+    const context = home()
+    const openings = [{ id: 'window', kind: 'window', wall: 'back', offset: 40, width: 100, height: 100, elevation: 80 }, { id: 'door', kind: 'door', wall: 'left', offset: 50, width: 90, height: 200, elevation: 0 }]
+    Object.assign(context.snapshot, { openings })
+    expect(validHomeContext(context)).toBe(true)
+    const model = new BuildModel(); model.addNode(40, 0, 80)
+    expect(model.loadJSON({ ...model.toJSON(), homeContext: context }).ok).toBe(true)
+    expect(model.toJSON().homeContext.snapshot.openings).toEqual(openings)
+    Object.assign(context.snapshot, { openings: [openings[0], { ...openings[1], wall: 'back', offset: 50 }] })
+    expect(validHomeContext(context)).toBe(true)
+    const environment = createHomeEnvironment(context), shell = environment.children.find((o: Object3D) => o.name === 'home-room-shell')!
+    expect(shell.children.filter((o: Object3D) => o.userData.wall).length).toBe(4)
+    disposeHome(environment)
+    Object.assign(context.snapshot, { openings: [{ ...openings[0], elevation: 200 }] })
+    expect(validHomeContext(context)).toBe(false)
   })
   it('坏房间数据不会替换当前产品', () => {
     const model = new BuildModel(); model.addNode(40, 0, 80); const before = model.toJSON()

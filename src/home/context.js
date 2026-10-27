@@ -5,6 +5,13 @@ export function validHomeContext(c) {
   const s = c.snapshot, r = s?.room;
   if (!r || !['furniture', 'area'].includes(s.mode) || ![r.w, r.h, r.d].every(n => number(n) && n > 0 && n <= 2000) || !Array.isArray(s.items) || s.items.length > 61) return false;
   const ids = new Set(), counts = { furniture: 0, reserved: 0, usable: 0 };
+  if (s.openings !== undefined && (!Array.isArray(s.openings) || s.openings.length > 20)) return false;
+  for (const o of (s.openings || [])) {
+    if (!o || typeof o.id !== 'string' || !o.id || o.id.length > 80 || ids.has(o.id) || !['window', 'door'].includes(o.kind) || !['back', 'front', 'left', 'right'].includes(o.wall)) return false;
+    ids.add(o.id);
+    const length = ['back', 'front'].includes(o.wall) ? r.w : r.d;
+    if (![o.offset, o.width, o.height, o.elevation].every(Number.isInteger) || o.offset < 0 || o.width < 1 || o.height < 1 || o.elevation < 0 || o.offset + o.width > length || o.elevation + o.height > r.h || o.kind === 'door' && o.elevation !== 0) return false;
+  }
   for (const i of s.items) {
     if (!i || typeof i.id !== 'string' || !i.id || i.id.length > 80 || ids.has(i.id) || typeof i.name !== 'string' || i.name.length > 160) return false;
     ids.add(i.id);
