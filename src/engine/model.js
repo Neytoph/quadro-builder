@@ -226,6 +226,7 @@ function rotateX(q) {
  * einmal eine Laenge weiter aussen sitzt.
  */
 export function clampOffset(part, cs = 5) {
+  if (part === "windmill") return 0;
   return part === "bearing" ? cs * 2 : cs;
 }
 
@@ -301,19 +302,19 @@ export function fixedFittingColor(kind) {
  * Maske 31 (+Y -Y +Z) ist dieselbe dreiarmige, um 90 Grad um die Lochachse
  * gedreht -- sie kommt aus einer Datei des Bestands und wird nur gelesen.
  */
-export const HOLE_MASKS = { hole_1: 11, hole_2: 15, hole_t: 59 };
+export const HOLE_MASKS = { hole_1: 11, hole_2: 15, hole_t: 59, windmill: 63 };
 const HOLE_ARM_BITS = [[0x04, 1, 1], [0x08, 1, -1], [0x10, 2, 1], [0x20, 2, -1]];
 
 /** Ist dieser Knoten eine Lochzapfenkupplung? */
 export function isHolePart(part) {
-  return part === "hole_1" || part === "hole_2" || part === "hole_t";
+  return part === "hole_1" || part === "hole_2" || part === "hole_t" || part === "windmill";
 }
 
 /** Katalogteil zu einer Arm-Maske: die Zahl der Arme entscheidet. */
 export function holePartForMask(mask) {
   let arme = 0;
   for (const [bit] of HOLE_ARM_BITS) if (mask & bit) arme++;
-  return arme >= 3 ? "hole_t" : arme === 2 ? "hole_2" : "hole_1";
+  return arme === 4 ? "windmill" : arme >= 3 ? "hole_t" : arme === 2 ? "hole_2" : "hole_1";
 }
 
 /**
@@ -1006,8 +1007,9 @@ export class BuildModel {
   // dessen Treffpunkt im Inneren mindestens eines Rohres liegt (z. B. 35er quer
   // ueber ein 75er). Beruehren an einer gemeinsamen Kupplung zaehlt nicht.
   // Liefert das kollidierende Rohr oder null.
-  tubeCollision(p, q) {
+  tubeCollision(p, q, ignoreTubeId = null) {
     for (const t of this.tubes.values()) {
+      if (t.id === ignoreTubeId) continue;
       const a = this.nodes.get(t.a), b = this.nodes.get(t.b);
       if (!a || !b) continue;
       if (segmentsOverlap(p, q, a, b)) return t;
@@ -2166,6 +2168,12 @@ export class BuildModel {
       // schraeg. Ohne das boete sie die Weltachsen an und ein angestecktes Rohr
       // liefe im falschen Winkel weg.
       node.quat = f.quat.slice();
+    } else if (part === "windmill") {
+      const ex = norm3(this._tubeDir(this.tubes.get(tubeId)));
+      const ey = norm3(m.stub);
+      node.part = part;
+      node.partMask = HOLE_MASKS[part];
+      node.partQuat = quatFromBasis(ex, ey, cross3(ex, ey)).map(round4);
     } else {
       node.part = part;
     }
@@ -2697,6 +2705,11 @@ export class BuildModel {
   tubeClampMount(tubeId, point, part, cs = 5) {
     const g = this._clampGeom(tubeId, point);
     if (!g) return null;
+    if (part === 'windmill') {
+      const tube = this.tubes.get(tubeId), a = this.nodes.get(tube.a), b = this.nodes.get(tube.b);
+      const length = Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
+      if (g.t < cs / 2 || g.t > length - cs / 2) return null;
+    }
     const off = clampOffset(part, cs);
     const pos = [g.axis[0] + g.stub[0] * off, g.axis[1] + g.stub[1] * off, g.axis[2] + g.stub[2] * off];
     if (this.isBelowGround(pos[1])) return null;
@@ -6064,6 +6077,8 @@ export class BuildModel {
           gesehen.add(paar);
           const q = list[j];
           if (!beruehrt(p, q)) continue;
+          const supported = (spoke, axle) => [spoke.a, spoke.b].some(node => node.part === 'windmill' && node.clampOn?.tubeId === axle.id);
+          if (supported(p, q) || supported(q, p)) continue;
           if (allowCoincide && segmentsCoincide(p.a, p.b, q.a, q.b)) continue;
           if (segmentsOverlap(p.a, p.b, q.a, q.b) || segmentsCross(p.a, p.b, q.a, q.b)) {
             out.add(p.id);
@@ -6215,7 +6230,7 @@ export class BuildModel {
       return { node: existing, tube: null, duplicate: true };
     }
     // Liegt auf dem Pfad schon ein Rohr? Dann nicht ueberbauen.
-    if (this.tubeCollision(from, target)) {
+    if (this.tubeCollision(from, target, from.part === 'windmill' ? from.clampOn?.tubeId : null)) {
       return { collision: true };
     }
     const to = this.addNode(target.x, target.y, target.z);

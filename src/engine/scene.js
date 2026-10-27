@@ -3673,7 +3673,7 @@ export class SceneManager {
     // des Knotens, seine Lage ist die des Teils (lokales -X zeigt zur tragenden
     // Kupplung, die Arme stehen quer dazu).
     const maske = n.partMask || HOLE_MASKS[n.part] || 11;
-    const echt = this._q().meshes && this._fitMeshes
+    const echt = n.part !== 'windmill' && this._q().meshes && this._fitMeshes
       ? this._fitMeshes["hole-connector4_" + maske] : null;
     if (echt && n.partQuat && n.partQuat.length === 4) {
       const qh = new THREE.Quaternion(n.partQuat[0], n.partQuat[1], n.partQuat[2],
@@ -3707,8 +3707,8 @@ export class SceneManager {
     // "O--": ein Ring, der ueber den Stutzen der tragenden Kupplung greift, und
     // quer dazu ein eigener Stutzen, in dem das Rohr steckt.
     const ringLen = cs * 0.9;
-    const ringR = armR + 0.05 + PIN_RING_WALL;   // Aussenmass des Rings
-    const ring = new THREE.Mesh(this._cachedGeo(`pinRing${seg}`, () => {
+    const ringR = (n.part === 'windmill' ? g.tubeRadius + 0.05 : armR + 0.05) + PIN_RING_WALL;
+    const ring = new THREE.Mesh(this._cachedGeo(`pinRing${seg}:${ringR}`, () => {
       const s = new THREE.Shape();
       s.absarc(0, 0, ringR, 0, Math.PI * 2, false);
       const loch = new THREE.Path();
@@ -3723,7 +3723,7 @@ export class SceneManager {
     // Der Stutzen der Kupplung reicht von ihrer Wuerfelflaeche (2,5 cm neben
     // der Muendung) bis gut einen Zentimeter darueber hinaus -- dort sitzt der
     // Ring, also knapp um die Muendung herum.
-    ring.position.copy(at).addScaledVector(peg, 0.5);
+    ring.position.copy(at).addScaledVector(peg, n.part === 'windmill' ? 0 : 0.5);
     ring.userData = { kind: "node", id: n.id };
     this.buildGroup.add(ring);
     if (st !== "future") this.pickNodes.push(ring);

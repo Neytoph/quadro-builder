@@ -123,6 +123,7 @@ export function partForFitting(kind, mask) {
   // Die Lagerkupplung hat kein eigenes QDF-Element -- sie ist eine Klemm-
   // Kupplung, die wir selbst setzen, und wird als bearing2 geschrieben.
   if (kind === "bearing-clamp") return getConnector("bearing");
+  if (kind === "windmill-clamp") return getConnector("windmill");
   // Rohrkappe und offenes Verbinderende sind ZWEI Teile, nicht eins: die Kappe
   // (`tube-cap2`) ist 24 mm lang und an einem Ende geschlossen, das offene
   // Verbinderende (`open-connector2`) eine 50 mm lange, beidseitig offene
@@ -133,7 +134,7 @@ export function partForFitting(kind, mask) {
     // gezaehlt wird nur der Rest: ein, zwei oder drei Arme.
     let arms = 0;
     for (let b = 2; b < 6; b++) if ((mask || 0) & (1 << b)) arms++;
-    return getConnector(arms >= 3 ? "hole_t" : arms === 2 ? "hole_2" : "hole_1");
+    return getConnector(arms === 4 ? "windmill" : arms >= 3 ? "hole_t" : arms === 2 ? "hole_2" : "hole_1");
   }
   const all = [...allConnectors(), ...accessories(), ...allTubes(), ...panels(), ...reinforcements()];
   // Manche Teile waehlt die Leiste unter ihrer KATALOG-Kennung statt unter der

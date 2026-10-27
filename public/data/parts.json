@@ -231,6 +231,16 @@
       "url": "https://quadroshop.com/products/flexi-connector-bolt"
     },
     {
+      "id": "windmill",
+      "code": "WINDMILL",
+      "name": "Windradverbinder",
+      "name_en": "Rotating cross connector",
+      "arms": 4,
+      "kind": "special",
+      "price": 0,
+      "buildable": false
+    },
+    {
       "id": "hole_t",
       "code": "CH3",
       "name": "Lochzapfenkupplung 3-armig",
@@ -391,6 +401,18 @@
       "buildable": true,
       "colored": true,
       "url": "https://quadroshop.com/products/tube-75cm"
+    },
+    {
+      "id": "TC15",
+      "code": "TC15",
+      "name": "Kleines Bogenrohr",
+      "name_en": "Small curved tube",
+      "length_cm": null,
+      "radius_cm": 20,
+      "shape": "curved",
+      "price": 0,
+      "buildable": true,
+      "colored": true
     },
     {
       "id": "TC1",
@@ -798,6 +820,7 @@
     }
   ],
   "accessories": [
+    { "id": "panel_sector_20", "name": "小扇形板", "qdf": "panel_sector_20", "compat": true, "price": 0 },
     { "id": "panel_sector_40", "name": "扇形小板", "qdf": "panel_sector_40", "compat": true, "price": 0 },
     { "id": "lattice_curved", "name": "曲面攀爬网", "qdf": "lattice_curved", "compat": true, "price": 0 },
     { "id": "trampoline", "name": "蹦床", "qdf": "trampoline", "compat": true, "price": 0 },

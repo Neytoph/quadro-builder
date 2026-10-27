@@ -10,7 +10,7 @@ export function createConfirmedComponentFixture(id, { install = true, offset = [
   const node=p=>{const key=p.join(',');if(!points.has(key))points.set(key,model.addNode(p[0]+offset[0],p[1]+offset[1],p[2]+offset[2]));return points.get(key);};
   const tube=(a,b,color='yellow',curved=false,center=null)=>{
     const na=node(a),nb=node(b),length=Math.hypot(...a.map((v,i)=>v-b[i]));
-    const part=curved?getTube('TC1'):allTubes().find(t=>t.buildable && t.shape==='straight' && Math.abs(t.length_cm+5-length)<0.1 && !t.id.startsWith('TA'));
+    const part=curved?getTube(Math.abs(Math.hypot(...a.map((v,i)=>v-center[i]))-20)<0.1?'TC15':'TC1'):allTubes().find(t=>t.buildable && t.shape==='straight' && Math.abs(t.length_cm+5-length)<0.1 && !t.id.startsWith('TA'));
     if(!part && !curved && length===60) { const mid=a.map((v,i)=>(v+b[i])/2);const first=tube(a,mid,color);tube(mid,b,color);return first; }
     if(!part)throw new Error(`夹具没有对应管长：${length}`);
     const record=model.addTube(na.id,nb.id,part.id,color,part.length_cm);
@@ -23,10 +23,11 @@ export function createConfirmedComponentFixture(id, { install = true, offset = [
     tube([0,42.5,0],[40,42.5,0],'green');tube([0,82.5,40],[40,82.5,40],'green');
     for(const x of [0,40]){tube([x,42.5,0],[x,42.5,40],'red');tube([x,42.5,40],[x,82.5,40],'blue');tube([x,2.5,40],[x,42.5,40],'green');}
   } else if(spec.mountType==='corner') {
-    tube([0,42.5,0],[40,42.5,0]);tube([0,42.5,0],[0,82.5,0],'green');
-    tube([40,42.5,0],[0,82.5,0],'blue',true,[0,42.5,0]);
-    tube([0,2.5,0],[0,42.5,0],'green');tube([40,2.5,0],[40,42.5,0],'yellow');
-    tube([0,2.5,0],[40,2.5,0],'red');
+    const radius=spec.width;
+    tube([0,42.5,0],[radius,42.5,0]);tube([0,42.5,0],[0,42.5+radius,0],'green');
+    tube([radius,42.5,0],[0,42.5+radius,0],'blue',true,[0,42.5,0]);
+    tube([0,2.5,0],[0,42.5,0],'green');tube([radius,2.5,0],[radius,42.5,0],'yellow');
+    tube([0,2.5,0],[radius,2.5,0],'red');
   } else if(spec.mountType==='tube') {
     tube([0,42.5,0],[40,42.5,0],'green');
     for(const x of [0,40]){tube([x,2.5,0],[x,42.5,0]);tube([x,2.5,0],[x,2.5,40],'red');}

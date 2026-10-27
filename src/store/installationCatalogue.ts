@@ -128,6 +128,14 @@ export const INSTALLATION_CATALOGUE: readonly CatalogueEntry[] = [
     "aliases": ""
   },
   {
+    "id": "panel_sector_20",
+    "origin": "extended",
+    "group": "outside",
+    "tool": "panels",
+    "method": "角部固定",
+    "aliases": ""
+  },
+  {
     "id": "panel_sector_40",
     "origin": "extended",
     "group": "outside",
@@ -568,6 +576,14 @@ export const INSTALLATION_CATALOGUE: readonly CatalogueEntry[] = [
     "aliases": ""
   },
   {
+    "id": "TC15",
+    "origin": "extended",
+    "group": "tubes",
+    "tool": "tubes",
+    "method": "两端连接",
+    "aliases": ""
+  },
+  {
     "id": "TC1",
     "origin": "official",
     "group": "tubes",
@@ -686,6 +702,14 @@ export const INSTALLATION_CATALOGUE: readonly CatalogueEntry[] = [
     "tool": "connectors",
     "method": "节点连接",
     "aliases": ""
+  },
+  {
+    "id": "windmill",
+    "origin": "extended",
+    "group": "connectors",
+    "tool": "connectors",
+    "method": "穿管",
+    "aliases": "旋转 十字"
   },
   {
     "id": "hole_t",

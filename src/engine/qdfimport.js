@@ -635,7 +635,7 @@ export function parseQDF(text, opts = {}) {
       const r6 = (v) => Math.round(v * 1e6) / 1e6;
       tubes.push({
         id: "t" + seq++, a: a.id, b: b.id,
-        tubeId: curvedTubeId, color: materials.get(mat) || FALLBACK_COLOR,
+        tubeId: Math.abs(R - 20) < 0.1 ? "TC15" : curvedTubeId, color: materials.get(mat) || FALLBACK_COLOR,
         length: null, bow: true, bowCenter: [round(cx), round(cy), round(cz)],
         // Wie beim geraden Rohr: eigene Lage aus der Datei (Tangente T, Normale N).
         geom: { p0: [round(sx), round(sy), round(sz)], dir: T.map(r6), up: N.map(r6), len: lenCm,
@@ -1224,8 +1224,9 @@ export function parseQDF(text, opts = {}) {
     // 孔销套在接头插杆上时，局部 -X 指向真实承载节点；不把自身的管误当转轴。
     const ex = rotateByQuat([h.quat[3], h.quat[0], h.quat[1], h.quat[2]], [1, 0, 0]);
     const carrier = [h.x - ex[0] * conn, h.y - ex[1] * conn, h.z - ex[2] * conn];
-    const onPeg = [...clampNodes.values()].some(n => Math.hypot(n.x - carrier[0], n.y - carrier[1], n.z - carrier[2]) < 2);
-    const axis = [h.x - h.stub[0] * conn, h.y - h.stub[1] * conn, h.z - h.stub[2] * conn];
+    const windmill = holePartForMask(h.mask) === 'windmill';
+    const onPeg = !windmill && [...clampNodes.values()].some(n => Math.hypot(n.x - carrier[0], n.y - carrier[1], n.z - carrier[2]) < 2);
+    const axis = windmill ? [h.x, h.y, h.z] : [h.x - h.stub[0] * conn, h.y - h.stub[1] * conn, h.z - h.stub[2] * conn];
     let onTube = null, best = 6;   // Toleranz: die Huelse sitzt auf der Rohrachse
     for (const t of onPeg ? [] : tubes) {
       if (t.bow) continue;
@@ -1234,6 +1235,7 @@ export function parseQDF(text, opts = {}) {
       const ab = [b.x - a.x, b.y - a.y, b.z - a.z];
       const L = Math.hypot(ab[0], ab[1], ab[2]) || 1;
       const u = [ab[0] / L, ab[1] / L, ab[2] / L];
+      if (windmill && Math.abs(u[0] * ex[0] + u[1] * ex[1] + u[2] * ex[2]) < 0.99) continue;
       const rel = [axis[0] - a.x, axis[1] - a.y, axis[2] - a.z];
       const s2 = rel[0] * u[0] + rel[1] * u[1] + rel[2] * u[2];
       if (s2 < -1 || s2 > L + 1) continue;
@@ -1251,6 +1253,16 @@ export function parseQDF(text, opts = {}) {
     nd.stub = h.stub;
     if (h.quat) nd.partQuat = h.quat;
     if (onTube) nd.clampOn = onTube;
+
+    if (windmill) {
+      for (const t of tubes) {
+        if (t.id === onTube?.tubeId) continue;
+        for (const end of ['a', 'b']) {
+          const old = clampNodes.get(t[end]);
+          if (old && Math.hypot(old.x - nd.x, old.y - nd.y, old.z - nd.z) < 0.1) t[end] = nd.id;
+        }
+      }
+    }
 
     // Das Rohr steckt IM Zapfen, nicht in der Kupplung daneben: es laeuft an
     // der Muendung los, in Stutzenrichtung. Beim Einlesen der Rohre gab es den

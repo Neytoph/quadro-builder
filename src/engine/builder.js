@@ -34,7 +34,7 @@ import { BearingConnectionController } from './bearingConnectionController.js';
 // Kupplungen, die auf einem Rohr sitzen statt im Raster: QDF-Art -> Katalogteil.
 // Teile, die sich um ein Rohr klemmen lassen. Die Lochzapfenkupplung gehört
 // NICHT dazu -- sie umschließt kein Rohr (siehe PLACEABLE_FITTINGS).
-const TUBE_CLAMP_PARTS = { "bearing-clamp": "bearing" };
+const TUBE_CLAMP_PARTS = { "bearing-clamp": "bearing", "windmill-clamp": "windmill" };
 // Dachtuecher: sie liegen auf einem Giebel-Gerippe (siehe model.roofMounts).
 const ROOF_KINDS = new Set(["roof2", "roof-large2"]);
 
@@ -2011,7 +2011,7 @@ export class Builder {
     let res;
     this.recordHistory(() => {
       res = isCurvedTube(this.tubeId)
-        ? this.model.extendBow(node.id, dirVec, this._bowNormal(dirVec, node), this.tubeId, this.colorFor("tube", node.id), gridSpacing())
+        ? this.model.extendBow(node.id, dirVec, this._bowNormal(dirVec, node), this.tubeId, this.colorFor("tube", node.id), tube.radius_cm || gridSpacing())
         : this.model.extend(
             node.id, dirVec, this.tubeId, this.colorFor("tube", node.id), tube.length_cm, spacingFor(tube.length_cm)
           );
@@ -2047,9 +2047,10 @@ export class Builder {
         ? [Math.sign(f[0]) || 1, 0, 0]
         : [0, 0, Math.sign(f[2]) || -1];
     }
-    if (node && this.model.bowBelowGround(node, dirVec, normal, gridSpacing())) {
+    const radius = getTube(this.tubeId)?.radius_cm || gridSpacing();
+    if (node && this.model.bowBelowGround(node, dirVec, normal, radius)) {
       const opposite = normal.map((value) => -value);
-      if (!this.model.bowBelowGround(node, dirVec, opposite, gridSpacing())) return opposite;
+      if (!this.model.bowBelowGround(node, dirVec, opposite, radius)) return opposite;
     }
     return normal;
   }
@@ -2599,7 +2600,7 @@ export class Builder {
 
   _targetBelowGround(node, vec) {
     if (isCurvedTube(this.tubeId))
-      return this.model.bowBelowGround(node, vec, this._bowNormal(vec, node), gridSpacing());
+      return this.model.bowBelowGround(node, vec, this._bowNormal(vec, node), getTube(this.tubeId)?.radius_cm || gridSpacing());
     if (vec[1] >= 0) return false;
     const tube = getTube(this.tubeId);
     const span = spacingFor(tube ? tube.length_cm : 35);
@@ -5586,7 +5587,7 @@ export class Builder {
         const tube = getTube(this.tubeId);
         this.recordHistory(() => {
           res = this.model.extendBow(h.data.nodeId, h.data.dir, this._bowNormal(h.data.dir, this.model.nodes.get(h.data.nodeId)),
-            tube.id, this.colorFor("tube", h.data.nodeId), gridSpacing());
+            tube.id, this.colorFor("tube", h.data.nodeId), tube.radius_cm || gridSpacing());
         });
       } else if (h.data.slope) {
         // Schräg-Konnektor (schon 45-Grad gedreht): Diagonalrohr weiterbauen,

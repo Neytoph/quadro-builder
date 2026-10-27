@@ -315,15 +315,16 @@ export function confirmedCandidates(model,id,options={}) {
     }return out;
   }
   if(spec.mountType==='corner') {
+    const radius=spec.width;
     const out=[];for(const node of model.nodes.values()) {
-      const rails=[...model.tubes.values()].filter(t=>!t.bow && !t.arm && !t.link && (t.a===node.id || t.b===node.id)).map(t=>({tube:t,dir:unit(cSub(curvePoint(model,t.id,t.a===node.id?1:0),xyz(node))),start:t.a===node.id?0:1,len:model._rail(t.id)?.len||0})).filter(r=>r.len>=40);
+      const rails=[...model.tubes.values()].filter(t=>!t.bow && !t.arm && !t.link && (t.a===node.id || t.b===node.id)).map(t=>({tube:t,dir:unit(cSub(curvePoint(model,t.id,t.a===node.id?1:0),xyz(node))),start:t.a===node.id?0:1,len:model._rail(t.id)?.len||0})).filter(r=>r.len>=radius);
       for(let i=0;i<rails.length;i++)for(let j=i+1;j<rails.length;j++) {
         const a=rails[i],b=rails[j];if(Math.abs(cDot(a.dir,b.dir))>0.01)continue;
         const z=cross(a.dir,b.dir),frame={pos:xyz(node),axes:[a.dir,b.dir,z],quat:quatFromBasis(a.dir,b.dir,z)};
-        const endA=xyz(node).map((v,k)=>v+a.dir[k]*40),endB=xyz(node).map((v,k)=>v+b.dir[k]*40);
+        const endA=xyz(node).map((v,k)=>v+a.dir[k]*radius),endB=xyz(node).map((v,k)=>v+b.dir[k]*radius);
         const bow=[...model.tubes.values()].find(t=>t.bow && Array.isArray(t.bowCenter) && Math.hypot(...cSub(t.bowCenter,xyz(node)))<0.35 && [false,true].some(r=>Math.hypot(...cSub(curvePoint(model,t.id,r?1:0),endA))<0.35 && Math.hypot(...cSub(curvePoint(model,t.id,r?0:1),endB))<0.35));
         if(!bow)continue;
-        const mounts=[{tube:a.tube.id,t:a.start+(a.start?-1:1)*4/a.len,role:'corner',width:2},{tube:a.tube.id,t:a.start+(a.start?-1:1)*36/a.len,role:'corner',width:2},{tube:b.tube.id,t:b.start+(b.start?-1:1)*36/b.len,role:'corner',width:2}];
+        const mounts=[{tube:a.tube.id,t:a.start+(a.start?-1:1)*4/a.len,role:'corner',width:2},{tube:a.tube.id,t:a.start+(a.start?-1:1)*(radius-4)/a.len,role:'corner',width:2},{tube:b.tube.id,t:b.start+(b.start?-1:1)*(radius-4)/b.len,role:'corner',width:2}];
         for(const t of [0.2,0.5,0.8])mounts.push({tube:bow.id,t,role:'arc-retainer',width:2});
         out.push(asFitting(spec,{tube:a.tube.id,a:a.tube.id,b:b.tube.id},frame,{mounts,supportTubes:[a.tube.id,b.tube.id,bow.id]}));
       }
@@ -428,7 +429,7 @@ function componentBodyVolumes(model,part) {
       out.push({pos:center([a,b]),axes:[x,d,z],half:[spec.width/2-3,2,0.6]});
     }return out;
   }
-  if(spec.feature==='sector')return [cVolume(frame,[3,3,-0.8],[37,37,0.8])];
+  if(spec.feature==='sector')return [cVolume(frame,[3,3,-0.8],[spec.width-3,spec.height-3,0.8])];
   if(spec.feature==='rope')return [cVolume(frame,[-part.ropeLength/2,-2,-0.6],[part.ropeLength/2,0.6,0.6])];
   if(spec.mountType==='tube') {const rail=model._rail(part.tube),length=rail?.len-10;return rail?[cVolume(frame,[-length/2,-spec.radius,-spec.radius],[length/2,spec.radius,spec.radius])]:[];}
   if(spec.feature==='bridge') {

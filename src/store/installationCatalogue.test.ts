@@ -34,12 +34,12 @@ function routingApi() {
   return api as unknown as EngineApi
 }
 
-it('95个真实物理件各归属一次，包含三种铝管与连接器', () => {
+it('目录组件各归属一次，包含新增弯管、扇形板和风火轮', () => {
   const entries = installationChoices(routingApi(), key => key)
-  expect(entries).toHaveLength(95)
-  expect(new Set(entries.map(entry => entry.id)).size).toBe(95)
-  expect(Object.fromEntries([...new Set(entries.map(entry => entry.tool))].map(tool => [tool, entries.filter(entry => entry.tool === tool).length]))).toEqual({ panels:24, accessories:10, textiles:13, wheels:7, slides:4, pools:5, tubes:10, connectors:18, reinforce:4 })
-  expect(entries.filter(entry => entry.group === 'outside')).toHaveLength(16)
+  expect(entries).toHaveLength(98)
+  expect(new Set(entries.map(entry => entry.id)).size).toBe(98)
+  expect(Object.fromEntries([...new Set(entries.map(entry => entry.tool))].map(tool => [tool, entries.filter(entry => entry.tool === tool).length]))).toEqual({ panels:25, accessories:10, textiles:13, wheels:7, slides:4, pools:5, tubes:11, connectors:19, reinforce:4 })
+  expect(entries.filter(entry => entry.group === 'outside')).toHaveLength(17)
   expect(entries.filter(entry => entry.group === 'inset')).toHaveLength(8)
   expect(entries.filter(entry => entry.group === 'on-tube')).toHaveLength(4)
   expect(entries.filter(entry => entry.group === 'on-frame')).toHaveLength(3)

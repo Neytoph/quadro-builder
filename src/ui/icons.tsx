@@ -53,7 +53,7 @@ const connBody = '<rect x="5.6" y="5.6" width="4.8" height="4.8" rx="1.1" fill="
 const arm = (x: number, y: number) => `<line x1="8" y1="8" x2="${x}" y2="${y}" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>`
 const connIcon = (...a: string[]) => connBody + a.join('')
 
-const holeArm: Record<string, [number, number, number, number]> = { r: [11.1, 8, 14.6, 8], l: [1.4, 8, 4.9, 8], d: [8, 11.1, 8, 14.6] }
+const holeArm: Record<string, [number, number, number, number]> = { r: [11.1, 8, 14.6, 8], l: [1.4, 8, 4.9, 8], d: [8, 11.1, 8, 14.6], u: [8, 1.4, 8, 4.9] }
 const holeIcon = (...keys: string[]) =>
   keys.map(k => { const [x1, y1, x2, y2] = holeArm[k]; return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>` }).join('') +
   '<circle cx="8" cy="8" r="3.1" fill="none" stroke="currentColor" stroke-width="1.6"/>'
@@ -74,6 +74,7 @@ export const CONN_CAT_ICON: Record<string, string> = {
   'hole_1': holeIcon('r'),
   'hole_2': holeIcon('r', 'l'),
   'hole_t': holeIcon('r', 'l', 'd'),
+  'windmill': holeIcon('r', 'l', 'd', 'u'),
   'bearing': '<line x1="1.5" y1="10.5" x2="14.5" y2="10.5" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/><rect x="5.4" y="7.4" width="5.2" height="6.2" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="6.6" y="2.4" width="2.8" height="5.4" rx="1.2" fill="currentColor"/>',
   'double_tube': '<line x1="1" y1="5.2" x2="15" y2="5.2" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><line x1="1" y1="10.8" x2="15" y2="10.8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><circle cx="8" cy="5.2" r="3.1" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="10.8" r="3.1" fill="none" stroke="currentColor" stroke-width="1.4"/>',
   'tube_clamp': '<line x1="1" y1="5.2" x2="15" y2="5.2" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><line x1="1" y1="10.8" x2="15" y2="10.8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path d="M5.4 3.5 A3.1 3.1 0 1 0 10.6 3.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M5.4 12.5 A3.1 3.1 0 1 1 10.6 12.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>',
@@ -177,7 +178,7 @@ export function PartImg({ id, imageKey, svg, size = 18 }: { id?: string | null; 
   // 没图的也占同样大的格子，和有图的行文字对齐
   return (
     <span className="qb-part-image shrink-0 inline-flex items-center justify-center" style={{ width: size, height: size }}>
-      {id ? <span title={id} style={{ color: '#8b929c', fontSize: size * .5 }}>?</span> : <Svg16 inner={svg} size={size} />}
+      {id && !['windmill', 'TC15', 'panel_sector_20'].includes(id) ? <span title={id} style={{ color: '#8b929c', fontSize: size * .5 }}>?</span> : <Svg16 inner={svg} size={size} />}
     </span>
   )
 }
@@ -185,6 +186,7 @@ export function PartImg({ id, imageKey, svg, size = 18 }: { id?: string | null; 
 /** 零件清单 / 库存行用的图标：优先零件 id，其次分类。 */
 export function partIcon(id?: string | null, kind?: string | null): string {
   const key = String(id || '')
+  if (key === 'panel_sector_20') return '<path d="M3 13 L13 13 A10 10 0 0 0 3 3 Z" fill="currentColor"/>'
   if (key && BY_ID[key]) return BY_ID[key]
   if (key.startsWith('TC')) return CURVED_TUBE_ICON
   if (key.startsWith('T')) return tubeIcon(key)
