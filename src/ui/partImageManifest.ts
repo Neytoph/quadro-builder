@@ -58,6 +58,10 @@ export const PART_IMAGE_MANIFEST = {
       "src": "parts/TC1.png",
       "srcLarge": "parts/large/TC1.png"
     },
+    "TC15": {
+      "src": "parts/TC15.png",
+      "srcLarge": "parts/large/TC15.png"
+    },
     "TS1": {
       "src": "parts/TS1.png",
       "srcLarge": "parts/large/TS1.png"
@@ -477,6 +481,10 @@ export const PART_IMAGE_MANIFEST = {
     "wheel_floating": {
       "src": "parts/wheel_floating.png",
       "srcLarge": "parts/large/wheel_floating.png"
+    },
+    "windmill": {
+      "src": "parts/windmill.png",
+      "srcLarge": "parts/large/windmill.png"
     }
   },
   "aliases": {
@@ -502,6 +510,7 @@ export const PART_IMAGE_MANIFEST = {
     "flexi-connector3": "flexi_hinge",
     "CXA": "flexi_bolt",
     "bolt2": "flexi_bolt",
+    "WINDMILL": "windmill",
     "CH3": "hole_t",
     "CH2": "hole_2",
     "CH1": "hole_1",

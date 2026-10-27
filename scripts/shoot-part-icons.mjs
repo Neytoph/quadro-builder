@@ -78,7 +78,7 @@ const items = await page.evaluate(async (files) => {
   // 官方造型里一次都没出现过的：现场搭一个小场景
   const recipes = [
     ['reinforcements', 'reinforce35'], ['reinforcements', 'reinforce55'], ['reinforcements', 'reinforce80'], ['reinforcements', 'alu_connector'],
-    ['connectors', '6way'], ['tubes', 'T52'], ['panels', 'panel_30x30'],
+    ['connectors', '6way'], ['connectors', 'windmill'], ['tubes', 'T52'], ['tubes', 'TC15'], ['panels', 'panel_30x30'],
     ['connectors', 'hole_1'], ['connectors', 'hole_2'], ['connectors', 'hole_t'], ['connectors', 'bearing'],
     ['connectors', 'flexi_bolt'], ['connectors', 'flexi_hinge'], ['connectors', 'flexi'],
     ['fittings', 'lattice'], ['textiles', 'textile_20x40'], ['textiles', 'textile_rainbow'], ['textiles', 'textile_bridge'], ['fittings', 'sleeve'],
@@ -146,6 +146,8 @@ for (const it of renderItems) {
       }
       else if (r === '6way') { const c = node(0, 0, 0); for (const d of [[40,0,0],[-40,0,0],[0,40,0],[0,-40,0],[0,0,40],[0,0,-40]]) tube(c, node(...d)); ids = [c.id] }
       else if (r === 'T52') ids = one(tube(node(0, 0, 0), node(57, 0, 0), 'T52', 52))
+      else if (r === 'TC15') { const start = node(0, 40, 0); ids = one(m.extendBow(start.id, [1, 0, 0], [0, 0, 1], 'TC15', 'red', 20)?.tube) }
+      else if (r === 'windmill') { const shaft = tube(node(-20, 40, 0), node(20, 40, 0)); ids = one(m.addTubeClamp(shaft.id, [0, 42.45, 0], 'windmill')) }
       else if (r === 'panel_30x30') {
         const a = node(0, 0, 0), b = node(30, 0, 0), c = node(0, 0, 30), d = node(30, 0, 30)
         const r0 = tube(a, c, 'T25', 25), r1 = tube(b, d, 'T25', 25); tube(a, b, 'T25', 25); tube(c, d, 'T25', 25)

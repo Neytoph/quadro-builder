@@ -14,6 +14,7 @@ export const PART_IMAGES_LARGE: ReadonlySet<string> = new Set([
   "TA35",
   "TA75",
   "TC1",
+  "TC15",
   "TS1",
   "TS2",
   "TS3",
@@ -112,5 +113,6 @@ export const PART_IMAGES_LARGE: ReadonlySet<string> = new Set([
   "wheel",
   "wheel_adapter",
   "wheel_bearing",
-  "wheel_floating"
+  "wheel_floating",
+  "windmill"
 ])

@@ -19,7 +19,7 @@ test('从目录选择三个新组件，并在真实画布上安装风火轮', as
   await page.locator('[data-ui="catalogue-tool-connectors"]').click()
   const item = page.locator('[data-ui="catalogue-item"][data-part-id="windmill"]')
   await expect(item).toHaveText('风火轮')
-  await expect(item.locator('svg')).toBeVisible()
+  await expect(item.locator('img')).toHaveAttribute('src', /windmill\.png/)
   await item.click()
   const point = await page.evaluate(() => {
     const { scene, model } = window.__quadroDev
@@ -35,6 +35,7 @@ test('从目录选择三个新组件，并在真实画布上安装风火轮', as
   await page.screenshot({ path: '.work/windmill-installed.png' })
   await page.locator('[data-ui="catalogue-tool-tubes"]').click()
   await expect(page.locator('[data-part-id="TC15"]')).toHaveText('小弯管')
+  await expect(page.locator('[data-part-id="TC15"] img')).toHaveAttribute('src', /TC15\.png/)
   await page.locator('[data-part-id="TC15"]').click()
   await expect.poll(() => page.evaluate(() => window.__quadroDev.builder.tubeId)).toBe('TC15')
   await page.locator('[data-ui="catalogue-tool-panels"]').click()
