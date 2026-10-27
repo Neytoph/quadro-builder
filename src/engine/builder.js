@@ -31,6 +31,14 @@ import { selectionTransformStrings } from '../ui/selectionTransformStrings';
 import { pickStepAnchor, stepCandidates, stepCandidatesFromSelection, stepNeighbor } from "./stepAnchor.js";
 import { BearingConnectionController } from './bearingConnectionController.js';
 
+export function confirmedFittingHandlePosition(model, mount) {
+  const spec = confirmedSpec(mount.kind || mount.partId);
+  if (spec?.feature !== 'sector') return mount.pos;
+  const frame = componentFrame(model, mount);
+  if (!frame) return mount.pos;
+  return frame.pos.map((value, i) => value + (frame.axes[0][i] + frame.axes[1][i]) * spec.width * 0.35);
+}
+
 // Kupplungen, die auf einem Rohr sitzen statt im Raster: QDF-Art -> Katalogteil.
 // Teile, die sich um ein Rohr klemmen lassen. Die Lochzapfenkupplung gehört
 // NICHT dazu -- sie umschließt kein Rohr (siehe PLACEABLE_FITTINGS).
@@ -2049,6 +2057,10 @@ export class Builder {
         : [0, 0, Math.sign(f[2]) || -1];
     }
     const radius = getTube(this.tubeId)?.radius_cm || gridSpacing();
+    if (node) {
+      const closing = this.model.closingBowNormal(node.id, dirVec, radius, normal);
+      if (closing) return closing;
+    }
     if (node && this.model.bowBelowGround(node, dirVec, normal, radius)) {
       const opposite = normal.map((value) => -value);
       if (!this.model.bowBelowGround(node, dirVec, opposite, radius)) return opposite;
@@ -2933,7 +2945,7 @@ export class Builder {
       const id = this.fittingPart || this.fittingKind, mounts = this.model.confirmedMounts(id);
       // 提示紧接本次 refresh 使用同一批诊断；下一次 refresh 会重新读取模型。
       this._confirmedFittingMounts = { id, mounts };
-      for (const mount of mounts) if (mount.mounts.length) this.scene.addHandle(mount.pos, { confirmedComponent: mount, placeNode: true }, 'place');
+      for (const mount of mounts) if (mount.mounts.length && (confirmedSpec(id)?.feature !== 'sector' || mount.valid)) this.scene.addHandle(confirmedFittingHandlePosition(this.model, mount), { confirmedComponent: mount, placeNode: true }, 'place');
       return;
     }
     if (ACCESSORY_IDS.has(this.fittingKind)) {

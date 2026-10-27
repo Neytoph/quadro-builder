@@ -152,12 +152,13 @@ describe('确认组件数据及装配边界',()=>{
     expect(part.ropeLength).toBeCloseTo(Math.hypot(15+40*.74-80*.23,40,65))
     expect(componentMountsValid(model,part)).toBe(true)
   })
-  it('扇形板必须有真实弧边支撑，删除弧管清除依赖件',()=>{
+  it('扇形板由两条直边固定，删除弧管不影响安装',()=>{
     const {model,part:record}=createConfirmedComponentFixture('panel_sector_40'),part=record as any
-    const bow=part.supportTubes.find((id: string)=>model.tubes.get(id)?.bow)
-    expect(bow).toBeTruthy();expect(part.mounts.filter((m: any)=>m.role==='arc-retainer')).toHaveLength(3)
-    model.removeTube(bow);expect(model.fittings.has(part.id)).toBe(false)
-    expect(model.confirmedMounts('panel_sector_40')).toHaveLength(0)
+    const bow=[...model.tubes.values()].find((tube: any)=>tube.bow) as any
+    expect(bow).toBeTruthy();expect(part.mounts.filter((m: any)=>m.role==='panel-screw')).toHaveLength(4)
+    model.removeTube(bow.id);expect(model.fittings.has(part.id)).toBe(true)
+    expect(componentMountsValid(model,part)).toBe(true)
+    model.removeTube(part.supportTubes[0]);expect(model.fittings.has(part.id)).toBe(false)
   })
   it('80长桥实际7个软包横杠，长布套管沿80边',()=>{
     for(const id of ['textile_bridge','textile_long']){

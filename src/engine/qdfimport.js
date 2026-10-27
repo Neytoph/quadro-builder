@@ -796,6 +796,41 @@ export function parseQDF(text, opts = {}) {
     return null;
   }
 
+  // 板可以装在长管的一段上，板角不必有接头；只接受两条完整覆盖板边的真实直管。
+  function findPanelRails(q, cx, cy, cz, h1, h2) {
+    const axes = [[1, 0, 0], [0, 1, 0], [0, 0, 1]].map(v => rotateByQuat(q, v));
+    const vector = (a, b) => [b.x - a.x, b.y - a.y, b.z - a.z];
+    const dot = (a, b) => a.reduce((s, v, i) => s + v * b[i], 0);
+    const support = (a, b) => {
+      const edge = vector(a, b), length = Math.hypot(...edge);
+      if (length < 0.01) return null;
+      for (const tube of tubes) {
+        if (tube.bow || tube.arm || tube.link) continue;
+        const start = nodes.find(node => node.id === tube.a), end = nodes.find(node => node.id === tube.b);
+        if (!start || !end) continue;
+        const delta = vector(start, end), span = Math.hypot(...delta);
+        if (span < 0.01) continue;
+        const dir = delta.map(v => v / span), ab = [a, b].map(point => vector(start, point));
+        const along = ab.map(v => dot(v, dir));
+        if (ab.some((v, i) => Math.hypot(...v.map((n, axis) => n - dir[axis] * along[i])) > 0.5)) continue;
+        if (Math.min(...along) < -0.5 || Math.max(...along) > span + 0.5) continue;
+        return { tube, t0: Math.min(...along), len: length };
+      }
+      return null;
+    };
+    for (const [i, j] of [[0, 1], [0, 2], [1, 2]]) for (const [ha, hb] of (h1 === h2 ? [[h1, h2]] : [[h1, h2], [h2, h1]])) {
+      const corner = (s1, s2) => ({ x: cx + axes[i][0] * ha * s1 + axes[j][0] * hb * s2,
+        y: cy + axes[i][1] * ha * s1 + axes[j][1] * hb * s2,
+        z: cz + axes[i][2] * ha * s1 + axes[j][2] * hb * s2 });
+      const corners = [corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1)];
+      for (const [[a, b], [c, d]] of [[[0, 1], [3, 2]], [[1, 2], [0, 3]]]) {
+        const first = support(corners[a], corners[b]), second = support(corners[c], corners[d]);
+        if (first && second && first.tube.id !== second.tube.id) return { first, second, corners };
+      }
+    }
+    return null;
+  }
+
   // Auf welcher Seite der Rohre liegt die Platte? Die Datei sagt es ueber ihre
   // lokale Z-Achse; verglichen wird sie mit der kanonischen Normalen der vier
   // gefundenen Ecken (oben bzw. aussen = +1).
@@ -839,11 +874,13 @@ export function parseQDF(text, opts = {}) {
           ? acrylicPanelsByDims.get(size) || acrylicPanelId
           : featureId || panelIdForDims(dimW + conn, dimH + conn);
       if (!panelId) { skipped[p.name] = (skipped[p.name] || 0) + 1; continue; }
-      const nodesFound = findPanelCorners(q, cx, cy, cz, (dimW + padW + conn) / 2, (dimH + padH + conn) / 2);
-      if (!nodesFound) { skipped[p.name] = (skipped[p.name] || 0) + 1; continue; }
+      const halfW = (dimW + padW + conn) / 2, halfH = (dimH + padH + conn) / 2;
+      const nodesFound = findPanelCorners(q, cx, cy, cz, halfW, halfH);
+      const rails = nodesFound ? null : findPanelRails(q, cx, cy, cz, halfW, halfH);
+      if (!nodesFound && !rails) { skipped[p.name] = (skipped[p.name] || 0) + 1; continue; }
       const mat = matNr;
-      panels.push({ id: "p" + seq++, nodes: nodesFound.map((n) => n.id), panelId,
-        color: materials.get(mat) || FALLBACK_COLOR, side: sideFromQuat(q, nodesFound),
+      panels.push({ id: "p" + seq++, ...(nodesFound ? { nodes: nodesFound.map((n) => n.id) } : { a: rails.first.tube.id, b: rails.second.tube.id, t0: round(rails.first.t0), len: round(rails.first.len) }), panelId,
+        color: materials.get(mat) || FALLBACK_COLOR, side: sideFromQuat(q, nodesFound || rails.corners),
         // Eigene Lage wie beim Rohr: auf Schraegen liegt die Platte in der Datei
         // bis zu 1,2 cm anders als aus dem Rohrpaar gerechnet.
         geom: { quat: [q[1], q[2], q[3], q[0]].map((v) => Math.round(v * 1e4) / 1e4),
@@ -1200,7 +1237,7 @@ export function parseQDF(text, opts = {}) {
   {
     const referenced = new Set();
     for (const t of tubes) { referenced.add(t.a); referenced.add(t.b); }
-    for (const pa of panels) for (const id of pa.nodes) referenced.add(id);
+    for (const pa of panels) for (const id of pa.nodes || []) referenced.add(id);
     // Netze/Stoffe haengen genauso an Eck-Kupplungen wie Platten. Fehlten sie
     // hier, wurden deren Ecken als "frei schwebend" geloescht und das Netz zeigte
     // danach auf Knoten, die es nicht mehr gibt.
@@ -1420,7 +1457,7 @@ export function parseQDF(text, opts = {}) {
   if (holeClamps.length) {
     const used = new Set();
     for (const t of tubes) { used.add(t.a); used.add(t.b); }
-    for (const pa of panels) for (const id of pa.nodes) used.add(id);
+    for (const pa of panels) for (const id of pa.nodes || []) used.add(id);
     for (const tx of textiles) for (const id of tx.nodes) used.add(id);
     for (let i = nodes.length - 1; i >= 0; i--) {
       const n = nodes[i];

@@ -9,12 +9,21 @@ export const PANEL_LIP_THICKNESS=.12;
 export const PANEL_LIP_CLEARANCE=.06;
 export const PANEL_LIP_JOIN_DEPTH=.01;
 const LIP_SEGMENTS=32;
+export function sectorScrewMounts(model,part) {
+  if(!part.mounts?.some(m=>m?.role==='arc-retainer'))return part.mounts || [];
+  const spec=confirmedSpec(part.kind || part.partId);
+  return [part.a,part.b].flatMap(id=>{
+    const rail=model._rail(id);if(!rail)return [];
+    const start=Math.hypot(...rail.p0.map((v,i)=>v-[part.x,part.y,part.z][i]))<.35?0:1;
+    return [4,spec.width-4].map(distance=>({tube:id,t:start+(start?-1:1)*distance/rail.len,role:'panel-screw',width:2}));
+  });
+}
 // 与原厂普通板网格一致：正面距管轴25.1mm，角部给接头让位25.1mm。
 export const PANEL_OUTER_FACE=2.51;
 export const PANEL_CORNER_RELIEF=2.51;
 
 export function panelLipProfiles(part) {
-  const spec=confirmedSpec(part.panelId);if(!spec)return [];
+  const spec=confirmedSpec(part.panelId||part.kind||part.partId);if(!spec)return [];
   const horizontal=part.params?.screwAxis==='horizontal';
   const front=spec.feature==='basin'?2.25:PANEL_OUTER_FACE;
   const inner=geometry().tubeRadius+PANEL_LIP_CLEARANCE,outer=inner+PANEL_LIP_THICKNESS;
@@ -26,6 +35,10 @@ export function panelLipProfiles(part) {
     return {inner:[Math.sqrt(inner*inner-z*z),z],outer:[Math.sqrt(outer*outer-z*z),z]};
   });
   if(top<back)sections.push({inner:[sections.at(-1).inner[0],back],outer:[sections.at(-1).outer[0],back]});
+  if(spec.feature==='sector')return [
+    {origin:[spec.width/2,0,0],inward:[0,1,0],along:[1,0,0],length:spec.width-2*inner,sections},
+    {origin:[0,spec.height/2,0],inward:[1,0,0],along:[0,1,0],length:spec.height-2*inner,sections},
+  ];
   const length=(horizontal?spec.width:spec.height)-2*inner;
   return [-1,1].map(sign=>{
     const inward=horizontal?[0,-sign,0]:[-sign,0,0];
@@ -51,14 +64,15 @@ export function panelLipSegments(part) {
 
 // 螺丝落在背面唇边的内侧，轴线朝承载管，沿管位置继续采用实际安装引用。
 export function panelScrewPose(model,part,frame,mount) {
-  const rail=model._rail(mount?.tube),spec=confirmedSpec(part.panelId);
+  const rail=model._rail(mount?.tube),spec=confirmedSpec(part.panelId||part.kind||part.partId);
   if(!rail || !spec || !frame || !Number.isFinite(mount.t))return null;
   const world=rail.p0.map((v,i)=>v+rail.dir[i]*rail.len*mount.t);
   const point=frame.axes.map(axis=>axis.reduce((sum,v,i)=>sum+v*(world[i]-frame.pos[i]),0));
   const tangent=frame.axes.map(axis=>axis.reduce((sum,v,i)=>sum+v*rail.dir[i],0));
   const inward=[-tangent[1],tangent[0],0],length=Math.hypot(inward[0],inward[1]);
   if(length<.999)return null;
-  const sign=inward[0]*point[0]+inward[1]*point[1]>0?-1:1;
+  const reference=spec.feature==='sector'?[spec.width/2,spec.height/2]:[0,0];
+  const sign=inward[0]*(reference[0]-point[0])+inward[1]*(reference[1]-point[1])<0?-1:1;
   const radial=inward.map(v=>v/length*sign),radius=geometry().tubeRadius+PANEL_LIP_CLEARANCE+PANEL_LIP_THICKNESS,z=.15;
   const across=Math.sqrt(radius*radius-z*z),normal=[radial[0]*across/radius,radial[1]*across/radius,z/radius];
   return {point:[point[0]+radial[0]*across,point[1]+radial[1]*across,z],normal,tangent:[radial[1],-radial[0],0]};

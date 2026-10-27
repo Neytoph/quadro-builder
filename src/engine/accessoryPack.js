@@ -252,6 +252,16 @@ export function componentObstacle(model, part, { sweep = false, collisionCache =
   // 先用保守世界包围盒排除远处部件；精确盒体和圆管检查继续决定真实碰撞。
   const bounded=volumes.map(box=>({box,bounds:volumeBounds(box)})),bounds=combinedBounds(bounded);
   const supports = new Set(Array.isArray(part.supportTubes) ? part.supportTubes : [part.tube, part.a, part.b].filter(Boolean));
+  const sector=confirmedSpec(part.kind || part.partId);
+  const sectorFrame=sector?.feature==='sector' ? componentFrame(model,part) : null;
+  if(sectorFrame){
+    const frame=sectorFrame,ends=frame.axes.slice(0,2).map(axis=>frame.pos.map((v,i)=>v+axis[i]*sector.width));
+    for(const tube of model.tubes.values()){
+      if(!tube.bow || !tube.bowCenter || Math.hypot(...sub(tube.bowCenter,frame.pos))>.35)continue;
+      const a=model.nodes.get(tube.a),b=model.nodes.get(tube.b);if(!a || !b)continue;
+      if([[point(a),point(b)],[point(b),point(a)]].some(pair=>pair.every((p,i)=>Math.hypot(...sub(p,ends[i]))<.35)))supports.add(tube.id);
+    }
+  }
   if(hasInsetScrews(part) || part.params?.screwAxis && confirmedSpec(part.panelId)) {
     const spec=accessorySpec(part.panelId);
     for(const id of insetFrameTubeIds(model,componentFrame(model,part),spec.width,spec.height))supports.add(id);
@@ -301,17 +311,20 @@ export function componentObstacle(model, part, { sweep = false, collisionCache =
 }
 
 function separatePanelRetainers(model, candidate, part, a, b) {
-  if (!candidate.panelId || !part.panelId || a.role !== 'retainer' || b.role !== 'retainer') return false;
-  if (!isOuterScrewPanel(candidate.panelId) || !isOuterScrewPanel(part.panelId)) return false;
+  const isPanelScrew = (p, mount) => mount.role === 'panel-screw' && confirmedSpec(p.kind || p.partId)?.feature === 'sector'
+    || mount.role === 'retainer' && p.panelId && isOuterScrewPanel(p.panelId);
+  if (!isPanelScrew(candidate, a) || !isPanelScrew(part, b)) return false;
   const rail = model._rail(a.tube), first = componentFrame(model, candidate), second = componentFrame(model, { ...part, appearanceVersion: 2 });
   const point = mountPoint(model, a);
   if (!rail || !first || !second || !point) return false;
-  const inward = frame => {
-    const delta = sub(frame.pos, point), along = dot(delta, rail.dir);
+  const inward = (frame, record) => {
+    const spec = confirmedSpec(record.kind || record.partId);
+    const center = spec?.feature === 'sector' ? frame.pos.map((v, i) => v + (frame.axes[0][i] + frame.axes[1][i]) * spec.width / 2) : frame.pos;
+    const delta = sub(center, point), along = dot(delta, rail.dir);
     return unit(sub(delta, rail.dir.map(v => v * along)));
   };
   // 外扣板螺丝朝各自开口内侧，共边后仍检查实际部件空间。
-  return dot(inward(first), inward(second)) <= 0.01;
+  return dot(inward(first, candidate), inward(second, part)) <= 0.01;
 }
 
 function occupiedMount(model, candidate, ignoreId, mountCache = null) {

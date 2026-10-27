@@ -5,6 +5,8 @@ import { createConfirmedComponentFixture } from './confirmedComponentExample.js'
 import { componentMountsValid } from './accessoryPack.js'
 import { buildQDF } from './qdfexport.js'
 import { parseQDF } from './qdfimport.js'
+import { confirmedCandidates } from './confirmedComponentModel.js'
+import { sectorScrewMounts } from './panelScrewMounts.js'
 
 beforeAll(async () => { await loadCatalog() })
 
@@ -40,9 +42,10 @@ describe('风火轮和小扇形结构', () => {
     expect(imported.rotateTubeClamp(importedHub.id, 5, Math.PI / 2)).toBe(true)
   })
 
-  it('小扇形板以两根15厘米管和小弯管支撑，并可保存重开', () => {
+  it('小扇形板以两根15厘米管固定，并可保存重开', () => {
     const { model, part } = createConfirmedComponentFixture('panel_sector_20')
-    expect(part.supportTubes.map((id: string) => model.tubes.get(id)!.tubeId).sort()).toEqual(['T15', 'T15', 'TC15'])
+    expect(part.supportTubes.map((id: string) => model.tubes.get(id)!.tubeId).sort()).toEqual(['T15', 'T15'])
+    expect(part.mounts.filter((mount: {role: string}) => mount.role === 'panel-screw')).toHaveLength(4)
     expect(componentMountsValid(model, part)).toBe(true)
     const reopened = new BuildModel()
     expect(reopened.loadJSON(model.toJSON()).ok).toBe(true)
@@ -52,6 +55,26 @@ describe('风火轮和小扇形结构', () => {
     expect(qdf.warnings.some((warning: { partId: string }) => warning.partId === 'panel_sector_20')).toBe(true)
     expect(imported.loadJSON(parseQDF(qdf.text, { tubes: buildableTubes() })).ok).toBe(true)
     expect([...imported.tubes.values()].some(tube => tube.tubeId === 'TC15')).toBe(true)
+  })
+
+  it.each(['panel_sector_20', 'panel_sector_40'])('旧版 %s 存档仍可打开并显示两条直边的螺丝', id => {
+    const { model, part } = createConfirmedComponentFixture(id)
+    const legacy = confirmedCandidates(model, id, { legacySector: true }).find((candidate: any) =>
+      candidate.a === part.a && candidate.b === part.b && candidate.pos.every((v: number, i: number) => Math.abs(v - [part.x, part.y, part.z][i]) < .01))!
+    expect(legacy).toBeTruthy()
+    part.mounts = legacy.mounts
+    part.supportTubes = legacy.supportTubes
+    const reopened = new BuildModel()
+    expect(reopened.loadJSON(model.toJSON()).ok).toBe(true)
+    const saved = reopened.fittings.get(part.id)!
+    expect(componentMountsValid(reopened, saved)).toBe(true)
+    const mounts = sectorScrewMounts(reopened, saved)
+    expect(mounts).toHaveLength(4)
+    expect(new Set(mounts.map((mount: {tube: string}) => mount.tube))).toEqual(new Set([saved.a, saved.b]))
+    const arc = [...reopened.tubes.values()].find(tube => tube.bow)!
+    reopened.removeTube(arc.id)
+    expect(reopened.fittings.has(saved.id)).toBe(true)
+    expect(componentMountsValid(reopened, saved)).toBe(true)
   })
 
   it('四个风火轮接口可分别连接短管并绕固定轴一起转动', () => {

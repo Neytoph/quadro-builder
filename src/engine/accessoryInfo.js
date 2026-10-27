@@ -108,9 +108,9 @@ const MOUNT_COPY = {
     de: ['Vier Netzränder und mehrere Befestigungspunkte', 'Vollständigen Rahmen prüfen, alle vier Netzränder befestigen und Befestigungen, Spannung und Freiraum prüfen.'],
   },
   corner: {
-    zh: ['弧管与两条直边固定', '检查扇形板对应的弧管、两条直边及端部接头，沿真实支撑边固定，检查圆弧方向。'],
-    en: ['Curved tube and two straight support edges', 'Check the curved tube, both straight support edges and end connectors, then secure the panel and check its orientation.'],
-    de: ['Bogenrohr und zwei gerade Trägerkanten', 'Bogenrohr, beide geraden Kanten und Verbinder prüfen, die Platte befestigen und ihre Ausrichtung prüfen.'],
+    zh: ['两条直角边螺丝固定', '检查两条直边的支撑管，将螺丝拧入板背面的包管边，并检查圆弧方向。'],
+    en: ['Screws on both straight edges', 'Check the two straight support tubes, fasten the screws through the rear panel lips and check the curved edge orientation.'],
+    de: ['Schrauben an beiden geraden Kanten', 'Beide geraden Trägerrohre prüfen, Schrauben durch die rückseitigen Plattenränder befestigen und die Ausrichtung prüfen.'],
   },
   tube: {
     zh: ['承载管与端部固定', '检查承载管及两端接头，将套筒或轮装在对应管轴上，检查轴向固定与转动空间。'],

@@ -39,7 +39,7 @@ export function createConfirmedComponentFixture(id, { install = true, offset = [
     for(const x of [0,w]){tube([x,2.5,0],[x,42.5,0],'green');tube([x,2.5,0],[x,2.5,40],'blue');}
     tube([0,2.5,40],[w,2.5,40],'red');
   }
-  const candidates=model.confirmedMounts(id),candidate=candidates.find(c=>c.valid);
+  const candidates=model.confirmedMounts(id),candidate=candidates.find(c=>c.valid && (spec.mountType!=='corner' || c.supportTubes.every(id=>Math.abs(model._rail(id).len-spec.width)<.1))) || candidates.find(c=>c.valid);
   if(!candidate)throw new Error(`${id}无可用真实安装位置：${candidates.map(c=>c.reason).join(',')}`);
   const part=install?model.addConfirmedComponent(candidate,spec.fixedColor||'blue'):null;
   if(install && !part)throw new Error(`${id}安装失败`);

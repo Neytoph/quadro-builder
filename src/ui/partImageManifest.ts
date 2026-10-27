@@ -290,6 +290,10 @@ export const PART_IMAGE_MANIFEST = {
       "src": "parts/panel_80x80.png",
       "srcLarge": "parts/large/panel_80x80.png"
     },
+    "panel_sector_20": {
+      "src": "parts/panel_sector_20.png",
+      "srcLarge": "parts/large/panel_sector_20.png"
+    },
     "panel_sector_40": {
       "src": "parts/panel_sector_40.png",
       "srcLarge": "parts/large/panel_sector_40.png"

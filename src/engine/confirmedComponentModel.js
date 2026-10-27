@@ -2,7 +2,7 @@ import { confirmedSpec, legoStudHeight } from './componentPack.js';
 import { INSET_PANEL_IDS, INSET_MOUNT_LAYOUT, INSET_PANEL_EDGE_INSET, hasInsetScrews, oppositeScrewSupports, insetScrewVolumes, insetPanelReference, insetPanelProbes } from './insetPanelMounts.js';
 import { geometry } from './catalog.js';
 import { quatFromBasis, xAxisOf, yAxisOf, zAxisOf } from './util.js';
-import { panelScrewPose, panelScrewAxes, panelLipSegments, PANEL_SCREW_RADIUS, PANEL_SCREW_HEAD_DEPTH, PANEL_SCREW_SHAFT_RADIUS, PANEL_SCREW_SHAFT_LENGTH, PANEL_OUTER_FACE, PANEL_CORNER_RELIEF } from './panelScrewMounts.js';
+import { panelScrewPose, panelScrewAxes, panelLipSegments, sectorScrewMounts, PANEL_SCREW_RADIUS, PANEL_SCREW_HEAD_DEPTH, PANEL_SCREW_SHAFT_RADIUS, PANEL_SCREW_SHAFT_LENGTH, PANEL_OUTER_FACE, PANEL_CORNER_RELIEF } from './panelScrewMounts.js';
 
 export const cSub = (a, b) => a.map((v, i) => v - b[i]);
 export const PANEL_RETAINER_LAYOUT = 'opposite-retainers';
@@ -323,10 +323,15 @@ export function confirmedCandidates(model,id,options={}) {
         const z=cross(a.dir,b.dir),frame={pos:xyz(node),axes:[a.dir,b.dir,z],quat:quatFromBasis(a.dir,b.dir,z)};
         const endA=xyz(node).map((v,k)=>v+a.dir[k]*radius),endB=xyz(node).map((v,k)=>v+b.dir[k]*radius);
         const bow=[...model.tubes.values()].find(t=>t.bow && Array.isArray(t.bowCenter) && Math.hypot(...cSub(t.bowCenter,xyz(node)))<0.35 && [false,true].some(r=>Math.hypot(...cSub(curvePoint(model,t.id,r?1:0),endA))<0.35 && Math.hypot(...cSub(curvePoint(model,t.id,r?0:1),endB))<0.35));
-        if(!bow)continue;
-        const mounts=[{tube:a.tube.id,t:a.start+(a.start?-1:1)*4/a.len,role:'corner',width:2},{tube:a.tube.id,t:a.start+(a.start?-1:1)*(radius-4)/a.len,role:'corner',width:2},{tube:b.tube.id,t:b.start+(b.start?-1:1)*(radius-4)/b.len,role:'corner',width:2}];
-        for(const t of [0.2,0.5,0.8])mounts.push({tube:bow.id,t,role:'arc-retainer',width:2});
-        out.push(asFitting(spec,{tube:a.tube.id,a:a.tube.id,b:b.tube.id},frame,{mounts,supportTubes:[a.tube.id,b.tube.id,bow.id]}));
+        if(options.legacySector){
+          if(!bow)continue;
+          const mounts=[{tube:a.tube.id,t:a.start+(a.start?-1:1)*4/a.len,role:'corner',width:2},{tube:a.tube.id,t:a.start+(a.start?-1:1)*(radius-4)/a.len,role:'corner',width:2},{tube:b.tube.id,t:b.start+(b.start?-1:1)*(radius-4)/b.len,role:'corner',width:2}];
+          for(const t of [0.2,0.5,0.8])mounts.push({tube:bow.id,t,role:'arc-retainer',width:2});
+          out.push(asFitting(spec,{tube:a.tube.id,a:a.tube.id,b:b.tube.id},frame,{mounts,supportTubes:[a.tube.id,b.tube.id,bow.id]}));
+          continue;
+        }
+        const mounts=[a,b].flatMap(rail=>[4,radius-4].map(distance=>({tube:rail.tube.id,t:rail.start+(rail.start?-1:1)*distance/rail.len,role:'panel-screw',width:2})));
+        out.push(asFitting(spec,{tube:a.tube.id,a:a.tube.id,b:b.tube.id},frame,{mounts,supportTubes:[a.tube.id,b.tube.id]}));
       }
     }return out;
   }
@@ -374,17 +379,17 @@ export function confirmedStructuralValid(model,part) {
     const candidate=trampolineCandidate(model,part);
     return candidate.valid && candidate.supportTubes.length===part.supportTubes.length && candidate.supportTubes.every(id=>part.supportTubes.includes(id)) && sameMounts(part.mounts,candidate.mounts);
   }
-  const candidates=part.panelId ? [confirmedPanelDiagnostics(model,part)] : confirmedCandidates(model,spec.id);
+  const candidates=part.panelId ? [confirmedPanelDiagnostics(model,part)] : confirmedCandidates(model,spec.id,{legacySector:spec.feature==='sector' && part.mounts.some(m=>m.role==='arc-retainer')});
   return candidates.some(p=>p.valid && p.supportTubes.length===part.supportTubes.length && p.supportTubes.every(id=>part.supportTubes.includes(id)) && sameMounts(part.mounts,p.mounts) && (!part.kind || Math.hypot(...cSub(p.pos,[part.x,part.y,part.z]))<0.1 && sameRotation(p.quat,part.quat)));
 }
 
 export function confirmedVolumes(model,part) {
   const body=componentBodyVolumes(model,part),frame=confirmedFrame(model,part),spec=confirmedSpec(part.panelId||part.kind||part.partId);
   if(hasInsetScrews(part))return [...body,...insetScrewVolumes(model,part,frame)];
-  if(frame && part.params?.screwAxis && supportsPanelFixing(part.panelId)){
+  if(frame && (part.params?.screwAxis && supportsPanelFixing(part.panelId) || spec?.feature==='sector')){
     const worldAxes=axes=>axes.map(axis=>frame.axes[0].map((_,i)=>frame.axes.reduce((sum,a,k)=>sum+a[i]*axis[k],0)));
     for(const segment of panelLipSegments(part))body.push({pos:localToWorld(frame,segment.point),axes:worldAxes(segment.axes),half:segment.half});
-    for(const mount of part.mounts || []){
+    for(const mount of spec?.feature==='sector'?sectorScrewMounts(model,part):(part.mounts || [])){
       const pose=panelScrewPose(model,part,frame,mount);if(!pose)continue;
       const {normal}=pose,axes=worldAxes(panelScrewAxes(pose));
       const at=distance=>localToWorld(frame,pose.point.map((v,i)=>v+normal[i]*distance));
@@ -429,7 +434,14 @@ function componentBodyVolumes(model,part) {
       out.push({pos:center([a,b]),axes:[x,d,z],half:[spec.width/2-3,2,0.6]});
     }return out;
   }
-  if(spec.feature==='sector')return [cVolume(frame,[3,3,-0.8],[spec.width-3,spec.height-3,0.8])];
+  if(spec.feature==='sector'){
+    const radius=spec.width-3,step=radius/8,boxes=[];
+    for(let i=0;i<8;i++){
+      const x0=i*step,x1=(i+1)*step,y1=Math.sqrt(Math.max(0,radius*radius-x1*x1));
+      if(y1>3 && x1>3)boxes.push(cVolume(frame,[Math.max(3,x0),3,PANEL_OUTER_FACE-geometry().panelThickness],[x1,y1,PANEL_OUTER_FACE]));
+    }
+    return boxes;
+  }
   if(spec.feature==='rope')return [cVolume(frame,[-part.ropeLength/2,-2,-0.6],[part.ropeLength/2,0.6,0.6])];
   if(spec.mountType==='tube') {const rail=model._rail(part.tube),length=rail?.len-10;return rail?[cVolume(frame,[-length/2,-spec.radius,-spec.radius],[length/2,spec.radius,spec.radius])]:[];}
   if(spec.feature==='bridge') {

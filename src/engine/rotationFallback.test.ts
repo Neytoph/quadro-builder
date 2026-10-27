@@ -200,7 +200,7 @@ describe('受阻后反向旋转', () => {
 })
 
 describe('选择模式下再次点击弯管和斜角接头', () => {
-  it.each(['lattice_curved', 'panel_sector_40'])('%s 的弯管支撑不能单独转动', (partId) => {
+  it.each(['lattice_curved'])('%s 的弯管支撑不能单独转动', (partId) => {
     const { model, part } = createConfirmedComponentFixture(partId)
     const supports = (part as any).supportTubes as string[]
     const bows = supports.filter(id => model.tubes.get(id)?.bow)

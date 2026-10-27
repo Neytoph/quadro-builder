@@ -5,6 +5,7 @@ import { MERGE_EPS, FORMAT_VERSION, DIAGONAL_SNAP_TOL, DIRECTIONS, DIAGONAL_DIRE
 import { ACCESSORY_IDS, PANEL_ACCESSORY_IDS, accessoryMount, accessoryDiagnostics, panelAccessoryDiagnostics, componentMountsValid, componentVolumes, componentFrame, confirmedDiagnostics, nativeWheelComponentObstacle } from './accessoryPack.js';
 import { confirmedSpec, usesCustomClimbingColor } from './componentPack.js';
 import { confirmedCandidates, ropeCandidate, supportsPanelFixing, PANEL_RETAINER_LAYOUT, curvePoint } from './confirmedComponentModel.js';
+import { sectorScrewMounts } from './panelScrewMounts.js';
 import { segmentDistance } from './segmentDistance.js';
 import { insetPanelProbes, INSET_PANEL_IDS, INSET_MOUNT_LAYOUT, oppositeScrewSupports, insetPanelReference } from './insetPanelMounts.js';
 import { validAssemblyConfig } from './assemblyConfig.js';
@@ -6722,6 +6723,62 @@ export class BuildModel {
     return this.isBelowGround(minY);
   }
 
+  // 优先连接同一管架内、位置和插口方向都匹配的端点，避免把无关的接头吸入闭环。
+  closingBowNormal(fromId, dir, radius, preferred) {
+    const from = this.nodes.get(fromId);
+    if (!from || !this.canExtendFrom(from, dir)) return null;
+    const reachable = new Set([fromId]), queue = [fromId];
+    for (let i = 0; i < queue.length; i++) for (const tube of this.tubes.values()) {
+      const next = tube.a === queue[i] ? tube.b : tube.b === queue[i] ? tube.a : null;
+      if (next && !reachable.has(next)) { reachable.add(next); queue.push(next); }
+    }
+    const options = [];
+    for (const id of reachable) {
+      if (id === fromId || this.tubeBetween(fromId, id)) continue;
+      const target = this.nodes.get(id);
+      if (!target) continue;
+      const delta = [target.x - from.x, target.y - from.y, target.z - from.z];
+      const raw = delta.map((v, i) => v / radius - dir[i]), length = Math.hypot(...raw);
+      if (Math.abs(length - 1) > .005 || Math.abs(raw.reduce((s, v, i) => s + v * dir[i], 0)) > .005) continue;
+      const normal = raw.map(v => v / length), incoming = normal.map(v => -v);
+      if (!this.canExtendFrom(target, incoming) || armFittingDirsAt(this, target).some(axis => axis.reduce((s, v, i) => s + v * incoming[i], 0) > ARM_ALIGN_TOL)) continue;
+      if (this.bowBelowGround(from, dir, normal, radius) || this.bowPathCollision(from, dir, normal, radius, target)) continue;
+      options.push(normal);
+    }
+    options.sort((a, b) => b.reduce((s, v, i) => s + v * preferred[i], 0) - a.reduce((s, v, i) => s + v * preferred[i], 0));
+    return options[0] || null;
+  }
+
+  bowPathCollision(from, dir, normal, radius, end, { ignoreId = null, tubeRadius = 2.45, connectorSize = 5 } = {}) {
+    const xyz = node => [node.x, node.y, node.z];
+    const arc = Array.from({ length: 33 }, (_, i) => {
+      const angle = Math.PI * i / 64;
+      return xyz(from).map((v, axis) => v + radius * (Math.sin(angle) * dir[axis] + (1 - Math.cos(angle)) * normal[axis]));
+    });
+    const clearance = 2 * tubeRadius - 0.03 + radius * (1 - Math.cos(Math.PI / 128));
+    return [...this.tubes.values()].some(other => {
+      if (other.id === ignoreId || other.link || other.arm) return false;
+      const p = this.nodes.get(other.a), q = this.nodes.get(other.b);
+      if (!p || !q) return false;
+      const points = other.bow && other.bowCenter
+        ? Array.from({ length: 33 }, (_, i) => curvePoint(this, other.id, i / 32))
+        : other.geom?.p0 && other.geom.dir
+          ? [connectorSize / 2, other.geom.len + (other.geom.pad || 0) + connectorSize / 2].map(distance => other.geom.p0.map((v, axis) => v + other.geom.dir[axis] * distance))
+          : [xyz(p), xyz(q)];
+      if (points.some(point => !point)) return false;
+      const sharesStart = other.a === from.id || other.b === from.id;
+      const sharesEnd = end && (other.a === end.id || other.b === end.id);
+      for (let i = 0; i < arc.length - 1; i++) {
+        const mid = arc[i].map((v, axis) => (v + arc[i + 1][axis]) / 2);
+        // 管段按半径膨胀检查，接头附近需连同管半径让位。
+        if (sharesStart && Math.hypot(...mid.map((v, axis) => v - xyz(from)[axis])) < connectorSize + tubeRadius) continue;
+        if (sharesEnd && Math.hypot(...mid.map((v, axis) => v - xyz(end)[axis])) < connectorSize + tubeRadius) continue;
+        for (let j = 0; j < points.length - 1; j++) if (segmentDistance(arc[i], arc[i + 1], points[j], points[j + 1]) < clearance) return true;
+      }
+      return false;
+    });
+  }
+
   extendBow(fromNodeId, dirVec, normal, tubeId, color, R) {
     const from = this.nodes.get(fromNodeId);
     if (!from) return null;
@@ -6736,6 +6793,10 @@ export class BuildModel {
     const existing = this.findNodeNear(target.x, target.y, target.z);
     if (existing && this.tubeBetween(from.id, existing.id)) {
       return { node: existing, tube: null, duplicate: true };
+    }
+    if (existing) {
+      const incoming = normal.map(value => -value);
+      if (!this.canExtendFrom(existing, incoming) || armFittingDirsAt(this, existing).some(axis => axis.reduce((sum, value, i) => sum + value * incoming[i], 0) > ARM_ALIGN_TOL)) return { collision: true };
     }
     const to = this.addNode(round(target.x), round(target.y), round(target.z));
     if (from.id === to.id) return null;
@@ -7173,6 +7234,11 @@ export class BuildModel {
         ...(f.appearanceVersion != null ? { appearanceVersion: f.appearanceVersion, params: structuredClone(f.params), mounts: structuredClone(f.mounts), supportTubes: structuredClone(f.supportTubes), facing: f.facing || 1 } : {}),
         ...(f.appearanceVersion === 2 ? { partId: f.partId, a: f.a, b: f.b, t0: f.t0, len: f.len, curveReverse: f.curveReverse, ropeLength: f.ropeLength } : {}),
       });
+      const loadedFitting = this.fittings.get(f.id);
+      if (['panel_sector_20', 'panel_sector_40'].includes(kind) && loadedFitting.mounts?.some(m => m?.role === 'arc-retainer') && componentMountsValid(this, loadedFitting)) {
+        loadedFitting.mounts = sectorScrewMounts(this, loadedFitting);
+        loadedFitting.supportTubes = [loadedFitting.a, loadedFitting.b];
+      }
       maxSeq = Math.max(maxSeq, parseSeq(f.id));
     }
     for (const s of data.slides || []) {

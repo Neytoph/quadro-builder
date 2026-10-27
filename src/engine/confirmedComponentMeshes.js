@@ -8,7 +8,7 @@ import fontData from 'three/examples/fonts/helvetiker_regular.typeface.json';
 import { confirmedSpec, confirmedColor, legoStudHeight } from './componentPack.js';
 import { insetScrewMeshes } from './insetPanelMeshes.js';
 import { hasInsetScrews, INSET_PANEL_EDGE_INSET } from './insetPanelMounts.js';
-import { panelScrewPose, panelLipProfiles, PANEL_SCREW_RADIUS, PANEL_SCREW_HEAD_DEPTH, PANEL_SCREW_SHAFT_RADIUS, PANEL_SCREW_SHAFT_LENGTH, PANEL_OUTER_FACE, PANEL_CORNER_RELIEF } from './panelScrewMounts.js';
+import { panelScrewPose, panelLipProfiles, sectorScrewMounts, PANEL_SCREW_RADIUS, PANEL_SCREW_HEAD_DEPTH, PANEL_SCREW_SHAFT_RADIUS, PANEL_SCREW_SHAFT_LENGTH, PANEL_OUTER_FACE, PANEL_CORNER_RELIEF } from './panelScrewMounts.js';
 import { COLOR_HEX } from './colors.js';
 import { readComponentAppearance, diamondNetSegments } from './componentAppearance.js';
 import { geometry } from './catalog.js';
@@ -85,7 +85,7 @@ function factory(scene,frame) {
 
 function outline(w,h,feature,inset=false) {
   const shape=new THREE.Shape(),x=w/2,y=h/2,n=PANEL_CORNER_RELIEF;
-  if(feature==='sector') {shape.moveTo(0,0);shape.lineTo(w,0);shape.absarc(0,0,w,0,Math.PI/2,false);shape.lineTo(0,0);return shape;}
+  if(feature==='sector') {shape.moveTo(n,0);shape.lineTo(w-n,0);shape.absarc(w,0,n,Math.PI,Math.PI/2,true);shape.absarc(0,0,w,Math.asin(n/w),Math.PI/2-Math.asin(n/w),false);shape.absarc(0,w,n,0,-Math.PI/2,true);shape.lineTo(0,n);shape.absarc(0,0,n,Math.PI/2,0,true);shape.closePath();return shape;}
   if(inset){shape.moveTo(-x,-y);shape.lineTo(x,-y);shape.lineTo(x,y);shape.lineTo(-x,y);shape.closePath();return shape;}
   // 外扣板到达管轴，接头处让位与普通板一致；内嵌板使用独立的完整矩形。
   shape.moveTo(-x+n,-y);shape.lineTo(x-n,-y);shape.absarc(x,-y,n,Math.PI,Math.PI/2,true);
@@ -309,7 +309,12 @@ export function confirmedComponentMeshes(scene,model,part) {
   const spec=confirmedSpec(part.panelId||part.kind||part.partId),frame=confirmedFrame(model,part);if(!spec || !frame)return [];
   if(spec.placement==='panel')return panelMeshes(scene,model,part,spec,frame);
   const f=factory(scene,frame);
-  if(spec.feature==='sector') {f.add(`sector-panel:${spec.width}`,()=>plateGeometry(spec.width,spec.height,'sector'),part.color||'#348ddd',[0,0,1.32-geometry().panelThickness]).name='sector-panel';clips(f,model,part);return f.meshes;}
+  if(spec.feature==='sector') {
+    const mesh=f.add(`sector-panel:${spec.width}`,()=>plateGeometry(spec.width,spec.height,'sector'),part.color||'#348ddd',[0,0,PANEL_OUTER_FACE-geometry().panelThickness]);
+    mesh.name='sector-panel';if(scene._panelMaterial)mesh.material=scene._panelMaterial(part.color,false,false);
+    const mounts=sectorScrewMounts(model,part);
+    panelScrews(f,model,{...part,mounts},frame);return f.meshes;
+  }
   if(spec.feature==='roller') {
     const rail=model._rail(part.tube),length=rail.len-12,r=spec.radius;
     f.add(`roller:${length}:${r}`,()=>{const g=new THREE.CylinderGeometry(r,r,length,48);g.rotateZ(Math.PI/2);return g;},'#f0d33f',[0,0,0],null,'cloth');

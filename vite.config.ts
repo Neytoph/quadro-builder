@@ -53,6 +53,11 @@ export default defineConfig({
         this.emitFile({ type: 'asset', fileName: 'home/visuals.js', source: fs.readFileSync(path.join(rootDir, 'src/home/visuals.js'), 'utf8') })
       },
       configureServer(server) {
+        // 该公共模块同时供源码和静态页面引用；带 ?import 的请求需原样提供给浏览器。
+        server.middlewares.use('/disclosure-motion.js', (_req, res) => {
+          res.setHeader('Content-Type', 'text/javascript')
+          res.end(fs.readFileSync(path.join(rootDir, 'public/disclosure-motion.js'), 'utf8'))
+        })
         server.middlewares.use('/home/visuals.js', (_req, res) => {
           res.setHeader('Content-Type', 'text/javascript')
           res.end(fs.readFileSync(path.join(rootDir, 'src/home/visuals.js'), 'utf8'))

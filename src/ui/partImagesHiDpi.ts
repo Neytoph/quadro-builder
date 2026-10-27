@@ -72,6 +72,7 @@ export const PART_IMAGES_LARGE: ReadonlySet<string> = new Set([
   "panel_70x120",
   "panel_80x20",
   "panel_80x80",
+  "panel_sector_20",
   "panel_sector_40",
   "pool_liner_l",
   "pool_liner_s",
