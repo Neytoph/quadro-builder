@@ -1,9 +1,17 @@
 import catalog from './officialModels.json'
 import { publicResourceUrl, resourceVersion, ENGINE_VERSION } from '../engine/publicResources.js'
 
-export type OfficialModel = { id: string; name: string }
+export type OfficialModel = { id: string; name: string; zh: string; de: string }
 
 export const OFFICIAL_MODELS = catalog as OfficialModel[]
+
+export function officialName(model: OfficialModel, lang: 'zh' | 'en' | 'de') {
+  return lang === 'en' ? model.name : model[lang]
+}
+
+export function matchesOfficial(model: OfficialModel, query: string) {
+  return `${model.id} ${model.name} ${model.zh} ${model.de}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())
+}
 
 export const OFFICIAL_BY_ID = new Map(OFFICIAL_MODELS.map(m => [m.id, m]))
 
