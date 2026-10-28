@@ -497,7 +497,9 @@ export function confirmedDiagnostics(model, probe, {collisionCache = null,mountC
   else if(spec.feature==='trampoline')part={...trampolineCandidate(model,probe),id:probe.id,color:probe.color};
   else if (probe.panelId) part = confirmedPanelDiagnostics(model, probe);
   else {
-    const candidate = (candidates || confirmedCandidates(model, spec.id)).find(p => p.supportTubes.length === probe.supportTubes?.length && p.supportTubes.every(id => probe.supportTubes.includes(id)) && (p.a == null || p.a === probe.a) && (p.b == null || p.b === probe.b) && (p.t0 == null || p.t0 === probe.t0) && (p.len == null || p.len === probe.len) && (spec.feature!=='trampoline' || p.params.width===(probe.params?.width ?? probe.w ?? 40) && p.params.height===(probe.params?.height ?? probe.h ?? 40)) && (p.curveReverse == null || p.curveReverse === probe.curveReverse));
+    const available=spec.feature==='sector' && probe.facing===-1 && (!candidates || candidates.some(p=>p.facing!==-1))
+      ? confirmedCandidates(model,spec.id,{sectorFacing:-1}) : candidates || confirmedCandidates(model,spec.id);
+    const candidate = available.find(p => p.supportTubes.length === probe.supportTubes?.length && p.supportTubes.every(id => probe.supportTubes.includes(id)) && (p.a == null || p.a === probe.a) && (p.b == null || p.b === probe.b) && (p.t0 == null || p.t0 === probe.t0) && (p.len == null || p.len === probe.len) && (spec.feature!=='trampoline' || p.params.width===(probe.params?.width ?? probe.w ?? 40) && p.params.height===(probe.params?.height ?? probe.h ?? 40)) && (p.curveReverse == null || p.curveReverse === probe.curveReverse));
     part = candidate ? { ...candidate, id: probe.id, color: probe.color } : invalid('missing_support');
   }
   if (!part.valid) return part;

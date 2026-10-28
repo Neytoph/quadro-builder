@@ -1538,6 +1538,12 @@ export class BuildModel {
    */
   rotateFitting(id) {
     const wheel = this.fittings.get(id);
+    if (confirmedSpec(wheel?.kind || wheel?.partId)?.feature === 'sector') {
+      const flipped = confirmedDiagnostics(this, { ...wheel, facing: -(wheel.facing || 1) });
+      if (!flipped.valid) return false;
+      wheel.facing = flipped.facing; wheel.quat = flipped.quat;
+      return true;
+    }
     if (wheel?.kind === "multi-wheel2") {
       const [x, y, z, w] = wheel.quat || [0, 0, 0, 1];
       // Half turn around the wheel's local Y axis, keeping its centre fixed.
@@ -1564,6 +1570,8 @@ export class BuildModel {
 
   /** Laesst sich dieses Anbauteil weiterdrehen? (fuer Zeiger und Meldung) */
   canRotateFitting(id) {
+    const fitting=this.fittings.get(id);
+    if (confirmedSpec(fitting?.kind || fitting?.partId)?.feature === 'sector') return true;
     if (this.fittings.get(id)?.kind === "multi-wheel2") return true;
     return !!this._nextFittingMount(id);
   }
@@ -5622,6 +5630,7 @@ export class BuildModel {
       if (!f) continue;
       flipPos(f);
       if (f.quat) f.quat = flipQuat(f.quat);
+      if (confirmedSpec(f.kind || f.partId)?.feature === 'sector') f.facing = -(f.facing || 1);
       if (f.kind === 'steering_wheel' && f.quat && this._rail(f.tube)) {
         const normal = cross3(this._rail(f.tube).dir, [0, 1, 0]);
         f.facing = dot3(zAxisOf(f.quat), normal) < 0 ? -1 : 1;

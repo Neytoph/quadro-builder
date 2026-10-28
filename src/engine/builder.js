@@ -1063,6 +1063,7 @@ export class Builder {
     if (kind === "panel" && this.model.panels.has(id)) return "panel";
     if (kind === "clamp" && this.model.clamps.has(id)) return "clamp";
     if (kind === "fitting") {
+      if (confirmedSpec(this.model.fittings.get(id)?.kind)?.feature === 'sector') return "fitting";
       if (this.model.fittings.get(id)?.kind === "multi-wheel2") return "fitting";
       if (ROTATABLE_FITTINGS.has(this.model.fittings.get(id)?.kind)) return "fitting";
       if (POOL_KINDS.has(this.model.fittings.get(id)?.kind)) return "pool";
@@ -2942,10 +2943,14 @@ export class Builder {
     if (this.fittingKind === 'rope') { this._buildRopeHandles(); return; }
     if (this.fittingKind === 'gym_rings') { this._buildGymRingHandles(); return; }
     if (confirmedSpec(this.fittingPart || this.fittingKind)?.placement === 'fitting') {
-      const id = this.fittingPart || this.fittingKind, mounts = this.model.confirmedMounts(id);
+      const id = this.fittingPart || this.fittingKind, sector=confirmedSpec(id)?.feature==='sector';
+      const opposite=sector ? this.model.confirmedMounts(id,{sectorFacing:-1}) : [];
+      const oppositeByRails=new Map(opposite.map(mount=>[`${mount.a}|${mount.b}`,mount]));
+      const camera=sector ? this.scene.cameraPosition() : null;
+      const mounts = this.model.confirmedMounts(id).map(mount => sector ? panelInstallationFacing(this.model,mount,camera,oppositeByRails.get(`${mount.a}|${mount.b}`)).part : mount);
       // 提示紧接本次 refresh 使用同一批诊断；下一次 refresh 会重新读取模型。
       this._confirmedFittingMounts = { id, mounts };
-      for (const mount of mounts) if (mount.mounts.length && (confirmedSpec(id)?.feature !== 'sector' || mount.valid)) this.scene.addHandle(confirmedFittingHandlePosition(this.model, mount), { confirmedComponent: mount, placeNode: true }, 'place');
+      for (const mount of mounts) if (mount.mounts.length && (!sector || mount.valid)) this.scene.addHandle(confirmedFittingHandlePosition(this.model,mount), { confirmedComponent: mount, placeNode: true }, 'place');
       return;
     }
     if (ACCESSORY_IDS.has(this.fittingKind)) {

@@ -8,6 +8,7 @@ import { docFromJSON } from '../collab/ymodel'
 import * as THREE from 'three'
 import { buildQDF } from './qdfexport.js'
 import { parseQDF } from './qdfimport.js'
+import { createConfirmedComponentFixture } from './confirmedComponentExample.js'
 
 beforeAll(async () => { await loadCatalog() })
 afterEach(() => { vi.useRealTimers() })
@@ -72,6 +73,19 @@ function parity(model: BuildModel, id: string, kind: string, action: string,
 }
 
 describe('已安装组件在选择模式与安装工具中的调整一致', () => {
+  it.each(['panel_sector_20', 'panel_sector_40'])('%s 选中后可翻面、撤销和重做', id => {
+    const { model, part } = createConfirmedComponentFixture(id)
+    const builder = editor(model, part.id, 'fitting')
+    const before = json(builder.model)
+    expect(builder.selectedPartAdjustment()).toBe('fitting')
+    selectedClick(builder)
+    const after = json(builder.model)
+    expect(after).not.toBe(before)
+    builder.history.undo()
+    expect(json(builder.model)).toBe(before)
+    builder.history.redo()
+    expect(json(builder.model)).toBe(after)
+  })
   it('多用轮在管上点击翻面，位置不变且可撤销重做和保存', () => {
     const { model, tube } = carrier()
     const mount = model.tubeFittingMount(tube.id, [20, 60, 0], 'multi-wheel2')!

@@ -320,7 +320,8 @@ export function confirmedCandidates(model,id,options={}) {
       const rails=[...model.tubes.values()].filter(t=>!t.bow && !t.arm && !t.link && (t.a===node.id || t.b===node.id)).map(t=>({tube:t,dir:unit(cSub(curvePoint(model,t.id,t.a===node.id?1:0),xyz(node))),start:t.a===node.id?0:1,len:model._rail(t.id)?.len||0})).filter(r=>r.len>=radius);
       for(let i=0;i<rails.length;i++)for(let j=i+1;j<rails.length;j++) {
         const a=rails[i],b=rails[j];if(Math.abs(cDot(a.dir,b.dir))>0.01)continue;
-        const z=cross(a.dir,b.dir),frame={pos:xyz(node),axes:[a.dir,b.dir,z],quat:quatFromBasis(a.dir,b.dir,z)};
+        const facing=options.sectorFacing===-1?-1:1;
+        const [x,y]=facing===-1?[b.dir,a.dir]:[a.dir,b.dir],z=cross(x,y),frame={pos:xyz(node),axes:[x,y,z],quat:quatFromBasis(x,y,z)};
         const endA=xyz(node).map((v,k)=>v+a.dir[k]*radius),endB=xyz(node).map((v,k)=>v+b.dir[k]*radius);
         const bow=[...model.tubes.values()].find(t=>t.bow && Array.isArray(t.bowCenter) && Math.hypot(...cSub(t.bowCenter,xyz(node)))<0.35 && [false,true].some(r=>Math.hypot(...cSub(curvePoint(model,t.id,r?1:0),endA))<0.35 && Math.hypot(...cSub(curvePoint(model,t.id,r?0:1),endB))<0.35));
         if(options.legacySector){
@@ -331,7 +332,7 @@ export function confirmedCandidates(model,id,options={}) {
           continue;
         }
         const mounts=[a,b].flatMap(rail=>[4,radius-4].map(distance=>({tube:rail.tube.id,t:rail.start+(rail.start?-1:1)*distance/rail.len,role:'panel-screw',width:2})));
-        out.push(asFitting(spec,{tube:a.tube.id,a:a.tube.id,b:b.tube.id},frame,{mounts,supportTubes:[a.tube.id,b.tube.id]}));
+        out.push(asFitting(spec,{tube:a.tube.id,a:a.tube.id,b:b.tube.id,facing},frame,{mounts,supportTubes:[a.tube.id,b.tube.id]}));
       }
     }return out;
   }
@@ -379,7 +380,7 @@ export function confirmedStructuralValid(model,part) {
     const candidate=trampolineCandidate(model,part);
     return candidate.valid && candidate.supportTubes.length===part.supportTubes.length && candidate.supportTubes.every(id=>part.supportTubes.includes(id)) && sameMounts(part.mounts,candidate.mounts);
   }
-  const candidates=part.panelId ? [confirmedPanelDiagnostics(model,part)] : confirmedCandidates(model,spec.id,{legacySector:spec.feature==='sector' && part.mounts.some(m=>m.role==='arc-retainer')});
+  const candidates=part.panelId ? [confirmedPanelDiagnostics(model,part)] : confirmedCandidates(model,spec.id,{legacySector:spec.feature==='sector' && part.mounts.some(m=>m.role==='arc-retainer'),sectorFacing:part.facing});
   return candidates.some(p=>p.valid && p.supportTubes.length===part.supportTubes.length && p.supportTubes.every(id=>part.supportTubes.includes(id)) && sameMounts(part.mounts,p.mounts) && (!part.kind || Math.hypot(...cSub(p.pos,[part.x,part.y,part.z]))<0.1 && sameRotation(p.quat,part.quat)));
 }
 
