@@ -1355,7 +1355,8 @@ export class SceneManager {
   // Rohr und pro Render-Durchlauf eine neue CylinderGeometry (~425 Stueck), die
   // beim naechsten Durchlauf wieder weggeworfen wurde.
   _tubeGeometry(radius, length, segments, hollow = false) {
-    const key = `${radius.toFixed(2)}:${length.toFixed(2)}:${segments}:${hollow}`;
+    // 缓存身份必须包含实际几何参数；舍入键会让近似长度共用先渲染的管件。
+    const key = `${radius}:${length}:${segments}:${hollow}`;
     let geo = this._tubeGeos.get(key);
     if (!geo) {
       // 真管保留 3 mm 管壁和两端环口；接头插杆、加强杆继续用实心几何。
