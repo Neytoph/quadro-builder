@@ -3,7 +3,8 @@ import {EDITOR_EMBED} from '../entry'
 
 const KEY_V1 = 'quadro.ui.widths.v1'
 const KEY_V2 = 'quadro.ui.layout.v2'
-const KEY = EDITOR_EMBED ? 'quadro.ui.model-editor.layout.v1' : 'quadro.ui.layout.v3'
+const PREVIOUS_KEY = EDITOR_EMBED ? 'quadro.ui.model-editor.layout.v1' : 'quadro.ui.layout.v3'
+const KEY = EDITOR_EMBED ? 'quadro.ui.model-editor.layout.v2' : 'quadro.ui.layout.v4'
 export const PANEL_GAP = 12
 export const TAB_BAR_H = 60
 export const NARROW_MAX = 767
@@ -93,9 +94,9 @@ function readBox(raw: unknown, side: Side, vh: number, fallbackW: number): Panel
 
 type StoredLayout = { left?: unknown; right?: unknown; leftColor?: boolean; leftKeys?: boolean }
 
-function flagsOf(raw: StoredLayout | null) {
+function flagsOf(raw: StoredLayout | null, currentVersion: boolean) {
   return {
-    leftColor: raw?.leftColor !== false,
+    leftColor: currentVersion && raw?.leftColor === true,
     leftKeys: raw?.leftKeys !== false,
   }
 }
@@ -106,18 +107,20 @@ function load(vh: number): { left: PanelBox; right: PanelBox; leftColor: boolean
     return {
       left: { width: LEFT_DEFAULT, top: TOP_MIN, height: h },
       right: { width: RIGHT_DEFAULT, top: TOP_MIN, height: h },
-      leftColor: true,
+      leftColor: false,
       leftKeys: true,
     }
   }
   try {
-    if(EDITOR_EMBED&&!localStorage.getItem(KEY))return {...empty(),leftColor:window.innerWidth>NARROW_MAX,leftKeys:false}
-    const raw = JSON.parse(localStorage.getItem(KEY) || localStorage.getItem(KEY_V2) || '') as StoredLayout
+    const current = localStorage.getItem(KEY)
+    const previous = localStorage.getItem(PREVIOUS_KEY)
+    if (EDITOR_EMBED && !current && !previous) return { ...empty(), leftKeys: false }
+    const raw = JSON.parse(current || previous || localStorage.getItem(KEY_V2) || '') as StoredLayout
     if (raw && (raw.left || raw.right)) {
       return {
         left: readBox(raw.left, 'left', vh, LEFT_DEFAULT),
         right: readBox(raw.right, 'right', vh, RIGHT_DEFAULT),
-        ...flagsOf(raw),
+        ...flagsOf(raw, !!current),
       }
     }
   } catch { /* fall through */ }
@@ -127,7 +130,7 @@ function load(vh: number): { left: PanelBox; right: PanelBox; leftColor: boolean
     return {
       left: clampBox({ width: Number(v1.left) || LEFT_DEFAULT, top: TOP_MIN, height: h }, 'left', vh),
       right: clampBox({ width: Number(v1.right) || RIGHT_DEFAULT, top: TOP_MIN, height: h }, 'right', vh),
-      leftColor: true,
+      leftColor: false,
       leftKeys: true,
     }
   } catch {

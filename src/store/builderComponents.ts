@@ -39,7 +39,7 @@ export function componentDimensions(part: BuilderComponent) {
 
 export function componentHintKey(part: BuilderComponent) {
   if (part.mountLayout === 'opposite-transparent-screws') return 'accessory.mount.opposite-screws'
-  if (['steering_wheel', 'swing', 'gym_rings', 'panel_40x40_busy', 'panel_40x40_pocket', 'trampoline'].includes(part.id)) return `accessory.hint.${part.id}`
+  if (['steering_wheel', 'swing', 'gym_rings', 'panel_40x40_busy', 'panel_40x40_pocket', 'trampoline', 'textile_bridge'].includes(part.id)) return `accessory.hint.${part.id}`
   if (part.id === 'sleeve') return 'accessory.hint.roller'
   const mount = part.mountType || part.mount || 'frame'
   return `accessory.mount.${mount}`

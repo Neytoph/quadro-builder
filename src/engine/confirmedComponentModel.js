@@ -215,7 +215,7 @@ function railCandidates(model,spec,{legacyInset=false,deduplicate=true,screwAxis
   const out=[],seen=new Set();
   for(const tube of model.tubes.values())for(const partner of model.panelPartners(tube.id,[spec.width,spec.height])) {
     const count=Math.max(1,Math.floor((partner.hi-partner.lo+0.5)/partner.len));
-    // 连续布套和彩虹桥沿指定长边安装，不能把跨距当成布套长度。
+    // 连续布套沿指定长边安装，不能把跨距当成布套长度。
     if(spec.mountType==='rails' && Math.abs(partner.len-spec.height)>0.5)continue;
     for(let k=0;k<count;k++) {
       const probe={a:tube.id,b:partner.id,t0:partner.lo+k*partner.len,len:partner.len};
@@ -232,14 +232,51 @@ function railCandidates(model,spec,{legacyInset=false,deduplicate=true,screwAxis
       let supports;
       if(spec.mountType==='rails' || spec.mountType==='rope') {
         const mounts=[];for(const id of [probe.a,probe.b]) {
-          const rail=model._rail(id),positions=spec.feature==='bridge'?rungPositions(probe.len).map(p=>p/probe.len):spec.feature==='rope'?[0.5]:[0.25,0.75];
-          for(const position of positions) {const p=cor[id===probe.a?0:3].map((v,i)=>v+(cor[id===probe.a?1:2][i]-v)*position);mounts.push({tube:id,t:cDot(cSub(p,rail.p0),rail.dir)/rail.len,role:spec.feature==='bridge'?'rung':spec.feature==='rope'?'knot':'sleeve',width:spec.feature==='bridge'?3:2});}
+          const rail=model._rail(id),positions=spec.feature==='rope'?[0.5]:[0.25,0.75];
+          for(const position of positions) {const p=cor[id===probe.a?0:3].map((v,i)=>v+(cor[id===probe.a?1:2][i]-v)*position);mounts.push({tube:id,t:cDot(cSub(p,rail.p0),rail.dir)/rail.len,role:spec.feature==='rope'?'knot':'sleeve',width:2});}
         }supports={mounts,supportTubes:[probe.a,probe.b]};
       } else supports=INSET_PANEL_IDS.has(spec.id) && !legacyInset || oppositeRetainers && supportsPanelFixing(spec.id) ? oppositeScrewSupports(model,frame,spec.width,spec.height,{screwAxis}) : edgeSupports(model,cor,density);
       if(!supports)continue;
       out.push(asFitting(spec,probe,frame,supports));
     }
   }return out;
+}
+
+function bridgeCandidates(model,spec) {
+  const rails=[...model.tubes.values()].flatMap(tube=>{
+    const rail=model._rail(tube.id);return rail?[{...rail,id:tube.id}]:[];
+  });
+  const out=[];
+  for(const probe of insetPanelProbes(model,spec.width,spec.height)) {
+    const corners=model.panelCorners(probe),supportTubes=new Set(),mounts=[];
+    if(!corners)continue;
+    // 框边按连续覆盖判断，横杠固定点仍记录各自实际落到的管件。
+    for(const [a,b] of [[corners[0],corners[1]],[corners[3],corners[2]]]) {
+      const direction=unit(cSub(b,a)),length=Math.hypot(...cSub(b,a)),spans=[];
+      for(const rail of rails) {
+        const alignment=cDot(rail.dir,direction);if(Math.abs(alignment)<.999)continue;
+        const offset=cSub(rail.p0,a),start=cDot(offset,direction);
+        if(Math.hypot(...cSub(offset,direction.map(v=>v*start)))>.35)continue;
+        const end=start+rail.len*alignment,lo=Math.max(0,Math.min(start,end)),hi=Math.min(length,Math.max(start,end));
+        if(hi>lo+.01)spans.push({rail,lo,hi});
+      }
+      spans.sort((a,b)=>a.lo-b.lo);let reach=0;
+      for(const span of spans) {
+        if(span.lo>reach+.35)break;
+        if(span.hi>reach+.01){reach=span.hi;supportTubes.add(span.rail.id);}
+      }
+      if(reach<length-.35)break;
+      for(const distance of rungPositions(length)) {
+        const span=spans.find(s=>s.lo<=distance && s.hi>=distance);if(!span)break;
+        const point=a.map((v,i)=>v+direction[i]*distance);
+        mounts.push({tube:span.rail.id,t:cDot(cSub(point,span.rail.p0),span.rail.dir)/span.rail.len,role:'rung',width:3});
+      }
+    }
+    if(mounts.length!==2*rungPositions(spec.height).length)continue;
+    const frame=confirmedFrame(model,{...probe,panelId:spec.id,side:1});if(!frame)continue;
+    out.push(asFitting(spec,probe,frame,{mounts,supportTubes:[...supportTubes]}));
+  }
+  return out;
 }
 function curvedCandidates(model,spec) {
   const out=[],bows=[...model.tubes.values()].filter(t=>t.bow && t.bowCenter);
@@ -336,8 +373,8 @@ export function confirmedCandidates(model,id,options={}) {
       }
     }return out;
   }
-  // 绳子选一个框格：两端分别绕住相对管，保存两个实际承载引用。
-  const candidates=railCandidates(model,spec);
+  // 彩虹桥按连续框边识别，布片和绳子保留各自的安装方式。
+  const candidates=spec.feature==='bridge'?bridgeCandidates(model,spec):railCandidates(model,spec);
   return spec.feature==='rope'?candidates.map(p=>ropeCandidate(model,...p.mounts)):candidates;
 }
 

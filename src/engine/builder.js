@@ -30,6 +30,7 @@ import { SelectionTransformPreview } from './selectionTransformPreview.js';
 import { selectionTransformStrings } from '../ui/selectionTransformStrings';
 import { pickStepAnchor, stepCandidates, stepCandidatesFromSelection, stepNeighbor } from "./stepAnchor.js";
 import { BearingConnectionController } from './bearingConnectionController.js';
+import { assemblyMeshes, ensureAssemblyMeshes } from './assemblyNativeMesh.js';
 
 export function confirmedFittingHandlePosition(model, mount) {
   const spec = confirmedSpec(mount.kind || mount.partId);
@@ -88,6 +89,7 @@ export const DEFAULT_MOVE_STEP = 20;
 
 export class Builder {
   constructor(scene, model, { onChange, onPreview } = {}) {
+    this._disposed = false;
     this.scene = scene;
     this.model = model;
     this.onChange = onChange || (() => {});
@@ -188,6 +190,7 @@ export class Builder {
 
   // --- Undo ---------------------------------------------------------------
   dispose() {
+    this._disposed = true;
     this._eventAbort?.abort();
     this._abortGesture();
     clearTimeout(this._panelFlipTimer);
@@ -369,6 +372,7 @@ export class Builder {
       this.assemblyProgress = 0;
     }
     this.mode = mode;
+    if (mode === 'panel') this._loadPanelGeometry();
     if (this.panelRail) { this.panelRail = null; this.highlight = null; }
     if (this.reinforceRail) { this.reinforceRail = null; this.highlight = null; }
     // Im Cursor-Modus gibt es keine Bau-Kupplung: sonst blieben Ankerpunkte
@@ -554,7 +558,19 @@ export class Builder {
     this.scene.clearInstallationPreview?.();
     if (this.panelRail) { this.panelRail = null; this.highlight = null; }
     this.panelId = panelId;
+    this._loadPanelGeometry();
     if (refresh && this.mode === "panel") this.refresh();
+  }
+  _loadPanelGeometry() {
+    if (this._disposed || !['panel_40x40', 'panel_40x20'].includes(this.panelId) || assemblyMeshes() || this._panelGeometryLoading) return;
+    this._panelGeometryLoading = ensureAssemblyMeshes().then(() => {
+      this._panelGeometryLoading = null;
+      if (!this._disposed && this.mode === 'panel') this.refresh();
+    }, error => {
+      this._panelGeometryLoading = null;
+      console.error('Panel geometry loading failed', error);
+      if (!this._disposed && this.mode === 'panel') this.onNotice(t('notice_panel_geometry_failed'), 'warn');
+    });
   }
   setInsetScrewAxis(axis) {
     if(!['auto','vertical','horizontal'].includes(axis) || this.readOnly)return false;
@@ -1717,7 +1733,7 @@ export class Builder {
         color: this.color === RANDOM_COLOR ? 'blue' : this.color, side: 1 };
       if (supportsPanelFixing(this.panelId)) probe.params = { screwAxis: panelRailScrewAxis(this.model, probe, confirmedSpec(this.panelId) ? undefined : componentFrame(this.model, probe)) };
       if (this.panelId !== 'panel_40x40_pocket') probe.side = this._panelSideFromCorners(this.model.panelCorners(probe));
-      part = this.model.panelAccessoryDiagnostics(probe);
+      part = this.model.panelPlacementDiagnostics(probe);
     }
     this.scene.showPanelPlacementPreview?.(this.model, part, pick.data.id);
   }
@@ -5426,7 +5442,7 @@ export class Builder {
       if(supportsPanelFixing(this.panelId))probe.params={screwAxis:panelRailScrewAxis(this.model,probe,confirmedSpec(this.panelId)?undefined:componentFrame(this.model,probe))};
       if (this.panelId !== 'panel_40x40_pocket') probe.side = this._panelSideFromCorners(this.model.panelCorners(probe));
       this.panelRail = null; this.highlight = null;
-      this._previewInstallation(this.model.panelAccessoryDiagnostics(probe), this.panelId);
+      this._previewInstallation(this.model.panelPlacementDiagnostics(probe), this.panelId);
       return null;
     }
     let added = null;
@@ -5460,13 +5476,20 @@ export class Builder {
     const part = this._installationPart;
     if (!part || this.readOnly) return false;
     const position = part.kind==='gym_rings' ? [part.x,part.y,part.z] : undefined;
-    const fresh = part.appearanceVersion === 2 ? this.model.confirmedDiagnostics(part) : part.kind ? this.model.accessoryDiagnostics(part.kind, part.tube, { facing: part.facing, position }) : this.model.panelAccessoryDiagnostics(part);
+    const nativePanel = part.nativeGeometry && ['panel_40x40', 'panel_40x20'].includes(part.panelId);
+    let fresh;
+    if (nativePanel) fresh = this.model.panelPlacementDiagnostics(part);
+    else if (part.appearanceVersion === 2) fresh = this.model.confirmedDiagnostics(part);
+    else if (part.kind) fresh = this.model.accessoryDiagnostics(part.kind, part.tube, { facing: part.facing, position });
+    else fresh = this.model.panelAccessoryDiagnostics(part);
     if (!fresh) { this.cancelInstallation(); return false; }
     if (!fresh.valid) { this._previewInstallation(fresh, part.kind || part.panelId); return false; }
     let added;
     this.recordHistory(() => {
-      added = part.appearanceVersion === 2 ? this.model.addConfirmedComponent(fresh, this.colorFor('panel')) : part.kind ? this.model.addAccessory(part.kind, fresh.tube, this.colorFor('panel'), { facing: part.facing, position })
-        : this.model.addPanelAccessory(fresh,part.color || this.colorFor('panel'));
+      if (nativePanel) added = this.model.addNativePanel(fresh, this.colorFor('panel'), { nativeGeometry: true });
+      else if (part.appearanceVersion === 2) added = this.model.addConfirmedComponent(fresh, this.colorFor('panel'));
+      else if (part.kind) added = this.model.addAccessory(part.kind, fresh.tube, this.colorFor('panel'), { facing: part.facing, position });
+      else added = this.model.addPanelAccessory(fresh, part.color || this.colorFor('panel'));
     });
     if (!added) return false;
     const facingConflict = this._installationFacingConflict;
