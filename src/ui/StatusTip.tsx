@@ -4,7 +4,7 @@ import { useI18n } from '../i18n'
 import { NARROW_MAX, statusTipBox, usePanelLayout } from './panelLayout'
 import { useDock } from './dock'
 import { usePresence } from './motion'
-import { componentForTool } from '../store/builderComponents'
+import { componentForTool, componentHintKey, componentDimensions } from '../store/builderComponents'
 import { useMobileControls } from './useMobileControls'
 
 const BY_MODE: Record<string, string> = {
@@ -23,6 +23,12 @@ const BY_MODE: Record<string, string> = {
 /** 一句话在画面上停多久。说完就收起来，不一直压着画布。 */
 const SAY_MS = 6000
 const KEYBOARD_TIPS = new Set(['tip.select', 'status.delete', 'status.clamp', 'status.assembly', 'status.paste'])
+const FITTING_HINTS: Record<string, string> = {
+  'tube-cap2': 'accessory.hint.cap',
+  'hub-cap2': 'accessory.hint.cap',
+  'open-connector2': 'accessory.hint.open_connector',
+  textil2: 'accessory.mount.rails',
+}
 
 /**
  * 工具提示：换工具的时候弹出一句当前工具怎么用，停几秒收起来。
@@ -40,6 +46,9 @@ export default function StatusTip({ menuOpen }: { menuOpen: boolean }) {
   const { pane } = useDock()
   const adjustment = api.engine()?.builder.selectedPartAdjustment()
   const adjusting = !!adjustment
+  const component = componentForTool(api)
+  const fittingHint = api.mode === 'fitting' ? FITTING_HINTS[api.fittingKind] : undefined
+  const installing = !!component || !!fittingHint
   const boxTip = mobile ? 'tip.boxSelectTouch' : 'tip.boxSelect'
   const key = api.pasting ? 'status.paste'
     : api.placingConnector ? 'tip.placeConnector'
@@ -48,9 +57,11 @@ export default function StatusTip({ menuOpen }: { menuOpen: boolean }) {
     : adjusting ? 'tip.adjustSelected'
     : api.mode==='fitting'&&api.fittingKind==='bearing-clamp' ? (api.engine()?.builder.bearingConnection?.selected?'status.bearingConnect':'status.bearing')
     : api.mode === 'reinforce' && api.reinforcementPartId === 'alu_connector' ? 'status.aluConnector'
+    : component ? componentHintKey(component)
+    : fittingHint ? fittingHint
     : (BY_MODE[api.mode] || 'tip.select')
   const bearing=api.mode==='fitting'&&api.fittingKind==='bearing-clamp'?api.engine()?.builder.bearingConnection:null
-  const text = bearing?.selected&&bearing.status() || t(key, { h: api.pasteHeightCm ?? 0 })
+  const text = bearing?.selected&&bearing.status() || t(key, { h: api.pasteHeightCm ?? 0, size: component ? componentDimensions(component) : '' })
 
   const [say, setSay] = useState<string | null>(text)
   useEffect(() => {
@@ -59,9 +70,10 @@ export default function StatusTip({ menuOpen }: { menuOpen: boolean }) {
       return
     }
     setSay(text)
+    if (installing) return
     const id = window.setTimeout(() => setSay(null), SAY_MS)
     return () => window.clearTimeout(id)
-  }, [text, menuOpen])
+  }, [text, menuOpen, component?.id, installing])
   const [shown, leaving] = usePresence(api.toast ? null : say)
 
   // 组件操作由右侧操作区域统一承载。
@@ -73,14 +85,14 @@ export default function StatusTip({ menuOpen }: { menuOpen: boolean }) {
     || (api.mode === 'select' && !!api.engine()?.builder.flexiTarget())
   if (flexi && !api.boxSelect && !api.readOnly) return null
 
-  if (api.selectionTransform || (mobile && KEYBOARD_TIPS.has(key)) || api.installationPreview || api.canFlipAccessory || api.selectedPanelFixing || componentForTool(api)) return null
+  if (api.selectionTransform || (mobile && KEYBOARD_TIPS.has(key)) || (api.mode === 'select' && (api.installationPreview || api.canFlipAccessory || api.selectedPanelFixing))) return null
 
   if (narrow && pane) return null
   if (narrow) {
     return (
       <div data-ui="status-tip" className="fixed left-2 right-2 bottom-[68px] z-30 pointer-events-none flex justify-center">
         {shown && (
-          <p key={key} className={`m-say m-say-up qb-card text-gray-100 max-w-full px-3 py-1.5 text-[12px] leading-snug ${api.boxSelect||bearing?.selected ? 'whitespace-normal' : 'truncate'} ${leaving ? 'm-leave' : ''}`}>
+          <p key={key} role="status" className={`m-say m-say-up qb-card text-gray-100 max-w-full px-3 py-1.5 text-[12px] leading-snug ${installing||api.boxSelect||bearing?.selected ? 'whitespace-normal' : 'truncate'} ${leaving ? 'm-leave' : ''}`}>
             {shown}
           </p>
         )}
@@ -92,7 +104,7 @@ export default function StatusTip({ menuOpen }: { menuOpen: boolean }) {
   return (
     <div data-ui="status-tip" className="fixed z-30 pointer-events-none flex justify-center" style={box}>
       {shown && (
-        <p key={key} className={`m-say qb-card text-gray-100 max-w-full px-4 py-2 text-[12.5px] leading-[1.55] text-center ${leaving ? 'm-leave' : ''}`}>
+        <p key={key} role="status" className={`m-say qb-card text-gray-100 max-w-full px-4 py-2 text-[12.5px] leading-[1.55] text-center ${leaving ? 'm-leave' : ''}`}>
           {shown}
         </p>
       )}
