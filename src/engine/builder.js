@@ -18,7 +18,7 @@ import { TUBE_FITTINGS, POOL_KINDS, isHolePart, holeArmDirs, holeClampDirsAt, HO
 import { CONNECTOR_ARM_BITS } from "./qdfimport.js";
 import { ACCESSORY_IDS, PANEL_ACCESSORY_IDS, componentFrame } from './accessoryPack.js';
 import { confirmedSpec, usesCustomClimbingColor } from './componentPack.js';
-import { supportsPanelFixing, panelRailScrewAxis } from './confirmedComponentModel.js';
+import { supportsPanelFixing, panelRailScrewAxis, curvePoint } from './confirmedComponentModel.js';
 import { insetPanelProbes } from './insetPanelMounts.js';
 import { installationReason, installationFacingNotice } from './installationReason.js';
 import { panelInstallationFacing } from './panelInstallationFacing.js';
@@ -34,6 +34,10 @@ import { assemblyMeshes, ensureAssemblyMeshes } from './assemblyNativeMesh.js';
 
 export function confirmedFittingHandlePosition(model, mount) {
   const spec = confirmedSpec(mount.kind || mount.partId);
+  if (spec?.mountType === 'curved-frame') {
+    const a = curvePoint(model, mount.a, 0.5), b = curvePoint(model, mount.b, 0.5);
+    if (a && b) return a.map((value, i) => (value + b[i]) / 2);
+  }
   if (spec?.feature !== 'sector') return mount.pos;
   const frame = componentFrame(model, mount);
   if (!frame) return mount.pos;
