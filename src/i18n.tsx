@@ -394,10 +394,10 @@ const zh: Dict = {
   'hint.showColor': '显示颜色',
   'hint.showKeys': '显示快捷键',
   'lib.title': '模型库',
-  'lib.hint': '官方模型来自 QUADRO Model Database，文件已放进本仓库，点开即用。',
+  'lib.hint': '来源：QUADRO Model Database',
   'lib.official': '官方',
   'lib.mine': '我导入的',
-  'lib.drag': '拖到画布上即可编辑。',
+  'lib.drag': '点击模型打开。',
   'lib.loading': '正在打开「{name}」…',
   'lib.fetchFailed': '官方模型 {id} 打不开。',
   'lib.emptyMine': '还没有自己导入的模型。可从「导入文件夹」读入本地 .qdf。',
@@ -1194,10 +1194,10 @@ const en: Dict = {
   'hint.showColor': 'Show colors',
   'hint.showKeys': 'Show shortcuts',
   'lib.title': 'Model library',
-  'lib.hint': 'Official models come from the QUADRO Model Database. The QDF files ship with the app.',
+  'lib.hint': 'Source: QUADRO Model Database',
   'lib.official': 'Official',
   'lib.mine': 'Imported',
-  'lib.drag': 'Drag onto the canvas to edit.',
+  'lib.drag': 'Click a model to open it.',
   'lib.loading': 'Opening “{name}”…',
   'lib.fetchFailed': 'Could not open official model {id}.',
   'lib.emptyMine': 'No imported models yet. Use “Import folder” for local .qdf files.',
@@ -1994,10 +1994,10 @@ const de: Dict = {
   'hint.showColor': 'Farben einblenden',
   'hint.showKeys': 'Tasten einblenden',
   'lib.title': 'Modellbibliothek',
-  'lib.hint': 'Offizielle Modelle kommen aus der QUADRO Model Database. Die QDF-Dateien liegen in der App.',
+  'lib.hint': 'Quelle: QUADRO Model Database',
   'lib.official': 'Offiziell',
   'lib.mine': 'Importiert',
-  'lib.drag': 'Auf die Fläche ziehen zum Bearbeiten.',
+  'lib.drag': 'Modell zum Öffnen antippen.',
   'lib.loading': 'Öffne „{name}“…',
   'lib.fetchFailed': 'Offizielles Modell {id} ließ sich nicht laden.',
   'lib.emptyMine': 'Noch keine eigenen Modelle. Über „Ordner importieren“ lokale .qdf einlesen.',
@@ -2528,7 +2528,10 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
   const t = useCallback((key: string, vars?: Record<string, string | number>) => {
     return fill(lookup(lang, os, key), { ...keys, ...vars })
   }, [lang, os, keys])
-  useEffect(() => { applyDocument(lang, os, t) }, [lang, os, t])
+  useEffect(() => {
+    applyDocument(lang, os, t)
+    window.dispatchEvent(new CustomEvent('quadro-language-change', { detail: { lang } }))
+  }, [lang, os, t])
   const value = useMemo(() => ({ lang, os, setLang, t }), [lang, os, setLang, t])
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }

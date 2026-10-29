@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useEngine } from '../store/EngineContext'
 import { useI18n } from '../i18n'
 import { storage, designEntry, checkAgainstInventory, missingCount } from '../engine-api'
-import { OFFICIAL_MODELS, officialThumbPath } from '../data/official'
+import { OFFICIAL_MODELS, officialThumbPath, officialName, matchesOfficial } from '../data/official'
 import { MODULE_GROUPS, PRESETS, presetThumbPath, type PresetDef } from '../data/presets'
 import { SINGLE_MODEL } from '../entry'
 
@@ -136,7 +136,7 @@ export default function LibraryPanel() {
 
   const officialVisible = useMemo(() => {
     const q = query.trim().toLowerCase()
-    return OFFICIAL_MODELS.filter(m => !q || `${m.id} ${m.name}`.toLowerCase().includes(q))
+    return OFFICIAL_MODELS.filter(m => matchesOfficial(m, q))
   }, [query])
 
   const mineVisible = useMemo(() => {
@@ -178,7 +178,7 @@ export default function LibraryPanel() {
             {t('lib.mine')} · {rows.length}
           </button>}
         </div>
-        <p className="text-[11px] text-gray-500 leading-snug">{t('lib.hint')} {t('lib.drag')}</p>
+        <p className="text-[11px] text-gray-500 leading-snug">{t('lib.drag')}</p>
         <input value={query} onChange={e => setQuery(e.target.value)} placeholder={t('lib.search')}
           className="w-full bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1.5 text-xs text-gray-100 outline-none focus:border-teal-500" />
         {tab === 'mine' && (
@@ -256,7 +256,7 @@ export default function LibraryPanel() {
                       draggable
                       onDragStart={e => startDrag(e, m.id)}
                       onClick={() => void openId(m.id)}
-                      title={`${m.id} · ${m.name}\n${t('lib.drag')}`}
+                      title={`${m.id} · ${officialName(m, lang)}\n${t('lib.hint')}`}
                       className={`text-left rounded-xl border border-gray-800 bg-gray-900/80 hover:border-teal-400 cursor-grab active:cursor-grabbing overflow-hidden ${busyCard ? 'opacity-60' : ''}`}
                     >
                       <div className="aspect-[4/3] bg-[#edd8c4] overflow-hidden">
@@ -266,7 +266,7 @@ export default function LibraryPanel() {
                       </div>
                       <div className="px-1.5 py-1.5">
                         <div className="text-[10px] text-teal-300 font-mono">{m.id}</div>
-                        <div className="text-[11px] text-gray-100 leading-snug line-clamp-2">{m.name}</div>
+                        <div className="text-[11px] text-gray-100 leading-snug line-clamp-2">{officialName(m, lang)}</div>
                       </div>
                     </button>
                   )

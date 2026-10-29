@@ -13,6 +13,7 @@ import { validHomeContext } from '../home/context.js';
 import { isSoftPart } from './softParts.js';
 import { incompleteRigidSelection } from './selectionTransform.js';
 import { nativePanelDiagnostics, nativePanelMounts, nativePanelGeometry } from './nativePanelDiagnostics.js';
+import { assemblyMeshes } from './assemblyNativeMesh.js';
 import { reinforcementPaths, aluminiumConnectorMounts, aluminiumConnectorSupport, isAluminiumConnector, validReinforcementRecords, explicitReinforcementGroups } from './reinforcement.js';
 import { c45PlacementBlocked } from './c45Placement.js';
 import { bearingEndpoints, bearingConnectionProbe, coaxial } from './bearingConnections.js';
@@ -1396,14 +1397,25 @@ export class BuildModel {
 
   panelAccessoryDiagnostics(probe, opts = {}) { return panelAccessoryDiagnostics(this, probe, opts); }
 
+  // 普通板安装按原厂板身和卡边复核；网格尚未加载时保留保守检查。
+  panelPlacementDiagnostics(probe, opts = {}) {
+    const candidate = this.panelAccessoryDiagnostics(probe, opts);
+    const needsGeometry = probe.nativeGeometry || !candidate.valid && candidate.reason === 'component_space';
+    if (needsGeometry && ['panel_40x40', 'panel_40x20'].includes(probe.panelId) && assemblyMeshes()) {
+      return { ...nativePanelDiagnostics(this, probe), nativeGeometry: true };
+    }
+    return candidate;
+  }
+
   _panelMountCandidate(probe, options = {}) {
-    const candidate = this.panelAccessoryDiagnostics(probe, options);
+    const candidate = this.panelPlacementDiagnostics(probe, options);
     if (candidate.valid || !candidate.mounts?.length) return candidate;
-    const opposite = this.panelAccessoryDiagnostics({ ...probe, side: -(probe.side || 1) }, options);
+    const opposite = this.panelPlacementDiagnostics({ ...probe, side: -(probe.side || 1) }, options);
     return opposite.valid ? opposite : candidate;
   }
 
   addPanelAccessory(probe,color) {
+    if (probe.nativeGeometry && ['panel_40x40', 'panel_40x20'].includes(probe.panelId)) return this.addNativePanel(probe, color, { nativeGeometry: true });
     const candidate=this.panelAccessoryDiagnostics(probe);
     if(!candidate.valid || !isSoftPart(this,candidate) && this.panelAt(candidate.a,candidate.b,candidate.t0,candidate.len))return null;
     const record={...candidate,id:this._id('p'),color:color || probe.color || null};
@@ -1462,7 +1474,7 @@ export class BuildModel {
     return candidates.map(p=>p.panelId ? diagnose(p) : confirmedDiagnostics(this,p,{collisionCache,mountCache,candidates}));
   }
   ropeDiagnostics(first, second) { return confirmedDiagnostics(this, ropeCandidate(this, first, second)); }
-  confirmedDiagnostics(probe) { return confirmedDiagnostics(this, probe); }
+  confirmedDiagnostics(probe) { return probe.nativeGeometry ? this.panelPlacementDiagnostics(probe) : confirmedDiagnostics(this, probe); }
   nativePanelDiagnostics(probe) { return nativePanelDiagnostics(this, probe); }
   nativePanelMounts(panelId) { return nativePanelMounts(this,panelId); }
 
@@ -1513,6 +1525,7 @@ export class BuildModel {
   }
 
   addConfirmedComponent(probe, color) {
+    if (probe.nativeGeometry && ['panel_40x40', 'panel_40x20'].includes(probe.panelId)) return this.addNativePanel(probe, color, { nativeGeometry: true });
     const candidate = confirmedDiagnostics(this, {...probe,id:undefined});
     if (!candidate.valid) return null;
     const record = { ...candidate, color: confirmedSpec(candidate.panelId || candidate.kind)?.fixedColor || color || probe.color || confirmedSpec(candidate.panelId || candidate.kind)?.defaultColor || null, id: this._id(candidate.panelId ? 'p' : 'f') };
