@@ -156,6 +156,18 @@ function singleSession(): string | undefined {
 }
 export let EDITOR_SESSION = singleSession()
 
+/** 另存的个人文档使用独立恢复入口，刷新不能重新载入原对象。 */
+export function adoptPersonalEntry(doc: string): string {
+  const url = new URL(location.href)
+  for (const key of ['src', 'draft', 'name', 'copy', 'newModelKind', 'newModelSlot']) url.searchParams.delete(key)
+  if (url.hash.startsWith(EDITOR_HASH)) url.hash = ''
+  url.searchParams.set('doc', doc)
+  history.replaceState(null, '', url)
+  entry = readEntry(url.search, url.hash, collab)
+  EDITOR_SESSION = `model-editor:doc:${doc}`
+  return EDITOR_SESSION
+}
+
 /** 仅在嵌入应用已卸载后替换来源；下一份文档重新走完整读取和权限检查。 */
 export function replaceEditorEntry(href: string) {
   const url = new URL(href, location.href)

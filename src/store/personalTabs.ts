@@ -6,6 +6,8 @@ export interface PersonalState {
   libraryId?: string
   libraryRevision?: number
   libraryOwner?: string
+  pendingLibrarySave?: { saveId: string; signature: string }
+  entrySource?: string
   baseRev?: number
   savedContent?: string
   editGeneration?: number
@@ -28,8 +30,9 @@ export function restorePersonalBinding<T extends PersonalState & { docId: string
   if (persisted.bindingVersion !== 1 || !(persisted.docId === null || typeof persisted.docId === 'string')
     || typeof persisted.name !== 'string' || typeof persisted.dirty !== 'boolean') return session
   return { ...session, docId: persisted.docId, name: persisted.name, dirty: persisted.dirty,
+    entrySource: persisted.entrySource,
     savedName: persisted.savedName,
-    ...(persisted.libraryBindingVersion===1?{libraryId:persisted.libraryId,libraryRevision:persisted.libraryRevision,libraryOwner:persisted.libraryOwner}:{}),
+    ...(persisted.libraryBindingVersion===1?{libraryId:persisted.libraryId,libraryRevision:persisted.libraryRevision,libraryOwner:persisted.libraryOwner,pendingLibrarySave:persisted.pendingLibrarySave}:{}),
     baseRev: persisted.baseRev, savedContent: persisted.savedContent, editGeneration: persisted.editGeneration,
     saveId: persisted.saveId, saveState: persisted.saveState, conflictDocId: persisted.conflictDocId }
 }

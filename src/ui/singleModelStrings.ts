@@ -1,5 +1,7 @@
 export const singleModelStrings = {
   zh: {
+    'saveConflict.title':'云端已有更新', 'saveConflict.body':'当前修改已保留在本机草稿。读取最新版会替换当前画布。',
+    'saveConflict.keep':'继续编辑', 'saveConflict.latest':'读取最新版', 'saveConflict.copy':'另存副本',
     'single.collab':'协作 · 自动同步',
     'single.drafts':'本机草稿', 'single.find':'打开本机草稿', 'single.draftIntro':'这里的草稿只保存在当前浏览器。打开后可以继续编辑，保存到「我的造型」才会占用保存容量。',
     'single.cloudHint':'云端设计请到「我的造型」查看。', 'single.empty':'这个浏览器中没有找到当前账号的草稿。',
@@ -13,6 +15,8 @@ export const singleModelStrings = {
     'single.source.session':'旧版设计', 'single.source.draft':'编辑草稿', 'single.source.document':'本机存档', 'single.source.library':'本机模型库', 'single.source.old':'旧版草稿',
   },
   en: {
+    'saveConflict.title':'Cloud design updated', 'saveConflict.body':'Your changes are kept in device drafts. Loading the latest replaces this canvas.',
+    'saveConflict.keep':'Keep editing', 'saveConflict.latest':'Load latest', 'saveConflict.copy':'Save a copy',
     'single.collab':'Collaborative · automatic sync',
     'single.drafts':'Device drafts', 'single.find':'Open device drafts', 'single.draftIntro':'These drafts are stored only in this browser. Open one to keep editing. Capacity is used when you save it to My designs.',
     'single.cloudHint':'Find your cloud designs in My designs.', 'single.empty':'No drafts found for this account in this browser.',
@@ -26,6 +30,8 @@ export const singleModelStrings = {
     'single.source.session':'Older design', 'single.source.draft':'Editing draft', 'single.source.document':'Local saved design', 'single.source.library':'Local library', 'single.source.old':'Older draft',
   },
   de: {
+    'saveConflict.title':'Cloud-Modell aktualisiert', 'saveConflict.body':'Deine Änderungen bleiben als lokaler Entwurf erhalten. Die aktuelle Cloud-Version ersetzt die Arbeitsfläche.',
+    'saveConflict.keep':'Weiter bearbeiten', 'saveConflict.latest':'Aktuelle Version laden', 'saveConflict.copy':'Kopie speichern',
     'single.collab':'Zusammenarbeit · automatisch synchronisiert',
     'single.drafts':'Lokale Entwürfe', 'single.find':'Lokale Entwürfe öffnen', 'single.draftIntro':'Diese Entwürfe sind nur in diesem Browser gespeichert. Öffne einen, um weiterzuarbeiten. Erst das Speichern in „Meine Modelle“ belegt Kapazität.',
     'single.cloudHint':'Deine Cloud-Modelle findest du unter „Meine Modelle“.', 'single.empty':'Für dieses Konto wurden in diesem Browser keine Entwürfe gefunden.',

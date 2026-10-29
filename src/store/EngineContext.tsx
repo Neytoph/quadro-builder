@@ -11,7 +11,7 @@ import { onSyncEvent, syncSavedDoc, syncNow, syncProbe, syncStarted } from '../s
 import { pushDocToServer, type PushDocOptions } from '../sync/docPublish'
 import { tabOpenedFrom, tabSavedAs } from '../sync/origin'
 import { pullDoc } from '../sync/docEntry'
-import { bootEntry, dropParam, SESSIONLESS, VIEW_ONLY, EDITOR_EMBED, EDITOR_SESSION, SINGLE_MODEL, RESOURCE_MODE, type ResumeExport } from '../entry'
+import { bootEntry, dropParam, adoptPersonalEntry, SESSIONLESS, VIEW_ONLY, EDITOR_EMBED, EDITOR_SESSION, SINGLE_MODEL, RESOURCE_MODE, type ResumeExport } from '../entry'
 import {deliverResourceFile,sendResourceMessage} from '../resourceDownload'
 import { draftHandoff, entryDraft } from './draftEntry'
 import { clearSlotAccess, slotLocked, slotAccess, saveCapacityFull, updateSlotAccess } from '../sync/slotAccess'
@@ -53,6 +53,8 @@ import { captureTool, ToolMemory, type BuilderTool, type ToolState } from './too
 import { editorScenes } from './scenePool'
 import { newModelTarget, pendingNewModel, finishNewModel } from './newModel'
 import { recordCreatedSlot } from '../sync/slotAccess'
+import { librarySaveIdentity, LibrarySaveError, readLibrarySnapshot, saveLibraryModel } from './librarySave'
+import { sourceEntryAction } from './sourceEntry'
 
 // 引擎来自 Vanilla JS，这里不跟它的推断类型较劲。
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -291,6 +293,9 @@ interface EngineApi {
   askName: (title: string, ok: string, value: string) => Promise<string | null>
   answerName: (name: string | null) => void
   nameAsk: { title: string; ok: string; value: string } | null
+  saveConflict: boolean
+  answerSaveConflict: (choice: 'copy' | 'latest' | 'cancel') => void
+  saveWasCancelled: () => boolean
   openDoc: (docId: string) => Promise<boolean>
   retrySave: (tabId: string) => Promise<void>
   /** `local`：本次保存尚未全部交给服务器。 */
@@ -544,8 +549,8 @@ function makeTab(seed: ModelJSON, name: string, docId: string | null): Tab {
 
 function persistPersonal(tab: Tab) {
   if (tab.planId || tab.readOnly || SESSIONLESS) return
-  const { docId, name, dirty, baseRev, savedContent, savedName, editGeneration, saveId, saveState, conflictDocId,libraryId,libraryRevision,libraryOwner } = tab
-  writePersonalState(tab.local, { bindingVersion: 1,libraryBindingVersion:1,libraryId,libraryRevision,libraryOwner, docId, name, dirty, baseRev, savedContent, savedName, editGeneration, saveId, saveState, conflictDocId })
+  const { docId, name, dirty, baseRev, savedContent, savedName, editGeneration, saveId, saveState, conflictDocId,libraryId,libraryRevision,libraryOwner,pendingLibrarySave,entrySource } = tab
+  writePersonalState(tab.local, { bindingVersion: 1,libraryBindingVersion:1,libraryId,libraryRevision,libraryOwner,pendingLibrarySave,entrySource, docId, name, dirty, baseRev, savedContent, savedName, editGeneration, saveId, saveState, conflictDocId })
 }
 
 /**
@@ -685,7 +690,7 @@ export function asBom(raw: AnyRec): BomView {
 }
 
 export function EngineProvider({ children }: { children: ReactNode }) {
-  const sessionKey = useRef(EDITOR_SESSION).current
+  const sessionKey = useRef(EDITOR_SESSION)
   const { t, lang } = useI18n()
   const hostRef = useRef<HTMLDivElement | null>(null)
   const eng = useRef<{ scene: E; model: E; builder: E } | null>(null)
@@ -733,6 +738,20 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     if (EDITOR_EMBED && opening) parent.postMessage({ type: 'xmf-model-editor:progress', phase: opening.phase }, location.origin)
   }, [opening])
   const [saving,setSaving]=useState(false),savingRef=useRef(false)
+  const saveCancelled = useRef(false)
+  const [saveConflict, setSaveConflict] = useState(false)
+  const saveConflictRef = useRef<((choice: 'copy' | 'latest' | 'cancel') => void) | null>(null)
+  const answerSaveConflict = useCallback((choice: 'copy' | 'latest' | 'cancel') => {
+    const resolve = saveConflictRef.current
+    saveConflictRef.current = null
+    setSaveConflict(false)
+    resolve?.(choice)
+  }, [])
+  useEffect(() => {
+    const cancel = () => answerSaveConflict('cancel')
+    const stop = storage.onAccountChange(cancel)
+    return () => { stop(); saveConflictRef.current?.('cancel'); saveConflictRef.current = null }
+  }, [answerSaveConflict])
   const libraryStatsQueue=useMemo(()=>createStatsQueue(),[])
   const capacityNotice = useRef(false)
   useEffect(()=>()=>libraryStatsQueue.cancel(),[libraryStatsQueue])
@@ -852,10 +871,10 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       tabs: tabsRef.current.map(tb => ({
         tabId: tb.tabId, docId: tb.docId, name: tb.name, dirty: tb.dirty, planId: tb.planId, view: tb.view,
         baseRev: tb.baseRev, savedContent: tb.savedContent, editGeneration: tb.editGeneration, saveId: tb.saveId,
-        saveState: tb.saveState, savedName: tb.savedName, conflictDocId: tb.conflictDocId,libraryId:tb.libraryId,libraryRevision:tb.libraryRevision,libraryOwner:tb.libraryOwner,
+        saveState: tb.saveState, savedName: tb.savedName, conflictDocId: tb.conflictDocId,libraryId:tb.libraryId,libraryRevision:tb.libraryRevision,libraryOwner:tb.libraryOwner,pendingLibrarySave:tb.pendingLibrarySave,entrySource:tb.entrySource,
       })),
       activeTabId: activeRef.current,
-    }, sessionKey) as Promise<void>
+    }, sessionKey.current) as Promise<void>
   }, [flushModel])
 
   const persistSession = useCallback(() => {
@@ -1179,7 +1198,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
         // 交付由 CollabProvider 取到以后 attachDoc 换进来。
         reportStartup('session')
         if (!SESSIONLESS) await docs.migrateOldDrafts()
-        const session = SESSIONLESS ? null : await docs.loadSession(sessionKey)
+        const session = SESSIONLESS ? null : await docs.loadSession(sessionKey.current)
         if (dead) return
         if (session?.tabs?.length) {
           const mapped: Tab[] = []
@@ -1208,7 +1227,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
               saveId: tb.saveId,
               saveState: tb.saveState,
               conflictDocId: tb.conflictDocId,
-              libraryId:tb.libraryId,libraryRevision:tb.libraryRevision,libraryOwner:tb.libraryOwner,
+              libraryId:tb.libraryId,libraryRevision:tb.libraryRevision,libraryOwner:tb.libraryOwner,pendingLibrarySave:tb.pendingLibrarySave,entrySource:tb.entrySource,
             }
             mapped.push(restored.planId || restored.readOnly || SESSIONLESS ? restored
               : restorePersonalBinding(restored, readPersonalState(local)))
@@ -1879,23 +1898,90 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       if(e2.builder.busy())return null
       if(!navigator.onLine){notify(t('sync.failed'),'err');return null}
       const data=structuredClone(exportTab(tab)),generation=tab.editGeneration||0
-      const binding={id:tab.libraryId,owner:tab.libraryOwner,revision:tab.libraryRevision}
+      const binding={id:tab.libraryId,owner:tab.libraryOwner,revision:tab.libraryRevision,baseContent:tab.savedContent,baseName:tab.savedName}
       let stats
       // 个人保存的统计由详情按实际内容计算，保存只等待模型写入回执。
       // 分享内容仍需同步更新公开尺寸和手册步数。
       if(slotAccess(null,binding.id)?.kind!=='save'){
         try{stats=await libraryStatsQueue.compute(binding.id,data)}catch(error){console.warn('[library stats]',error);notify(t('sync.localFailed'),'err');return null}
       }
-      let res:Response
-      try{res=await fetch('/quadro/library/'+encodeURIComponent(binding.id)+'/native',{method:'PUT',credentials:'include',headers:{'Content-Type':'application/json','X-Builder-User-ID':binding.owner||''},body:JSON.stringify({name:name||tab.name,data,parts:partsOfData(data),stats,revision:binding.revision})})}
-      catch(error){console.warn('[library save]',error);notify(t('sync.failed'),'err');return null}
-      if(!res.ok){if(res.status===423){tab.readOnly=true;e2.builder.setReadOnly(true)};notify(t('toast.srcFailed')+' ('+res.status+')','err');syncTabs();return null}
-      if(tab.libraryId!==binding.id||tab.libraryOwner!==binding.owner)return null
-      const result=await res.json() as {revision:number};tab.libraryRevision=result.revision
-      if((tab.editGeneration||0)===generation){tab.dirty=false;tab.name=name||tab.name;tab.savedName=tab.name;tab.savedContent=modelContent(data);tab.saveState='synced'}
-      syncTabs()
-      notify(t('toast.saved', { name: name || tab.name }), 'saved')
-      return {docId:tab.libraryId,name:name||tab.name,data}
+      const saveName = name || tab.name, epoch = storage.getAccountEpoch()
+      const requestAbort = new AbortController()
+      const stopRequestWatch = storage.onAccountChange(() => requestAbort.abort())
+      const active = () => storage.getAccountEpoch() === epoch && String(storage.getAccountScope()) === `user:${binding.owner}`
+        && tabsRef.current.includes(tab) && tab.libraryId === binding.id && tab.libraryOwner === binding.owner
+      const access = { id: binding.id, owner: binding.owner || '', active, normalize: normalizeModel, signal: requestAbort.signal }
+      try {
+        const identity = await librarySaveIdentity(saveName, data, tab.pendingLibrarySave)
+        if (!active()) return null
+        tab.pendingLibrarySave = identity
+        await saveSessionNow()
+        const result = await saveLibraryModel({ ...access, revision: binding.revision || 0, name: saveName, data,
+          saveId: identity.saveId, parts: partsOfData(data), stats, baseContent: binding.baseContent, baseName: binding.baseName })
+        if (!active()) return null
+        if (result.status === 'saved') {
+          tab.libraryRevision = result.revision
+          tab.pendingLibrarySave = undefined
+          tab.savedName = saveName; tab.savedContent = modelContent(data)
+          if (savedGenerationUnchanged(tab, generation, data, exportTab(tab))) { tab.dirty = false; tab.name = saveName; tab.saveState = 'synced' }
+          syncTabs(); await saveSessionNow()
+          if (result.recovered) track('builder.save.recovered', { reason: 'receipt', object: binding.id })
+          notify(t('toast.saved', { name: saveName }), 'saved')
+          return { docId: binding.id, name: saveName, data }
+        }
+        // 独立草稿保存完整快照，既不占云端容量，也不由后台同步自动上传。
+        const work = structuredClone(exportTab(tab)), workName = tab.name
+        const backupTab = docs.newTabId()
+        await docs.saveSession({ tabs: [{ tabId: backupTab, docId: null, name: saveName, dirty: true, model: data }], activeTabId: backupTab }, `single-draft:${identity.saveId}`)
+        if (modelContent(work) !== modelContent(data) || workName !== saveName) {
+          const latestTab = docs.newTabId()
+          await docs.saveSession({ tabs: [{ tabId: latestTab, docId: null, name: workName, dirty: true, model: work }], activeTabId: latestTab }, `single-draft:${crypto.randomUUID()}`)
+        }
+        if (!active()) return null
+        tab.saveState = 'conflict'; syncTabs()
+        e2.builder.setReadOnly(true)
+        let choice: 'copy' | 'latest' | 'cancel'
+        try { choice = await new Promise(resolve => { saveConflictRef.current = resolve; setSaveConflict(true) }) }
+        finally { if (active() && activeRef.current === tab.tabId) e2.builder.setReadOnly(!!tab.readOnly) }
+        if (!active()) return null
+        if (choice === 'cancel') { saveCancelled.current = true; return null }
+        if (choice === 'latest') {
+          const remote = await readLibrarySnapshot(access)
+          if (!active() || modelContent(exportTab(tab)) !== modelContent(work) || tab.name !== workName) return null
+          replaceTabModel(tab, remote.data)
+          tab.name = remote.name; tab.savedName = remote.name; tab.savedContent = modelContent(remote.data)
+          tab.libraryRevision = remote.revision; tab.pendingLibrarySave = undefined; tab.dirty = false; tab.saveState = 'synced'
+          if (activeRef.current === tab.tabId) applyTab(tab)
+          syncTabs(); await saveSessionNow()
+          track('builder.save.recovered', { reason: 'latest', object: binding.id })
+          return { docId: binding.id, name: remote.name, data: remote.data }
+        }
+        if (!await allowCloudSave() || !active()) return null
+        const copyData = structuredClone(exportTab(tab)), copyGeneration = tab.editGeneration || 0
+        const copy = await saveSnapshot(tab, { docId: null, name: t('saves.copyName', { name: tab.name }), data: copyData })
+        if (!copy || !active()) return null
+        tab.libraryId = undefined; tab.libraryOwner = undefined; tab.libraryRevision = undefined; tab.pendingLibrarySave = undefined
+        tab.docId = copy.id; tab.saveId = String(copy.saveId); tab.baseRev = Number(copy.rev || 0)
+        const unchanged = savedGenerationUnchanged(tab, copyGeneration, copyData, exportTab(tab))
+        tab.savedContent = modelContent(copyData); tab.savedName = copy.name
+        if (unchanged) tab.name = copy.name
+        tab.conflictDocId = undefined; tab.dirty = !unchanged; tab.saveState = tab.dirty ? 'unsaved' : 'syncing'
+        tabSavedAs(tab.tabId, copy.id)
+        const previousSession = sessionKey.current
+        sessionKey.current = adoptPersonalEntry(String(copy.id))
+        syncTabs(); await saveSessionNow()
+        if (previousSession && previousSession !== sessionKey.current) await docs.saveSession({ tabs: [], activeTabId: null }, previousSession)
+        await pushSaved(String(copy.id), String(copy.name), copyData, String(copy.saveId), tab)
+        track('builder.save.recovered', { reason: 'copy', object: binding.id })
+        const syncedCopy = await docs.getDoc(String(copy.id)) as AnyRec | null
+        return syncedCopy?.syncedSaveId === copy.saveId && !tab.dirty ? { docId: String(copy.id), name: String(copy.name), data: copyData } : null
+      } catch (error) {
+        console.warn('[library save]', error)
+        if (!active()) return null
+        if (error instanceof LibrarySaveError && error.status === 423) { tab.readOnly = true; e2.builder.setReadOnly(true) }
+        track('builder.save.fail', { reason: error instanceof LibrarySaveError ? 'http_' + error.status : 'library_io', object: binding.id })
+        notify(t('sync.failed'), 'err'); syncTabs(); return null
+      } finally { stopRequestWatch() }
     }
     if (tab.planId) {
       notify(t('collab.autoSynced'))
@@ -1966,6 +2052,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
 
   const saveCurrent=useCallback(async(name?:string)=>{
     if(savingRef.current || SINGLE_MODEL && !entryReady)return null
+    saveCancelled.current = false
     savingRef.current=true;setSaving(true)
     try{return await saveCurrentNow(name)}finally{savingRef.current=false;setSaving(false)}
   },[entryReady,saveCurrentNow])
@@ -2977,13 +3064,15 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       setOpening({ phase: 'read', name: ent.name || undefined })
       await paintOpening()
       let data: unknown = null
-      let libraryRevision:number|undefined,libraryOwner:string|undefined
+      let libraryRevision:number|undefined,libraryOwner:string|undefined,libraryName:string|undefined
       if (payload) {
         data = await decodeShare(payload)
         clearSharePayload()
       } else {
         const expectedOwner=EDITOR_EMBED?new URLSearchParams(location.search).get('editorOwner'):RESOURCE_MODE?new URLSearchParams(location.search).get('resourceOwner'):null
-        const { response: res, text: sourceText } = await readModelSource(versionPublicSource(ent.src as string), { credentials: 'include',...(expectedOwner?{headers:{'X-Builder-User-ID':expectedOwner}}:{}) })
+        const nativeLibrary = !!ent.src?.match(/^\/quadro\/library\/[a-f0-9]+\/native$/)
+        const sourceURL = nativeLibrary ? ent.src + '?snapshot=1' : versionPublicSource(ent.src as string)
+        const { response: res, text: sourceText } = await readModelSource(sourceURL, { credentials: 'include',...(expectedOwner?{headers:{'X-Builder-User-ID':expectedOwner}}:{}) })
         if (!res.ok) { track('builder.app.fail', { reason: 'source_http' }); notify(t('toast.srcFailed'), 'err');if(EDITOR_EMBED||RESOURCE_MODE){if(EDITOR_EMBED&&res.status===423)parent.postMessage({type:'xmf-model-editor:readonly'},location.origin);else setError(t('toast.srcFailed')+' ('+res.status+')')} return }
         libraryRevision=Number(res.headers.get('X-Library-Revision')||0)||undefined
         libraryOwner=res.headers.get('X-Builder-User-ID')||undefined
@@ -2993,7 +3082,13 @@ export function EngineProvider({ children }: { children: ReactNode }) {
         }
         setOpening({ phase: 'build', name: ent.name || undefined })
         await paintOpening()
-        try { data = designFromText(sourceText) } catch { data = null }
+        if (nativeLibrary) {
+          const snapshot = JSON.parse(sourceText) as { name: string; revision: number; data: unknown }
+          if (snapshot.revision !== libraryRevision || typeof snapshot.name !== 'string') throw new Error(t('toast.srcInvalid'))
+          libraryName = snapshot.name; data = snapshot.data
+        } else {
+          try { data = designFromText(sourceText) } catch { data = null }
+        }
       }
       if (!data) { track('builder.app.fail', { reason: 'source_format' }); notify(t('toast.shareInvalid'), 'err');if(EDITOR_EMBED||RESOURCE_MODE)setError(t('toast.shareInvalid')); return }
       setOpening({ phase: 'build', name: ent.name || undefined })
@@ -3002,8 +3097,27 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       if (!e2) return
       const restored = tabsRef.current.find(x => x.tabId === activeRef.current)
       const requestedLibrary=ent.src?.match(/^\/quadro\/library\/([a-f0-9]+)\/native$/)?.[1]
-      if(SINGLE_MODEL && requestedLibrary && restored?.libraryId===requestedLibrary && restored.libraryOwner===libraryOwner && restored.dirty){
-        setEntryReady(true);return
+      const source = ent.src || (payload ? 'share:' + (await librarySaveIdentity('', normalizeModel(data)!)).signature : '')
+      if (SINGLE_MODEL && !SESSIONLESS) {
+        const action = sourceEntryAction(restored, source, requestedLibrary)
+        if (action === 'restore' && (!requestedLibrary || restored?.libraryOwner === libraryOwner)) {
+          setEntryReady(true); return
+        }
+        if (action === 'new' || requestedLibrary && restored?.libraryOwner !== libraryOwner) {
+          const owner = String(storage.getAccountScope())
+          if (restored?.dirty) {
+            const backup = docs.newTabId(), backupData = structuredClone(exportTab(restored))
+            await docs.saveSession({ tabs: [{ tabId: backup, docId: null, name: restored.name, dirty: true, model: backupData }], activeTabId: backup }, `single-draft:${crypto.randomUUID()}`)
+          }
+          if (String(storage.getAccountScope()) !== owner) return
+          const fresh = makeTab(EMPTY_MODEL, ent.name || t('tab.untitled'), null)
+          tabsRef.current = [fresh]; activeRef.current = fresh.tabId; applyTab(fresh)
+          if (restored) {
+            restored.local.history.destroy()
+            await restored.local.persistence?.destroy()
+            restored.local.doc.destroy()
+          }
+        }
       }
       if (!SINGLE_MODEL && !EDITOR_EMBED && modelPartCount(e2.model.toJSON()) > 0) createEmptyTab()
       // 当前是共享方案的标签页时 applyModelJson 自己会新开一个
@@ -3014,9 +3128,11 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       }
       const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
       const library=ent.src?.match(/^\/quadro\/library\/([a-f0-9]+)\/native$/)
-      if(tab&&library&&libraryRevision){tab.libraryId=library[1];tab.libraryRevision=libraryRevision;tab.libraryOwner=libraryOwner;tab.dirty=false;tab.savedName=ent.name||tab.name;tab.savedContent=modelContent(tab.local.history.toJSON());tab.saveState='synced'}
+      if(tab&&library&&libraryRevision){tab.libraryId=library[1];tab.libraryRevision=libraryRevision;tab.libraryOwner=libraryOwner;tab.dirty=false;tab.savedName=libraryName||tab.name;tab.savedContent=modelContent(tab.local.history.toJSON());tab.saveState='synced'}
       if (tab) {
-        if (ent.name) tab.name = ent.name
+        tab.entrySource = source
+        if (libraryName !== undefined) tab.name = libraryName
+        else if (ent.name) tab.name = ent.name
         syncTabs()
       }
       if (tab && ent.origin) tabOpenedFrom(tab.tabId, ent.origin)
@@ -3024,9 +3140,12 @@ export function EngineProvider({ children }: { children: ReactNode }) {
         resetTabAnalytics(tab, e2.model.toJSON(), entryAnalyticsObject())
         setAnalyticsObject(entryAnalyticsObject())
       }
-      if (SINGLE_MODEL && !SESSIONLESS && !requestedLibrary) dropParam('src')
       track('builder.design.open', { from: payload ? 'share' : 'src', view: VIEW_ONLY, copy: ent.copy })
       if (ent.copy && !VIEW_ONLY) { await copyToAccount(); dropParam('copy') }
+      if (SINGLE_MODEL && !SESSIONLESS) {
+        await saveSessionNow()
+        if (!requestedLibrary) dropParam('src')
+      }
       setEntryReady(true)
     })().catch(err => {
       console.error('[model source] opening failed', err)
@@ -3222,7 +3341,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       if(sessionTimer.current)window.clearTimeout(sessionTimer.current)
       const discarded=tabsRef.current;tabsRef.current=[];activeRef.current=null;eng.current?.builder.setReadOnly(true)
       for(const tab of discarded)await dropTabDoc(tab.tabId,tab.local)
-      await docs.saveSession({tabs:[],activeTabId:null},sessionKey)
+      await docs.saveSession({tabs:[],activeTabId:null},sessionKey.current)
     },
     mode: (builder?.mode as string) || 'select',
     color: (builder?.color as string) || 'random',
@@ -3328,7 +3447,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     homeContext,
     bindHome,
     frameHome: () => { changeBackground('home'); scene?.frameHome(); bump() },
-    highlight, highlightIds, safety, setInv, newTab, closeTab, activateTab, renameTab, setTabName, saveCurrent, saveCurrentAs, askName, answerName, nameAsk, openDoc, retrySave,
+    highlight, highlightIds, safety, setInv, newTab, closeTab, activateTab, renameTab, setTabName, saveCurrent, saveCurrentAs, askName, answerName, nameAsk, saveConflict, answerSaveConflict, saveWasCancelled: () => saveCancelled.current, openDoc, retrySave,
     listDocs: async () => (await docs.listDocs()).map((d: AnyRec) => ({ id: String(d.id), name: String(d.name), updatedAt: Number(d.updatedAt || 0), local: !Number(d.rev) || !!d.dirty || (!!d.saveId && d.syncedSaveId !== d.saveId) })),
     removeDoc: async (id) => { await docs.removeDoc(id); bump() },
     renameDoc: async (id, name) => { await docs.renameDoc(id, name); bump() },

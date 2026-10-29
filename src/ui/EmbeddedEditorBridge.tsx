@@ -50,6 +50,7 @@ export default function EmbeddedEditorBridge(){
       name=typed.trim()||live.current.t('tab.untitled')
      }
      const saved=await api.saveCurrent(name)
+     if(!saved&&api.saveWasCancelled()){send('save-cancelled');return}
      if(!saved||api.editorState().dirty)throw new Error(live.current.t('sync.failed'))
     }
     if(command==='xmf-model-editor:discard')await api.discardEditor()

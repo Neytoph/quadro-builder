@@ -39,6 +39,7 @@ import {resourceFileDelivered,sendResourceMessage} from './resourceDownload'
 import {installResourceStyle} from '../public/model-resources.js'
 import {RESOURCE_MODE} from './entry'
 import Toast from './ui/Toast'
+import SaveConflictDialog from './ui/SaveConflictDialog'
 
 function DeferredAssemblyPreview() {
   const api = useEngine(), { t } = useI18n()
@@ -537,6 +538,7 @@ function AppInner() {
       <DeferredAssemblyPreview />
       <AccountDialog />
       <NameDialog />
+      <SaveConflictDialog />
       <ManualProgress />
       <Onboarding autoOpen={!EDITOR_EMBED && collab.mode === 'off' && !bootEntry().plan && !bootEntry().invite && !bootEntry().createShared} />
       {collab.mode === 'plan' && <CollabCoach />}
