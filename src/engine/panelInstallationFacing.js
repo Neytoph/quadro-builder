@@ -9,8 +9,10 @@ export function panelInstallationFacing(model, part, camera, oppositeCandidate =
   if (!frame) return { part, conflict: null };
   const towardCamera = frame.axes[2].reduce((sum, v, i) => sum + v * (camera[i] - frame.pos[i]), 0);
   if (Math.abs(towardCamera) < .001) return { part, conflict: null };
-  const opposite = sector ? oppositeCandidate || model.confirmedDiagnostics({ ...part, facing: -(part.facing || 1) })
-    : model.panelAccessoryDiagnostics({ ...part, side: -(part.side || 1) });
+  let opposite;
+  if (sector) opposite = oppositeCandidate || model.confirmedDiagnostics({ ...part, facing: -(part.facing || 1) });
+  else if (part.nativeGeometry) opposite = model.panelPlacementDiagnostics({ ...part, side: -(part.side || 1) });
+  else opposite = model.panelAccessoryDiagnostics({ ...part, side: -(part.side || 1) });
   const preferred = towardCamera > 0 ? part : opposite;
   const alternative = towardCamera > 0 ? opposite : part;
   if (preferred.valid || !alternative.valid) return { part: preferred, conflict: null };

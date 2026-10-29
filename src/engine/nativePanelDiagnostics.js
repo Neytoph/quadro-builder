@@ -45,7 +45,7 @@ export function nativePanelDiagnostics(model, probe) {
   if (!['panel_40x40', 'panel_40x20'].includes(probe?.panelId)) throw new Error('原生面板检查只支持普通方板和半板');
   if (!assemblyMeshes()) throw new Error('原生面板检查需要先加载装配网格');
   if(!physicalReferences(model,probe))return {...probe,valid:false,reason:'missing_support'};
-  const candidate = model.confirmedDiagnostics(probe);
+  const candidate = model.panelAccessoryDiagnostics(probe);
   if (!candidate.valid && candidate.reason !== 'component_space') return candidate;
   if(!physicalReferences(model,candidate))return {...candidate,valid:false,reason:'missing_support'};
   if (model.panelAt(candidate.a, candidate.b, candidate.t0, candidate.len, probe.id)) return candidate;
