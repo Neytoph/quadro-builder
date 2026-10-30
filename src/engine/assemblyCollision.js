@@ -12,8 +12,8 @@ function useMeshes() {
   connectorMasks = loaded.connectorMasks;
   accessoryTriangles = loaded.accessoryTriangles;
 }
-import { componentVolumes } from './accessoryPack.js';
-import { curvePoint } from './confirmedComponentModel.js';
+import { componentVolumes, panelMountsMate } from './accessoryPack.js';
+import { curvePoint, confirmedFrame } from './confirmedComponentModel.js';
 import { C45_SLEEVE_LEN, C45_ARM_LEN } from './config.js';
 import { structuralBearingSupport } from './assemblyStructuralBearings.js';
 import { aluminiumConnectorDisplay } from './reinforcement.js';
@@ -238,6 +238,15 @@ function sharedPanelLipContact(model,id,obstacleId,a,b,delta,end,pad,obstacleOff
   }
   return false;
 }
+function sharedPanelMountContact(model,id,obstacleId,a,b,delta,end,pad,obstacleOffset){
+  const panel=model.panels?.get(id);
+  if(!panel || !model.panels?.has(obstacleId) || a.kind!=='box' || b.kind!=='box' || !panelMountsMate(a,b))return false;
+  if(Math.hypot(...sub(end,obstacleOffset))>.001)return false;
+  const normal=confirmedFrame(model,panel)?.axes[2];if(!normal)return false;
+  const relative=sub(delta,obstacleOffset),along=dot(relative,normal);
+  // 共管接触仅沿板面法线接近最终位置时成立，横向扫过仍按真实盒体检查。
+  return along>=-.001 && Math.hypot(...relative)+Math.hypot(...pad)<=10 && Math.hypot(...sub(relative,normal.map(v=>v*along)))<.001;
+}
 function entryPanelContact(model,id,obstacleId,a,b,delta,end,pad,obstacleOffset,contracts){
   const contract=contracts.get(`${id}:${obstacleId}`),panel=model.panels?.get(id),slide=model.slides?.get(obstacleId);
   if(!contract||contract.panelId!==id||contract.slideId!==obstacleId||!panel||slide?.kind!=='slide2'||a.kind!=='triangle'||b.kind!=='triangle')return false;
@@ -419,6 +428,7 @@ export function checkAssemblyPath(model,movingIds,installedIds,start,end=[0,0,0]
         if(!intersects(sweptBounds,obstacleShapeBounds))continue;
         if(!assemblyShapesOverlap(move(a,delta),move(b,obstacle.offset),pad))continue;
         if(allowMating&&panelSlotContact(model,id,obstacle.id,a,delta,obstacle.offset))continue;
+        if(allowMating&&sharedPanelMountContact(model,id,obstacle.id,a,b,delta,end,pad,obstacle.offset))continue;
         if(allowMating&&sharedPanelLipContact(model,id,obstacle.id,a,b,delta,end,pad,obstacle.offset))continue;
         if(allowMating&&entryPanelContact(model,id,obstacle.id,a,b,delta,end,pad,obstacle.offset,entryPanelContacts))continue;
         if(allowMating&&panelLinerContact(model,id,obstacle.id,a,b,delta,end,pad,obstacle.offset,panelLinerContacts))continue;

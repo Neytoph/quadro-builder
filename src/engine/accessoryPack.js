@@ -199,6 +199,23 @@ function boxesOverlap(a, b) {
   return true;
 }
 
+// 外扣板在同一根管上从不同框面扣合，圆弧卡边属于共管连接面。
+// 只处理已标记的卡边及固定螺丝与邻板边缘的连接面；板身、附件和螺丝之间继续检查。
+export function panelMountsMate(a,b) {
+  const first=a.panelLip,second=b.panelLip;
+  if(first && second){
+    if(Math.abs(dot(first.axis,second.axis))<.99999 || dot(first.inward,second.inward)>.01)return false;
+    const delta=sub(second.origin,first.origin),along=dot(delta,first.axis);
+    return Math.hypot(...sub(delta,first.axis.map(v=>v*along)))<.01;
+  }
+  const lip=first || a.panelScrew || second || b.panelScrew,skin=first || a.panelScrew?b.panelSkin:a.panelSkin;
+  if(!lip || !skin || Math.abs(dot(lip.inward,skin.axes[2]))<.99999)return false;
+  const delta=sub(lip.origin,skin.origin);
+  if(Math.abs(dot(delta,skin.axes[2]))>.01)return false;
+  return [0,1].some(i=>Math.abs(dot(lip.axis,skin.axes[i]))>.99999
+    && Math.abs(Math.abs(dot(delta,skin.axes[1-i]))-[skin.height,skin.width][i]/2)<.01);
+}
+
 function volumeBounds(box) {
   const bounds=[];
   for(let i=0;i<3;i++){
@@ -302,7 +319,7 @@ export function componentObstacle(model, part, { sweep = false, collisionCache =
       const bounded=boxes.map(box=>({box,bounds:volumeBounds(box)}));
       entry={bounded,bounds:combinedBounds(bounded)};collisionCache?.set(other,entry);
     }
-    if(boundsOverlap(bounds,entry.bounds) && bounded.some(a=>entry.bounded.some(b=>boundsOverlap(a.bounds,b.bounds) && boxesOverlap(a.box,b.box))))return {kind:other.panelId?'panel':'fitting',id:other.id};
+    if(boundsOverlap(bounds,entry.bounds) && bounded.some(a=>entry.bounded.some(b=>boundsOverlap(a.bounds,b.bounds) && boxesOverlap(a.box,b.box) && !panelMountsMate(a.box,b.box))))return {kind:other.panelId?'panel':'fitting',id:other.id};
   }
   for (const slide of model.slides.values()) {
     const origin = [slide.x, slide.y, slide.z];

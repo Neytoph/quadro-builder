@@ -426,13 +426,21 @@ export function confirmedVolumes(model,part) {
   if(hasInsetScrews(part))return [...body,...insetScrewVolumes(model,part,frame)];
   if(frame && (part.params?.screwAxis && supportsPanelFixing(part.panelId) || spec?.feature==='sector')){
     const worldAxes=axes=>axes.map(axis=>frame.axes[0].map((_,i)=>frame.axes.reduce((sum,a,k)=>sum+a[i]*axis[k],0)));
-    for(const segment of panelLipSegments(part))body.push({pos:localToWorld(frame,segment.point),axes:worldAxes(segment.axes),half:segment.half});
+    for(const segment of panelLipSegments(part)){
+      const axes=worldAxes(segment.axes),origin=localToWorld(frame,segment.origin);
+      const panelLip=isOuterScrewPanel(part.panelId)?{origin,axis:axes[0],inward:unit(cSub(frame.pos,origin))}:undefined;
+      body.push({pos:localToWorld(frame,segment.point),axes,half:segment.half,...(panelLip?{panelLip}:{})});
+    }
     for(const mount of spec?.feature==='sector'?sectorScrewMounts(model,part):(part.mounts || [])){
       const pose=panelScrewPose(model,part,frame,mount);if(!pose)continue;
       const {normal}=pose,axes=worldAxes(panelScrewAxes(pose));
       const at=distance=>localToWorld(frame,pose.point.map((v,i)=>v+normal[i]*distance));
-      body.push({pos:at(-.033),axes,half:[PANEL_SCREW_RADIUS,PANEL_SCREW_RADIUS,PANEL_SCREW_HEAD_DEPTH/2+.002]});
-      body.push({pos:at(-.1-PANEL_SCREW_SHAFT_LENGTH/2),axes,half:[PANEL_SCREW_SHAFT_RADIUS,PANEL_SCREW_SHAFT_RADIUS,PANEL_SCREW_SHAFT_LENGTH/2]});
+      const rail=model._rail(mount.tube),origin=curvePoint(model,mount.tube,mount.t),delta=cSub(frame.pos,origin);
+      const along=delta.reduce((s,v,k)=>s+v*rail.dir[k],0),inward=unit(delta.map((v,i)=>v-rail.dir[i]*along));
+      const panelScrew=isOuterScrewPanel(part.panelId)?{origin,axis:rail.dir,inward}:undefined;
+      const fixing=panelScrew?{panelScrew}:{};
+      body.push({pos:at(-.033),axes,half:[PANEL_SCREW_RADIUS,PANEL_SCREW_RADIUS,PANEL_SCREW_HEAD_DEPTH/2+.002],...fixing});
+      body.push({pos:at(-.1-PANEL_SCREW_SHAFT_LENGTH/2),axes,half:[PANEL_SCREW_SHAFT_RADIUS,PANEL_SCREW_SHAFT_RADIUS,PANEL_SCREW_SHAFT_LENGTH/2],...fixing});
     }
     return body;
   }
@@ -447,7 +455,8 @@ export function confirmedVolumes(model,part) {
 
 function outerPanelBodyVolumes(frame,spec) {
   const x=spec.width/2,y=spec.height/2,r=PANEL_CORNER_RELIEF,z=PANEL_OUTER_FACE,boxes=[];
-  const add=(x0,y0,x1,y1)=>boxes.push({...cVolume(frame,[x0,y0,z-geometry().panelThickness],[x1,y1,z]),roundTubeClearance:true});
+  const panelSkin={origin:frame.pos,axes:frame.axes,width:spec.width,height:spec.height};
+  const add=(x0,y0,x1,y1)=>boxes.push({...cVolume(frame,[x0,y0,z-geometry().panelThickness],[x1,y1,z]),roundTubeClearance:true,panelSkin});
   add(-x+r,-y,x-r,y);add(-x,-y+r,x,y-r);
   // 在原16条保守盒体内继续切分，避免扩大任何旧碰撞区域。
   // 每段平方跨度至多r²/32，到角心至少r*sqrt(31/32)，保留49mm圆管的让位间隙。
@@ -497,6 +506,15 @@ function componentBodyVolumes(model,part) {
   if(spec.feature==='capsule')return [cVolume(frame,[-16,-16,1.7],[16,16,18.3])];
   if(spec.feature==='basin')return [cVolume(frame,[-17,-17,-8],[17,17,2.4]),cVolume(frame,[-20.5,-15,1.2],[20.5,15,2.4]),cVolume(frame,[-15,-20.5,1.2],[15,20.5,2.4])];
   if(spec.placement==='fitting')return [cVolume(frame,[-spec.width/2+3,-spec.height/2+3,-1],[spec.width/2-3,spec.height/2-3,1])];
-  const depth=spec.feature==='lego' ? (legoStudHeight(part)>0.7?4.5:3.7) : ({clock:5.9,maze:5.9,climbing:5.8,felt:3.9,magnet:6.2,sensory:3.2})[spec.feature] || 3.3;
-  return [...(spec.feature==='sensory'?[]:outerPanelBodyVolumes(frame,spec)),cVolume(frame,[-spec.width/2+5,-spec.height/2+1.3,1.5],[spec.width/2-5,spec.height/2-1.3,depth]),cVolume(frame,[-spec.width/2+1.3,-spec.height/2+5,1.5],[spec.width/2-1.3,spec.height/2-5,depth])];
+  if(spec.feature==='sensory')return [cVolume(frame,[-15,-18.7,1.5],[15,18.7,3.2]),cVolume(frame,[-18.7,-15,1.5],[18.7,15,3.2])];
+  const body=outerPanelBodyVolumes(frame,spec);
+  // 凸起附件只占自身区域；无凸起的板不附加覆盖到安装边的厚盒体。
+  const decoration=({
+    lego:[16.8,16.8,legoStudHeight(part)>.7?4.5:3.7],
+    clock:[16.55,16.55,6.2],maze:[16.5,16.5,5.9],
+    climbing:[14.5,Math.min(spec.height/2-3,14),5.8],
+    felt:[16.5,16.5,3.9],magnet:[13,13,6.2],
+  })[spec.feature];
+  if(decoration){const [x,y,depth]=decoration;body.push(cVolume(frame,[-x,-y,1.5],[x,y,depth]));}
+  return body;
 }

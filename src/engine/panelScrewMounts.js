@@ -57,7 +57,7 @@ export function panelLipSegments(part) {
     });
     const mid=ranges.map(([lo,hi])=>(lo+hi)/2),local=radial.map((v,k)=>v*mid[0]+tangent[k]*mid[1]);
     const vector=p=>lip.inward.map((v,k)=>v*p[0]+(k===2?p[1]:0));
-    segments.push({point:lip.origin.map((v,k)=>v+vector(local)[k]),axes:[lip.along,vector(radial),vector(tangent)],half:[lip.length/2,...ranges.map(([lo,hi])=>(hi-lo)/2)]});
+    segments.push({origin:lip.origin,point:lip.origin.map((v,k)=>v+vector(local)[k]),axes:[lip.along,vector(radial),vector(tangent)],half:[lip.length/2,...ranges.map(([lo,hi])=>(hi-lo)/2)]});
   }
   return segments;
 }
