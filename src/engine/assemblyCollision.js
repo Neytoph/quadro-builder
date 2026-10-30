@@ -21,9 +21,9 @@ import { xAxisOf, yAxisOf, zAxisOf, panelNormal, modelMiddle } from './util.js';
 import { segmentDistance } from './segmentDistance.js';
 
 const xyz = p => [p.x, p.y, p.z];
-const sub = (a,b) => a.map((v,i)=>v-b[i]);
-const dot = (a,b) => a.reduce((s,v,i)=>s+v*b[i],0);
-const unit = a => { const l=Math.hypot(...a)||1;return a.map(v=>v/l); };
+const sub = (a,b) => [a[0]-b[0],a[1]-b[1],a[2]-b[2]];
+const dot = (a,b) => a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+const unit = a => { const l=Math.hypot(...a)||1;return [a[0]/l,a[1]/l,a[2]/l]; };
 const cross = (a,b) => [a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
 const axes = q => { if(!q)return [[1,0,0],[0,1,0],[0,0,1]];const length=Math.hypot(...q)||1,normal=q.map(v=>v/length);return [xAxisOf(normal),yAxisOf(normal),zAxisOf(normal)]; };
 // Frozen conservative bounds measured from public/data/models/{slides,fittings}.json,
@@ -136,17 +136,31 @@ function sweptTriangleTriangle(points,other,pad){
   const vertices=Math.hypot(...pad)>1e-10?[...points.map(p=>sub(p,pad)),...points.map(p=>p.map((v,i)=>v+pad[i]))]:points;
   const edges=points.map((p,i)=>sub(points[(i+1)%3],p)),otherEdges=other.map((p,i)=>sub(other[(i+1)%3],p));
   const normal=cross(edges[0],edges[1]),otherNormal=cross(otherEdges[0],otherEdges[1]);
-  const axes=[normal,otherNormal,...edges.map(e=>cross(e,pad)),...edges.flatMap(e=>otherEdges.map(o=>cross(e,o))),...otherEdges.map(e=>cross(pad,e)),...edges.map(e=>cross(normal,e)),...otherEdges.map(e=>cross(otherNormal,e))];
-  for(const raw of axes){const length=Math.hypot(...raw);if(length<1e-10)continue;const axis=raw.map(v=>v/length),a=vertices.map(p=>dot(p,axis)),b=other.map(p=>dot(p,axis));const loA=Math.min(...a),hiA=Math.max(...a),loB=Math.min(...b),hiB=Math.max(...b);if(hiA-loA>1e-6 || hiB-loB>1e-6){if(hiA<=loB+1e-6 || hiB<=loA+1e-6)return false;}else if(hiA<loB-1e-6 || hiB<loA-1e-6)return false;}
+  const separated=raw=>{
+    const length=Math.hypot(...raw);if(length<1e-10)return false;
+    const axis=[raw[0]/length,raw[1]/length,raw[2]/length];
+    let loA=Infinity,hiA=-Infinity,loB=Infinity,hiB=-Infinity;
+    for(const point of vertices){const value=dot(point,axis);loA=Math.min(loA,value);hiA=Math.max(hiA,value);}
+    for(const point of other){const value=dot(point,axis);loB=Math.min(loB,value);hiB=Math.max(hiB,value);}
+    if(hiA-loA>1e-6 || hiB-loB>1e-6)return hiA<=loB+1e-6 || hiB<=loA+1e-6;
+    return hiA<loB-1e-6 || hiB<loA-1e-6;
+  };
+  if(separated(normal)||separated(otherNormal))return false;
+  for(const edge of edges)if(separated(cross(edge,pad)))return false;
+  for(const edge of edges)for(const otherEdge of otherEdges)if(separated(cross(edge,otherEdge)))return false;
+  for(const edge of otherEdges)if(separated(cross(pad,edge)))return false;
+  for(const edge of edges)if(separated(cross(normal,edge)))return false;
+  for(const edge of otherEdges)if(separated(cross(otherNormal,edge)))return false;
   return true;
 }
 function triangleOverlap(triangle,other,padding){
   const points=triangle.points,pad=Array.isArray(padding)?padding:[0,0,0];
+  if(other.kind==='triangle')return sweptTriangleTriangle(points,other.points,pad);
+  if(other.kind==='box')return sweptTriangleBox(points,pad,other);
   const surfaces=[points];
   if(Math.hypot(...pad)>1e-8){const start=points.map(p=>p.map((v,i)=>v-pad[i])),end=points.map(p=>p.map((v,i)=>v+pad[i]));surfaces.push(start,end);for(let i=0;i<3;i++){const j=(i+1)%3;surfaces.push([start[i],start[j],end[j]],[start[i],end[j],end[i]]);}}
   if(other.kind==='cylinder')return prismContainsPoint(points,pad,other.a)||prismContainsPoint(points,pad,other.b)||surfaces.some(points=>triangleCylinderDistance(points,other)<other.r-.005);
   if(other.kind==='capsule')return prismContainsPoint(points,pad,other.a)||prismContainsPoint(points,pad,other.b)||surfaces.some(points=>segmentTriangleDistance(other.a,other.b,points)<other.r-.005);
-  if(other.kind==='triangle')return sweptTriangleTriangle(points,other.points,pad);
   return sweptTriangleBox(points,pad,other);
 }
 // Test the whole swept solid, including an obstacle fully enclosed between its faces.
@@ -174,7 +188,12 @@ function finitePipeCapsSeparate(a,b,padding){
   return false;
 }
 export function assemblyShapesOverlap(a,b,padding=[0,0,0]){if(a.kind==='triangle')return triangleOverlap(a,b,padding);if(b.kind==='triangle')return triangleOverlap(b,a,padding);const pad=Array.isArray(padding)?Math.hypot(...padding):padding,vector=Array.isArray(padding)?padding:[0,0,0];if(['capsule','cylinder'].includes(a.kind)&&['capsule','cylinder'].includes(b.kind)){if(finitePipeCapsSeparate(a,b,padding))return false;return segmentDistance(a.a,a.b,b.a,b.b)<a.r+b.r+pad-0.03;}if(['capsule','cylinder'].includes(a.kind))return boxSegment(b,a.a,a.b,a.r,vector);if(['capsule','cylinder'].includes(b.kind))return boxSegment(a,b.a,b.b,b.r,vector);const delta=sub(b.pos,a.pos);for(const axis of [...a.axes,...b.axes,...a.axes.flatMap(x=>b.axes.map(y=>cross(x,y)))]){if(Math.hypot(...axis)<1e-7)continue;const ra=a.axes.reduce((s,x,i)=>s+Math.abs(dot(x,axis))*a.half[i],0),rb=b.axes.reduce((s,x,i)=>s+Math.abs(dot(x,axis))*b.half[i],0);if(Math.abs(dot(delta,axis))>=ra+rb+Math.abs(dot(vector,axis))-0.03)return false;}return true;}
-const move=(shape,delta)=>shape.kind==='triangle'?{...shape,points:shape.points.map(p=>p.map((v,i)=>v+delta[i]))}:['capsule','cylinder'].includes(shape.kind)?{...shape,a:shape.a.map((v,i)=>v+delta[i]),b:shape.b.map((v,i)=>v+delta[i])}:{...shape,pos:shape.pos.map((v,i)=>v+delta[i])};
+function move(shape,delta){
+  if(delta[0]===0&&delta[1]===0&&delta[2]===0)return shape;
+  if(shape.kind==='triangle')return {...shape,points:shape.points.map(p=>p.map((v,i)=>v+delta[i]))};
+  if(shape.kind==='capsule'||shape.kind==='cylinder')return {...shape,a:shape.a.map((v,i)=>v+delta[i]),b:shape.b.map((v,i)=>v+delta[i])};
+  return {...shape,pos:shape.pos.map((v,i)=>v+delta[i])};
+}
 const boundsCache=new WeakMap();
 function shapeBounds(shape){if(boundsCache.has(shape))return boundsCache.get(shape);const bounds=computeShapeBounds(shape);boundsCache.set(shape,bounds);return bounds;}
 function computeShapeBounds(shape){ if(shape.kind==='triangle')return [0,1,2].map(i=>[Math.min(...shape.points.map(p=>p[i])),Math.max(...shape.points.map(p=>p[i]))]);if(['capsule','cylinder'].includes(shape.kind))return shape.a.map((v,i)=>[Math.min(v,shape.b[i])-shape.r,Math.max(v,shape.b[i])+shape.r]);return shape.pos.map((v,i)=>{const radius=shape.axes.reduce((s,a,k)=>s+Math.abs(a[i])*shape.half[k],0);return [v-radius,v+radius];}); }
@@ -394,18 +413,18 @@ export function checkAssemblyPath(model,movingIds,installedIds,start,end=[0,0,0]
   const obstacles=[...new Set(installedIds)].filter(id=>!moving.has(id)).map(id=>{const offset=obstacleTranslations.get(id)||[0,0,0],shapes=partEnvelope(model,id);return {id,offset,shapes,bounds:shiftBounds(envelopeBounds(shapes),offset)};});
   const adapterMap=new Map();for(const t of model.tubes.values())if(t.arm){if(!adapterMap.has(t.a))adapterMap.set(t.a,[]);if(!adapterMap.has(t.b))adapterMap.set(t.b,[]);adapterMap.get(t.a).push(t.b);adapterMap.get(t.b).push(t.a);}
   for(const id of movingIds){const shapes=partEnvelope(model,id);if(!shapes.length)continue;const movingBounds=envelopeBounds(shapes).map(([lo,hi],i)=>[lo+Math.min(start[i],end[i])-spacing/2,hi+Math.max(start[i],end[i])+spacing/2]);for(const obstacle of obstacles){if(!obstacle.shapes.length||!intersects(movingBounds,obstacle.bounds))continue;
-    const pairs=shapes.flatMap(a=>{const bounds=shapeBounds(a).map(([lo,hi],i)=>[lo+Math.min(start[i],end[i])-spacing/2,hi+Math.max(start[i],end[i])+spacing/2]),localBounds=shiftBounds(bounds,obstacle.offset.map(v=>-v));return indexedShapes(obstacle.shapes,localBounds).filter(b=>{
+    const pairs=shapes.flatMap(a=>{const bounds=shapeBounds(a).map(([lo,hi],i)=>[lo+Math.min(start[i],end[i])-spacing/2,hi+Math.max(start[i],end[i])+spacing/2]),localBounds=shiftBounds(bounds,obstacle.offset.map(v=>-v)),middleShape=move(a,midpoint);return indexedShapes(obstacle.shapes,localBounds).filter(b=>{
       if(!intersects(localBounds,shapeBounds(b)))return false;
       // Exact whole-segment SAT proves these pairs clear before sampling. Keep
       // short intervals for all remaining pairs and for joint-contact checks.
       const exactSweep=a.kind==='triangle'&&['triangle','box'].includes(b.kind)||b.kind==='triangle'&&a.kind==='box';
-      return count<=2||!exactSweep||assemblyShapesOverlap(move(a,midpoint),move(b,obstacle.offset),fullPad);
+      return count<=2||!exactSweep||assemblyShapesOverlap(middleShape,move(b,obstacle.offset),fullPad);
     }).map(b=>[a,b,shapeBounds(a),shiftBounds(shapeBounds(b),obstacle.offset)]);});
     if(!pairs.length)continue;
     const t=model.tubes.get(id),o=model.tubes.get(obstacle.id),shared=t&&o?[t.a,t.b].filter(n=>n===o.a||n===o.b):[];
     const fileContacts=allowMating?fileC45ContactNodes(model,id,obstacle.id,start,end,obstacle.offset,c45MatingContacts):[];
     for(let sample=0;sample<count;sample++){
-      const delta=start.map((v,i)=>v+(end[i]-v)*(sample+.5)/count),pad=sub(end,start).map(v=>v/count/2),sampleBounds=new Map(),paddingRadius=Math.hypot(...pad)+.05;
+      const delta=start.map((v,i)=>v+(end[i]-v)*(sample+.5)/count),pad=sub(end,start).map(v=>v/count/2),sampleBounds=new Map(),sampleShapes=new Map(),paddingRadius=Math.hypot(...pad)+.05;
       const adapterIds=id=>adapterMap.get(id)||[];
       const adapterContacts=model.nodes.has(id)&&o ? [o.a,o.b].filter(n=>adapterIds(id).includes(n)) : t&&model.nodes.has(obstacle.id) ? [t.a,t.b].filter(n=>adapterIds(obstacle.id).includes(n)) : [];
       const declaredContacts=[...(matingContacts.get(`${id}:${obstacle.id}`)||[]),...fileContacts.map(contact=>contact.nodeId)].filter(nodeId=>model.nodes.has(nodeId));
@@ -417,7 +436,8 @@ export function checkAssemblyPath(model,movingIds,installedIds,start,end=[0,0,0]
         // sample. The Euclidean padding radius and margin cover every shape's
         // swept tolerance, including pipe/pipe distance checks.
         if(!intersects(sweptBounds,obstacleShapeBounds))continue;
-        if(!assemblyShapesOverlap(move(a,delta),move(b,obstacle.offset),pad))continue;
+        let translated=sampleShapes.get(a);if(!translated){translated=move(a,delta);sampleShapes.set(a,translated);}
+        if(!assemblyShapesOverlap(translated,move(b,obstacle.offset),pad))continue;
         if(allowMating&&panelSlotContact(model,id,obstacle.id,a,delta,obstacle.offset))continue;
         if(allowMating&&sharedPanelLipContact(model,id,obstacle.id,a,b,delta,end,pad,obstacle.offset))continue;
         if(allowMating&&entryPanelContact(model,id,obstacle.id,a,b,delta,end,pad,obstacle.offset,entryPanelContacts))continue;
