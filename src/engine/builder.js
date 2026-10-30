@@ -31,6 +31,7 @@ import { selectionTransformStrings } from '../ui/selectionTransformStrings';
 import { pickStepAnchor, stepCandidates, stepCandidatesFromSelection, stepNeighbor } from "./stepAnchor.js";
 import { BearingConnectionController } from './bearingConnectionController.js';
 import { assemblyMeshes, ensureAssemblyMeshes } from './assemblyNativeMesh.js';
+import { PanelMountQueue } from './panelMountQueue.js';
 
 export function confirmedFittingHandlePosition(model, mount) {
   const spec = confirmedSpec(mount.kind || mount.partId);
@@ -206,6 +207,8 @@ export class Builder {
     this._assemblyRequest++;
     this._assemblyWorker?.terminate();
     this._assemblyWorker = null;
+    this._panelMountQueue?.dispose();
+    this._panelMountQueue = null;
     this.history?.onChange(() => {});
     this.history?.onExternal(() => {});
     this.history = null;
@@ -348,6 +351,7 @@ export class Builder {
 
   // --- oeffentliche Steuerung --------------------------------------------
   setMode(mode) {
+    if (mode !== 'panel') this._panelMountQueue?.cancel();
     this.bearingConnection?.cancel();
     this.transformGizmo?.cancel();
     this.cancelSelectionTransform(false);
@@ -568,6 +572,7 @@ export class Builder {
     if (refresh && this.mode === "panel") this.refresh();
   }
   _loadPanelGeometry() {
+    this._panelMountQueue?.retry();
     if (this._disposed || !['panel_40x40', 'panel_40x20'].includes(this.panelId) || assemblyMeshes() || this._panelGeometryLoading) return;
     this._panelGeometryLoading = ensureAssemblyMeshes().then(() => {
       this._panelGeometryLoading = null;
@@ -2305,7 +2310,22 @@ export class Builder {
     if (this.highlight && !this.panelRail && !this.reinforceRail) return;
     // Im Platten-Modus klickt man zwei Rohre an -- keine Flaechen-Handles.
     if (this.mode === "panel") {
-      if (!this.panelRail && PANEL_ACCESSORY_IDS.has(this.panelId)) for (const mount of this.model.panelAccessoryMounts(this.panelId,{screwAxis:this.insetScrewAxis||'auto',oppositeRetainers:true})) this.scene.addHandle(mount.pos, { panelAccessoryMount: mount }, 'place');
+      if (!this.panelRail && PANEL_ACCESSORY_IDS.has(this.panelId)) {
+        const options = { screwAxis: this.insetScrewAxis || 'auto', oppositeRetainers: true };
+        let mounts;
+        if (typeof Worker === 'function') {
+          this._panelMountQueue ??= new PanelMountQueue(() => {
+            if (this._disposed || this.mode !== 'panel' || this.panelRail || this.busy()) return;
+            this._buildHandles();
+            this.scene.requestRender();
+          }, error => {
+            console.error('Panel mount computation failed', error);
+            if (!this._disposed && this.mode === 'panel') this.onNotice(t('notice_panel_geometry_failed'), 'warn');
+          });
+          mounts = this._panelMountQueue.get(this.model.toJSON(), this.panelId, options) || [];
+        } else mounts = this.model.panelAccessoryMounts(this.panelId, options);
+        for (const mount of mounts) this.scene.addHandle(mount.pos, { panelAccessoryMount: mount }, 'place');
+      }
       return;
     }
     if (this.mode === "slide") { this._buildSlideHandles(); return; }
