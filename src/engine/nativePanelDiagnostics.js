@@ -5,6 +5,7 @@ import { confirmedSpec } from './componentPack.js';
 import { confirmedFrame } from './confirmedComponentModel.js';
 import { geometry } from './catalog.js';
 import { quatFromBasis } from './util.js';
+import { componentObstacle } from './accessoryPack.js';
 
 const geometryPasses = new WeakMap();
 
@@ -49,6 +50,10 @@ export function nativePanelDiagnostics(model, probe) {
   if (!candidate.valid && candidate.reason !== 'component_space') return candidate;
   if(!physicalReferences(model,candidate))return {...candidate,valid:false,reason:'missing_support'};
   if (model.panelAt(candidate.a, candidate.b, candidate.t0, candidate.len, probe.id)) return candidate;
+  // 工厂弯管网格与画布圆弧不同，原厂板的转角复核不能豁免实际弯管占位。
+  // 单独遍历全部弯管，避免先命中的直管或邻板遮住弯管冲突。
+  const curvedObstacle = componentObstacle(model, candidate, { curvedTubesOnly: true });
+  if (curvedObstacle) return { ...candidate, valid:false, reason:'component_space', obstacle:curvedObstacle };
   const frame = JSON.stringify(['nodes','tubes','clamps'].map(group => [...model[group].values()]));
   let pass = geometryPasses.get(model);
   if (!pass || pass.frame !== frame) {

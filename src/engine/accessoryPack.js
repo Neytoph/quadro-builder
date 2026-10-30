@@ -246,7 +246,7 @@ export function nativeWheelComponentObstacle(model, wheel) {
   return null;
 }
 
-export function componentObstacle(model, part, { sweep = false, collisionCache = null } = {}) {
+export function componentObstacle(model, part, { sweep = false, collisionCache = null, curvedTubesOnly = false } = {}) {
   if (isSoftPart(model, part)) return null;
   const volumes = componentVolumes(model, part, { sweep });
   // 先用保守世界包围盒排除远处部件；精确盒体和圆管检查继续决定真实碰撞。
@@ -267,6 +267,7 @@ export function componentObstacle(model, part, { sweep = false, collisionCache =
     for(const id of insetFrameTubeIds(model,componentFrame(model,part),spec.width,spec.height))supports.add(id);
   }
   for (const tube of model.tubes.values()) {
+    if (curvedTubesOnly && !tube.bow) continue;
     if (supports.has(tube.id) || tube.link || tube.arm) continue;
     const a = model.nodes.get(tube.a), b = model.nodes.get(tube.b);
     if (!a || !b) continue;
@@ -290,6 +291,7 @@ export function componentObstacle(model, part, { sweep = false, collisionCache =
       if(segmentNearBounds(bounds,start,end,2.45) && bounded.some(({box,bounds})=>segmentNearBounds(bounds,start,end,2.45) && segmentHits(box,start,end)))return {kind:'tube',id:tube.id};
     }
   }
+  if (curvedTubesOnly) return null;
   for (const other of [...model.panels.values(), ...model.textiles.values(), ...model.fittings.values()]) {
     if (other.id === part.id || isSoftPart(model, other)) continue;
     let entry=collisionCache?.get(other);
