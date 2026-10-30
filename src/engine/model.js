@@ -6333,32 +6333,79 @@ export class BuildModel {
     return true;
   }
 
-  // Baut von einem bestehenden Knoten in eine Richtung ein Rohr an und legt
-  // (falls noetig) den Zielknoten an. spacing = Rohrlaenge + Kupplungsgroesse.
-  // Rueckgabe:
-  //   { node, tube }            erfolgreich gebaut
-  //   { node, tube:null, duplicate:true }  Ziel existiert und ist schon verbunden (Navigation)
-  //   { collision:true }        Pfad ist durch ein anderes Rohr belegt
-  extend(fromNodeId, dirVec, tubeId, color, length, spacing) {
+  tubeExtensionContext() {
+    const edges = new Map(), components = new Map();
+    for (const tube of this.tubes.values()) {
+      if (tube.link) continue;
+      for (const [a, b] of [[tube.a, tube.b], [tube.b, tube.a]]) {
+        if (!edges.has(a)) edges.set(a, []);
+        edges.get(a).push(b);
+      }
+    }
+    for (const id of this.nodes.keys()) {
+      if (components.has(id)) continue;
+      const queue = [id]; components.set(id, id);
+      for (let i = 0; i < queue.length; i++) for (const next of edges.get(queue[i]) || []) {
+        if (!components.has(next)) { components.set(next, id); queue.push(next); }
+      }
+    }
+    return { components };
+  }
+
+  // 引导、悬停预览与放置共用只读结果；一个刷新周期复用实体连接关系。
+  planTubeExtension(fromNodeId, dirVec, spacing, { snapTol = DIAGONAL_SNAP_TOL,
+    connectorSize = 5, context = this.tubeExtensionContext() } = {}) {
     const from = this.nodes.get(fromNodeId);
     if (!from) return null;
     if (!this.canExtendFrom(from, dirVec)) return null;
-    const target = {
+    if (armFittingDirsAt(this, from).some(axis => dot3(axis, dirVec) > ARM_ALIGN_TOL)) return null;
+    let target = {
       x: from.x + dirVec[0] * spacing,
       y: from.y + dirVec[1] * spacing,
       z: from.z + dirVec[2] * spacing,
     };
     if (this.isBelowGround(target.y)) return { ground: true };
-    // Bereits verbundener Zielknoten => reine Navigation, kein neuer Bau.
-    const existing = this.findNodeNear(target.x, target.y, target.z);
-    if (existing && this.tubeBetween(from.id, existing.id)) {
-      return { node: existing, tube: null, duplicate: true };
+    let existing = this.findNodeNear(target.x, target.y, target.z);
+    // 同一实体管架闭环时，允许一个连接件孔距内的安装误差；双管虚拟桥不跨组选点。
+    {
+      const sameComponent = id => context.components.get(id) === context.components.get(from.id);
+      let bestDistance = existing ? Math.hypot(existing.x - target.x, existing.y - target.y, existing.z - target.z) : Infinity;
+      let bestConnected = existing && sameComponent(existing.id);
+      for (const node of this.nodes.values()) {
+        if (node.id === from.id || node.unused) continue;
+        const distance = Math.hypot(node.x - target.x, node.y - target.y, node.z - target.z);
+        const sameFrame = sameComponent(node.id);
+        const tolerance = sameFrame ? Math.max(snapTol, connectorSize + MERGE_EPS) : snapTol;
+        if (distance > tolerance || (bestConnected && !sameFrame) || (sameFrame === !!bestConnected && distance >= bestDistance)) continue;
+        const axis = norm3([node.x - from.x, node.y - from.y, node.z - from.z]);
+        if (dot3(axis, norm3(dirVec)) < DIR_ALIGN_TOL) continue;
+        const incoming = axis.map(v => -v);
+        if (!this.canExtendFrom(node, incoming) || armFittingDirsAt(this, node).some(port => dot3(port, incoming) > ARM_ALIGN_TOL)) continue;
+        if (this.tubeCollision(from, node, from.part === 'windmill' ? from.clampOn?.tubeId : null)) continue;
+        existing = node; bestDistance = distance; bestConnected = sameFrame;
+      }
     }
-    // Liegt auf dem Pfad schon ein Rohr? Dann nicht ueberbauen.
+    if (existing) {
+      target = { x: existing.x, y: existing.y, z: existing.z };
+      const prior = this.tubeBetween(from.id, existing.id);
+      if (prior && !prior.link) return { node: existing, tube: null, duplicate: true };
+      const incoming = norm3([from.x - target.x, from.y - target.y, from.z - target.z]);
+      const endpoint = existing.unused ? { ...existing, unused: false } : existing;
+      if (!this.canExtendFrom(endpoint, incoming) || armFittingDirsAt(this, endpoint).some(axis => dot3(axis, incoming) > ARM_ALIGN_TOL)) return { collision: true };
+    }
     if (this.tubeCollision(from, target, from.part === 'windmill' ? from.clampOn?.tubeId : null)) {
       return { collision: true };
     }
-    const to = this.addNode(target.x, target.y, target.z);
+    return { target, existing };
+  }
+
+  extend(fromNodeId, dirVec, tubeId, color, length, spacing, snapTol = DIAGONAL_SNAP_TOL) {
+    const plan = this.planTubeExtension(fromNodeId, dirVec, spacing, { snapTol });
+    if (!plan || !plan.target) return plan;
+    const from = this.nodes.get(fromNodeId);
+    const { target, existing } = plan;
+    const to = existing || this.addNode(target.x, target.y, target.z);
+    delete to.unused;
     // Der neue Knoten steht in derselben Lage wie der, von dem gebaut wird --
     // sonst boete er am Ende einer gedrehten Reihe wieder die Weltachsen an und
     // das naechste Rohr knickte weg.
@@ -6807,24 +6854,7 @@ export class BuildModel {
   // Neusetzen werden die Rohre wieder sauber zusammengefuehrt. Kein C45-Adapter
   // (die Kupplung ist bereits 45-Grad gedreht).
   extendDiagonalSnap(fromId, dir, tubeId, color, length, spacing, snapTol = DIAGONAL_SNAP_TOL) {
-    const from = this.nodes.get(fromId);
-    if (!from) return null;
-    if (!this.canExtendFrom(from, dir)) return null;
-    const tx = from.x + dir[0] * spacing, ty = from.y + dir[1] * spacing, tz = from.z + dir[2] * spacing;
-    let best = null, bestD = snapTol;
-    for (const n of this.nodes.values()) {
-      if (n.id === fromId) continue;
-      const d = Math.hypot(n.x - tx, n.y - ty, n.z - tz);
-      if (d <= bestD) { bestD = d; best = n; }
-    }
-    if (best) {
-      if (this.tubeBetween(fromId, best.id)) return { node: best, tube: null, duplicate: true };
-      if (this.tubeCollision(from, best)) return { collision: true };
-      const tube = this.addTube(fromId, best.id, tubeId, color, length);
-      return { node: best, tube };
-    }
-    // Ohne Rasterpunkt entsteht ein neuer Knoten -- extend() prueft den Boden.
-    return this.extend(fromId, dir, tubeId, color, length, spacing);
+    return this.extend(fromId, dir, tubeId, color, length, spacing, snapTol);
   }
 
   // Bogenrohr (Viertelkreis) anbauen. dirVec ist die Tangente am Startknoten,

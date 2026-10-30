@@ -2327,6 +2327,7 @@ export class Builder {
     }
     // Freie Oeffnung eines Doppelrohrverbinders/einer Rohrklammer: dort gehoert
     // ein GERADES Rohr hinein -- mit einem Bogenrohr in der Hand nicht.
+    const openings = new Set();
     if (!isCurvedTube(this.tubeId)) {
       for (const c of this.model.clamps.values()) {
         if (!c.dir || !c.off) continue;
@@ -2337,8 +2338,12 @@ export class Builder {
         const tube = getTube(this.tubeId);
         if (!tube) continue;
         const span = spacingFor(tube.length_cm);
-        const { p1, p2 } = this.model.secondTubeEnds(c.id, span,
-          { step: SNAP_STEP, cs: geometry().connectorSize });
+        const placement = this._secondTubePlacement(center, c.dir, c.id);
+        if (!placement) continue;
+        const { p1, p2 } = placement;
+        const key = [p1, p2].map(p => p.map(v => Math.round(v * 100)).join(',')).sort().join('/');
+        if (openings.has(key)) continue;
+        openings.add(key);
         this.scene.addHandle(center, { clampOpening: true, center, dir: c.dir, clampId: c.id,
           previewEnds: [p1, p2], previewSpan: span, previewColor: this.colorFor("tube"),
           arrowCompact: true }, "dir");
@@ -2347,6 +2352,7 @@ export class Builder {
       // GENAU auf der Achse, auf der das Rohr durchlaeuft.
       for (const o of this.model.bearingOpenings()) {
         if (this._openingOccupied(o.pos, o.dir)) continue;
+        if (!this._secondTubePlacement(o.pos, o.dir)) continue;
         this.scene.addHandle(o.pos,
           { clampOpening: true, center: o.pos, dir: o.dir, bearingNode: o.nodeId }, "dir");
       }
@@ -2358,7 +2364,9 @@ export class Builder {
       // einer Rad- oder Rohrkappe: dort steckt die Kappe ANSTELLE der Kupplung,
       // ihre Punkte wuerden ins Leere zeigen.
       .filter((n) => !n.unused && !(this.model.hasWheelCap && this.model.hasWheelCap(n)));
-    for (const node of nodes) this._addBuildHandles(node);
+    const context = this.model.tubeExtensionContext();
+    for (const node of nodes) this._addBuildHandles(node, context);
+    this.scene.mergeTubeGuides?.();
   }
 
   /** 在现有接头上高亮空插座：点上去换成所选通型，不在空气中长新节点。 */
@@ -2572,7 +2580,7 @@ export class Builder {
     return (node.armDirs && node.armDirs.length) ? node.armDirs : null;
   }
 
-  _addBuildHandles(node) {
+  _addBuildHandles(node, context) {
     // Gedrehte Kupplung: ihre eigenen Arm-Richtungen verwenden, sie ist bereits
     // korrekt ausgerichtet.
     const armDirs = this._armDirsOf(node);
@@ -2617,6 +2625,20 @@ export class Builder {
       // Punkt auch dann noch an, wenn das Rohr schon steckt.
       if (c45Dir && this._armOccupied(node, d.vec)) continue;
       if (this._targetBelowGround(node, d.vec)) continue;
+      let previewTarget;
+      if (!isCurvedTube(this.tubeId)) {
+        const selected = isSlope || c45Dir ? this._diagonalTube() : tube;
+        if (!selected) continue;
+        const plan = this.model.planTubeExtension(node.id, d.vec, spacingFor(selected.length_cm),
+          { connectorSize: geometry().connectorSize, context });
+        if (!plan?.target) continue;
+        previewTarget = [plan.target.x, plan.target.y, plan.target.z];
+      } else {
+        const normal = this._bowNormal(d.vec, node), radius = tube.radius_cm || gridSpacing();
+        const end = [node.x, node.y, node.z].map((v, i) => v + radius * (d.vec[i] + normal[i]));
+        const existing = this.model.findNodeNear(...end);
+        if (existing && (!this.model.canExtendFrom(existing, normal.map(v => -v)) || this._armOccupied(existing, normal.map(v => -v)))) continue;
+      }
       const isCardDir = Math.max(Math.abs(d.vec[0]), Math.abs(d.vec[1]), Math.abs(d.vec[2])) > DIR_ALIGN_TOL;
       // Pfeile wachsen aus der Kupplung heraus (wie designer), nicht als
       // schwebende Kugel auf `gap`. Die Richtung bleibt die des freien Arms.
@@ -2626,6 +2648,7 @@ export class Builder {
           nodeId: node.id, dir: d.vec, dirName: d.name, slope: isSlope || !!c45Dir,
           arrowCompact: true,
           previewSpan,
+          previewTarget,
           previewColor,
         },
         ((useDiag || c45Dir) && !isCardDir) ? "diag" : "dir"
@@ -3358,13 +3381,29 @@ export class Builder {
   // Zweite, parallele Tube in die leere Oeffnung setzen. Im Doppelrohrverbinder
   // richtet sie sich nach dem gehaltenen Rohr aus (Regel: model.secondTubeEnds);
   // im Maul einer Lagerkupplung liegt sie mittig.
-  _placeSecondTube(center, dir, bearingNode = null, clampId = null) {
+  _secondTubePlacement(center, dir, clampId = null) {
     const tube = getTube(this.tubeId);
-    if (!tube) return;
+    if (!tube) return null;
     const span = spacingFor(tube.length_cm);
     const { p1, p2 } = clampId
       ? this.model.secondTubeEnds(clampId, span, { step: SNAP_STEP, cs: geometry().connectorSize })
       : this.model.centeredTubeEnds(center, dir, span, SNAP_STEP);
+    const [a, b] = [p1, p2].map(p => ({ x: p[0], y: p[1], z: p[2] }));
+    if (this.model.isBelowGround(a.y) || this.model.isBelowGround(b.y) || this.model.tubeCollision(a, b)) return null;
+    const axis = p2.map((v, i) => (v - p1[i]) / span);
+    for (const [point, incoming] of [[p1, axis], [p2, axis.map(v => -v)]]) {
+      const node = this.model.findNodeNear(...point);
+      if (node && (!this.model.canExtendFrom(node, incoming) || this._armOccupied(node, incoming))) return null;
+    }
+    return { p1, p2, span };
+  }
+
+  _placeSecondTube(center, dir, bearingNode = null, clampId = null) {
+    const tube = getTube(this.tubeId);
+    if (!tube) return;
+    const placement = this._secondTubePlacement(center, dir, clampId);
+    if (!placement) { this.onNotice(t('notice_collision'), 'warn'); return; }
+    const { p1, p2 } = placement;
     this.recordHistory(() => {
       const n1 = this.model.addNode(round2(p1[0]), round2(p1[1]), round2(p1[2]));
       const n2 = this.model.addNode(round2(p2[0]), round2(p2[1]), round2(p2[2]));

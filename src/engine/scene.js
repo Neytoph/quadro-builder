@@ -29,6 +29,7 @@ import { createOutdoorVisuals, OUTDOOR_AREA } from './outdoor.js';
 import { PanelPlacementGuides } from './panelPlacementGuides.js';
 import { PANEL_OUTER_FACE, PANEL_CORNER_RELIEF } from './panelScrewMounts.js';
 import { rainbowRibbonLayout, createRainbowRibbonSheet, createRainbowRibbonSleeve } from './rainbowTextile.js';
+import { mergeTubeGuideSegments } from './tubeGuides.js';
 
 const outdoor = createOutdoorVisuals(THREE);
 
@@ -3869,7 +3870,31 @@ export class SceneManager {
     arm.raycast = () => {};
     group.add(arm);
     group.userData.arms.push([axis, arm]);
+    if (!this._tubeGuideSegments) this._tubeGuideSegments = [];
+    this._tubeGuideSegments.push({ start: origin.slice(),
+      end: origin.map((v, i) => v + dir.getComponent(i) * GUIDE.half), mesh: arm,
+      replace: mesh => { group.userData.arms.find(entry => entry[1] === arm)[1] = mesh; } });
     return group;
+  }
+
+  mergeTubeGuides() {
+    for (const merged of mergeTubeGuideSegments(this._tubeGuideSegments || [])) {
+      if (merged.sources.length < 2) continue;
+      const start = new THREE.Vector3(...merged.start), end = new THREE.Vector3(...merged.end);
+      const mesh = new THREE.Mesh(this._cachedGeo('mergedTubeGuide', () =>
+        new THREE.CylinderGeometry(GUIDE.r, GUIDE.r, 1, 6)), merged.sources[0].mesh.material);
+      mesh.position.copy(start).add(end).multiplyScalar(.5);
+      mesh.scale.y = start.distanceTo(end);
+      mesh.quaternion.setFromUnitVectors(UP, end.sub(start).normalize());
+      mesh.renderOrder = 998;
+      mesh.raycast = () => {};
+      this.handleGroup.add(mesh);
+      for (const source of merged.sources) {
+        source.mesh.removeFromParent();
+        source.replace?.(mesh);
+      }
+    }
+    this._tubeGuideSegments = [];
   }
 
   // 指到某个接头时，那个接点的三条线一起亮起来。
@@ -5488,6 +5513,7 @@ export class SceneManager {
     this.handleMeshes = [];
     // 十字是按坐标去重的，句柄清掉了这张表也得跟着清，否则下一轮画不出来
     if (this._guideAt) this._guideAt.clear();
+    this._tubeGuideSegments = [];
   }
 
   // `radius` waechst nur dort, wo ein Punkt schwerer zu treffen ist -- etwa der
@@ -5550,6 +5576,7 @@ export class SceneManager {
    * 点起来的手感跟以前一样。
    */
   _addArrowHandle(origin, dirArr, userData, kind) {
+    dirArr = userData.previewTarget ? userData.previewTarget.map((v, i) => v - origin[i]) : dirArr;
     const dir = new THREE.Vector3(dirArr[0], dirArr[1], dirArr[2]);
     if (dir.lengthSq() < 1e-8) dir.set(0, 1, 0);
     else dir.normalize();
@@ -5580,6 +5607,8 @@ export class SceneManager {
       guide.renderOrder = 998;
       guide.raycast = () => {};
       group.add(guide);
+      if (!this._tubeGuideSegments) this._tubeGuideSegments = [];
+      this._tubeGuideSegments.push({ start: ends[0], end: ends[1], mesh: guide });
     } else this._addNodeGuide(origin, [dir.x, dir.y, dir.z]);
 
     // 指到这个方向时亮起来的那一条，从接点往外，比引导线略长也略粗
@@ -5651,8 +5680,9 @@ export class SceneManager {
   }
 
   _setTubePreview(group) {
-    const span = Number(group && group.userData && group.userData.previewSpan);
-    const dirArr = group && group.userData && group.userData.dir;
+    const target = group?.userData.previewTarget;
+    const span = target ? group.position.distanceTo(new THREE.Vector3(...target)) : Number(group?.userData.previewSpan);
+    const dirArr = target ? target.map((v, i) => v - group.position.getComponent(i)) : group?.userData.dir;
     if (!(span > 0) || !dirArr) {
       this._clearTubePreview();
       return;
