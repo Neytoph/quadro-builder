@@ -15,9 +15,9 @@ describe('风火轮和小扇形结构', () => {
     const model = new BuildModel()
     const root = model.addNode(0, 60, 0), end = model.addNode(-40, 60, 0)
     model.addTube(root.id, end.id, 'T35', 'blue', 35)
-    const mount = model.fittingMounts('bearing2').find(m => m.nodeId === root.id && m.dir.every((v: number, i: number) => v === dir[i]))!
+    const mount = model.fittingMounts('bearing2').find(m => 'nodeId' in m && m.nodeId === root.id && m.dir.every((v: number, i: number) => v === dir[i]))!
     const bearing = model.addFittingAt('bearing2', mount, 'red')!
-    const wheelMount = model.fittingMounts('multi-wheel2').find(m => m.bearingId === bearing.id)!
+    const wheelMount = model.fittingMounts('multi-wheel2').find(m => 'bearingId' in m && m.bearingId === bearing.id)!
     const hub = model.addWindmillAtBearing(bearing.id)!
     expect([hub.x, hub.y, hub.z]).toEqual(wheelMount.pos)
     expect(holeArmDirs(hub)).toHaveLength(4)
