@@ -11,6 +11,52 @@ import { sectorScrewMounts } from './panelScrewMounts.js'
 beforeAll(async () => { await loadCatalog() })
 
 describe('风火轮和小扇形结构', () => {
+  it.each([[0, 0, 1], [1, 0, 0], [0, 1, 0]])('风火轮可承接在连接件旁的轮轴承上，轴向 %j', (...dir) => {
+    const model = new BuildModel()
+    const root = model.addNode(0, 60, 0), end = model.addNode(-40, 60, 0)
+    model.addTube(root.id, end.id, 'T35', 'blue', 35)
+    const mount = model.fittingMounts('bearing2').find(m => m.nodeId === root.id && m.dir.every((v: number, i: number) => v === dir[i]))!
+    const bearing = model.addFittingAt('bearing2', mount, 'red')!
+    const wheelMount = model.fittingMounts('multi-wheel2').find(m => m.bearingId === bearing.id)!
+    const hub = model.addWindmillAtBearing(bearing.id)!
+    expect([hub.x, hub.y, hub.z]).toEqual(wheelMount.pos)
+    expect(holeArmDirs(hub)).toHaveLength(4)
+    expect(model.addWindmillAtBearing(bearing.id)).toBeNull()
+    expect(model.addFittingAt('multi-wheel2', wheelMount, 'blue')).toBeNull()
+    const spoke = model.extend(hub.id, holeArmDirs(hub)[0], 'T15', 'red', 15, 20)!
+    expect(spoke.tube).toBeTruthy()
+    const fixed = structuredClone([root, end, bearing])
+    expect(model.turnHoleClamp(hub.id, Math.PI / 4)).toBe(true)
+    expect([root, end, bearing]).toEqual(fixed)
+    expect([...model.collisions()]).toEqual([])
+    const saved = new BuildModel()
+    expect(saved.loadJSON(model.toJSON()).ok).toBe(true)
+    expect(saved.turnHoleClamp(hub.id)).toBe(true)
+    const selection = new Map([...model.nodes.keys()].map(id => [id, 'node']))
+    const inserted = model.insertFragment(model.extractSelection(selection)!, [160, 80, 0])!
+    const copied = inserted.nodes.map((id: string) => model.nodes.get(id)).find(n => n.part === 'windmill')!
+    expect(model.turnHoleClamp(copied.id)).toBe(true)
+    const qdf = buildQDF(saved)
+    expect(qdf.warnings).toEqual([])
+    const imported = new BuildModel()
+    expect(imported.loadJSON(parseQDF(qdf.text, { tubes: buildableTubes() })).ok).toBe(true)
+    const importedHub = [...imported.nodes.values()].find(n => n.part === 'windmill')!
+    expect(importedHub.clampOn).toBeFalsy()
+    expect(imported.turnHoleClamp(importedHub.id)).toBe(true)
+  })
+
+  it('轴承已安装多向轮时不再提供风火轮安装点', () => {
+    const model = new BuildModel()
+    model.addNode(0, 60, 0)
+    const bearing = model.addFittingAt('bearing2', model.fittingMounts('bearing2')[0], 'red')!
+    const mount = model.windmillBearingMounts()[0]
+    expect(mount.bearingId).toBe(bearing.id)
+    model.addFittingAt('multi-wheel2', mount, 'blue')
+    expect(model.windmillBearingMounts()).toEqual([])
+    expect(model.addWindmillAtBearing(bearing.id)).toBeNull()
+    expect(model.addWindmillAtBearing('missing')).toBeNull()
+  })
+
   it('中心安装在固定管上，四个接口及连接的短管一起旋转', () => {
     const model = new BuildModel()
     const a = model.addNode(0, 50, -20), b = model.addNode(0, 50, 20)

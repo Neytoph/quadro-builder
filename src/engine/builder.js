@@ -524,6 +524,7 @@ export class Builder {
         if (!t.arm && !t.link && !t.bow) n++;
       }
       if (kind === "bearing-clamp") n += this.model.bearingArmMounts(cs).length;
+      if (kind === "windmill-clamp") n += this.model.windmillBearingMounts().length;
       return n;
     }
     return this.model.fittingMounts(kind, cs).length
@@ -3079,6 +3080,11 @@ export class Builder {
     // Klemm-Kupplungen (Lochzapfen-, Lagerkupplung) klemmen an einer beliebigen
     // Stelle -- ein Punkt je Rohr zeigt, welche Rohre in Frage kommen.
     if (TUBE_CLAMP_PARTS[this.fittingKind]) {
+      if (this.fittingKind === 'windmill-clamp') {
+        for (const mount of this.model.windmillBearingMounts()) {
+          this.scene.addHandle(mount.pos, { windmillBearing: mount }, 'dir');
+        }
+      }
       for (const m of this._tubeMidpoints(sel, amKnoten)) {
         const mesh = this.scene.addHandle(m.pos, { clampTube: m }, "dir");
         this._tubeHandles.set(m.tubeId, { mesh, art: "clamp", ruhe: m });
@@ -5140,6 +5146,14 @@ export class Builder {
     if(this.fittingKind==='bearing-clamp'&&this._bearingController().click(e))return;
     const part = TUBE_CLAMP_PARTS[this.fittingKind];
     const h = this.scene.pickHandle(e.clientX, e.clientY);
+    if (part === 'windmill' && h?.data?.windmillBearing) {
+      let added = null;
+      this.recordHistory(() => { added = this.model.addWindmillAtBearing(h.data.windmillBearing.bearingId); });
+      if (added) this._notePlaced(added.id, 'node');
+      else this.onNotice(t('notice_fitting_exists'), 'warn');
+      this.refresh();
+      return;
+    }
     if (h && h.data && h.data.bearingArm) {
       const m = h.data.bearingArm;
       let f = null;
@@ -5178,6 +5192,10 @@ export class Builder {
         // Weiterdrehen statt loeschen: der Anschluss rueckt um 90 Grad um das
         // Rohr weiter, das Eingesteckte dreht mit.
         this._adjustPlacedPart(n.id, "bearing");
+        return;
+      }
+      if (n?.part === 'windmill') {
+        this._adjustPlacedPart(n.id, 'hole');
         return;
       }
     }

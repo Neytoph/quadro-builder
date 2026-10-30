@@ -1901,6 +1901,8 @@ export class BuildModel {
 
   _nativeWheelComponentBlocked(kind, pos, quat) {
     if (kind !== 'multi-wheel2') return false;
+    if ([...this.nodes.values()].some(n => n.part === 'windmill'
+      && Math.hypot(n.x - pos[0], n.y - pos[1], n.z - pos[2]) < 2)) return true;
     return !!nativeWheelComponentObstacle(this, { kind, x: pos[0], y: pos[1], z: pos[2], quat });
   }
 
@@ -1978,9 +1980,27 @@ export class BuildModel {
       if (f.kind !== "bearing2" || !f.quat) continue;
       const ax = rotateX(f.quat);
       out.push({ pos: [round(f.x + ax[0] * BEARING_LEN), round(f.y + ax[1] * BEARING_LEN),
-        round(f.z + ax[2] * BEARING_LEN)], dir: ax, quat: f.quat.slice() });
+        round(f.z + ax[2] * BEARING_LEN)], dir: ax, quat: f.quat.slice(), bearingId: f.id });
     }
     return out;
+  }
+
+  // 风火轮与多向轮共用轮轴承末端，保持原生孔销节点的旋转与存档语义。
+  windmillBearingMounts() {
+    return this._wheelMounts().filter(m => !this.isBelowGround(m.pos[1])
+      && !this.findNodeNear(...m.pos)
+      && !this._fittingBlocked('multi-wheel2', m.pos, m.dir, BEARING_LEN * 0.45));
+  }
+
+  addWindmillAtBearing(bearingId) {
+    const mount = this.windmillBearingMounts().find(m => m.bearingId === bearingId);
+    if (!mount) return null;
+    const node = this.addNode(...mount.pos);
+    node.part = 'windmill';
+    node.partMask = HOLE_MASKS.windmill;
+    node.partQuat = mount.quat.slice();
+    node.stub = holeArmDirs(node)[0];
+    return node;
   }
 
   /**
