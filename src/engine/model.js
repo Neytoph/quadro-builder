@@ -1012,6 +1012,7 @@ export class BuildModel {
   tubeCollision(p, q, ignoreTubeId = null) {
     for (const t of this.tubes.values()) {
       if (t.id === ignoreTubeId) continue;
+      if (t.link) continue;
       const a = this.nodes.get(t.a), b = this.nodes.get(t.b);
       if (!a || !b) continue;
       if (segmentsOverlap(p, q, a, b)) return t;
@@ -3906,7 +3907,8 @@ export class BuildModel {
       if (!k || !k.off || !k.dir) continue;
       const base = this._clampBaseTube(k);
       const frozen = base && frozenBase.has(base.id);
-      const ax = frozen ? { o: [k.x, k.y, k.z], u: norm3(k.dir) } : axAt(k.x, k.y, k.z);
+      const axis = norm3(k.dir).map(v => v * (dot3(k.dir, u) < 0 ? -1 : 1));
+      const ax = frozen ? { o: [k.x, k.y, k.z], u: axis } : axAt(k.x, k.y, k.z);
       const pos = frozen ? [k.x, k.y, k.z] : rodriguesAt([k.x, k.y, k.z], ax.o, ax.u, co, si);
       const ko = rodriguesDir(k.off, ax.u, co, si);
       const kd = frozen ? k.dir : rodriguesDir(k.dir, ax.u, co, si);
@@ -4077,6 +4079,43 @@ export class BuildModel {
   }
 
   _clampBaseTube(c) { return c ? this._clampTubeAt([c.x, c.y, c.z], c.dir) : null; }
+
+  /** 同一直线、实际相连的承载管共用方向，优先夹住已通过该位置的第二根管。 */
+  alignedClampOff(tubeId, off, point) {
+    const rail = this._rail(tubeId);
+    if (!rail) return off;
+    const run = new Set([tubeId]);
+    const nodes = new Set([this.tubes.get(tubeId).a, this.tubes.get(tubeId).b]);
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const tube of this.tubes.values()) {
+        if (run.has(tube.id) || (!nodes.has(tube.a) && !nodes.has(tube.b))) continue;
+        const other = this._rail(tube.id);
+        if (!other || Math.abs(dot3(rail.dir, other.dir)) < .99999) continue;
+        run.add(tube.id);
+        nodes.add(tube.a); nodes.add(tube.b);
+        grew = true;
+      }
+    }
+    let best = null, distance = Infinity, covered = false;
+    for (const clamp of this.clamps.values()) {
+      if (!clamp.off || !run.has(this._clampBaseTube(clamp)?.id)) continue;
+      const second = this._clampSecondTube(clamp);
+      const secondRail = second && this._rail(second.id);
+      if (!secondRail) continue;
+      const hole = point.map((v, i) => v + clamp.off[i]);
+      const along = dot3(hole.map((v, i) => v - secondRail.p0[i]), secondRail.dir);
+      const half = Math.hypot(...clamp.off) / 2;
+      const covers = along > half && along < secondRail.len - half;
+      if (!covers && dot3(norm3(off), norm3(clamp.off)) <= 0) continue;
+      if (covered && !covers) continue;
+      const d = Math.hypot(clamp.x - point[0], clamp.y - point[1], clamp.z - point[2]);
+      if ((covers && !covered) || d < distance) { best = clamp.off; distance = d; covered = covers; }
+    }
+    return best ? norm3(best).map(v => v * Math.hypot(...off)) : off;
+  }
+
   _clampSecondTube(c) {
     if (!c || !c.off) return null;
     return this._clampTubeAt([c.x + c.off[0], c.y + c.off[1], c.z + c.off[2]], c.dir);
@@ -4432,7 +4471,8 @@ export class BuildModel {
     for (const cid of flap.clampIds) {
       const k = this.clamps.get(cid);
       if (!k || !k.dir) continue;
-      const ax = { o: [k.x, k.y, k.z], u: norm3(k.dir) };
+      const axis = norm3(k.dir).map(v => v * (dot3(k.dir, hingeAx.u) < 0 ? -1 : 1));
+      const ax = { o: [k.x, k.y, k.z], u: axis };
       const base = this._clampBaseTube(k);
       const sec = this._clampSecondTube(k);
       if (base && !flap.second.has(base.id)) {
@@ -4483,7 +4523,7 @@ export class BuildModel {
     return tagged;
   }
 
-  _nodeAdj(rotationAxis = null) {
+  _nodeAdj(rotationAxis = null, includeClampLinks = true) {
     const adj = new Map();
     const link = (a, b) => {
       if (!a || !b || a === b) return;
@@ -4492,7 +4532,10 @@ export class BuildModel {
       adj.get(a).push(b);
       adj.get(b).push(a);
     };
-    for (const t of this.tubes.values()) link(t.a, t.b);
+    for (const t of this.tubes.values()) {
+      if (t.link && !includeClampLinks) continue;
+      link(t.a, t.b);
+    }
     for (const n of this.nodes.values()) {
       const t = n.clampOn && this.tubes.get(n.clampOn.tubeId);
       if (t && rotationAxis && n.bearingOn && this._jointCoaxialTube(rotationAxis,t.id)) continue;
@@ -4626,8 +4669,7 @@ export class BuildModel {
   }
 
   /**
-   * Vom angeklickten Teil aus: alles, was ueber Rohre / Adapter / Klemmen
-   * zusammenhaengt. Zwei getrennte Aufbauten bleiben zwei Bloecke.
+   * 沿实际管件选择整块；双管连接桥是活动侧与固定架的边界。
    * extra.hinge / extra.tubes kommen vom Treffer (Scharnier, Verstaerkungsprofil).
    */
   connectedSelection(seedId, seedKind, extra = {}) {
@@ -4670,16 +4712,22 @@ export class BuildModel {
       if (p) { addTube(p.a); addTube(p.b); }
     } else if (kind === "clamp") {
       const c = this.clamps.get(id);
-      if (c) addNear(c.x, c.y, c.z, 12);
+      const tube = this._clampSecondTube(c) || this._clampBaseTube(c);
+      if (tube) addTube(tube.id);
     } else if (kind === "fitting") {
       const f = this.fittings.get(id);
       if (f) {
         if (f.tube) addTube(f.tube);
+        for (const tid of f.supportTubes || []) addTube(tid);
         for (const n of this.nodes.values()) if (n.bearingOn === id) out.add(n.id);
         const reach = POOL_KINDS.has(f.kind)
           ? Math.max(50, Math.hypot(f.w || 0, f.h || 0, f.d || 0) / 2 + 25)
           : 16;
-        addNear(f.x, f.y, f.z, reach);
+        if (!out.size) {
+          const near = POOL_KINDS.has(f.kind) ? this._nodesNearPoint(f.x, f.y, f.z, reach)
+            : this._nearestAttachmentNodes(f.x, f.y, f.z, reach);
+          for (const nid of near) out.add(nid);
+        }
       }
     } else if (kind === "slide") {
       for (const sid of this._slideChainIds(id)) {
@@ -4708,8 +4756,26 @@ export class BuildModel {
     return out;
   }
 
+  /** 无承载引用的旧配件归到最近的实体上，避免跨过双管之间的短距离。 */
+  _nearestAttachmentNodes(x, y, z, maxDist) {
+    let distance = maxDist;
+    const out = new Set();
+    const consider = (d, ids) => {
+      if (d > distance + 1e-6) return;
+      if (d < distance - 1e-6) { out.clear(); distance = d; }
+      for (const id of ids) out.add(id);
+    };
+    for (const n of this.nodes.values()) consider(Math.hypot(n.x - x, n.y - y, n.z - z), [n.id]);
+    for (const tube of this.tubes.values()) {
+      if (tube.link || tube.bow) continue;
+      const a = this.nodes.get(tube.a), b = this.nodes.get(tube.b);
+      if (a && b) consider(distPointToSeg(x, y, z, a, b), [a.id, b.id]);
+    }
+    return out;
+  }
+
   _floodNodes(start) {
-    const adj = this._nodeAdj();
+    const adj = this._nodeAdj(null, false);
     const seen = new Set();
     const q = [];
     for (const id of start) {
@@ -4785,15 +4851,23 @@ export class BuildModel {
       }
     }
     for (const c of this.clamps.values()) {
-      if (this._pointOnIsland(c.x, c.y, c.z, nodes, tubeIds, 12, 8)) sel.set(c.id, "clamp");
+      const tube = this._clampSecondTube(c) || this._clampBaseTube(c);
+      if (tube && tubeIds.has(tube.id)) sel.set(c.id, "clamp");
     }
     for (const f of this.fittings.values()) {
       if (sel.has(f.id)) continue;
-      if (f.tube && tubeIds.has(f.tube)) { sel.set(f.id, 'fitting'); continue; }
+      const supports = Array.isArray(f.supportTubes) ? f.supportTubes : f.tube ? [f.tube] : [];
+      if (supports.length) {
+        if (supports.every(id => tubeIds.has(id))) sel.set(f.id, 'fitting');
+        continue;
+      }
       const nodeReach = POOL_KINDS.has(f.kind)
         ? Math.max(50, Math.hypot(f.w || 0, f.h || 0, f.d || 0) / 2 + 25)
         : 16;
-      if (this._pointOnIsland(f.x, f.y, f.z, nodes, tubeIds, nodeReach, 8)) sel.set(f.id, "fitting");
+      const attached = POOL_KINDS.has(f.kind)
+        ? this._pointOnIsland(f.x, f.y, f.z, nodes, tubeIds, nodeReach, 8)
+        : [...this._nearestAttachmentNodes(f.x, f.y, f.z, nodeReach)].some(id => nodes.has(id));
+      if (attached) sel.set(f.id, "fitting");
     }
     const slideHit = new Set();
     for (const s of this.slides.values()) {

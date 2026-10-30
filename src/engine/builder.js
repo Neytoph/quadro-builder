@@ -3332,7 +3332,8 @@ export class Builder {
     p = [p[0] - u[0] * pa, p[1] - u[1] * pa, p[2] - u[2] * pa];
     const pl = Math.hypot(...p) || 1; p = [p[0] / pl, p[1] / pl, p[2] / pl];
     const card = this._cardinalPerp(p, u);
-    const off = [card[0] * cs, card[1] * cs, card[2] * cs];
+    const off = this.model.alignedClampOff(tubeId,
+      [card[0] * cs, card[1] * cs, card[2] * cs], ax);
     // Der Punkt liegt auf der Achse des UMSCHLOSSENEN Rohrs, nicht zwischen
     // beiden Loechern -- genau wie in den Herstellerdateien (Test.qdf: das Rohr
     // laeuft auf der Y-Achse, die clamp2-Zeile steht auf 0/340/0). Das
@@ -3361,6 +3362,15 @@ export class Builder {
     this.recordHistory(() => {
       const n1 = this.model.addNode(round2(p1[0]), round2(p1[1]), round2(p1[2]));
       const n2 = this.model.addNode(round2(p2[0]), round2(p2[1]), round2(p2[2]));
+      // 第二根管的插口朝向跟随夹子，先转夹子再加管时也能沿斜面继续搭。
+      const clamp = clampId && this.model.clamps.get(clampId);
+      if (clamp) {
+        const ex = new Vector3(...clamp.dir).normalize();
+        const ey = new Vector3(...clamp.off).normalize();
+        const ez = new Vector3().crossVectors(ex, ey).normalize();
+        const quat = quatFromBasis(ex.toArray(), ey.toArray(), ez.toArray());
+        for (const node of [n1, n2]) if (!node.quat && this.model.degree(node.id) === 0) node.quat = quat.slice();
+      }
       const tb = this.model.addTube(n1.id, n2.id, tube.id, this.colorFor("tube"), tube.length_cm);
       // Rohr im Maul einer Lagerkupplung: Teil und Rohr gehoeren jetzt zusammen.
       if (bearingNode && tb) this.model.noteBearingTube(bearingNode, tb.id);

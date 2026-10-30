@@ -3,7 +3,9 @@ import * as THREE from 'three'
 import { BuildModel } from './model.js'
 import { Builder } from './builder.js'
 import { SceneManager } from './scene.js'
-import { loadCatalog, geometry } from './catalog.js'
+import { loadCatalog, geometry, buildableTubes, panels as catalogPanels } from './catalog.js'
+import { buildQDF } from './qdfexport.js'
+import { parseQDF } from './qdfimport.js'
 import { connectorsForNode } from './bom.js'
 import { ModelHistory } from '../collab/history'
 import { docFromJSON } from '../collab/ymodel'
@@ -109,6 +111,164 @@ describe('自由管口的空心几何', () => {
     expect(new THREE.Raycaster(new THREE.Vector3(2.3, 0, 10), new THREE.Vector3(0, 0, -1)).intersectObject(rim).length).toBeGreaterThan(0)
   })
 })
+
+describe('双管斜面继续接管与相邻两格对齐', () => {
+  it('夹子先转到任意角度，再放第二根管：自由端提供斜面的侧向接管方向', () => {
+    const { model, builder, scene, clamp } = fixture()
+    const angle = Math.PI / 6
+    model.rotateClamp(clamp.id, angle)
+    builder._placeSecondTube([], clamp.dir, null, clamp.id)
+    const second = model._clampSecondTube(clamp)!
+    const start = model.nodes.get(second.a)!
+    scene.clearHandles()
+    builder._addBuildHandles(start)
+    const side = [0, -Math.sin(angle), Math.cos(angle)]
+    const handle = scene.handleGroup.children.find((g: THREE.Object3D) => g.userData.dir?.every((v: number, i: number) => Math.abs(v - side[i]) < 1e-4))!
+    expect(handle).toBeTruthy()
+    const result = model.extend(start.id, handle.userData.dir, 'T35', 'blue', 35, 40)!
+    expect(result.tube).toBeTruthy()
+    expect(connectorsForNode(model, start)).toContain('elbow')
+    const reopened = new BuildModel()
+    reopened.loadJSON(model.toJSON())
+    expect(reopened.nodes.get(start.id)!.quat).toEqual(start.quat)
+    expect(reopened.tubes.has(result.tube!.id)).toBe(true)
+  })
+
+  it.each([false, true])('相邻两格沿用已装斜面的角度，共用接缝并整体转动，第二格反向建管=%s', reverse => {
+    const { model, builder, clamp, base } = fixture()
+    model.rotateClamp(clamp.id, Math.PI / 6)
+    builder._placeSecondTube([], clamp.dir, null, clamp.id)
+    const first = model._clampSecondTube(clamp)!
+    const joint = model.nodes.get(base.b)!
+    const end = model.addNode(80, 40, 0)
+    const nextBase = model.addTube(reverse ? end.id : joint.id, reverse ? joint.id : end.id, 'T35', 'green', 35)!
+    builder.clampPart = 'double_tube'
+    builder._placeClampOnTube(nextBase.id, { x: 60, y: 42, z: 0 })
+    const next = [...model.clamps.values()].find(c => c.id !== clamp.id)!
+    expect(next.off).toEqual(clamp.off)
+    builder._placeSecondTube([], next.dir, null, next.id)
+    const second = model._clampSecondTube(next)!
+    expect([second.a, second.b]).toContain(first.b)
+    const fixed = [base.a, base.b, end.id].map(id => ({ ...model.nodes.get(id)! }))
+    expect(model.rotateClamp(clamp.id, Math.PI / 12)).toBe(true)
+    expect(next.off).toEqual(clamp.off)
+    const a = model.nodes.get(first.a)!, b = model.nodes.get(first.b)!
+    const c = model.nodes.get(second.a === first.b ? second.b : second.a)!
+    expect([a.y, a.z]).toEqual([b.y, b.z])
+    expect([b.y, b.z]).toEqual([c.y, c.z])
+    for (const node of fixed) expect(model.nodes.get(node.id)).toEqual(node)
+    const reopened = new BuildModel()
+    reopened.loadJSON(model.toJSON())
+    expect(reopened.clampCohort(clamp.id).clamps.has(next.id)).toBe(true)
+    builder._placeClampOnTube(nextBase.id, { x: 70, y: 38, z: 0 })
+    const added = [...model.clamps.values()].find(c => c.id !== clamp.id && c.id !== next.id)!
+    expect(added.off).toEqual(next.off)
+    expect(model._clampSecondTube(added)!.id).toBe(second.id)
+    expect(model.rotateClamp(added.id, -Math.PI / 12)).toBe(true)
+    expect(added.off).toEqual(next.off)
+    expect(next.off).toEqual(clamp.off)
+  })
+
+  it('独立管架与转角不自动改角度，已有第二根管的位置优先沿用真实角度', () => {
+    const { model, builder, clamp, base } = fixture()
+    model.rotateClamp(clamp.id, Math.PI / 6)
+    builder._placeSecondTube([], clamp.dir, null, clamp.id)
+    const off = [0, 5, 0]
+    const a = model.addNode(0, 40, 40), b = model.addNode(40, 40, 40)
+    const separate = model.addTube(a.id, b.id, 'T35', 'green', 35)!
+    expect(model.alignedClampOff(separate.id, off, [20, 40, 40])).toEqual(off)
+    const corner = model.addNode(40, 40, 40)
+    const turn = model.addTube(base.b, corner.id, 'T35', 'green', 35)!
+    expect(model.alignedClampOff(turn.id, off, [40, 40, 20])).toEqual(off)
+    const matched = model.alignedClampOff(base.id, [0, -5, 0], [20, 40, 0])
+    matched.forEach((v: number, i: number) => expect(v).toBeCloseTo(clamp.off[i], 2))
+  })
+
+  it('虚拟连接桥不阻挡接管，真实管件仍阻挡交叉路径', () => {
+    const model = new BuildModel()
+    const a = model.addNode(0, 40, 0), b = model.addNode(0, 50, 0)
+    const bridge = model.addLink(a.id, b.id)!
+    const start = { x: -20, y: 45, z: 0 }, end = { x: 20, y: 45, z: 0 }
+    expect(model.tubeCollision(start, end)).toBeNull()
+    model.tubes.delete(bridge.id)
+    model.addTube(a.id, b.id, 'T05', 'red', 5)
+    expect(model.tubeCollision(start, end)).toBeTruthy()
+  })
+
+  it('2×2 斜面的面板、管件和配件独立选整块，主架构从两边均不穿过双管连接桥', () => {
+    const { model, builder, clamp, base } = fixture()
+    builder._placeSecondTube([], clamp.dir, null, clamp.id)
+    const first = model._clampSecondTube(clamp)!
+    const fixedEnd = model.addNode(80, 40, 0)
+    const nextBase = model.addTube(base.b, fixedEnd.id, 'T35', 'green', 35)!
+    const supports = [base.a, base.b, fixedEnd.id].flatMap(id => {
+      const node = model.nodes.get(id)!
+      const foot = model.addNode(node.x, 0, node.z)
+      return [foot.id, model.addTube(foot.id, id, 'T35', 'yellow', 35)!.id]
+    })
+    builder._placeClampOnTube(nextBase.id, { x: 60, y: 42, z: 0 })
+    const nextClamp = [...model.clamps.values()].find(c => c.id !== clamp.id)!
+    builder._placeSecondTube([], nextClamp.dir, null, nextClamp.id)
+    const second = model._clampSecondTube(nextClamp)!
+    const rows = [[first, second]]
+    const movingTubes = [first.id, second.id]
+    const panels: string[] = []
+    let previous = [first.a, first.b, second.b]
+    for (let row = 1; row <= 2; row++) {
+      const nodes = [0, 40, 80].map(x => model.addNode(x, 45, row * 40))
+      for (let i = 0; i < 3; i++) movingTubes.push(model.addTube(previous[i], nodes[i].id, 'T35', 'blue', 35)!.id)
+      const rails = [0, 1].map(i => model.addTube(nodes[i].id, nodes[i + 1].id, 'T35', 'blue', 35)!)
+      movingTubes.push(...rails.map(t => t.id))
+      for (let i = 0; i < 2; i++) panels.push(model.addPanel(rows[row - 1][i].id, rails[i].id, 0, 40, 'panel_40x40', 'green')!.id)
+      rows.push(rails)
+      previous = nodes.map(n => n.id)
+    }
+    const movingFitting = model.addFitting('end-cap', 0, 45, 0)!
+    const fixedFitting = model.addFitting('end-cap', 0, 40, 0)!
+    expect(model.rotateClamp(clamp.id, -Math.PI / 12)).toBe(true)
+    const fixed = new Set([base.a, base.b, fixedEnd.id, base.id, nextBase.id, fixedFitting.id, ...supports])
+    for (const [seed, kind] of [[first.id, 'tube'], [panels[0], 'panel'], [movingFitting.id, 'fitting'], [clamp.id, 'clamp']] as const) {
+      const selection = model.connectedSelection(seed, kind)
+      for (const id of movingTubes) expect(selection.has(id), `${kind} missing ${id}`).toBe(true)
+      for (const id of panels) expect(selection.get(id)).toBe('panel')
+      expect(selection.get(movingFitting.id)).toBe('fitting')
+      expect(selection.get(clamp.id)).toBe('clamp')
+      expect(selection.get(nextClamp.id)).toBe('clamp')
+      for (const id of fixed) expect(selection.has(id), `${kind} leaked ${id}`).toBe(false)
+    }
+    const main = model.connectedSelection(base.id, 'tube')
+    for (const id of fixed) expect(main.has(id), `main missing ${id}`).toBe(true)
+    for (const id of [...movingTubes, ...panels, clamp.id, nextClamp.id, movingFitting.id]) expect(main.has(id), `main leaked ${id}`).toBe(false)
+    const before = model.toJSON()
+    sceneParts(builder, model)
+    builder._selectConnectedFromPick({ data: { id: panels[0], kind: 'panel' } }, false)
+    expect(builder.selection.has(base.id)).toBe(false)
+    expect(builder.selection.has(second.id)).toBe(true)
+    expect(model.toJSON()).toEqual(before)
+    const reopened = new BuildModel()
+    const exported = buildQDF(model)
+    expect(reopened.loadJSON(parseQDF(exported.text, {
+      tubes: buildableTubes(), panels: catalogPanels(), connectorSize: geometry().connectorSize, mergeEps: 2,
+    })).ok).toBe(true)
+    const panel = [...reopened.panels.values()][0]
+    const slope = reopened.connectedSelection(panel.id, 'panel')
+    expect([...reopened.panels.keys()].every(id => slope.has(id))).toBe(true)
+    expect(reopened.panels.size).toBe(4)
+    const mainTube = [...reopened.tubes.values()].find(t => !t.link && Math.abs(reopened.nodes.get(t.a)!.y - 40) < .1 && Math.abs(reopened.nodes.get(t.b)!.y - 40) < .1)!
+    expect(mainTube).toBeTruthy()
+    expect(slope.has(mainTube.id)).toBe(false)
+  })
+})
+
+function sceneParts(builder: Builder, model: BuildModel) {
+  builder.scene.selectableParts = () => new Map([
+    ...[...model.nodes.keys()].map(id => [id, 'node'] as const),
+    ...[...model.tubes.values()].filter(t => !t.link).map(t => [t.id, 'tube'] as const),
+    ...[...model.panels.keys()].map(id => [id, 'panel'] as const),
+    ...[...model.clamps.keys()].map(id => [id, 'clamp'] as const),
+    ...[...model.fittings.keys()].map(id => [id, 'fitting'] as const),
+  ])
+}
 
 describe('已选双管夹绕管旋转', () => {
   it('拖动旋转保持第一根管、图关系，可逐步撤销重做', () => {
