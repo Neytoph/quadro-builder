@@ -111,8 +111,9 @@ describe('45°件独立拆卸及真实接管方向', () => {
     expect(model.nodes.get(upper.id)!.c45body).toBe(true)
   })
 
-  it('承载45°件的自动直通不提供额外直管或弯管入口，换通型后使用真实空口', () => {
+  it('手动指定的承载接头仍保留通型限制，换通型后使用真实空口', () => {
     const { model, lower } = fixture()
+    lower.preferType = 'straight'
     const before = model.toJSON()
     for (const dir of [[0, 1, 0], [0, -1, 0]]) {
       expect(model.canExtendFrom(lower, dir)).toBe(false)
@@ -132,13 +133,15 @@ describe('45°件独立拆卸及真实接管方向', () => {
     expect(model.canExtendFrom(lower, [0, 1, 0])).toBe(true)
   })
 
-  it('竖向承载接头同样保留通型限制，上端直角二通仍可水平接管', () => {
+  it('竖向承载接头可自动扩建，上端手动直角二通仍可水平接管', () => {
     const model = new BuildModel()
     const base = model.addNode(0, 40, 0)
     model.addC45Adapter(base.id, [0, 1, 0], [Math.SQRT1_2, -Math.SQRT1_2, 0], C45_SLEEVE_LEN, C45_ARM_LEN)
     expect(model.extend(base.id, [0, -1, 0], 'T35', 'blue', 35, 40)!.tube).toBeTruthy()
-    for (const dir of [[1, 0, 0], [-1, 0, 0]]) expect(model.canExtendFrom(base, dir)).toBe(false)
-    expect(model.canExtendFrom(base, [0, 0, 1])).toBe(false)
+    for (const dir of [[1, 0, 0], [-1, 0, 0]]) expect(model.canExtendFrom(base, dir)).toBe(true)
+    expect(model.canExtendFrom(base, [0, 0, 1])).toBe(true)
+    expect(model.canExtendFrom(base, [0, 1, 0])).toBe(false)
+    expect(model.canExtendFrom(base, [0, -1, 0])).toBe(false)
     const { model: other, diagonal, upper } = fixture()
     other.removeC45(upper.id)
     const end = diagonal.node!

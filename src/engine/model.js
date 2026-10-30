@@ -6311,18 +6311,6 @@ export class BuildModel {
           return [0, 1, 2].map((i) => axes[0][i] * v[0] + axes[1][i] * v[1] + axes[2][i] * v[2]);
         });
     }
-    if (!ports && !node.c45body) {
-      let carriesC45 = false, hasTube = false;
-      for (const tube of this.tubes.values()) {
-        if (tube.link) continue;
-        const otherId = tube.a === node.id ? tube.b : tube.b === node.id ? tube.a : null;
-        if (!otherId) continue;
-        if (tube.arm && this.nodes.get(otherId)?.c45body) carriesC45 = true;
-        else if (!tube.arm) hasTube = true;
-      }
-      // 已接管的45°承载接头只使用现有空插口；需要其他方向时先明确更换普通通型。
-      if (carriesC45 && hasTube) ports = node.arms || [];
-    }
     const length = Math.hypot(...dir);
     if (!length) return false;
     const unit = dir.map((v) => v / length);
@@ -6338,6 +6326,17 @@ export class BuildModel {
       if (usedLength && occupied.reduce((sum, value, i) => sum + value * unit[i], 0) / usedLength > ARM_ALIGN_TOL) return false;
     }
     return true;
+  }
+
+  // 自动接头扩建后保留原有空插口，并将新管的实际方向写入导入的臂记录。
+  _extendConnectorArms(tube) {
+    if (!tube) return;
+    for (const [id, otherId] of [[tube.a, tube.b], [tube.b, tube.a]]) {
+      const node = this.nodes.get(id), other = this.nodes.get(otherId);
+      if (!node?.arms || node.part || node.c45body || node.preferType || !other) continue;
+      const dir = norm3(this._tubeDirAt(tube, node, other));
+      if (!node.arms.some(arm => dot3(norm3(arm), dir) > DIR_ALIGN_TOL)) node.arms = [...node.arms, dir];
+    }
   }
 
   tubeExtensionContext() {
@@ -6421,6 +6420,7 @@ export class BuildModel {
       to.quat=quatFromBasis(ex,ey,ez).map(round4);
     } else if (from.quat && !to.quat) to.quat = from.quat.slice();
     const tube = this.addTube(from.id, to.id, tubeId, color, length);
+    this._extendConnectorArms(tube);
     return { node: to, tube };
   }
 
@@ -6960,6 +6960,7 @@ export class BuildModel {
     if (tube) {
       tube.bow = true;
       tube.bowCenter = [round(cx), round(cy), round(cz)];
+      this._extendConnectorArms(tube);
     }
     return { node: to, tube };
   }
