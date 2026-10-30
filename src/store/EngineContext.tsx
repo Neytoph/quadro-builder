@@ -1388,10 +1388,14 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     return () => { alive = false }
   }, [ready, bindHome, notify, lang])
 
-  const bom = useMemo(() => {
+  // 引擎会原地修改零件；完整内容指纹同时覆盖编辑、撤销和协作更新。
+  // 选择和工具切换不重复运行全模型分析，读取指纹也不修改成组状态。
+  const modelSnapshot = useMemo(() => model && ready ? JSON.stringify(model.toJSON({ pruneGroups: false })) : null, [model, ready, tick])
+  const rawBom = useMemo(() => {
     if (!model || !ready) return null
-    try { return asBom(computeBOM(model) as AnyRec) } catch { return null }
-  }, [model, ready, tick, lang])
+    try { return computeBOM(model) as AnyRec } catch { return null }
+  }, [model, ready, modelSnapshot, lang])
+  const bom = useMemo(() => rawBom ? asBom(rawBom) : null, [rawBom])
 
   const safety = useMemo<SafetyResult | null>(() => {
     if (!model || !ready) return null
@@ -1399,22 +1403,22 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       room: room.visible ? { w: room.w, d: room.d } : null,
       indoor: room.visible,
     }) as SafetyResult
-  }, [model, ready, tick, room])
+  }, [model, ready, modelSnapshot, room])
 
   const cmp = useMemo(() => {
-    if (!model || !ready) return { rows: [] as InvRow[], feasible: null as boolean | null }
+    if (!rawBom) return { rows: [] as InvRow[], feasible: null as boolean | null }
     try {
-      const raw = compareInventory(computeBOM(model), inventory) as { rows: InvRow[]; feasible: boolean }
+      const raw = compareInventory(rawBom, inventory) as { rows: InvRow[]; feasible: boolean }
       return { rows: raw.rows, feasible: inventoryUsed(inventory) ? raw.feasible : null }
     } catch { return { rows: [], feasible: null } }
-  }, [model, ready, tick, inventory, lang])
+  }, [rawBom, inventory, lang])
 
   const sizeCm = useMemo<[number, number, number] | null>(() => {
     if (!model || !ready) return null
     const b = model.bounds?.(2.5) as { size: number[] } | null
     if (!b) return null
     return [Math.round(b.size[0]), Math.round(b.size[2]), Math.round(b.size[1])]
-  }, [model, ready, tick])
+  }, [model, ready, modelSnapshot])
 
   bomRef.current = bom
   sizeRef.current = sizeCm

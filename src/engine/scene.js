@@ -6527,15 +6527,24 @@ export class SceneManager {
 
   // 选中和悬停只描绘实际几何的边缘，透明、纹理与功能件颜色保留。
   _partOutline(geometry, selected) {
-    let edges = new THREE.EdgesGeometry(geometry, 35);
-    if (!edges.getAttribute('position').count) {
+    this._partOutlinePositions ||= new WeakMap();
+    const source = geometry.getAttribute('position'), index = geometry.index;
+    let cached = this._partOutlinePositions.get(geometry);
+    if (!cached || cached.source !== source || cached.index !== index ||
+        cached.sourceVersion !== source.version || cached.indexVersion !== index?.version) {
+      let edges = new THREE.EdgesGeometry(geometry, 35);
+      if (!edges.getAttribute('position').count) {
+        edges.dispose();
+        edges = new THREE.EdgesGeometry(geometry, 10);
+      }
+      cached = { source, index, sourceVersion: source.version, indexVersion: index?.version,
+        positions: edges.getAttribute('position').array };
       edges.dispose();
-      edges = new THREE.EdgesGeometry(geometry, 10);
+      this._partOutlinePositions.set(geometry, cached);
     }
-    const position = edges.getAttribute('position');
-    if (!position.count) { edges.dispose(); return null; }
-    const outlineGeometry = new LineSegmentsGeometry().setPositions(position.array);
-    edges.dispose();
+    if (!cached.positions.length) return null;
+    // 只共享只读CPU边线；每条轮廓单独持有GPU资源，可沿用现有清理流程。
+    const outlineGeometry = new LineSegmentsGeometry().setPositions(cached.positions);
     const key = selected ? 'part-outline-selected' : 'part-outline-hover';
     const material = this._materials[key] ||= new LineMaterial({
       color: selected ? '#f88929' : '#f2d28a', linewidth: selected ? 1.8 : 1.3,

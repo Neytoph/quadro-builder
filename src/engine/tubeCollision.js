@@ -8,6 +8,18 @@ const sub = (a, b) => ({ x: a.x - b.x, y: a.y - b.y, z: a.z - b.z });
 const distance2 = (a, b) => dot(sub(a, b), sub(a, b));
 const clamp = (v) => Math.max(0, Math.min(1, v));
 const at = (a, d, t) => ({ x: a.x + d.x * t, y: a.y + d.y * t, z: a.z + d.z * t });
+const paths = new WeakMap();
+
+// 缓存既有弯管的只读路径；坐标原地修改、转动和弯心变化都会立即失效。
+export function cachedTubePath(a, b, tube) {
+  if (!tube.bow || !tube.bowCenter) return tubePath(a, b, tube);
+  const key = [a.x, a.y, a.z, b.x, b.y, b.z, ...tube.bowCenter];
+  const prior = paths.get(tube);
+  if (prior && key.length === prior.key.length && key.every((value, i) => value === prior.key[i])) return prior.path;
+  const path = tubePath({ x: a.x, y: a.y, z: a.z }, { x: b.x, y: b.y, z: b.z }, tube);
+  paths.set(tube, { key, path });
+  return path;
+}
 
 export function tubePath(a, b, tube = {}) {
   let points = [a, b], center = null;

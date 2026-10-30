@@ -3800,9 +3800,7 @@ export class Builder {
         this.scene.setCursor("crosshair");
         return;
       }
-      // Cursor- und Loesch-Modus: alles Platzierte ist treffbar, Rutschen
-      // eingeschlossen. Im Loesch-Modus wird der Klick zum Loeschen.
-      obj = this.scene.pickForDelete(x, y)?.object || null;
+      // 选择和删除的命中在下方统一处理，避免同一次悬停重复拾取全模型。
     } else if (this.mode === "add") {
       if (this.placeConnectorId) {
         const h = this.scene.pickHandle(x, y);

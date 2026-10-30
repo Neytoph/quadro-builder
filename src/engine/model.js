@@ -7,7 +7,7 @@ import { confirmedSpec, usesCustomClimbingColor } from './componentPack.js';
 import { confirmedCandidates, ropeCandidate, supportsPanelFixing, PANEL_RETAINER_LAYOUT, curvePoint } from './confirmedComponentModel.js';
 import { sectorScrewMounts } from './panelScrewMounts.js';
 import { segmentDistance } from './segmentDistance.js';
-import { tubePath, tubePathsCross, tubePathsCoincide } from './tubeCollision.js';
+import { tubePath, cachedTubePath, tubePathsCross, tubePathsCoincide } from './tubeCollision.js';
 import { insetPanelProbes, INSET_PANEL_IDS, INSET_MOUNT_LAYOUT, oppositeScrewSupports, insetPanelReference } from './insetPanelMounts.js';
 import { validAssemblyConfig } from './assemblyConfig.js';
 import { validHomeContext } from '../home/context.js';
@@ -1022,7 +1022,7 @@ export class BuildModel {
       const a = this.nodes.get(t.a), b = this.nodes.get(t.b);
       if (!a || !b) continue;
       if (path.center || t.bow) {
-        if (tubePathsCross(path, tubePath(a, b, t))) return t;
+        if (tubePathsCross(path, cachedTubePath(a, b, t))) return t;
       } else if (segmentsOverlap(p, q, a, b) || segmentsCross(p, q, a, b)) return t;
     }
     return null;
@@ -6169,7 +6169,7 @@ export class BuildModel {
       if (t.arm || t.link) continue;
       const a = this.nodes.get(t.a), b = this.nodes.get(t.b);
       if (!a || !b) continue;
-      list.push({ id: t.id, a, b, ...tubePath(a, b, t) });
+      list.push({ id: t.id, a, b, ...cachedTubePath(a, b, t) });
     }
     // Raster aufbauen: jedes Rohr liegt in allen Zellen, die seine Kiste beruehrt.
     const grid = new Map();
@@ -7176,9 +7176,9 @@ export class BuildModel {
   }
 
   // --- Serialisierung -----------------------------------------------------
-  toJSON() {
+  toJSON({ pruneGroups = true } = {}) {
     // 删过零件的组在这里收拾：存档、撤销快照、复制都经过这一步
-    this._pruneGroups();
+    if (pruneGroups) this._pruneGroups();
     return {
       format: FORMAT_VERSION,
       ...(this.assemblyConfig ? { assemblyConfig: structuredClone(this.assemblyConfig) } : {}),
