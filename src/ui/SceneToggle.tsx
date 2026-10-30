@@ -17,7 +17,7 @@ const tileChrome = (_on: boolean, h: number): CSSProperties => ({
 
 const tileBtn = 'm-tile overflow-hidden rounded-lg p-0 border-0 cursor-pointer transition-[filter,opacity,box-shadow,transform] duration-200 hover:scale-[1.03] active:scale-95 flex items-center justify-center'
 
-/** 场景工具位于左侧属性栏旁，区域显示按钮排在最右侧。 */
+/** 场景工具位于左侧属性栏旁，框架按钮跟在导出后面。 */
 export default function SceneToggle() {
   const api = useEngine()
   const { t, lang } = useI18n()
@@ -46,7 +46,7 @@ export default function SceneToggle() {
     <div className="fixed z-20 pointer-events-none" style={{ left: pos.sceneLeft, top: pos.sceneTop }}><div
       data-tour="scene-buttons"
       data-ui="scene-buttons"
-      className="flex flex-row pointer-events-none"
+      className="flex flex-row flex-wrap pointer-events-none"
       style={{ width: clusterW, gap: SCENE_CLUSTER_GAP }}
     >
       <HomeRoomPanel tile={tile} />
@@ -87,6 +87,29 @@ export default function SceneToggle() {
           <rect x="24.8" y="19" width="8.2" height="7.2" rx="1.2" fill="#D7E8EE" />
           <circle cx="17.2" cy="33.2" r="3.1" fill="#fff" stroke="#5C6570" strokeWidth="1.05" />
           <path d="M22.4 31.7 h10.4 M22.4 35.3 h7.4" stroke="#C4B8A8" strokeWidth="1.5" strokeLinecap="round" />
+        </svg>
+      </button>
+      <button
+        type="button"
+        data-ui="frame-only-toggle"
+        data-panel-chrome
+        data-button-motion="off"
+        aria-label={t('btn.frameOnly')}
+        aria-pressed={api.frameOnly}
+        title={t('btn.frameOnly')}
+        onClick={api.toggleFrameOnly}
+        className={`pointer-events-auto ${tileBtn} focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600`}
+        style={tileChrome(api.frameOnly, tile)}
+      >
+        <svg viewBox="0 0 48 48" width={tile} height={tile} aria-hidden="true">
+          <rect width="48" height="48" fill={api.frameOnly ? '#FFF0DF' : '#EEF1F5'} />
+          <g fill="none" stroke={api.frameOnly ? '#EA580C' : '#3A8494'} strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round">
+            <path d="M13 17 25 10 37 17 25 24Z M13 17V32L25 39 37 32V17 M25 24V39" />
+            <path d="M25 10V25 M13 32 25 25 37 32" strokeDasharray="2 3" opacity=".5" />
+          </g>
+          <g fill={api.frameOnly ? '#EA580C' : '#3A8494'}>
+            {[[13,17],[25,10],[37,17],[25,24],[13,32],[25,39],[37,32]].map(([cx,cy]) => <rect key={`${cx}-${cy}`} x={cx-1.8} y={cy-1.8} width="3.6" height="3.6" rx=".7" />)}
+          </g>
         </svg>
       </button>
       {indoor && <button

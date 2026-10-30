@@ -268,6 +268,8 @@ interface EngineApi {
   frame: () => void
   toggleGrass: () => void
   grassOn: boolean
+  frameOnly: boolean
+  toggleFrameOnly: () => void
   background: 'grass' | 'blank' | 'home'
   setBackground: (mode: 'grass' | 'blank' | 'home') => void
   homeZones: { obstacles: boolean; usable: boolean }
@@ -694,7 +696,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const { t, lang } = useI18n()
   const hostRef = useRef<HTMLDivElement | null>(null)
   const eng = useRef<{ scene: E; model: E; builder: E } | null>(null)
-  const thumbBatch = useRef<{ json: unknown; camera: unknown; sceneOn: boolean; mode: string } | null>(null)
+  const thumbBatch = useRef<{ json: unknown; camera: unknown; sceneOn: boolean; mode: string; frameOnly: boolean } | null>(null)
   // 截图一次只做一件：存下时截的封面、开启共享时截的封面、发布前截的画面可能同时来，
   // 两批叠在一起，先结束的那一批会把场景复位，后一批截到的就是错的
   const shotTurn = useRef<Promise<unknown>>(Promise.resolve())
@@ -3240,7 +3242,9 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       camera: e.scene.cameraState(),
       sceneOn: !!e.scene._sceneOn,
       mode: String(e.builder.mode || 'select'),
+      frameOnly: !!e.builder.frameOnly,
     }
+    e.builder.frameOnly = false
     e.builder.cancelPaste?.()
     e.builder.setMode('select')
     e.builder.modelReplaced()
@@ -3258,6 +3262,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       // 截图期间文档可能被别人改过：按文档现在的样子放回去
       const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
       e.model.loadJSON(tab ? tab.local.history.toJSON() : prev.json)
+      e.builder.frameOnly = prev.frameOnly
       e.builder.setMode(prev.mode || 'select')
       e.scene.setScene(prev.sceneOn)
       if (prev.camera) e.scene.restoreCameraState(prev.camera)
@@ -3440,6 +3445,19 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       bump()
     },
     grassOn: !!scene?._sceneOn,
+    frameOnly: !!builder?.frameOnly,
+    toggleFrameOnly: () => {
+      if (!builder || !scene || thumbBatch.current) return
+      builder.frameOnly = !builder.frameOnly
+      builder.refresh()
+      if (builder.frameOnly) {
+        const visible = scene.selectableParts()
+        let removed = false
+        for (const id of builder.selection.keys()) if (!visible.has(id)) { builder.selection.delete(id); removed = true }
+        if (removed) builder.refresh()
+      }
+      bump()
+    },
     background: scene?._sceneOn ? 'grass' : homeContext && !scene?._homeHidden ? 'home' : 'blank',
     setBackground: changeBackground,
     homeZones: { obstacles: scene?._homeObstaclesVisible !== false, usable: scene?._homeUsableVisible !== false },

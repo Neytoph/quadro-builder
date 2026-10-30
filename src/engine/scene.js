@@ -191,6 +191,8 @@ const SLIDE_END_FLAT = 47.5 - SLIDE_END_LIP_R;
 // Flaechige Anbauteile verschwinden im Verstaerken- und Kollisions-Modus, wie
 // Platten und Netze auch.
 const FLAT_FITTINGS = new Set(["lattice2", "textil-round2", "roof-large2"]);
+// 框架视图保留承接管件的机械连接件，其余配件随面板一起隐藏。
+const FRAME_FITTINGS = new Set(["adapter2", "bearing2", "steering-lock2", "open-connector2", "tube-cap2"]);
 // Staerke der Baellebad-Folie: nur so dick, dass sie sichtbar ist.
 // Der Nullpunkt des kleinen Beckens liegt 20 cm neben der Mitte seiner
 // Frontwand (abgegriffenes Modell, lokale X-Achse) -- wie in qdfimport.js.
@@ -4109,6 +4111,13 @@ export class SceneManager {
   // opts.slideNameFor(slide) -> string|null : Beschriftung an der Rutsche/Dach.
   // assembly.transforms 只移动场景碎片，保存的模型位置保持不变。
   renderModel(model, selectedNodeId, opts = {}) {
+    const frameOnly = !!opts.frameOnly;
+    const viewChanged = !!this._frameOnly !== frameOnly;
+    if (viewChanged) {
+      this._finishMotion();
+      this._clearHoverOverlay();
+    }
+    this._frameOnly = frameOnly;
     this._renderModel = model;   // 有的配件要回头看模型（软包滚筒套在哪根管上）
     if (opts.interactionMode) {
       if (opts.interactionMode === 'select' || opts.interactionMode === 'delete') this._hoverPartMode = opts.interactionMode;
@@ -4211,7 +4220,7 @@ export class SceneManager {
     const reinforce = opts.reinforce || false;
     // Kollisions-Modus: betroffene Rohre rot, alle anderen grau. Platten und
     // Netze bleiben aussen vor, damit die Ueberlagerungen sichtbar sind.
-    const hideFlat = reinforce;
+    const hideFlat = reinforce || frameOnly;
     const cs = geometry().connectorSize;
     // Echte Kupplungs-Arme (aus variant2 importiert, node.arms): kurze Stutzen
     // mit Arm-Durchmesser (~42 mm). Offene Arme ragen heraus; von Rohren belegte
@@ -5009,6 +5018,7 @@ export class SceneManager {
     // Anbauteile: Raeder, Rollen, Kappen, Netze, Rundwand, Dach, Sonderkupplungen.
     for (const f of (model.fittings ? model.fittings.values() : [])) {
       if (hideFlat && FLAT_FITTINGS.has(f.kind)) continue;
+      if (frameOnly && !FRAME_FITTINGS.has(f.kind)) continue;
       const st = stateOf(f.id);
       if (st === "future") continue;
       for (const mesh of this._fittingMeshes(f)) {
@@ -5068,7 +5078,10 @@ export class SceneManager {
 
     // Beschriftung fuer Teile, die selbst keine tragen (Platten, Anbauteile,
     // Doppelrohrverbinder, Netze): nur fuer das eine gewaehlte Teil.
-    if (soloLabel) {
+    const hiddenSolo = frameOnly && soloLabel && (model.panels.has(soloLabel.id)
+      || model.textiles?.has(soloLabel.id) || model.slides.has(soloLabel.id)
+      || model.fittings?.has(soloLabel.id) && !FRAME_FITTINGS.has(model.fittings.get(soloLabel.id).kind));
+    if (soloLabel && !hiddenSolo) {
       const at = this._soloAnchor(model, soloLabel.id);
       if (at) {
         const sprite = this._makeLabelSprite(soloLabel.text, false, null);
@@ -5103,7 +5116,7 @@ export class SceneManager {
     // Zoom-Grenze richtet sich nach der Modellgroesse.
     this._applyZoomLimits(model);
 
-    if (vorher) this._motionAfterRender(vorher, opts);
+    if (vorher) this._motionAfterRender(vorher, viewChanged ? { ...opts, preview: true } : opts);
     if (opts.preserveSelectionAppearance && selected && !highlight) this._outlineSelectedParts(selected, opts.profileSelection);
     if (this._homeFramePending && this._homeFramePending === this._homeKey) this.frameHomeProduct();
 
