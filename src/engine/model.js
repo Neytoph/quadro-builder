@@ -7,6 +7,7 @@ import { confirmedSpec, usesCustomClimbingColor } from './componentPack.js';
 import { confirmedCandidates, ropeCandidate, supportsPanelFixing, PANEL_RETAINER_LAYOUT, curvePoint } from './confirmedComponentModel.js';
 import { sectorScrewMounts } from './panelScrewMounts.js';
 import { segmentDistance } from './segmentDistance.js';
+import { tubePath, tubePathsCross, tubePathsCoincide } from './tubeCollision.js';
 import { insetPanelProbes, INSET_PANEL_IDS, INSET_MOUNT_LAYOUT, oppositeScrewSupports, insetPanelReference } from './insetPanelMounts.js';
 import { validAssemblyConfig } from './assemblyConfig.js';
 import { validHomeContext } from '../home/context.js';
@@ -1009,14 +1010,20 @@ export class BuildModel {
   // dessen Treffpunkt im Inneren mindestens eines Rohres liegt (z. B. 35er quer
   // ueber ein 75er). Beruehren an einer gemeinsamen Kupplung zaehlt nicht.
   // Liefert das kollidierende Rohr oder null.
-  tubeCollision(p, q, ignoreTubeId = null) {
+  /**
+   * @param {string|null} [ignoreTubeId]
+   * @param {{ bowCenter?: number[]|null }} [options]
+   */
+  tubeCollision(p, q, ignoreTubeId = null, { bowCenter = null } = {}) {
+    const path = tubePath(p, q, { bow: !!bowCenter, bowCenter });
     for (const t of this.tubes.values()) {
       if (t.id === ignoreTubeId) continue;
       if (t.link) continue;
       const a = this.nodes.get(t.a), b = this.nodes.get(t.b);
       if (!a || !b) continue;
-      if (segmentsOverlap(p, q, a, b)) return t;
-      if (segmentsCross(p, q, a, b)) return t;
+      if (path.center || t.bow) {
+        if (tubePathsCross(path, tubePath(a, b, t))) return t;
+      } else if (segmentsOverlap(p, q, a, b) || segmentsCross(p, q, a, b)) return t;
     }
     return null;
   }
@@ -6153,19 +6160,16 @@ export class BuildModel {
    *
    * `only` schraenkt auf bestimmte Rohre ein: beim Ziehen und Einfuegen bewegt
    * sich nur ein Teil, alles Uebrige steht und bildet keine NEUE Ueberlagerung.
+   * @param {{ only?: Set<string>|null, allowCoincide?: boolean }} [options]
    */
   collisions({ only = null, allowCoincide = false } = {}) {
     const out = new Set();
     const list = [];
     for (const t of this.tubes.values()) {
-      if (t.arm || t.link || t.bow) continue;
+      if (t.arm || t.link) continue;
       const a = this.nodes.get(t.a), b = this.nodes.get(t.b);
       if (!a || !b) continue;
-      list.push({
-        id: t.id, a, b,
-        lo: [Math.min(a.x, b.x), Math.min(a.y, b.y), Math.min(a.z, b.z)],
-        hi: [Math.max(a.x, b.x), Math.max(a.y, b.y), Math.max(a.z, b.z)],
-      });
+      list.push({ id: t.id, a, b, ...tubePath(a, b, t) });
     }
     // Raster aufbauen: jedes Rohr liegt in allen Zellen, die seine Kiste beruehrt.
     const grid = new Map();
@@ -6204,8 +6208,11 @@ export class BuildModel {
           if (!beruehrt(p, q)) continue;
           const supported = (spoke, axle) => [spoke.a, spoke.b].some(node => node.part === 'windmill' && node.clampOn?.tubeId === axle.id);
           if (supported(p, q) || supported(q, p)) continue;
-          if (allowCoincide && segmentsCoincide(p.a, p.b, q.a, q.b)) continue;
-          if (segmentsOverlap(p.a, p.b, q.a, q.b) || segmentsCross(p.a, p.b, q.a, q.b)) {
+          if (allowCoincide && (p.center || q.center ? tubePathsCoincide(p, q)
+            : segmentsCoincide(p.a, p.b, q.a, q.b))) continue;
+          const hit = p.center || q.center ? tubePathsCross(p, q)
+            : segmentsOverlap(p.a, p.b, q.a, q.b) || segmentsCross(p.a, p.b, q.a, q.b);
+          if (hit) {
             out.add(p.id);
             out.add(q.id);
           }
@@ -6219,7 +6226,7 @@ export class BuildModel {
   tubesAt(nodeIds) {
     const out = new Set();
     for (const t of this.tubes.values()) {
-      if (t.arm || t.link || t.bow) continue;
+      if (t.arm || t.link) continue;
       if (nodeIds.has(t.a) || nodeIds.has(t.b)) out.add(t.id);
     }
     return out;
@@ -6943,6 +6950,9 @@ export class BuildModel {
     if (existing) {
       const incoming = normal.map(value => -value);
       if (!this.canExtendFrom(existing, incoming) || armFittingDirsAt(this, existing).some(axis => axis.reduce((sum, value, i) => sum + value * incoming[i], 0) > ARM_ALIGN_TOL)) return { collision: true };
+    }
+    if (this.tubeCollision(from, existing || target, null, { bowCenter: [round(cx), round(cy), round(cz)] })) {
+      return { collision: true };
     }
     const to = this.addNode(round(target.x), round(target.y), round(target.z));
     if (from.id === to.id) return null;
