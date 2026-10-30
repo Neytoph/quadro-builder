@@ -116,6 +116,7 @@ export class Builder {
     // "select" (Cursor: vorhandenes auswaehlen) | "delete" (Klick loescht)
     // | "add" | "panel" | "slide" | "clamp" | "fitting" | "reinforce" | "assembly"
     this.mode = "select";
+    this.frameOnly = false;
     this.tubeId = geometry().defaultTube;
     this.panelId = defaultPanel();
     this.fittingKind = "multi-wheel2";   // gewaehltes Anbauteil (QDF-Art)
@@ -2260,7 +2261,7 @@ export class Builder {
     let displayModel=this._selectionTransform?.model || this.model;
     if(this._colorPreview?.hex)displayModel=colorPreviewModel(this.model,this._colorPreview.selection,this._colorPreview.hex);
     this.scene.renderModel(displayModel, this.selectedNodeId,
-      { labelFor, slideNameFor, labelIds, soloId, soloLabel, assembly, suggest, reinforce, reinforcementPartId: this.reinforcementPartId,
+      { labelFor, slideNameFor, labelIds, soloId, soloLabel, assembly, suggest, reinforce, frameOnly: this.frameOnly, reinforcementPartId: this.reinforcementPartId,
         selected: this._colorPreview ? null : selected,
         preserveSelectionAppearance: this.mode === 'select',
         solidSelected: this.mode==='select' && selected?.size>1 && !this.highlight ? selected : this._boxSelected,
