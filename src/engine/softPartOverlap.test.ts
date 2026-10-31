@@ -28,16 +28,27 @@ describe('软装不参与放置冲突检查', () => {
   })
 
   it.each(['panel_40x40', 'hole_panel_40x40'])('蹦床与相邻%s 共边时不占用板件固定点', panelId => {
-    const model = createDirectInstallationFrame(80, 40)
-    const a = model.findNodeNear(40, 42.5, 0)!, b = model.findNodeNear(40, 42.5, 40)!
-    expect(model.addTube(a.id, b.id, 'T35', 'green', 35)).toBeTruthy()
-    const trampoline = model.confirmedMounts('trampoline').find(p => p.valid && p.params.width === 40 && p.params.height === 40)!
-    expect(model.addConfirmedComponent(trampoline, 'black')).toBeTruthy()
-    const panel = model.confirmedMounts(panelId).find(p => p.valid && Math.abs(p.pos[0] - trampoline.pos[0]) > 30)!
-    expect(panel).toBeTruthy()
-    expect(panel.supportTubes.some((id: string) => trampoline.supportTubes.includes(id))).toBe(true)
-    expect(panelId === 'panel_40x40' ? model.addNativePanel(panel, 'blue') : model.addConfirmedComponent(panel, 'blue')).toBeTruthy()
-    expect(model.addNativePanel({ ...panel, panelId: 'panel_40x40' }, 'green')).toBeNull()
+    for (const softFirst of [true, false]) {
+      const model = createDirectInstallationFrame(80, 40)
+      const a = model.findNodeNear(40, 42.5, 0)!, b = model.findNodeNear(40, 42.5, 40)!
+      const sharedEdge = model.addTube(a.id, b.id, 'T35', 'green', 35)!
+      expect(sharedEdge).toBeTruthy()
+      const trampoline = model.confirmedMounts('trampoline').find(p => p.valid && p.params.width === 40 && p.params.height === 40)!
+      expect(trampoline.supportTubes).toContain(sharedEdge.id)
+      if (softFirst) expect(model.addConfirmedComponent(trampoline, 'black')).toBeTruthy()
+      // 同一板面有多个固定方向；保留候选方向，明确选择使用共边管的一组。
+      const panel = model.confirmedMounts(panelId, { deduplicate: false }).find(p =>
+        p.supportTubes.includes(sharedEdge.id) &&
+        Math.abs(Math.abs(p.pos[0] - trampoline.pos[0]) - 40) < 0.01 &&
+        Math.abs(p.pos[1] - trampoline.pos[1]) < 0.01 && Math.abs(p.pos[2] - trampoline.pos[2]) < 0.01)!
+      expect(panel).toBeTruthy()
+      expect(panel.valid).toBe(true)
+      expect(panel.mounts.some((mount: {tube: string}) => mount.tube === sharedEdge.id)).toBe(true)
+      expect(trampoline.mounts.some((mount: {tube: string}) => mount.tube === sharedEdge.id)).toBe(true)
+      expect(panelId === 'panel_40x40' ? model.addNativePanel(panel, 'blue') : model.addConfirmedComponent(panel, 'blue')).toBeTruthy()
+      if (!softFirst) expect(model.addConfirmedComponent(trampoline, 'black')).toBeTruthy()
+      expect(model.addNativePanel({ ...panel, panelId: 'panel_40x40' }, 'green')).toBeNull()
+    }
   })
 
   it('普通板与网、布面可按任一顺序重叠安装，硬板重复仍拒绝', () => {

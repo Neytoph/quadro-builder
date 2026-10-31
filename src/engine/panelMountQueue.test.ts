@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PanelMountQueue } from './panelMountQueue.js'
+import { loadCatalog } from './catalog.js'
+import { createConfirmedComponentFixture } from './confirmedComponentExample.js'
+import { withPlacementPass } from './incrementalPlacement.js'
 
 // 此夹具只检查消息乱序、失效与资源释放；真实计算和鼠标安装另用Chrome Worker验收。
 type MountRequest = { requestId: number; panelId: string; model: unknown }
@@ -26,6 +29,30 @@ const queues: PanelMountQueue[] = []
 afterEach(() => { queues.splice(0).forEach(queue => queue.dispose()); MessageWorker.instances = []; vi.unstubAllGlobals() })
 
 describe('板材后台挂位请求', () => {
+  it('后台等待期间保留远处真实板位，附近旧位置消失，删除后由最新计算恢复', async () => {
+    await loadCatalog()
+    const {model}=createConfirmedComponentFixture('panel_40x40_honeycomb',{install:false})
+    const other=createConfirmedComponentFixture('panel_40x40_honeycomb',{install:false}).model
+    model.insertFragment(other.extractSelection(new Map([...other.nodes.keys()].map(id=>[id,'node']))),[1000,42.5,0])
+    const {queue}=setup(),id='panel_40x40_honeycomb'
+    const get=()=>withPlacementPass(model,()=>queue.get(model.toJSON(),id,options,model))
+    expect(get()).toBeNull()
+    const mounts=model.panelAccessoryMounts(id),worker=MessageWorker.instances[0]
+    worker.reply(mounts);expect(get()).toEqual(mounts)
+    const part=model.addConfirmedComponent(mounts[0],'blue')!
+    expect(part).toBeTruthy()
+    const partial=get()!
+    expect(partial.length).toBeGreaterThan(0)
+    expect(partial.length).toBeLessThan(mounts.length)
+    const far=mounts.filter(p=>Math.hypot(...p.pos.map((v:number,i:number)=>v-mounts[0].pos[i]))>100)
+    expect(far.length).toBeGreaterThan(0)
+    for(const mount of far)expect(partial).toContainEqual(mount)
+    expect(partial.every((p:unknown)=>model.panelPlacementDiagnostics(p).valid)).toBe(true)
+    const after=model.panelAccessoryMounts(id);worker.reply(after);expect(get()).toEqual(after)
+    model.removePanel(part.id);get()
+    const restored=model.panelAccessoryMounts(id);worker.reply(restored)
+    expect(get()).toEqual(mounts)
+  })
   it('模型没变化时复用结果，空结果也不重复计算', () => {
     const { queue, ready } = setup(), data = { nodes: [{ x: 0 }] }
     expect(queue.get(data, 'panel_40x40', options)).toBeNull()

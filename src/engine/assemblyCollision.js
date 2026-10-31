@@ -50,6 +50,8 @@ export function beginAssemblyCollisionPass(model,queryCache=new Map()){envelopeC
 export function forkAssemblyCollisionPass(source,target,excludedId){beginAssemblyCollisionPass(target);const cache=new Map(envelopeCache.get(source));cache.delete(excludedId);envelopeCache.set(target,cache);}
 export function invalidateAssemblyEnvelope(model,id){envelopeCache.get(model)?.delete(id);}
 export function partEnvelope(model,id){useMeshes();const cache=envelopeCache.get(model);if(cache?.has(id))return cache.get(id);const shapes=computeEnvelope(model,id);cache?.set(id,shapes);return shapes;}
+// 增量失效范围必须读取当前几何，不能借用装配过程中的旧包围体。
+export function currentPartBounds(model,id){useMeshes();const shapes=computeEnvelope(model,id);return shapes.length?envelopeBounds(shapes):null;}
 function computeEnvelope(model,id) {
   const radius=geometry().tubeRadius||2.45, cs=geometry().connectorSize||5;
   const tube=model.tubes.get(id);

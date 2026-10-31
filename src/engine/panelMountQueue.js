@@ -1,17 +1,27 @@
-// 仅缓存同一完整模型快照；后台一次计算一个请求，等待中的请求只保留最新选择。
+import { placementMemo, placementCached, placementBounds } from './incrementalPlacement.js';
+
+// 后台计算受影响的候选；等待期间保留已经确认不受变更影响的安装点。
 export class PanelMountQueue {
   constructor(onReady, onError) {
     this.onReady = onReady;
     this.onError = onError;
     this.results = new Map();
+    this.partial = new Map();
     this.requestId = 0;
   }
 
-  get(data, panelId, options) {
+  /** @param {import('./model.js').BuildModel|null} [model] */
+  get(data, panelId, options, model = null) {
     if (this.disposed) return null;
     const snapshot = JSON.stringify(data);
     if (snapshot !== this.snapshot) {
       this.snapshot = snapshot;
+      for(const [key,mounts] of this.results)this.partial.set(key,mounts);
+      for(const [key,mounts] of this.partial){
+        const kept=model?mounts.filter(m=>placementCached(model,'worker-mount:'+key+':'+JSON.stringify(m))):[];
+        if(kept.length)this.partial.set(key,kept);else this.partial.delete(key);
+      }
+      while(this.partial.size>8)this.partial.delete(this.partial.keys().next().value);
       this.results.clear();
       this.failedKey = null;
     }
@@ -19,14 +29,17 @@ export class PanelMountQueue {
     this.requested = { snapshot, key };
     if (this.results.has(key)) {
       this.waiting = null;
-      return this.results.get(key);
+      const mounts=this.results.get(key);
+      if(model)for(const mount of mounts)placementMemo(model,'worker-mount:'+key+':'+JSON.stringify(mount),
+        ()=>({bounds:placementBounds(model,mount),ids:new Set([mount.a,mount.b,...(mount.supportTubes||[])].filter(Boolean))}),()=>true);
+      return mounts;
     }
     if (this.failedKey === key) return null;
     if (this.running?.snapshot !== snapshot || this.running?.key !== key) {
       this.waiting = { snapshot, key, model: structuredClone(data), panelId, options: { ...options } };
       this.start();
     } else this.waiting = null;
-    return null;
+    return this.partial.get(key)?.length ? this.partial.get(key) : null;
   }
 
   start() {
@@ -60,6 +73,7 @@ export class PanelMountQueue {
     this.running = null;
     if (job.snapshot === this.snapshot) {
       this.results.set(job.key, message.mounts);
+      this.partial.delete(job.key);
       if (this.results.size > 8) this.results.delete(this.results.keys().next().value);
     }
     if (this.requested?.snapshot === job.snapshot && this.requested.key === job.key) this.onReady();
@@ -95,5 +109,6 @@ export class PanelMountQueue {
     this.worker = null;
     this.running = null;
     this.results.clear();
+    this.partial.clear();
   }
 }
