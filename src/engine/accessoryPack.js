@@ -5,6 +5,7 @@ import { INSET_MOUNT_LAYOUT, INSET_PANEL_EDGE_INSET, hasInsetScrews, oppositeScr
 import { geometry } from './catalog.js';
 import { isSoftPart } from './softParts.js';
 import { gymRingPlacement } from './gymRingSupport.js';
+import { placementMemo, placementBounds } from './incrementalPlacement.js';
 
 export const ACCESSORY_PACK = [
   { id: 'steering_wheel', name: '方向盘', name_en: 'Steering wheel', name_de: 'Lenkrad', placement: 'fitting', mount: 'horizontal', diameter: 24, clampSpacing: 8, shaft: 8, width: 24, drop: 0 },
@@ -264,6 +265,11 @@ export function nativeWheelComponentObstacle(model, wheel) {
 }
 
 export function componentObstacle(model, part, { sweep = false, collisionCache = null, curvedTubesOnly = false } = {}) {
+  return placementMemo(model,'obstacle:'+JSON.stringify([part,sweep,curvedTubesOnly]),()=>({
+    bounds:placementBounds(model,part),ids:new Set([part.a,part.b,part.tube,...(part.supportTubes||[])].filter(Boolean))
+  }),()=>computeComponentObstacle(model,part,{sweep,collisionCache,curvedTubesOnly}));
+}
+function computeComponentObstacle(model, part, { sweep, collisionCache, curvedTubesOnly }) {
   if (isSoftPart(model, part)) return null;
   const volumes = componentVolumes(model, part, { sweep });
   // 先用保守世界包围盒排除远处部件；精确盒体和圆管检查继续决定真实碰撞。

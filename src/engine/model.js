@@ -2,6 +2,7 @@
 // Bewusst ohne Three.js-Abhaengigkeit, damit es testbar und Backend-tauglich bleibt.
 
 import { MERGE_EPS, FORMAT_VERSION, DIAGONAL_SNAP_TOL, DIRECTIONS, DIAGONAL_DIRECTIONS, DIR_ALIGN_TOL, ARM_ALIGN_TOL, CONN_TYPE_MASK, anchorGap } from "./config.js";
+import { withPlacementPass, placementMemo, placementBounds, pointsBounds, railBounds, railLineScope } from './incrementalPlacement.js';
 import { ACCESSORY_IDS, PANEL_ACCESSORY_IDS, accessoryMount, accessoryDiagnostics, panelAccessoryDiagnostics, componentMountsValid, componentVolumes, componentFrame, confirmedDiagnostics, nativeWheelComponentObstacle } from './accessoryPack.js';
 import { confirmedSpec, usesCustomClimbingColor } from './componentPack.js';
 import { confirmedCandidates, ropeCandidate, supportsPanelFixing, PANEL_RETAINER_LAYOUT, curvePoint } from './confirmedComponentModel.js';
@@ -1265,6 +1266,12 @@ export class BuildModel {
    * daraus ergeben sich die moeglichen Abschnitte.
    */
   panelPartners(railId, dims, tol = 1.5) {
+    // 调用方会追加连续框边，返回独立数组，避免污染共享查询结果。
+    return placementMemo(this,'partners:'+JSON.stringify([railId,dims,tol]),{groups:['nodes','tubes'],bounds:railBounds(this,railId,Math.max(...dims)+tol+8),ids:new Set([railId])},
+      ()=>this._computePanelPartners(railId,dims,tol)).map(p=>({...p}));
+  }
+
+  _computePanelPartners(railId,dims,tol) {
     const ra = this._rail(railId);
     if (!ra) return [];
     const out = [];
@@ -1398,10 +1405,14 @@ export class BuildModel {
   }
 
   accessoryMounts(kind) {
-    return [...this.tubes.keys()].map(id => accessoryMount(this, kind, id)).filter(Boolean);
+    return withPlacementPass(this,()=>[...this.tubes.keys()].map(id=>this.accessoryDiagnostics(kind,id)).filter(mount=>mount.valid));
   }
 
-  accessoryDiagnostics(kind, tubeId, opts = {}) { return accessoryDiagnostics(this, kind, tubeId, opts); }
+  accessoryDiagnostics(kind, tubeId, opts = {}) {
+    const scope=kind==='gym_rings'?railLineScope(this,tubeId,80):{bounds:railBounds(this,tubeId,80),ids:new Set([tubeId])};
+    delete scope.groups;
+    return placementMemo(this,'accessory-diagnostic:'+JSON.stringify([kind,tubeId,opts]),scope,()=>accessoryDiagnostics(this,kind,tubeId,opts));
+  }
 
   panelAccessoryDiagnostics(probe, opts = {}) { return panelAccessoryDiagnostics(this, probe, opts); }
 
@@ -1416,6 +1427,12 @@ export class BuildModel {
   }
 
   _panelMountCandidate(probe, options = {}) {
+    return placementMemo(this,'panel-diagnostic:'+JSON.stringify([probe,options.ignoreId]),()=>({
+      bounds:placementBounds(this,probe),ids:new Set([probe.a,probe.b,probe.tube,...(probe.supportTubes||[])].filter(Boolean))
+    }),()=>this._uncachedPanelMountCandidate(probe,options));
+  }
+
+  _uncachedPanelMountCandidate(probe, options = {}) {
     const candidate = this.panelPlacementDiagnostics(probe, options);
     if (candidate.valid || !candidate.mounts?.length) return candidate;
     const opposite = this.panelPlacementDiagnostics({ ...probe, side: -(probe.side || 1) }, options);
@@ -1431,7 +1448,13 @@ export class BuildModel {
     this.panels.set(record.id,record);return record;
   }
 
+  // 不同板型返回各自扩展字段，保留既有动态候选接口。
+  /** @returns {Array<any>} */
   panelAccessoryMounts(panelId,{screwAxis='auto',oppositeRetainers=true}={}) {
+    return withPlacementPass(this,()=>this._incrementalPanelAccessoryMounts(panelId,{screwAxis,oppositeRetainers}));
+  }
+
+  _incrementalPanelAccessoryMounts(panelId,{screwAxis='auto',oppositeRetainers=true}={}) {
     if(screwAxis==='auto'){
       const seen=new Set();
       return ['vertical','horizontal'].flatMap(axis=>this._panelAccessoryMounts(panelId,axis,true)).filter(part=>{
@@ -1471,7 +1494,13 @@ export class BuildModel {
     return f;
   }
 
+  // 配件候选字段由目录类型决定，保留调用方原有动态字段访问。
+  /** @returns {Array<any>} */
   confirmedMounts(partId,options={}) {
+    return withPlacementPass(this,()=>this._incrementalConfirmedMounts(partId,options));
+  }
+
+  _incrementalConfirmedMounts(partId,options={}) {
     // 同一次同步枚举中，承载方向筛选与返回结果共用检查；下次枚举仍读取当前模型。
     const checked=new Map(),collisionCache=new Map(),mountCache=new Map();
     const diagnose=probe=>{
@@ -1479,7 +1508,9 @@ export class BuildModel {
       return checked.get(probe);
     };
     const candidates=confirmedCandidates(this,partId,{...options,isPanelCandidateValid:probe=>diagnose(probe).valid});
-    return candidates.map(p=>p.panelId ? diagnose(p) : confirmedDiagnostics(this,p,{collisionCache,mountCache,candidates}));
+    return candidates.map(p=>p.panelId ? diagnose(p) : placementMemo(this,'fitting-diagnostic:'+JSON.stringify(p),()=>({
+      bounds:placementBounds(this,p),ids:new Set(p.supportTubes||[])
+    }),()=>confirmedDiagnostics(this,p,{collisionCache,mountCache,candidates})));
   }
   ropeDiagnostics(first, second) { return confirmedDiagnostics(this, ropeCandidate(this, first, second)); }
   confirmedDiagnostics(probe) { return probe.nativeGeometry ? this.panelPlacementDiagnostics(probe) : confirmedDiagnostics(this, probe); }
@@ -1919,6 +1950,10 @@ export class BuildModel {
    * Punkte zeigen nur, welche Rohre in Frage kommen.
    */
   tubeFittingSpots(kind, cs = 5) {
+    return withPlacementPass(this,()=>this._incrementalTubeFittingSpots(kind,cs));
+  }
+
+  _incrementalTubeFittingSpots(kind, cs) {
     if (!TUBE_FITTINGS[kind]) return [];
     const out = [];
     for (const t of this.tubes.values()) {
@@ -1926,7 +1961,7 @@ export class BuildModel {
       const a = this.nodes.get(t.a), b = this.nodes.get(t.b);
       if (!a || !b) continue;
       const mid = [(a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2];
-      const m = this.tubeFittingMount(t.id, mid, kind, cs);
+      const m = placementMemo(this,'tube-fitting:'+JSON.stringify([t.id,kind,cs]),{bounds:railBounds(this,t.id,80),ids:new Set([t.id])},()=>this.tubeFittingMount(t.id, mid, kind, cs));
       if (m) out.push(m);
     }
     return out;
@@ -2131,8 +2166,13 @@ export class BuildModel {
   // An der Kupplung: jede kardinale Richtung ohne Rohr, nicht unter den Boden.
   // Die Laufrolle haengt immer nach unten, sie kennt nur diese eine Stelle.
   _fittingNodeMounts(spec, cs = 5, kind = null) {
+    return [...this.nodes.values()].flatMap(n=>placementMemo(this,'node-fitting:'+JSON.stringify([n.id,spec,cs,kind]),
+      {bounds:pointsBounds([[n.x,n.y,n.z]],Math.max(cs,Math.abs(spec.offset))+12),ids:new Set([n.id])},()=>this._computeFittingNodeMounts(spec,cs,kind,[n])));
+  }
+
+  _computeFittingNodeMounts(spec, cs, kind, nodes) {
     const out = [];
-    for (const n of this.nodes.values()) {
+    for (const n of nodes) {
       if (n.c45body) continue;                       // Adapterkoerper ist keine Kupplung
       // Knoten mit festem Katalogteil (Lochzapfen-, Lagerkupplung, Flexi) sind
       // keine Kupplung mit freien Stutzen -- ein Anbauteil sitzt dort nicht.
@@ -2356,8 +2396,13 @@ export class BuildModel {
    * -X-Achse).
    */
   holeArmMounts(cs = 5) {
+    return [...this.nodes.values()].flatMap(n=>placementMemo(this,'hole-arm:'+JSON.stringify([n.id,cs]),
+      {bounds:pointsBounds([[n.x,n.y,n.z]],cs+12),ids:new Set([n.id])},()=>this._computeHoleArmMounts(cs,[n])));
+  }
+
+  _computeHoleArmMounts(cs,nodes) {
     const out = [];
-    for (const n of this.nodes.values()) {
+    for (const n of nodes) {
       if (n.part || n.bearingOn || n.unused || n.c45body) continue;
       const belegt = [];
       for (const t of this.tubes.values()) {
@@ -3286,6 +3331,10 @@ export class BuildModel {
    * 开口检查硬质面板、管件和接头；软装不占用开口，承载边不算障碍。
    */
   _openingFree(corners) {
+    return placementMemo(this,'opening-free:'+JSON.stringify(corners),{bounds:pointsBounds(corners,12)},()=>this._computeOpeningFree(corners));
+  }
+
+  _computeOpeningFree(corners) {
     for (const p of this.panels.values()) {
       if (isSoftPart(this, p)) continue;
       const c = this.panelCorners(p);
@@ -6340,6 +6389,10 @@ export class BuildModel {
   }
 
   tubeExtensionContext() {
+    return placementMemo(this,'tube-components',{structure:true},()=>this._computeTubeExtensionContext());
+  }
+
+  _computeTubeExtensionContext() {
     const edges = new Map(), components = new Map();
     for (const tube of this.tubes.values()) {
       if (tube.link) continue;
@@ -6355,12 +6408,33 @@ export class BuildModel {
         if (!components.has(next)) { components.set(next, id); queue.push(next); }
       }
     }
-    return { components };
+    const buckets=new Map();
+    for(const node of this.nodes.values()){
+      const key=[node.x,node.y,node.z].map(v=>Math.floor(v/40)).join(',');
+      if(!buckets.has(key))buckets.set(key,[]);
+      buckets.get(key).push(node.id);
+    }
+    return { components, buckets };
   }
 
   // 引导、悬停预览与放置共用只读结果；一个刷新周期复用实体连接关系。
   planTubeExtension(fromNodeId, dirVec, spacing, { snapTol = DIAGONAL_SNAP_TOL,
     connectorSize = 5, context = this.tubeExtensionContext() } = {}) {
+    const from=this.nodes.get(fromNodeId);if(!from)return null;
+    const start=[from.x,from.y,from.z],target=start.map((v,i)=>v+dirVec[i]*spacing),radius=Math.max(snapTol,connectorSize+MERGE_EPS);
+    const nearby=[];
+    if(context.buckets){
+      const lo=target.map(v=>Math.floor((v-radius)/40)),hi=target.map(v=>Math.floor((v+radius)/40));
+      for(let x=lo[0];x<=hi[0];x++)for(let y=lo[1];y<=hi[1];y++)for(let z=lo[2];z<=hi[2];z++)nearby.push(...(context.buckets.get([x,y,z].join(','))||[]));
+    }else nearby.push(...this.nodes.keys());
+    const connections=nearby.filter(id=>{const n=this.nodes.get(id);return n&&Math.hypot(n.x-target[0],n.y-target[1],n.z-target[2])<=radius;})
+      .map(id=>[id,context.components.get(id)===context.components.get(fromNodeId)]);
+    return placementMemo(this,'tube-plan:'+JSON.stringify([fromNodeId,dirVec,spacing,snapTol,connectorSize,connections]),
+      {bounds:pointsBounds([start,target],radius+12),ids:new Set([fromNodeId,...connections.map(([id])=>id)])},
+      ()=>this._computeTubeExtensionPlan(fromNodeId,dirVec,spacing,{snapTol,connectorSize,context}));
+  }
+
+  _computeTubeExtensionPlan(fromNodeId,dirVec,spacing,{snapTol,connectorSize,context}) {
     const from = this.nodes.get(fromNodeId);
     if (!from) return null;
     if (!this.canExtendFrom(from, dirVec)) return null;

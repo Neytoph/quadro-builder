@@ -1,3 +1,4 @@
+import { placementMemo, railLineScope } from './incrementalPlacement.js';
 const point = node => [node.x,node.y,node.z];
 const sub = (a,b) => a.map((v,i) => v-b[i]);
 const dot = (a,b) => a.reduce((sum,v,i) => sum+v*b[i],0);
@@ -6,6 +7,9 @@ export const GYM_RING_SPACING = 18;
 
 // 只沿共享接头追踪同高、共线的真实直管；分离的管子不能拼成承载段。
 export function gymRingSupport(model, tubeId) {
+  return placementMemo(model,'gym-ring-support:'+tubeId,railLineScope(model,tubeId,1),()=>computeGymRingSupport(model,tubeId));
+}
+function computeGymRingSupport(model,tubeId) {
   const base = model._rail(tubeId);
   if (!base || Math.abs(base.dir[1]) > 0.001) return null;
   const queue = [tubeId], seen = new Set(), segments = [];

@@ -1,4 +1,5 @@
 import {geometry} from './catalog.js';
+import { placementMemo, railLineScope } from './incrementalPlacement.js';
 import {INSET_PANEL_IDS, INSET_MOUNT_LAYOUT} from './insetPanelSpec.js';
 export {INSET_PANEL_IDS, INSET_MOUNT_LAYOUT} from './insetPanelSpec.js';
 
@@ -20,6 +21,23 @@ export function hasInsetScrews(part) {return INSET_PANEL_IDS.has(part.panelId) &
 
 // 连续边管用于查找矩形候选，固定边可由一根或多根相接的直管组成。
 export function insetPanelProbes(model,width,height,{deduplicate=true,segmentedOnly=false,onlyRailId=null}={}) {
+  const ids=onlyRailId?[onlyRailId]:[...model.tubes.keys()],seen=new Set(),out=[];
+  for(const id of ids){
+    const probes=placementMemo(model,'inset-rail:'+JSON.stringify([width,height,segmentedOnly,id]),railLineScope(model,id,width+2),
+      ()=>computeInsetPanelProbes(model,width,height,{deduplicate:false,segmentedOnly,onlyRailId:id}));
+    for(const probe of probes){
+      if(deduplicate){
+        const rail=model._rail(probe.a),partner=model._rail(probe.b),delta=sub(partner.p0,rail.p0),along=dot(delta,rail.dir),across=delta.map((v,i)=>v-along*rail.dir[i]);
+        const start=rail.p0.map((v,i)=>v+rail.dir[i]*probe.t0),end=start.map((v,i)=>v+rail.dir[i]*height);
+        const key=[start,end,start.map((v,i)=>v+across[i]),end.map((v,i)=>v+across[i])].map(p=>p.map(v=>v.toFixed(2)).join(',')).sort().join('|');
+        if(seen.has(key))continue;seen.add(key);
+      }
+      out.push(probe);
+    }
+  }
+  return out;
+}
+function computeInsetPanelProbes(model,width,height,{deduplicate,segmentedOnly,onlyRailId}) {
   const rails=[...model.tubes.values()].flatMap(t=>{const rail=model._rail(t.id);return rail?[{...rail,id:t.id}]:[];}),out=[],seen=new Set();
   for(const rail of rails){
     if(onlyRailId && rail.id!==onlyRailId)continue;

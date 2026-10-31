@@ -2,6 +2,7 @@
 
 import { DIRECTIONS, DIAGONAL_DIRECTIONS, DIR_ALIGN_TOL, ARM_ALIGN_TOL, CLAMP_LINK_DIST, C45_SLEEVE_LEN, C45_ARM_LEN, CONN_TYPE_MASK } from "./config.js";
 import { c45CollisionContext } from './c45Placement.js';
+import { withPlacementPass, placementMemo, railLineScope } from './incrementalPlacement.js';
 import { Vector3 } from "three";
 import { ALUMINIUM_CONNECTOR, reinforcementGuide, aluminiumConnectorTargets } from './reinforcement.js';
 import { buildableTubes, geometry, getTube, spacingFor, getPanel, defaultPanel, diagonalTubeId, slideKindLabel, slideKindName, isCurvedTube, gridSpacing, partName, partForFitting, getPartById, getConnector, poolLinerFor, reinforcementPart, textilePart } from "./catalog.js";
@@ -1675,6 +1676,14 @@ export class Builder {
    * @param {boolean} lattice
    */
   _freePartners(railId, at = null, lattice = this.mode === "fitting" && RAIL_FITTINGS.has(this.fittingKind)) {
+    const radius=lattice?(this._isRainbowTextile()?Infinity:this._railSize()?.gap||160):Math.max(...(this._panelDims()||[80]));
+    const scope=railLineScope(this.model,railId,radius+8);
+    delete scope.groups;
+    return placementMemo(this.model,'free-partners:'+JSON.stringify([railId,at,lattice,this.panelId,this.fittingKind,this.fittingPart]),scope,
+      ()=>this._computeFreePartners(railId,at,lattice));
+  }
+
+  _computeFreePartners(railId, at, lattice) {
     const kind = lattice ? this.fittingKind : null;
     let partners;
     if (lattice) partners = this._railPartners(railId);
@@ -2207,6 +2216,15 @@ export class Builder {
   }
 
   refresh() {
+    if(this._externalPending && !this.busy()){
+      this._externalPending=false;
+      this.applyExternal(this.history.toJSON());
+      return;
+    }
+    return withPlacementPass(this.model,()=>this._refreshPlacementPass());
+  }
+
+  _refreshPlacementPass() {
     this.bearingConnection?.validate();
     if(this._selectionTransform?.visualPreview){this.scene.requestRender();this.onPreview();return;}
     const transformKey=[...this.selection.keys()].sort().join(',');
@@ -2214,12 +2232,6 @@ export class Builder {
     // 框选着色仅跟随仍被选中的同一种零件，取消选择后恢复原材质。
     for (const [id, kind] of this._boxSelected || []) {
       if (this.selection.get(id) !== kind) this._boxSelected.delete(id);
-    }
-    // 拖动、粘贴期间攒下的外部修改：操作收尾以后的第一次刷新读进来
-    if (this._externalPending && !this.busy()) {
-      this._externalPending = false;
-      this.applyExternal(this.history.toJSON());
-      return;
     }
     const assembly =this.mode === "assembly" && this.buildPlan.steps.length
       ? this._assemblyVisibility() : null;
@@ -2322,7 +2334,7 @@ export class Builder {
             console.error('Panel mount computation failed', error);
             if (!this._disposed && this.mode === 'panel') this.onNotice(t('notice_panel_geometry_failed'), 'warn');
           });
-          mounts = this._panelMountQueue.get(this.model.toJSON(), this.panelId, options) || [];
+          mounts = withPlacementPass(this.model,()=>this._panelMountQueue.get(this.model.toJSON(), this.panelId, options, this.model)) || [];
         } else mounts = this.model.panelAccessoryMounts(this.panelId, options);
         for (const mount of mounts) this.scene.addHandle(mount.pos, { panelAccessoryMount: mount }, 'place');
       }

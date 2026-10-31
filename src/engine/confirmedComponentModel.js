@@ -1,4 +1,5 @@
 import { confirmedSpec, legoStudHeight } from './componentPack.js';
+import { placementMemo, pointsBounds, railBounds } from './incrementalPlacement.js';
 import { INSET_PANEL_IDS, INSET_MOUNT_LAYOUT, INSET_PANEL_EDGE_INSET, hasInsetScrews, oppositeScrewSupports, insetScrewVolumes, insetPanelReference, insetPanelProbes } from './insetPanelMounts.js';
 import { geometry } from './catalog.js';
 import { quatFromBasis, xAxisOf, yAxisOf, zAxisOf } from './util.js';
@@ -113,6 +114,10 @@ export function panelRailScrewAxis(model,probe,frame=confirmedFrame(model,probe)
 }
 
 export function confirmedPanelDiagnostics(model,probe,{legacyInset=false,screwAxis=probe.params?.screwAxis}={}) {
+  return placementMemo(model,'panel-support:'+JSON.stringify([probe,legacyInset,screwAxis]),{groups:['nodes','tubes'],bounds:pointsBounds(model.panelCorners(probe),8),ids:new Set([probe.a,probe.b])},
+    ()=>computeConfirmedPanelDiagnostics(model,probe,{legacyInset,screwAxis}));
+}
+function computeConfirmedPanelDiagnostics(model,probe,{legacyInset,screwAxis}) {
   const spec=confirmedSpec(probe.panelId); if(!spec)return bad('frame_size',probe);
   const cor=model.panelCorners(probe);if(!cor)return bad('missing_support',probe);
   const lengths=[Math.hypot(...cSub(cor[1],cor[0])),Math.hypot(...cSub(cor[3],cor[0]))].sort((a,b)=>a-b),dims=[spec.width,spec.height].sort((a,b)=>a-b);
@@ -213,7 +218,20 @@ export function ropeCandidate(model,first,second) {
 }
 function railCandidates(model,spec,{legacyInset=false,deduplicate=true,screwAxis='vertical',oppositeRetainers=false}={}) {
   const out=[],seen=new Set();
-  for(const tube of model.tubes.values())for(const partner of model.panelPartners(tube.id,[spec.width,spec.height])) {
+  for(const tube of model.tubes.values()){
+    const candidates=placementMemo(model,'rail-candidates:'+JSON.stringify([tube.id,spec,legacyInset,screwAxis,oppositeRetainers]),
+      {groups:['nodes','tubes'],bounds:railBounds(model,tube.id,Math.max(spec.width,spec.height)+8),ids:new Set([tube.id])},
+      ()=>computeRailCandidates(model,spec,{legacyInset,deduplicate:false,screwAxis,oppositeRetainers,tube}));
+    for(const candidate of candidates){
+      const key=model.panelCorners(candidate)?.map(p=>p.map(v=>v.toFixed(2)).join(',')).sort().join('|');
+      if(deduplicate&&seen.has(key))continue;seen.add(key);out.push(candidate);
+    }
+  }
+  return out;
+}
+function computeRailCandidates(model,spec,{legacyInset,deduplicate,screwAxis,oppositeRetainers,tube}) {
+  const out=[],seen=new Set();
+  for(const partner of model.panelPartners(tube.id,[spec.width,spec.height])) {
     const count=Math.max(1,Math.floor((partner.hi-partner.lo+0.5)/partner.len));
     // 连续布套沿指定长边安装，不能把跨距当成布套长度。
     if(spec.mountType==='rails' && Math.abs(partner.len-spec.height)>0.5)continue;
@@ -303,6 +321,13 @@ function curvedCandidates(model,spec) {
 // 引擎记录按部件类型动态扩展，显式数组类型保留调用方的回调类型推断。
 /** @returns {Array<Record<string, any>>} */
 export function confirmedCandidates(model,id,options={}) {
+  const spec=confirmedSpec(id);if(!spec)return [];
+  const geometryOptions={...options,isPanelCandidateValid:undefined,...(spec.placement==='panel'?{deduplicate:false}:{})};
+  const candidates=placementMemo(model,'component-candidates:'+JSON.stringify([id,geometryOptions]),{structure:true},
+    ()=>computeConfirmedCandidates(model,id,geometryOptions));
+  return spec.placement==='panel'?selectPanelCandidates(model,candidates,options):candidates;
+}
+function computeConfirmedCandidates(model,id,options) {
   const spec=confirmedSpec(id);if(!spec)return [];
   if(isOuterScrewPanel(id) && options.screwAxis==null){
     const candidates=['vertical','horizontal'].flatMap(screwAxis=>confirmedCandidates(model,id,{...options,screwAxis,deduplicate:false}));
