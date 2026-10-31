@@ -115,7 +115,7 @@ export function consolidateLayerSteps(plan, rowKey) {
   for (const step of plan.steps) step.dependsOn = unique(step.dependsOn.map(mapId)).filter(id => id !== step.id);
   for (const mark of plan.interfaces) if (mark.supportStepId) mark.supportStepId = mapId(mark.supportStepId);
   for (const module of plan.frameModules) if (module.installStepId) module.installStepId = mapId(module.installStepId);
-  for (const instance of plan.ledger.instances) instance.stepId = mapId(instance.stepId);
+  for (const instance of plan.purpose==='step-count'?[]:plan.ledger.instances) instance.stepId = mapId(instance.stepId);
   for (const point of plan.fixingPoints || []) point.stepId = mapId(point.stepId);
   for (const diagnostic of plan.diagnostics) if (diagnostic.details?.stepId) diagnostic.details.stepId = mapId(diagnostic.details.stepId);
   validateStepDependencies(plan.steps, plan.diagnostics);

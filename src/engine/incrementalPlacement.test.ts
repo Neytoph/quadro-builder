@@ -3,7 +3,7 @@ import { BuildModel } from './model.js'
 import { loadCatalog } from './catalog.js'
 import { CONFIRMED_COMPONENTS } from './componentPack.js'
 import { createConfirmedComponentFixture } from './confirmedComponentExample.js'
-import { withPlacementPass, placementCacheStats } from './incrementalPlacement.js'
+import { withPlacementPass, withPlacementSnapshot, placementCacheStats } from './incrementalPlacement.js'
 import { DIRECTIONS } from './config.js'
 import { Builder } from './builder.js'
 
@@ -12,6 +12,27 @@ const fresh = (model: BuildModel) => { const copy=new BuildModel(); expect(copy.
 const mounts = (model: BuildModel,id:string) => model.confirmedMounts(id)
 
 describe('增量安装位置与完整重算一致',()=>{
+  it('同步统计共享真实安装查询，结束后释放缓存并响应后续编辑',()=>{
+    const {model}=createConfirmedComponentFixture('panel_40x40_honeycomb',{install:false})
+    const initialCache=placementCacheStats(model)
+    const query=()=>model.panelAccessoryMounts('panel_40x40_honeycomb')
+    const expected=fresh(model).panelAccessoryMounts('panel_40x40_honeycomb')
+    withPlacementSnapshot(model,()=>{
+      expect(query()).toEqual(expected)
+      expect(withPlacementSnapshot(model,query)).toEqual(expected)
+      expect(placementCacheStats(model)!.hits).toBeGreaterThan(0)
+    })
+    expect(placementCacheStats(model)).toEqual(initialCache)
+    query()
+    const previous=placementCacheStats(model)
+    withPlacementSnapshot(model,()=>expect(query()).toEqual(expected))
+    expect(placementCacheStats(model)).toEqual(previous)
+    const node=model.nodes.values().next().value!
+    node.x+=20
+    expect(withPlacementSnapshot(model,query)).toEqual(fresh(model).panelAccessoryMounts('panel_40x40_honeycomb'))
+    expect(query()).toEqual(fresh(model).panelAccessoryMounts('panel_40x40_honeycomb'))
+  })
+
   it.each(CONFIRMED_COMPONENTS.filter(s=>s.id!=='rope'))('$id 安装、删除、恢复、移动及支撑变化',spec=>{
     const {model,candidate}=createConfirmedComponentFixture(spec.id,{install:false})
     const check=()=>expect(mounts(model,spec.id)).toEqual(mounts(fresh(model),spec.id))

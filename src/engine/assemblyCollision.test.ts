@@ -9,6 +9,12 @@ import {parseQDF} from './qdfimport.js';
 import {SceneManager} from './scene.js';
 beforeAll(async()=>{await loadCatalog();});
 describe('measured assembly geometry',()=>{
+  it('checks the first obstructed interval of a long path without allocating every later sample',()=>{
+    const model=new BuildModel(),a=model.addNode(0,0,0),b=model.addNode(0,40,0),c=model.addNode(3,0,0),d=model.addNode(3,40,0);
+    const moving=model.addTube(a.id,b.id,'T35','blue',35)!,fixed=model.addTube(c.id,d.id,'T35','blue',35)!;
+    beginAssemblyCollisionPass(model);
+    expect(checkAssemblyPath(model,[moving.id],[fixed.id],[0,0,0],[1e9,0,0],{allowMating:false})).toMatchObject({obstaclePartId:fixed.id});
+  });
   it('A0016 file C45 enters only its linked native mouth and finite receiver port, preserving wrong references and pipe-body obstruction',()=>{
     const model=new BuildModel();expect(model.loadJSON(parseQDF(readFileSync('public/qdf/A0016.qdf','utf8'),{tubes:buildableTubes(),panels:panels(),connectorSize:geometry().connectorSize,mergeEps:2})).ok).toBe(true);
     const contracts=new Map([['n1:t22',{cornerId:'n1',receiverNodeId:'n7',tubeId:'t22'}],['n2:t28',{cornerId:'n2',receiverNodeId:'n12',tubeId:'t28'}],['n3:t30',{cornerId:'n3',receiverNodeId:'n14',tubeId:'t30'}],['n4:t23',{cornerId:'n4',receiverNodeId:'n8',tubeId:'t23'}]]),options={c45MatingContacts:contracts};beginAssemblyCollisionPass(model);
@@ -97,6 +103,17 @@ describe('measured assembly geometry',()=>{
   it('C0179 C45 envelopes use the exact native SceneManager placement for every imported adapter',()=>{const model=new BuildModel();expect(model.loadJSON(parseQDF(readFileSync('public/qdf/C0179.qdf','utf8'),{tubes:buildableTubes(),panels:panels(),connectorSize:geometry().connectorSize,mergeEps:2})).ok).toBe(true);const scene={_c45BaseNode:SceneManager.prototype._c45BaseNode};let adapters=0;for(const node of model.nodes.values())if(node.c45body){adapters++;const matrix=SceneManager.prototype._c45Placement.call(scene as any,model,node)!,elements=matrix.elements;const shapes=partEnvelope(model,node.id);expect(shapes.length).toBe(accessoryTriangles.connector45_2.length);shapes.forEach((shape:any,index:number)=>shape.points.forEach((point:number[],vertex:number)=>point.forEach((value:number,axis:number)=>{const local=accessoryTriangles.connector45_2[index][vertex];expect(value).toBeCloseTo(elements[12+axis]+elements[axis]*local[0]+elements[4+axis]*local[1]+elements[8+axis]*local[2],8);})));}expect(adapters).toBe(11);});
   it('detects a thin obstacle fully inside a swept triangular prism, between sampled faces',()=>{const triangle={kind:'triangle',points:[[0,0,0],[10,0,0],[0,10,0]]},box={kind:'box',pos:[2,2,.5],axes:[[1,0,0],[0,1,0],[0,0,1]],half:[.1,.1,.1]};expect(assemblyShapesOverlap(triangle,box,[0,0,1])).toBe(true);expect(assemblyShapesOverlap({...triangle,points:triangle.points.map(p=>[p[0],p[1],.5])},box)).toBe(true);expect(assemblyShapesOverlap(triangle,{...box,pos:[9,9,.5]},[0,0,1])).toBe(false);expect(assemblyShapesOverlap(triangle,{...box,pos:[2,2,1.2]},[0,0,1])).toBe(false);});
   it.each(['capsule','cylinder'])('detects an enclosed %s axis without requiring contact with prism boundary faces',kind=>{const triangle={kind:'triangle',points:[[0,0,0],[10,0,0],[0,10,0]]},pipe={kind,a:[2,2,.4],b:[2,2,.6],r:.1};expect(assemblyShapesOverlap(triangle,pipe,[0,0,1])).toBe(true);expect(assemblyShapesOverlap(triangle,{...pipe,a:[9,9,.4],b:[9,9,.6]},[0,0,1])).toBe(false);});
+  it('rechecks a finite pipe after its endpoints are edited in place or replaced',()=>{
+    const triangle={kind:'triangle',points:[[-1,17,0],[1,17,0],[0,17,1]]};
+    const pipe={kind:'cylinder',a:[0,2.5,0],b:[0,17.5,0],r:2.45};
+    expect(assemblyShapesOverlap(triangle,pipe)).toBe(true);
+    pipe.b[1]=10;
+    expect(assemblyShapesOverlap(triangle,pipe)).toBe(false);
+    pipe.a=[0,15,0];pipe.b=[0,30,0];
+    expect(assemblyShapesOverlap(triangle,pipe)).toBe(true);
+    pipe.a[0]=10;pipe.b[0]=10;
+    expect(assemblyShapesOverlap(triangle,pipe)).toBe(false);
+  });
   it('matches every frozen source fingerprint',()=>{for(const [file,hash] of Object.entries(sourceHashes))expect(createHash('sha256').update(readFileSync(file)).digest('hex')).toBe(hash);});
   it('keeps a swept panel face apart from a connector on the other side of its plane',()=>{const a={kind:'triangle',points:[[37.49,31.51,-2.51],[2.51,26.8,-2.51],[2.51,31.51,-2.51]]},b={kind:'triangle',points:[[.8,22.5,-1.94],[.8,27.5,-1.94],[1.48,27.5,-1.48]]};expect(assemblyShapesOverlap(a,b,[0,-1.125,0])).toBe(false);});
   it('allows adjacent faces to touch at one edge while rejecting coplanar area overlap',()=>{const a={kind:'triangle',points:[[0,0,0],[1,0,0],[0,1,0]]},edge={kind:'triangle',points:[[1,0,0],[1,1,0],[0,1,0]]},overlap={kind:'triangle',points:[[.2,.2,0],[.8,.2,0],[.2,.8,0]]};expect(assemblyShapesOverlap(a,edge)).toBe(false);expect(assemblyShapesOverlap(a,overlap)).toBe(true);});

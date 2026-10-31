@@ -46,8 +46,8 @@ function nativeBox(p,limits) { const basis=axes(p.quat),middle=limits.map(([a,b]
 const envelopeCache=new WeakMap();
 const portDepthCache=new WeakMap();
 const pathResultCache=new WeakMap();
-export function beginAssemblyCollisionPass(model,queryCache=new Map()){envelopeCache.set(model,new Map());portDepthCache.set(model,new Map());pathResultCache.set(model,queryCache);}
-export function forkAssemblyCollisionPass(source,target,excludedId){beginAssemblyCollisionPass(target);const cache=new Map(envelopeCache.get(source));cache.delete(excludedId);envelopeCache.set(target,cache);}
+export function beginAssemblyCollisionPass(model,queryCache=new Map(),reuseEnvelopes=false){if(!reuseEnvelopes||!envelopeCache.has(model)){envelopeCache.set(model,new Map());portDepthCache.set(model,new Map());}pathResultCache.set(model,queryCache);}
+export function forkAssemblyCollisionPass(source,target,excludedId){beginAssemblyCollisionPass(target);const cache=new Map(envelopeCache.get(source));for(const id of Array.isArray(excludedId)?excludedId:[excludedId])cache.delete(id);envelopeCache.set(target,cache);}
 export function invalidateAssemblyEnvelope(model,id){envelopeCache.get(model)?.delete(id);}
 export function partEnvelope(model,id){useMeshes();const cache=envelopeCache.get(model);if(cache?.has(id))return cache.get(id);const shapes=computeEnvelope(model,id);cache?.set(id,shapes);return shapes;}
 // 增量失效范围必须读取当前几何，不能借用装配过程中的旧包围体。
@@ -143,7 +143,16 @@ function clipPolygonPlane(points,origin,normal,positive){
   }
   return out;
 }
-function cylinderPlanes(cylinder){const axis=unit(sub(cylinder.b,cylinder.a));return {axis,start:cylinder.a.map((v,i)=>v+axis[i]*1e-6),end:cylinder.b.map((v,i)=>v-axis[i]*1e-6)};}
+const cylinderPlaneCache=new WeakMap();
+function cylinderPlanes(cylinder){
+  let planes=cylinderPlaneCache.get(cylinder);
+  if(!planes||planes.a[0]!==cylinder.a[0]||planes.a[1]!==cylinder.a[1]||planes.a[2]!==cylinder.a[2]||planes.b[0]!==cylinder.b[0]||planes.b[1]!==cylinder.b[1]||planes.b[2]!==cylinder.b[2]){
+    const axis=unit(sub(cylinder.b,cylinder.a));
+    planes={axis,a:[...cylinder.a],b:[...cylinder.b],start:cylinder.a.map((v,i)=>v+axis[i]*1e-6),end:cylinder.b.map((v,i)=>v-axis[i]*1e-6)};
+    cylinderPlaneCache.set(cylinder,planes);
+  }
+  return planes;
+}
 function triangleCylinderDistance(points,cylinder,planes){
   const {axis,start,end}=planes;
   let polygon=clipPolygonPlane(points,start,axis,true);if(!polygon.length)return Infinity;
@@ -231,7 +240,7 @@ function shapeBounds(shape){if(boundsCache.has(shape))return boundsCache.get(sha
 function computeShapeBounds(shape){ if(shape.kind==='triangle')return [0,1,2].map(i=>[Math.min(...shape.points.map(p=>p[i])),Math.max(...shape.points.map(p=>p[i]))]);if(['capsule','cylinder'].includes(shape.kind))return shape.a.map((v,i)=>[Math.min(v,shape.b[i])-shape.r,Math.max(v,shape.b[i])+shape.r]);return shape.pos.map((v,i)=>{const radius=shape.axes.reduce((s,a,k)=>s+Math.abs(a[i])*shape.half[k],0);return [v-radius,v+radius];}); }
 const envelopeBoundsCache=new WeakMap();
 function envelopeBounds(shapes){if(envelopeBoundsCache.has(shapes))return envelopeBoundsCache.get(shapes);const out=[0,1,2].map(i=>[Math.min(...shapes.map(s=>shapeBounds(s)[i][0])),Math.max(...shapes.map(s=>shapeBounds(s)[i][1]))]);envelopeBoundsCache.set(shapes,out);return out;}
-const intersects=(a,b)=>a.every(([lo,hi],i)=>lo<b[i][1]+0.01&&hi>b[i][0]-0.01);
+const intersects=(a,b)=>a[0][0]<b[0][1]+.01&&a[0][1]>b[0][0]-.01&&a[1][0]<b[1][1]+.01&&a[1][1]>b[1][0]-.01&&a[2][0]<b[2][1]+.01&&a[2][1]>b[2][0]-.01;
 const shapeIndexCache=new WeakMap(),INDEX_CELL=8;
 function cellsForBounds(bounds){const ranges=bounds.map(([lo,hi])=>[Math.floor((lo-.011)/INDEX_CELL),Math.floor((hi+.011)/INDEX_CELL)]);if(ranges.reduce((n,[lo,hi])=>n*(hi-lo+1),1)>512)return null;const out=[];for(let x=ranges[0][0];x<=ranges[0][1];x++)for(let y=ranges[1][0];y<=ranges[1][1];y++)for(let z=ranges[2][0];z<=ranges[2][1];z++)out.push(`${x},${y},${z}`);return out;}
 function indexedShapes(shapes,bounds){
@@ -450,20 +459,23 @@ export function checkAssemblyPath(model,movingIds,installedIds,start,end=[0,0,0]
   const moving=new Set(movingIds),travel=Math.hypot(...sub(start,end)),spacing=geometry().tubeRadius||2.45,count=Math.max(1,Math.ceil(travel/spacing));
   const assemblyMoving=new Set(movingAssemblyIds);
   const translatedObstacles=new WeakMap();
+  const obstacleBounds=new WeakMap();
   const midpoint=start.map((v,i)=>(v+end[i])/2),fullPad=sub(end,start).map(v=>v/2);
-  const shiftBounds=(bounds,offset)=>bounds.map(([lo,hi],i)=>[lo+offset[i],hi+offset[i]]);
+  const shiftBounds=(bounds,offset)=>offset.every(v=>v===0)?bounds:bounds.map(([lo,hi],i)=>[lo+offset[i],hi+offset[i]]);
+  const pad=sub(end,start).map(v=>v/count/2),paddingRadius=Math.hypot(...pad)+.05;
+  const samples=new Map(),sampleCacheLimit=16384;
   const obstacles=[...new Set(installedIds)].filter(id=>!moving.has(id)).map(id=>{const offset=obstacleTranslations.get(id)||[0,0,0],shapes=partEnvelope(model,id);return {id,offset,shapes,bounds:shiftBounds(envelopeBounds(shapes),offset)};});
   const adapterMap=new Map();for(const t of model.tubes.values())if(t.arm){if(!adapterMap.has(t.a))adapterMap.set(t.a,[]);if(!adapterMap.has(t.b))adapterMap.set(t.b,[]);adapterMap.get(t.a).push(t.b);adapterMap.get(t.b).push(t.a);}
-  for(const id of movingIds){const shapes=partEnvelope(model,id);if(!shapes.length)continue;const shapeSweeps=new Map(),movingBounds=envelopeBounds(shapes).map(([lo,hi],i)=>[lo+Math.min(start[i],end[i])-spacing/2,hi+Math.max(start[i],end[i])+spacing/2]);for(const obstacle of obstacles){if(!obstacle.shapes.length||!intersects(movingBounds,obstacle.bounds))continue;
+  for(const id of movingIds){const shapes=partEnvelope(model,id);if(!shapes.length)continue;const reuseSamples=count*shapes.length<=sampleCacheLimit,shapeSweeps=new Map(),movingBounds=envelopeBounds(shapes).map(([lo,hi],i)=>[lo+Math.min(start[i],end[i])-spacing/2,hi+Math.max(start[i],end[i])+spacing/2]);for(const obstacle of obstacles){if(!obstacle.shapes.length||!intersects(movingBounds,obstacle.bounds))continue;
     const t=model.tubes.get(id),o=model.tubes.get(obstacle.id),shared=t&&o?[t.a,t.b].filter(n=>n===o.a||n===o.b):[];
     const fixed=b=>{let translated=translatedObstacles.get(b);if(!translated){translated=move(b,obstacle.offset);translatedObstacles.set(b,translated);}return translated;};
-    const pairs=shapes.flatMap(a=>{let sweep=shapeSweeps.get(a);if(!sweep){sweep={bounds:shapeBounds(a).map(([lo,hi],i)=>[lo+Math.min(start[i],end[i])-spacing/2,hi+Math.max(start[i],end[i])+spacing/2])};shapeSweeps.set(a,sweep);}const localBounds=shiftBounds(sweep.bounds,obstacle.offset.map(v=>-v));return indexedShapes(obstacle.shapes,localBounds).filter(b=>{
+    const pairs=shapes.flatMap(a=>{let sweep=shapeSweeps.get(a);if(!sweep){sweep={bounds:shapeBounds(a).map(([lo,hi],i)=>[lo+Math.min(start[i],end[i])-spacing/2,hi+Math.max(start[i],end[i])+spacing/2]),samples:[]};shapeSweeps.set(a,sweep);}const localBounds=shiftBounds(sweep.bounds,obstacle.offset.map(v=>-v));return indexedShapes(obstacle.shapes,localBounds).filter(b=>{
       if(!intersects(localBounds,shapeBounds(b)))return false;
       // Exact whole-segment SAT proves these pairs clear before sampling. Keep
       // short intervals for all remaining pairs and for joint-contact checks.
       const exactSweep=a.kind==='triangle'&&['triangle','box'].includes(b.kind)||b.kind==='triangle'&&a.kind==='box';
       return count<=2||!exactSweep||assemblyShapesOverlap(sweep.middle??=move(a,midpoint),fixed(b),fullPad);
-    }).map(b=>[a,b,shapeBounds(a),shiftBounds(shapeBounds(b),obstacle.offset)]);});
+    }).map(b=>{let bounds=obstacleBounds.get(b);if(!bounds){bounds=shiftBounds(shapeBounds(b),obstacle.offset);obstacleBounds.set(b,bounds);}return [a,b,shapeBounds(a),bounds,sweep];});});
     if(!pairs.length)continue;
     const fileContacts=allowMating?fileC45ContactNodes(model,id,obstacle.id,start,end,obstacle.offset,c45MatingContacts):[];
     const adapterIds=id=>adapterMap.get(id)||[];
@@ -474,17 +486,19 @@ export function checkAssemblyPath(model,movingIds,installedIds,start,end=[0,0,0]
     const contactAxes=contacts.flatMap(nodeId=>{const tube=assemblyMoving.has(nodeId)&&o?o:portTube;if(!tube||![tube.a,tube.b].includes(nodeId))return [];return [unit(model._tubeDirAt(tube,model.nodes.get(nodeId),model.nodes.get(nodeId===tube.a?tube.b:tube.a)))];});
     const portAxes=contactAxes.length?contactAxes:portTube?[unit(sub(xyz(model.nodes.get(portTube.b)),xyz(model.nodes.get(portTube.a))))]:[];
     for(let sample=0;sample<count;sample++){
-      const delta=start.map((v,i)=>v+(end[i]-v)*(sample+.5)/count),pad=sub(end,start).map(v=>v/count/2),sampleBounds=new Map(),sampleShapes=new Map(),paddingRadius=Math.hypot(...pad)+.05;
+      let delta=samples.get(sample);
+      if(!delta){delta=start.map((v,i)=>v+(end[i]-v)*(sample+.5)/count);if(samples.size<sampleCacheLimit)samples.set(sample,delta);}
+      const localSamples=reuseSamples?null:new Map();
       const relative=sub(delta,obstacle.offset);
       const coaxial=contacts.length&&portAxes.length&&portAxes.every(portAxis=>Math.hypot(...relative.map((v,i)=>v-portAxis[i]*dot(relative,portAxis)))<.6 && (travel<1e-6 || Math.abs(dot(unit(sub(end,start)),portAxis))>.995));
-      for(const [a,b,movingShapeBounds,obstacleShapeBounds] of pairs){
-        let sweptBounds=sampleBounds.get(a);
-        if(!sweptBounds){sweptBounds=movingShapeBounds.map(([lo,hi],i)=>{const margin=a.kind==='triangle'?Math.abs(pad[i])+.05:paddingRadius;return [lo+delta[i]-margin,hi+delta[i]+margin];});sampleBounds.set(a,sweptBounds);}
+      for(const [a,b,movingShapeBounds,obstacleShapeBounds,sweep] of pairs){
+        let interval=reuseSamples?sweep.samples[sample]:localSamples.get(a);
+        if(!interval){interval={bounds:movingShapeBounds.map(([lo,hi],i)=>{const margin=a.kind==='triangle'?Math.abs(pad[i])+.05:paddingRadius;return [lo+delta[i]-margin,hi+delta[i]+margin];})};if(reuseSamples)sweep.samples[sample]=interval;else localSamples.set(a,interval);}
         // Conservative AABB rejection avoids SAT on pairs separated at this
         // sample. Triangle sweeps have exact axis extents; other shapes retain
         // the Euclidean padding needed by pipe/pipe distance checks.
-        if(!intersects(sweptBounds,obstacleShapeBounds))continue;
-        let translated=sampleShapes.get(a);if(!translated){translated=move(a,delta);sampleShapes.set(a,translated);}
+        if(!intersects(interval.bounds,obstacleShapeBounds))continue;
+        const translated=interval.shape??=move(a,delta);
         if(!assemblyShapesOverlap(translated,fixed(b),pad))continue;
         if(allowMating&&panelSlotContact(model,id,obstacle.id,a,delta,obstacle.offset))continue;
         if(allowMating&&sharedPanelMountContact(model,id,obstacle.id,a,b,delta,end,pad,obstacle.offset))continue;

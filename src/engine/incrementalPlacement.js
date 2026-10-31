@@ -63,6 +63,14 @@ function logicalBounds(model,group,part) {
   return null;
 }
 // 部分几何查询使用轻量模型视图；保留动态模型接口，返回值仍由泛型约束。
+// 同步统计期间模型不变，不需要为后续编辑建立空间变更记录；查询结果仅在本次共享。
+/** @template T @param {any} model @param {()=>T} compute @returns {T} */
+export function withPlacementSnapshot(model,compute) {
+  const previous=states.get(model);
+  if(previous?.active)return compute();
+  states.set(model,{entries:new Map(),active:true,hits:0,misses:0});
+  try{return compute();}finally{if(previous)states.set(model,previous);else states.delete(model);}
+}
 /** @template T @param {any} model @param {()=>T} compute @returns {T} */
 export function withPlacementPass(model,compute) {
   let state=states.get(model);

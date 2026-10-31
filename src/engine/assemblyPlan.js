@@ -419,9 +419,15 @@ export function computeLayeredManualPlan(model) {
 }
 
 export function computeAssemblyPlan(model, config = model.assemblyConfig || {}, order = 'y+', internal = {}) {
+  const plan=buildAssemblyPlan(model,config,order,{...internal,stepCountOnly:false});
+  if(!plan.ledger)throw new Error('完整装配计划缺少物料台账');
+  return Object.assign(plan,{ledger:plan.ledger});
+}
+
+function buildAssemblyPlan(model, config, order, internal) {
   if (!assemblyMeshes()) throw new Error('装配网格还没加载');
   const pathQueryCache=internal.pathQueryCache||new Map();
-  beginAssemblyCollisionPass(model,pathQueryCache);
+  beginAssemblyCollisionPass(model,pathQueryCache,internal.collisionPass===model);
   const deferredAccessories=internal.deferredAccessories||[],deferredIds=new Set(deferredAccessories.map(item=>item.partId));
   const diagnostics = [], coord = n => n.y;
   for (const n of model.nodes.values()) diagnostics.push(...resolveNodeConnection(model, n).diagnostics);
@@ -565,9 +571,9 @@ export function computeAssemblyPlan(model, config = model.assemblyConfig || {}, 
     if (preassemble && commonAxis) {
       const minY = r.nodeIds.length ? Math.min(...r.nodeIds.map(id => model.nodes.get(id).y)) : r.anchor?.[1] || 0;
       const installed = regions.slice(0, regions.indexOf(r));
-      const obstruction = r.kind === 'roof' ? insertionObstruction(model, r, installed, r.detachedTranslation) : null;
+      const obstruction = !internal.stepCountOnly&&r.kind === 'roof' ? insertionObstruction(model, r, installed, r.detachedTranslation) : null;
       // 采样步距不超过管半径，并用半步距扩张间隙，覆盖相邻姿态之间的运动。
-      r.installation.pathVerified = !obstruction;
+      r.installation.pathVerified = !internal.stepCountOnly&&!obstruction;
       r.installation.pathSamples = Math.max(1, Math.ceil(Math.hypot(...r.detachedTranslation) / (geometry().tubeRadius || 2.45))) + 1;
       r.installation.sampleSpacing = Math.hypot(...r.detachedTranslation) / (r.installation.pathSamples - 1);
       if (obstruction && r.kind === 'roof') diagnostics.push({ code: 'INSTALLATION_PATH_BLOCKED', severity: 'error', message: '屋顶安装通道被相邻管件占用，请调整区域或安装顺序。', nodeIds: [], partIds: [obstruction.movingTubeId, obstruction.obstacleTubeId], details: obstruction });
@@ -616,8 +622,8 @@ export function computeAssemblyPlan(model, config = model.assemblyConfig || {}, 
       const buildAction = bodyModule ? { type: 'preassemble', translation: r.detachedTranslation, detached: true } : { type: 'build', translation: [0, 0, 0], detached: false };
       if (r.kind === 'body' && marks.length && !commonAxis) diagnostics.push({ code: 'INCOMPATIBLE_BODY_INTERFACES', severity: 'error', message: '自定义主体区域无法整体插接，请合并连续主体或调整边界管件。', nodeIds: marks.map(m => m.nodeId).filter(Boolean), partIds: r.partIds });
       if (bodyModule) {
-        const obstruction = insertionObstruction(model, r, regions.slice(0, regions.indexOf(r)), r.detachedTranslation);
-        r.installation.pathVerified = !obstruction;
+        const obstruction = internal.stepCountOnly?null:insertionObstruction(model, r, regions.slice(0, regions.indexOf(r)), r.detachedTranslation);
+        r.installation.pathVerified = !internal.stepCountOnly&&!obstruction;
         r.installation.pathSamples = Math.max(1, Math.ceil(Math.hypot(...r.detachedTranslation) / (geometry().tubeRadius || 2.45))) + 1;
         r.installation.sampleSpacing = Math.hypot(...r.detachedTranslation) / (r.installation.pathSamples - 1);
         if (obstruction) diagnostics.push({ code: 'INSTALLATION_PATH_BLOCKED', severity: 'error', message: '主体区域安装通道被相邻管件占用。', nodeIds: [], partIds: [obstruction.movingTubeId, obstruction.obstacleTubeId], details: obstruction });
@@ -670,10 +676,10 @@ export function computeAssemblyPlan(model, config = model.assemblyConfig || {}, 
     const supportSteps = steps.filter(s => s.regionId === support?.id && s.kind !== 'accessories');
     if (supportSteps.length && steps.indexOf(supportSteps.at(-1)) >= steps.indexOf(step) && step.action.type !== 'preassemble') diagnostics.push({ code: 'INVALID_ASSEMBLY_ORDER', severity: 'error', message: '接口支撑区域尚未完成，请调整区域顺序。', nodeIds: mark.nodeId ? [mark.nodeId] : [], partIds: [] });
   }
-  scheduleAssemblyAccessories(model, steps, diagnostics, regions,deferredAccessories);
+  scheduleAssemblyAccessories(model, steps, diagnostics, regions,deferredAccessories,{stepCountOnly:internal.stepCountOnly===true});
   owner.clear();
   steps.forEach((step, i) => { if (step.action.type !== 'attach') for (const id of step.partIds) owner.set(id, i); });
-  const bom = computeBOM(model), ledger = allocateBOM(model, bom, steps, owner, diagnostics);
+  const bom = internal.stepCountOnly?null:computeBOM(model), ledger = internal.stepCountOnly?null:allocateBOM(model, bom, steps, owner, diagnostics);
   const fixingPoints = [];
   for (const step of steps) for (const group of GROUPS) step[group] = step.parts[group];
   // 只展示真实的单口插接。已固定两端的管件不能画成从一侧强行插入。
@@ -703,7 +709,8 @@ export function computeAssemblyPlan(model, config = model.assemblyConfig || {}, 
   for (const [name] of Object.entries(MAPS)) for (const p of values(model, MAPS[name])) if (!owner.has(p.id)) diagnostics.push({ code: 'PART_UNASSIGNED', severity: 'error', message: `部件 ${p.id} 没有区域或装配步骤。`, nodeIds: MAPS[name] === 'nodes' ? [p.id] : [], partIds: [p.id] });
   const plan = { version: 2, adjustments:[], order, regions, interfaces, frameModules, fixingPoints, steps, diagnostics, bom, ledger, levels, verification: { directionChecked: false, pathChecked: false, methodChecked: false, physical: 'unverified', load: 'unverified' }, canExport: false };
   internal.onProgress?.('structure');
-  addAssemblyOperations(model, plan, (completed,total) => internal.onProgress?.('operations',completed,total));
+  // 本轮模型未改变，动作阶段沿用刚生成的碰撞包络；独立调用仍重新生成。
+  addAssemblyOperations(model, plan, (completed,total) => internal.onProgress?.('operations',completed,total),{reuseEnvelopes:true,stepCountOnly:internal.stepCountOnly===true});
   // A blocked lowering path may be opened by installing its covering later.
   // Rebuild the actual action plan and recheck every subsequent motion; never
   // retain a geometric exemption merely because the first candidate failed.
@@ -711,13 +718,20 @@ export function computeAssemblyPlan(model, config = model.assemblyConfig || {}, 
     const candidates=frameModules.filter(module=>module.reason==='installation-path-blocked'&&model.panels.has(module.obstruction?.obstaclePartId));
     for(const diagnostic of diagnostics.filter(d=>d.code==='INSTALLATION_PATH_BLOCKED'&&d.details?.type==='lower-frame'&&model.panels.has(d.details.obstaclePartId))){const step=steps.find(step=>step.operations.some(op=>op.id===diagnostic.details.operationId));if(step)candidates.push({tubeIds:step.tubeIds,obstruction:diagnostic.details});}
     const candidate=candidates.find(module=>!deferredIds.has(module.obstruction.obstaclePartId));
-    if(candidate){const request={partId:candidate.obstruction.obstaclePartId,afterTubeIds:candidate.tubeIds,reason:'blocked-lowering-path'},history=[...(internal.history||[]),{...request,blockedBy:candidate.obstruction.obstaclePartId}];return computeAssemblyPlan(model,config,order,{attempt:(internal.attempt||0)+1,deferredAccessories:[...deferredAccessories,request],history,pathQueryCache,onProgress:internal.onProgress});}
+    if(candidate){const request={partId:candidate.obstruction.obstaclePartId,afterTubeIds:candidate.tubeIds,reason:'blocked-lowering-path'},history=[...(internal.history||[]),{...request,blockedBy:candidate.obstruction.obstaclePartId}];return buildAssemblyPlan(model,config,order,{attempt:(internal.attempt||0)+1,deferredAccessories:[...deferredAccessories,request],history,pathQueryCache,collisionPass:model,stepCountOnly:internal.stepCountOnly,onProgress:internal.onProgress});}
   }
   plan.adjustments=internal.history||[];
+  if(internal.stepCountOnly)plan.purpose='step-count';
   consolidateLayerSteps(plan, rowKey);
   reconcileFrameModulePanels(model, frameModules, plan.steps, deferredIds);
-  plan.canExport = ledger.conserved && plan.verification.directionChecked && plan.verification.pathChecked && plan.verification.methodChecked && !diagnostics.some(d => d.severity === 'error');
+  plan.canExport = !internal.stepCountOnly&&ledger.conserved && plan.verification.directionChecked && plan.verification.pathChecked && plan.verification.methodChecked && !diagnostics.some(d => d.severity === 'error');
   return plan;
+}
+
+// 动作验证中只有落框碰撞会触发板面重排；计数保留这些检查和全部安装姿态，
+// 省去其余仅用于说明书验证的路径检查。这个入口只返回数量，不返回可导出的计划。
+export function computeAssemblyStepCount(model,order='y+',onProgress){
+  return buildAssemblyPlan(model,model.assemblyConfig||{},order,{stepCountOnly:true,onProgress}).steps.length;
 }
 
 /** 渲染器只消费此快照。已预装模块保持分离，直到安装步骤才归位。 */

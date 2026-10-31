@@ -69,7 +69,7 @@ const verify=(pathChecked=false,methodChecked=true,directionConsistent=true)=>({
 const diag=(diagnostics,code,message,partIds,details)=>diagnostics.push({code,severity:'error',message,partIds,nodeIds:[],details});
 
 /** Reassign physical prethread parts before their carrier is closed, then defer coverings. */
-export function scheduleAssemblyAccessories(model,steps,diagnostics,regions=[],deferredAccessories=[]){
+export function scheduleAssemblyAccessories(model,steps,diagnostics,regions=[],deferredAccessories=[],{stepCountOnly=false}={}){
   const originalDependencies = new Map(steps.map(step => [step.id, [...step.dependsOn]]));
   const mergedSteps = new Map();
   for (const r of regions.filter(r=>r.kind==='roof')) {
@@ -161,6 +161,8 @@ export function scheduleAssemblyAccessories(model,steps,diagnostics,regions=[],d
   }
   resolveScheduledStepDependencies(steps, originalDependencies, mergedSteps, diagnostics);
   for(const s of steps){if(s.action.type==='attach')continue;s.partIds=[...new Set(Object.keys(MAPS).flatMap(k=>s[k]))];}
+  // 以下仅追加说明书诊断；步骤数不使用它们，统计的安全检查仍由安全引擎执行。
+  if(stepCountOnly)return;
   for(const p of [...model.panels.values(),...model.fittings.values()])if(p.appearanceVersion&&(ACCESSORY_IDS.has(p.kind)||PANEL_ACCESSORY_IDS.has(p.panelId))){
     let result;try{result=p.appearanceVersion===2?confirmedDiagnostics(model,p):p.kind?model.accessoryDiagnostics(p.kind,p.tube,{facing:p.facing,ignoreId:p.id}):model.panelAccessoryDiagnostics(p);}catch(error){result={valid:false,reason:String(error)};}
     if(!componentMountsValid(model,p)||!result?.valid)diag(diagnostics,'ACCESSORY_INSTALLATION_INVALID','配件的安装引用、朝向、支撑或空间无效，请检查诊断所指部件。',[p.id,...tubeSupports(p)],result);
@@ -199,7 +201,7 @@ function frameSequence(model,nodeIds,tubeIds,emit,diagnostics,threads=[]){
   if(nodes.length)build(nodes,tubes);
 }
 
-export function addAssemblyOperations(model,plan,onProgress){
+export function addAssemblyOperations(model,plan,onProgress,{reuseEnvelopes=false,stepCountOnly=false}={}){
   const loaded=assemblyMeshes();if(!loaded)throw new Error('装配网格还没加载');
   const nativeEnvelopes=loaded.nativeEnvelopes;
   const {steps,diagnostics}=plan,installed=new Set(),runDone=new Set(),threadDone=new Set(),poses=new Map(),threadAssemblies=[],threadCarrierConsumed=new Set(),preparedRigid=new Set(),softLinings=[];let previous;
@@ -214,9 +216,9 @@ export function addAssemblyOperations(model,plan,onProgress){
   const fittingMatingContacts=new Map();
   for(const fitting of model.fittings.values())if(!THREAD.has(fitting.kind)&&!fitting.appearanceVersion){const resolved=nativeAccessorySupport(model,fitting.id);if(resolved.valid)for(const supportId of resolved.supportIds){const kind=fitting.kind==='bearing-connector4'?'structural-bearing-stub':model.nodes.has(supportId)?'node-stub':fitting.kind==='casters2'&&model.fittings.get(supportId)?.kind==='adapter2'?'caster-adapter':model.fittings.get(supportId)?.kind==='bearing2'?'wheel-bearing':null;if(kind)fittingMatingContacts.set(`${fitting.id}:${supportId}`,{fittingId:fitting.id,supportId,kind,axis:resolved.mount.direction,basis:resolved.basis});}}
   const c45MatingContacts=new Map(plan.interfaces.filter(mark=>mark.directionBasis==='qdf-file-C45-mouth-and-matching-receiver-axis').map(mark=>[`${mark.nodeId}:${mark.supportTubeId}`,{cornerId:mark.nodeId,receiverNodeId:mark.mateNodeId,tubeId:mark.supportTubeId,basis:mark.directionBasis}]));
-  const reinforcement=reinforcementPart(),core=createCoreChannels(model,{entryPanelContacts,linerCarrierContacts,panelLinerContacts,fittingMatingContacts,c45MatingContacts});
+  const reinforcement=reinforcementPart(),core=createCoreChannels(model,{entryPanelContacts,linerCarrierContacts,panelLinerContacts,fittingMatingContacts,c45MatingContacts},reuseEnvelopes);
   const checkPath=(moving,installed,...args)=>core.check(moving,[...new Set([...installed,...preparedRigid])].filter(id=>!softLinings.some(lining=>lining.folded&&lining.id===id&&moving.every(part=>lining.carriers.includes(part)||lining.carriers.some(t=>{const tube=model.tubes.get(t);return tube.a===part||tube.b===part;})))),...args);
-  const materialKeys=id=>plan.ledger.instances.filter(x=>x.partIds.includes(id)).map(x=>`${x.group}:${x.key}`);
+  const materialKeys=id=>stepCountOnly?[]:plan.ledger.instances.filter(x=>x.partIds.includes(id)).map(x=>`${x.group}:${x.key}`);
   let processedSteps=0;
   for(const step of steps){step.operations=[];const opByPart=new Map();let staging=[0,0,0];
     const region=plan.regions.find(r=>r.id===step.regionId),regional=step.action.detached ? region.detachedTranslation : [0,0,0];
@@ -256,11 +258,13 @@ export function addAssemblyOperations(model,plan,onProgress){
       const op={id,type,order:step.operations.length+1,partIds:unique,consumesPartIds:unique,dependsOn:previous?[previous]:[],instructions:[text],verification:verify(),...extra};
       const offset=(op.placementTranslation || [0,0,0]).map((v,i)=>v+regional[i]+staging[i]);
       op.placementTranslation=offset;
-      if(op.translation && op.direction && !['prethread-accessory','thread-flexible-carrier'].includes(type)) {
+      if(op.translation && op.direction && !['prethread-accessory','thread-flexible-carrier'].includes(type) && (!stepCountOnly||type==='lower-frame')) {
         const start=op.translation.map((v,i)=>v+offset[i]);
         const obstruction=checkPath(op.movingEnvelopeIds||op.partIds,[...present],start,offset,{obstacleTranslations:poses});
         op.verification=verify(!obstruction,!obstruction);
         if(obstruction)diag(diagnostics,'INSTALLATION_PATH_BLOCKED','安装动作的完整部件包络被已装部件阻挡，请调整局部预装顺序或开放接口。',[obstruction.movingPartId,obstruction.obstaclePartId],{...obstruction,operationId:id,type});
+      } else if(stepCountOnly&&op.translation&&op.direction&&!['prethread-accessory','thread-flexible-carrier'].includes(type)) {
+        op.verification={...verify(false,false),pathApplicability:'not-evaluated-step-count'};
       }
       for(const p of op.consumesPartIds){present.add(p);preparedRigid.delete(p);poses.set(p,offset);}
       if(op.translation)for(const p of op.partIds)poses.set(p,offset);
@@ -379,8 +383,8 @@ export function addAssemblyOperations(model,plan,onProgress){
       // the generic model-middle outward normal can point through its back.
       const specialNormal=specialFrame&&(panel.appearanceVersion===1&&panel.panelId==='panel_40x40_pocket'?specialFrame.axes[1]:specialFrame.axes[2]);
       const envelope=partEnvelope(model,id),normals=(envelope[0]?.axes || (envelope[0]?.points?[unit(cross(sub(envelope[0].points[1],envelope[0].points[0]),sub(envelope[0].points[2],envelope[0].points[0])))]:[])).flatMap(axis=>[axis.map(v=>v*18),axis.map(v=>v*-18)]),panelCorners=model.panels.has(id)?model.panelCorners(model.panels.get(id)):null,panelNormal=specialNormal||(panelCorners&&(model.panels.get(id).geom?.quat?zAxisOf(model.panels.get(id).geom.quat):panelMountNormal(unit(sub(panelCorners[1],panelCorners[0])),unit(sub(panelCorners[3],panelCorners[0])),panelCorners[0].map((_,i)=>panelCorners.reduce((sum,p)=>sum+p[i],0)/4),modelMiddle(model.nodes.values())).map(v=>v*(model.panels.get(id).side<0?-1:1)))),panelDepth=panelNormal?envelope.flatMap(shape=>shape.points?shape.points.map(point=>dot(point,panelNormal)):shape.kind==='box'?[dot(shape.pos,panelNormal)-shape.half.reduce((sum,h,i)=>sum+h*Math.abs(dot(shape.axes[i],panelNormal)),0),dot(shape.pos,panelNormal)+shape.half.reduce((sum,h,i)=>sum+h*Math.abs(dot(shape.axes[i],panelNormal)),0)]:[]):[],panelReach=panelDepth.length?Math.max(8,Math.max(...panelDepth)-Math.min(...panelDepth)+3):18,panelApproaches=panelNormal?[panelNormal.map(v=>v*panelReach),panelNormal.map(v=>v*Math.max(18,panelReach))]:[],candidates=panelNormal?panelApproaches:model.slides.has(id)?[[0,18,0]]:native?.valid&&model.fittings.has(id)?[native.mount.direction.map(v=>v*18)]:[...normals,[0,18,0],[18,0,0],[-18,0,0],[0,0,18],[0,0,-18],[0,-18,0]];
-      const failures=[];let translation;const tried=new Set();for(const delta of candidates){const key=delta.map(v=>v.toFixed(4)).join(',');if(tried.has(key))continue;tried.add(key);const failure=checkPath([id],[...present],delta.map((v,i)=>v+regional[i]),regional,{obstacleTranslations:poses});failures.push(failure);if(!failure){translation=delta;break;}}
-      if(!envelope.length || !translation)diag(diagnostics,'ACCESSORY_INSTALLATION_PATH_UNRESOLVED','板面或配件没有可确认的无遮挡安装路径，请调整朝向、支撑或区域顺序。',[id],{candidates:candidates.length,failures});
+      const failures=[];let translation;const tried=new Set();if(!stepCountOnly)for(const delta of candidates){const key=delta.map(v=>v.toFixed(4)).join(',');if(tried.has(key))continue;tried.add(key);const failure=checkPath([id],[...present],delta.map((v,i)=>v+regional[i]),regional,{obstacleTranslations:poses});failures.push(failure);if(!failure){translation=delta;break;}}
+      if(!stepCountOnly&&(!envelope.length || !translation))diag(diagnostics,'ACCESSORY_INSTALLATION_PATH_UNRESOLVED','板面或配件没有可确认的无遮挡安装路径，请调整朝向、支撑或区域顺序。',[id],{candidates:candidates.length,failures});
       const entry=[...entryPanelContacts.values()].find(contact=>contact.panelId===id);
       const component=model.panels.get(id)||model.fittings.get(id),special=isOriginalComponent(component)?componentInstallCopy(componentPartId(component),component):null;
       const fitOp=emit('fit-accessory',[id],special?.instructions[0]||copy('拿取图中配件，按图示朝向固定到已完成的支撑；确认所有相邻框架已拼接后再遮盖接口。','Fit the shown accessory to the completed support; cover ports only after adjacent frames are joined.','Gezeigtes Zubehör an der fertigen Stütze befestigen; Anschlüsse erst nach dem Verbinden benachbarter Rahmen abdecken.'),{...(special?{instructions:[...special.instructions],componentId:componentPartId(component),installationCopyBasis:'component-catalog-special-instructions'}:{}),referencePartIds:[...new Set([...(step.panelSupports?.[id]||tubeSupports(model.panels.get(id)||model.fittings.get(id)||{})),...(native?.supportIds||[]),...(entry?[entry.slideId,entry.railId]:[]),...(step.clampSupports?.[id]||[]),...(step.bearingSupports?.[id]?[step.bearingSupports[id]]:[])])],translation,direction:translation&&unit(translation).map(v=>-v),position:envelope[0]?.pos||envelope[0]?.points?.[0]||[0,step.y,0],verification:verify(!!translation,!!translation)});
@@ -410,7 +414,7 @@ export function addAssemblyOperations(model,plan,onProgress){
   for(const id of entities)if(consumption.get(id)!==1)diag(diagnostics,'OPERATION_CONSUMPTION_MISMATCH','安装动作的实体消耗必须恰好一次。',[id],{count:consumption.get(id)||0});
   // The existing BOM allocation is authoritative. Detail pages never allocate again.
   for(const op of operations)op.consumesMaterialInstanceIds=[];
-  for(const instance of plan.ledger.instances){
+  for(const instance of stepCountOnly?[]:plan.ledger.instances){
     const candidates=operations.filter(op=>instance.partIds.some(id=>op.consumesPartIds.includes(id)));
     const core=instance.group==='reinforcements'?operations.find(op=>op.type==='preinsert-reinforcement' && instance.partIds.some(id=>op.partIds.includes(id))):null;
     const first=core||candidates[0];
@@ -426,5 +430,5 @@ export function addAssemblyOperations(model,plan,onProgress){
     else diag(diagnostics,'OPERATION_MATERIAL_UNASSIGNED','物料台账没有对应的安装动作。',instance.partIds,{instanceId:instance.id});
   }
 
-  plan.verification={directionChecked:operations.every(op=>op.verification.directionConsistent),pathChecked:!diagnostics.some(d=>['INSTALLATION_PATH_BLOCKED','ACCESSORY_INSTALLATION_PATH_UNRESOLVED','UNKNOWN_INSTALLATION_GEOMETRY','PRETHREAD_METHOD_UNVERIFIED','REINFORCEMENT_PATH_UNVERIFIED','REINFORCEMENT_CHANNEL_SPLIT','REINFORCEMENT_PLACEMENT_UNVERIFIED','MISSING_THREAD_SUPPORT'].includes(d.code))&&operations.filter(op=>op.translation).every(op=>op.verification.pathChecked),methodChecked:!diagnostics.some(d=>d.severity==='error')&&operations.every(op=>op.verification.methodChecked),physical:'unverified',load:'unverified'};
+  plan.verification={directionChecked:operations.every(op=>op.verification.directionConsistent),pathChecked:!stepCountOnly&&!diagnostics.some(d=>['INSTALLATION_PATH_BLOCKED','ACCESSORY_INSTALLATION_PATH_UNRESOLVED','UNKNOWN_INSTALLATION_GEOMETRY','PRETHREAD_METHOD_UNVERIFIED','REINFORCEMENT_PATH_UNVERIFIED','REINFORCEMENT_CHANNEL_SPLIT','REINFORCEMENT_PLACEMENT_UNVERIFIED','MISSING_THREAD_SUPPORT'].includes(d.code))&&operations.filter(op=>op.translation).every(op=>op.verification.pathChecked),methodChecked:!stepCountOnly&&!diagnostics.some(d=>d.severity==='error')&&operations.every(op=>op.verification.methodChecked),physical:'unverified',load:'unverified'};
 }

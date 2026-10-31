@@ -1,10 +1,10 @@
 import { reinforcementRuns, resolveNodeConnection } from './bom.js';
-import { beginAssemblyCollisionPass, checkAssemblyPath } from './assemblyCollision.js';
+import { beginAssemblyCollisionPass, forkAssemblyCollisionPass, checkAssemblyPath } from './assemblyCollision.js';
 import { REINFORCEMENT_SPECS } from './reinforcement.js';
 const xyz=p=>[p.x,p.y,p.z],sub=(a,b)=>a.map((v,i)=>v-b[i]),dot=(a,b)=>a.reduce((s,v,i)=>s+v*b[i],0),unit=a=>a.map(v=>v/(Math.hypot(...a)||1));
 /** 75 cm 加固铝管位于80 cm节点间距的连续通道内。
  * 碰撞包络沿用完整通道及承载管外径，兼容判断仅适用于该同轴通道。 */
-export function createCoreChannels(model,pathOptions={}){
+export function createCoreChannels(model,pathOptions={},reuseEnvelopes=false){
   const virtual=Object.assign(Object.create(Object.getPrototypeOf(model)),model,{nodes:new Map(model.nodes),tubes:new Map(model.tubes)}),channels=[];
   for(const [index,run] of reinforcementRuns(model).entries()){
     const coverage = REINFORCEMENT_SPECS[run.partId]?.span || 80;
@@ -23,7 +23,11 @@ export function createCoreChannels(model,pathOptions={}){
     const legacyValid = run.tubeIds.length<=2&&run.tubeIds.every(id=>{const t=model.tubes.get(id);return (run.tubeIds.length===1&&Math.abs((t.geom?.len||t.length)-75)<.01)||(run.tubeIds.length===2&&Math.abs((t.geom?.len||t.length)-35)<.01);});
     channels.push({id,run,axis,start,end,span,middle,carrierOrder,firstCarrier:carrierOrder[0],valid:Math.abs(span-coverage)<.6&&through&&validTubes&&(run.explicit||legacyValid),active:false,terminalNodeIds:[ordered[0].id,ordered.at(-1).id],basis:'official-profile-compatibility-and-opposed-port-topology',crossSection:'official-compatible; dimensions-unmeasured'});
   }
-  beginAssemblyCollisionPass(virtual);
+  const addedIds=channels.flatMap(({id})=>[id,`${id}-start`,`${id}-end`]);
+  const reusedId=addedIds.some(id=>['nodes','tubes','panels','textiles','fittings','slides','clamps'].some(key=>model[key]?.has(id)));
+  // 临时端点可能改变未固定方向的板面朝向；同名零件也不能沿用原包络。
+  if(!reuseEnvelopes||reusedId)beginAssemblyCollisionPass(virtual);
+  else forkAssemblyCollisionPass(model,virtual,channels.length?[...model.panels.keys(),...model.textiles.keys()]:[]);
   const check=(moving,installed,start,end=[0,0,0],{obstacleTranslations:poses=new Map(),...extra}={})=>{
     const travel=sub(end,start),movingIds=[...moving];
     for(const channel of channels.filter(c=>c.active))if(moving.includes(channel.firstCarrier)&&!movingIds.includes(channel.id))movingIds.push(channel.id);
