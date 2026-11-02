@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { MessageChannel as NodeMessageChannel } from 'node:worker_threads'
-import { bootLanguage, waitForAssetController } from './boot'
+import { assetControllerScope, bootLanguage, waitForAssetController } from './boot'
 import { READY, type AssetBoot } from './protocol'
 
 const config: AssetBoot = { protocol: 1, release: 'a'.repeat(64), mode: 'public-ipv6-fallback', base: '/builder/',
@@ -24,6 +24,16 @@ function container(readyRelease: string, throws = false) {
 }
 
 describe('bounded exact controller handshake', () => {
+  it('controls the configured HTML document without registering a site-wide scope', async () => {
+    const scoped = { ...config, documentScope: '/model-workspace.html' }
+    expect(assetControllerScope(scoped, '/model-workspace.html')).toBe('/model-workspace.html')
+    for (const path of ['/stock.html', '/admin', '/model-workspace.html/other', '/builder/']) {
+      expect(assetControllerScope(scoped, path)).toBe('/builder/')
+    }
+    const sw = container(config.release)
+    expect(await waitForAssetController(sw, scoped, assetControllerScope(scoped, '/model-workspace.html'))).toBe(true)
+    expect(sw.registrations).toEqual([['/builder/public-assets-sw.js', { scope: '/model-workspace.html', updateViaCache: 'none' }]])
+  })
   it('failure messages follow URL language, saved preference and normalized browser language without requiring storage', () => {
     expect(bootLanguage('?lang=de', () => { throw new Error('URL must win') }, 'zh-CN')).toBe('de')
     expect(bootLanguage('', key => key === 'quadro-builder-lang' ? 'en' : 'de', 'zh-CN')).toBe('en')

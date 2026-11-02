@@ -7,10 +7,15 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import fontData from 'three/examples/fonts/helvetiker_regular.typeface.json';
 import { confirmedSpec, confirmedColor, legoStudHeight } from './componentPack.js';
 import { insetScrewMeshes } from './insetPanelMeshes.js';
+import { hasInsetScrews, INSET_PANEL_EDGE_INSET } from './insetPanelMounts.js';
+import { panelScrewPose, panelLipProfiles, sectorScrewMounts, PANEL_SCREW_RADIUS, PANEL_SCREW_HEAD_DEPTH, PANEL_SCREW_SHAFT_RADIUS, PANEL_SCREW_SHAFT_LENGTH, PANEL_OUTER_FACE, PANEL_CORNER_RELIEF } from './panelScrewMounts.js';
 import { COLOR_HEX } from './colors.js';
+import { readComponentAppearance, diamondNetSegments } from './componentAppearance.js';
+import { geometry } from './catalog.js';
 import { confirmedFrame, curvePoint, worldToLocal, rungPositions } from './confirmedComponentModel.js';
 const font=new FontLoader().parse(fontData);
 const colors=['#e64343','#ffcf3d','#f09cbc','#74b166','#318dde','#9c75cb'];
+const clearPanelFeatures=new Set(['acrylic','acrylic_holes','capsule']);
 const vec=p=>new THREE.Vector3(...p);
 const resolveColor=color=>COLOR_HEX[color] || color;
 
@@ -35,7 +40,7 @@ function feltBump(scene) {
   const map=new THREE.DataTexture(data,size,size);map.wrapS=map.wrapT=THREE.RepeatWrapping;map.repeat.set(12,12);map.needsUpdate=true;
   scene._confirmedFiberBump=map;return map;
 }
-function componentEnvironment(scene) {
+export function componentEnvironment(scene) {
   if(!scene.renderer?.isWebGLRenderer)return null;
   if(scene._confirmedEnvironmentRenderer!==scene.renderer){
     scene._confirmedEnvironmentTarget?.dispose();
@@ -78,9 +83,11 @@ function factory(scene,frame) {
   return {meshes,add,box,ball,tube,torus,text};
 }
 
-function outline(w,h,feature) {
-  const shape=new THREE.Shape(),x=w/2,y=h/2,n=2.7;
-  if(feature==='sector') {shape.moveTo(0,0);shape.lineTo(40,0);shape.absarc(0,0,40,0,Math.PI/2,false);shape.lineTo(0,0);return shape;}
+function outline(w,h,feature,inset=false) {
+  const shape=new THREE.Shape(),x=w/2,y=h/2,n=PANEL_CORNER_RELIEF;
+  if(feature==='sector') {shape.moveTo(n,0);shape.lineTo(w-n,0);shape.absarc(w,0,n,Math.PI,Math.PI/2,true);shape.absarc(0,0,w,Math.asin(n/w),Math.PI/2-Math.asin(n/w),false);shape.absarc(0,w,n,0,-Math.PI/2,true);shape.lineTo(0,n);shape.absarc(0,0,n,Math.PI/2,0,true);shape.closePath();return shape;}
+  if(inset){shape.moveTo(-x,-y);shape.lineTo(x,-y);shape.lineTo(x,y);shape.lineTo(-x,y);shape.closePath();return shape;}
+  // 外扣板到达管轴，接头处让位与普通板一致；内嵌板使用独立的完整矩形。
   shape.moveTo(-x+n,-y);shape.lineTo(x-n,-y);shape.absarc(x,-y,n,Math.PI,Math.PI/2,true);
   shape.lineTo(x,y-n);shape.absarc(x,y,n,-Math.PI/2,-Math.PI,true);
   if(feature==='castle') {
@@ -88,8 +95,9 @@ function outline(w,h,feature) {
   }
   shape.lineTo(-x+n,y);shape.absarc(-x,y,n,0,-Math.PI/2,true);shape.lineTo(-x,-y+n);shape.absarc(-x,-y,n,Math.PI/2,0,true);shape.closePath();return shape;
 }
-function plateGeometry(w,h,feature,depth=1.2) {
-  const shape=outline(w,h,feature);
+function plateGeometry(w,h,feature,inset=false) {
+  const depth=geometry().panelThickness,bevel=inset&&!clearPanelFeatures.has(feature)?Math.min(0.06,depth/4):0;
+  const shape=outline(w,h,feature,inset);
   if(feature==='holes' || feature==='acrylic_holes')for(const x of [-w*0.28,0,w*0.28])for(const y of [-h*0.28,0,h*0.28])shape.holes.push(new THREE.Path().absarc(x,y,3.2,0,Math.PI*2,true));
   if(feature==='honeycomb')for(let row=-7;row<=7;row++)for(let col=-7;col<=7;col++) {
     const x=col*2.65+(Math.abs(row%2)?1.325:0),y=row*2.65*Math.sqrt(3)/2;if(Math.abs(x)>w/2-2.3 || Math.abs(y)>h/2-2.3)continue;
@@ -99,7 +107,9 @@ function plateGeometry(w,h,feature,depth=1.2) {
     const p=new THREE.Path();p.moveTo(x-0.32,y-0.6);p.lineTo(x-0.32,y+0.6);p.absarc(x,y+0.6,0.32,Math.PI,0,true);p.lineTo(x+0.32,y-0.6);p.absarc(x,y-0.6,0.32,0,-Math.PI,true);p.closePath();shape.holes.push(p);
   }
   if(feature==='castle'){const p=new THREE.Path();p.moveTo(-12,-3);p.lineTo(-12,0);p.lineTo(12,0);p.lineTo(12,-3);p.closePath();shape.holes.push(p);}
-  return new THREE.ExtrudeGeometry(shape,{depth,bevelEnabled:feature!=='acrylic',bevelThickness:feature==='honeycomb'?0.06:0.12,bevelSize:feature==='honeycomb'?0.06:0.12,bevelSegments:2,curveSegments:16});
+  const mesh=new THREE.ExtrudeGeometry(shape,{depth:depth-2*bevel,bevelEnabled:bevel>0,bevelThickness:bevel,bevelSize:bevel,bevelSegments:2,curveSegments:16});
+  mesh.translate(0,0,bevel);
+  return mesh;
 }
 function clips(f,model,part,color='#343a3e') {
   const frame=confirmedFrame(model,part);
@@ -115,22 +125,85 @@ function clips(f,model,part,color='#343a3e') {
     f.ball('retainer-screw',0.42,'#c7c9cc',[local[0],local[1],local[2]+3.85],'metal');
   }
 }
+function panelScrews(f,model,part,frame) {
+  const lipColor=confirmedColor(part)||'#398ddb';
+  for(const lip of panelLipProfiles(part)){
+    const key=`panel-back-lip:curved:${lip.length}:${lip.inward.join(',')}:${JSON.stringify(lip.sections)}`;
+    f.add(key,()=>{
+      const points=[...lip.sections.map(s=>s.outer),...lip.sections.map(s=>s.inner).reverse()];
+      const shape=new THREE.Shape(points.map(p=>new THREE.Vector2(...p)));
+      const geo=new THREE.ExtrudeGeometry(shape,{depth:lip.length,bevelEnabled:false,steps:1});
+      // 圆弧侧壁使用径向法线，端盖和接板直段保留棱边。
+      const positions=geo.getAttribute('position'),normals=geo.getAttribute('normal');
+      for(let i=0;i<positions.count;i++){
+        const x=positions.getX(i),y=positions.getY(i),radius=Math.hypot(x,y);
+        const dot=(normals.getX(i)*x+normals.getY(i)*y)/radius;
+        if(Math.abs(normals.getZ(i))<.001 && Math.abs(dot)>.98)normals.setXYZ(i,Math.sign(dot)*x/radius,Math.sign(dot)*y/radius,0);
+      }
+      geo.translate(0,0,-lip.length/2);
+      geo.applyMatrix4(new THREE.Matrix4().makeBasis(vec(lip.inward),new THREE.Vector3(0,0,1),vec(lip.along)));
+      return geo;
+    },lipColor,lip.origin);
+  }
+  for(const mount of part.mounts || []){
+    const pose=panelScrewPose(model,part,frame,mount);if(!pose)continue;
+    const rotation=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,0,1),vec(pose.normal));
+    const offset=distance=>pose.point.map((v,i)=>v+pose.normal[i]*distance);
+    f.add('panel-screw-head',()=>{const g=new THREE.CylinderGeometry(PANEL_SCREW_RADIUS,PANEL_SCREW_RADIUS,PANEL_SCREW_HEAD_DEPTH,24);g.rotateX(Math.PI/2);return g;},'#252525',offset(-.035),rotation);
+    f.add('panel-screw-shaft',()=>{const g=new THREE.CylinderGeometry(PANEL_SCREW_SHAFT_RADIUS,PANEL_SCREW_SHAFT_RADIUS,PANEL_SCREW_SHAFT_LENGTH,12);g.rotateX(Math.PI/2);return g;},'#252525',offset(-.1-PANEL_SCREW_SHAFT_LENGTH/2),rotation);
+    f.add('panel-screw-slot',()=>new THREE.BoxGeometry(.72,.1,.008),'#060606',offset(.025),rotation);
+  }
+}
+function panelBodyGeometry(scene,geometry) {
+  return scene._cachedGeo(`panel-body:${geometry.uuid}`,()=>{
+    const body=geometry.clone(),positions=geometry.getAttribute('position'),index=geometry.getIndex(),indices=[];
+    for(let i=0;i<index.count;i+=3){
+      const vertices=[index.getX(i),index.getX(i+1),index.getX(i+2)];
+      if(vertices.every(vertex=>positions.getZ(vertex)>=0))indices.push(...vertices);
+    }
+    body.setIndex(indices);return body;
+  });
+}
 function panelMeshes(scene,model,part,spec,frame) {
-  const f=factory(scene,frame),w=spec.width-3,h=spec.height-3,feature=spec.feature;
+  const standard=['panel_40x40','panel_40x20','panel_30x30','hole_panel_40x40'].includes(spec.id);
+  if(standard && scene._q?.().meshes) {
+    // 旧v2标准板复用工厂网格：板边到达管轴，包管唇边及接头让位保留原厂形状。
+    let [x,y,z]=frame.axes.map(vec),width=spec.width,height=spec.height;
+    if(part.params?.screwAxis ? part.params.screwAxis==='vertical' : part.turned){[x,y]=[y,x.clone().negate()];[width,height]=[height,width];}
+    const native=scene._surfaceMeshFor(spec.feature==='holes'?spec.id:'panel2',x,y,width,height,vec(frame.pos),z.toArray(),1);
+    if(native) {
+      const mesh=new THREE.Mesh(part.params?.screwAxis?panelBodyGeometry(scene,native.geo):native.geo,scene._panelMaterial(part.color,false,false));
+      mesh.name=`plate:native:${spec.id}`;native.matrix.decompose(mesh.position,mesh.quaternion,mesh.scale);
+      mesh.castShadow=true;mesh.receiveShadow=true;
+      const fixing=factory(scene,frame);
+      if(part.params?.screwAxis)panelScrews(fixing,model,part,frame);
+      return [mesh,...fixing.meshes];
+    }
+  }
+  const inset=hasInsetScrews(part),clear=clearPanelFeatures.has(spec.feature),edgeInset=inset?INSET_PANEL_EDGE_INSET:clear?1.5:0;
+  const f=factory(scene,frame),w=spec.width-2*edgeInset,h=spec.height-2*edgeInset,feature=spec.feature;
   const color=confirmedColor(part)||'#398ddb';
-  const clear=['acrylic','acrylic_holes','capsule'].includes(feature);
-  if(feature!=='basin' && feature!=='grid' && feature!=='sensory')f.add(`plate:${w}:${h}:${feature}`,()=>plateGeometry(w,h,feature,clear?0.45:1.2),clear?'#eaf7fa':color,[0,0,1.8],null,clear?'glass':feature==='magnet'?'coated-metal':feature==='felt'?'cloth':'plastic');
-  if(feature==='plain')for(const x of [-w/2+1,w/2-1])f.box('plain-edge-lip',[1,h-4,0.8],color,[x,0,1.5]);
+  if(part.params?.screwAxis && !hasInsetScrews(part) && feature!=='basketball')panelScrews(f,model,part,frame);
+  if(standard) {
+    // 网格加载期间及低画质使用同样外宽和管顶高度，避免加载前后板面跳变。
+    const mesh=f.add(`plate:standard:${spec.id}`,()=>plateGeometry(spec.width,spec.height,feature),color,[0,0,PANEL_OUTER_FACE-geometry().panelThickness]);
+    if(scene._panelMaterial)mesh.material=scene._panelMaterial(part.color,false,false);
+  } else if(feature!=='basin' && feature!=='grid' && feature!=='sensory') {
+    const faceHeight=inset?geometry().panelThickness/2:(({acrylic:2.25,acrylic_holes:2.37,capsule:2.37})[feature] ?? PANEL_OUTER_FACE);
+    const materialType=clear?'glass':(({magnet:'coated-metal',felt:'cloth'})[feature] || 'plastic');
+    f.add(`plate:${w}:${h}:${feature}:${inset?'inset':'outer'}`,()=>plateGeometry(w,h,feature,inset||clear),clear?'#eaf7fa':color,[0,0,faceHeight-geometry().panelThickness],null,materialType);
+  }
+  const featureStart=f.meshes.length;
   if(clear)f.meshes.push(...insetScrewMeshes(scene,model,part,frame));
   if(clear){
-    const points=outline(w,h,feature).getPoints(64).map(p=>[p.x,p.y,2.2]);
-    f.tube('acrylic-polished-edge',points,0.065,'#bdcdd1','glass-edge');
-    if(feature==='acrylic_holes')for(const x of [-w*.28,0,w*.28])for(const y of [-h*.28,0,h*.28])f.torus('acrylic-hole-edge',3.2,0.06,'#beced3',[x,y,2.2],null,'glass-edge');
+    const points=outline(w,h,feature,true).getPoints(64).map(p=>[p.x,p.y,inset?0:2.2]);
+    for(let i=1;i<points.length;i++)f.tube('acrylic-polished-edge',[points[i-1],points[i]],0.065,'#bdcdd1','glass-edge');
+    if(feature==='acrylic_holes')for(const x of [-w*.28,0,w*.28])for(const y of [-h*.28,0,h*.28])f.torus('acrylic-hole-edge',3.2,0.06,'#beced3',[x,y,inset?0:2.2],null,'glass-edge');
   }
   if(feature==='capsule') {
-    f.add('capsule-hemisphere-r16',()=>{const g=new THREE.SphereGeometry(16,56,36,0,Math.PI*2,0,Math.PI/2);g.rotateX(Math.PI/2);return g;},'#e6f5fa',[0,0,2.3],null,'glass');
-    f.add('capsule-inner-shell-r15.65',()=>{const g=new THREE.SphereGeometry(15.65,56,36,0,Math.PI*2,0,Math.PI/2);g.rotateX(Math.PI/2);return g;},'#e4eef0',[0,0,2.3],null,'glass-inner');
-    f.torus('capsule-equator',15.82,0.18,'#a9bdc4',[0,0,2.3],null,'glass-edge');
+    f.add('capsule-hemisphere-r16',()=>{const g=new THREE.SphereGeometry(16,56,36,0,Math.PI*2,0,Math.PI/2);g.rotateX(Math.PI/2);return g;},'#e6f5fa',[0,0,inset?0:2.3],null,'glass');
+    f.add('capsule-inner-shell-r15.65',()=>{const g=new THREE.SphereGeometry(15.65,56,36,0,Math.PI*2,0,Math.PI/2);g.rotateX(Math.PI/2);return g;},'#e4eef0',[0,0,inset?0:2.3],null,'glass-inner');
+    f.torus('capsule-equator',15.82,0.18,'#a9bdc4',[0,0,inset?0:2.3],null,'glass-edge');
   }
   if(feature==='lego') {
     const height=legoStudHeight(part),z=height===0.7?3.2:3.025+height/2;
@@ -173,7 +246,6 @@ function panelMeshes(scene,model,part,spec,frame) {
     f.box('basket-mount-base',[8,6,1.4],'#efece1',[0,-4,4],0.45);for(const x of [-2.5,2.5])for(const y of [-2,-6])f.ball('basket-base-screw',0.45,'#b4bac0',[x,y,5],'metal');
     f.box('basket-neck',[2,1.8,8],'#f88722',[0,-4,8.5]);f.torus('basket-orange-ring',8,0.75,'#ff8524',[0,-4,16],new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),Math.PI/2));
     for(let i=0;i<16;i++)for(const direction of [-1,1]){const points=[];for(let k=0;k<=6;k++){const a=i*Math.PI/8+direction*(k%2?Math.PI/8:0),r=8-k*0.55;points.push([Math.cos(a)*r,-4-k*3.1,16+Math.sin(a)*r]);}f.tube('basket-net:'+i+':'+direction,points,0.13,'#efe6cd');}
-    clips(f,model,part,'#929b9f');
   }
   if(feature==='basin') {
     const shape=new THREE.Shape();shape.moveTo(-17,-17);shape.lineTo(17,-17);shape.lineTo(17,17);shape.lineTo(-17,17);shape.closePath();
@@ -217,8 +289,19 @@ function panelMeshes(scene,model,part,spec,frame) {
     const seam=outline(w-1.3,h-1.3,'felt').getPoints(80).map(p=>[p.x,p.y,3.08]);f.tube('felt-binding-seam',seam,.055,'#f6df85','cloth');
   }
   if(feature==='grid') {
-    for(let x=-17;x<=17;x+=3.4)f.box('grid-vertical',[0.5,34,0.65],'#f6f2e7',[x,0,2]);for(let y=-17;y<=17;y+=3.4)f.box('grid-horizontal',[34,0.5,0.65],'#f6f2e7',[0,y,2]);f.meshes.push(...insetScrewMeshes(scene,model,part,frame));
+    const span=inset?w:34,edge=inset?(span-.5)/2:17;
+    for(let k=0;k<=10;k++){
+      const at=-edge+2*edge*k/10;
+      f.box('grid-vertical',[.5,span,geometry().panelThickness],'#f6f2e7',[at,0,inset?0:2]);
+      f.box('grid-horizontal',[span,.5,geometry().panelThickness],'#f6f2e7',[0,at,inset?0:2]);
+    }
+    f.meshes.push(...insetScrewMeshes(scene,model,part,frame));
   }
+  if(!standard&&!inset&&!clear&&!['basin','sensory'].includes(feature)){
+    // 功能装饰的原坐标以3.12cm板面为基准，随板面一起贴合到普通板高度。
+    for(const mesh of f.meshes.slice(featureStart))mesh.position.addScaledVector(vec(frame.axes[2]),PANEL_OUTER_FACE-3.12);
+  }
+  if(feature==='basketball')clips(f,model,part,'#929b9f');
   return f.meshes;
 }
 
@@ -226,7 +309,12 @@ export function confirmedComponentMeshes(scene,model,part) {
   const spec=confirmedSpec(part.panelId||part.kind||part.partId),frame=confirmedFrame(model,part);if(!spec || !frame)return [];
   if(spec.placement==='panel')return panelMeshes(scene,model,part,spec,frame);
   const f=factory(scene,frame);
-  if(spec.feature==='sector') {f.add('sector-panel',()=>plateGeometry(40,40,'sector'),part.color||'#348ddd');clips(f,model,part);return f.meshes;}
+  if(spec.feature==='sector') {
+    const mesh=f.add(`sector-panel:${spec.width}`,()=>plateGeometry(spec.width,spec.height,'sector'),part.color||'#348ddd',[0,0,PANEL_OUTER_FACE-geometry().panelThickness]);
+    mesh.name='sector-panel';if(scene._panelMaterial)mesh.material=scene._panelMaterial(part.color,false,false);
+    const mounts=sectorScrewMounts(model,part);
+    panelScrews(f,model,{...part,mounts},frame);return f.meshes;
+  }
   if(spec.feature==='roller') {
     const rail=model._rail(part.tube),length=rail.len-12,r=spec.radius;
     f.add(`roller:${length}:${r}`,()=>{const g=new THREE.CylinderGeometry(r,r,length,48);g.rotateZ(Math.PI/2);return g;},'#f0d33f',[0,0,0],null,'cloth');
@@ -276,6 +364,18 @@ export function confirmedComponentMeshes(scene,model,part) {
     if(curved)for(let v=0.15;v<1-margin;v+=0.14)f.tube('curve-quilt:'+v,Array.from({length:16},(_,k)=>local(margin+k*(1-2*margin)/15,v)),0.06,'#d0d5ab','cloth');
   }
   if(spec.feature==='net') {
+    const appearance=readComponentAppearance(part);
+    if(appearance?.variant==='diamond_net') {
+      for(const [index,ends] of diamondNetSegments().entries()) {
+        const points=Array.from({length:25},(_,i)=>local(ends[0][0]+(ends[1][0]-ends[0][0])*i/24,ends[0][1]+(ends[1][1]-ends[0][1])*i/24));
+        f.tube('net-diamond:'+index,points,.16,appearance.color);
+      }
+      for(const mount of part.mounts) {
+        const p=worldToLocal(frame,curvePoint(model,mount.tube,mount.t));
+        f.torus('net-diamond-lacing-loop',2.7,.22,appearance.color,p,new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),Math.PI/2));
+      }
+      return f.meshes;
+    }
     for(let i=0;i<=4;i++)for(const along of [true,false]) {
       const pts=Array.from({length:25},(_,k)=>local(along?i/4:k/24,along?k/24:i/4));f.tube('net-strand:'+i+':'+along,pts,0.35,colors[(i+(along?0:2))%6]);
     }

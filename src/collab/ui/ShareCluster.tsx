@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type RefObject } from 'react'
 import { Users, UserPlus } from 'lucide-react'
 import { useI18n } from '../../i18n'
 import { useCollab } from '../CollabContext'
@@ -6,25 +6,29 @@ import { Face } from './bits'
 import { DeliverModal, EnableShareModal, ShareModal } from './Modals'
 import { bootEntry, dropParam } from '../../entry'
 import { useEngine } from '../../store/EngineContext'
+import { collaborationSpace } from '../../sync/slotAccess'
 
 /**
  * 顶栏最右边：普通设计创建共享副本，共享方案查看成员；创建人可以邀请协作。
  * 开源本地版不出现。
  */
-export default function ShareCluster() {
+export default function ShareCluster({ triggerRef }: { triggerRef?: RefObject<HTMLButtonElement | null> } = {}) {
   const collab = useCollab()
   const { t } = useI18n()
   const api = useEngine()
+  const createAllowed = collaborationSpace()
   const [open, setOpen] = useState<'enable' | 'share' | 'deliver' | null>(null)
   const createOpened = useRef(false)
   const manageOpened = useRef(false)
   const show = (dialog: 'enable' | 'share' | 'deliver') => { collab.setSharingDialogOpen(true); setOpen(dialog) }
   useEffect(() => {
     if (!collab.enabled || !api.ready || !api.entryReady || createOpened.current || !bootEntry().createShared) return
+    if (createAllowed === undefined) return
+    if (!createAllowed) { createOpened.current=true;dropParam('createShared');api.notify(t('capacity.collaborationFull'),'warn');return }
     if (bootEntry().plan && (collab.plan?.id !== bootEntry().plan || !collab.session?.synced)) return
     createOpened.current = true
     show('enable')
-  }, [collab.enabled, api.ready, api.entryReady, collab.plan, collab.session, collab.rev])
+  }, [collab.enabled, api.ready, api.entryReady, collab.plan, collab.session, collab.rev, createAllowed])
   useEffect(() => {
     if (collab.inviteOpenId && collab.plan?.id === collab.inviteOpenId) show('share')
     if (!manageOpened.current && collab.plan && new URLSearchParams(location.search).get('inviteManage') === '1') {
@@ -38,10 +42,11 @@ export default function ShareCluster() {
   if (!collab.enabled || collab.mode === 'delivery' || collab.mode === 'room') return null
 
   if (collab.mode !== 'plan') {
+    if (!createAllowed && !collab.createdPlan && open !== 'enable') return null
     return (
       <div className="cb-cluster">
-        <button type="button" className="cb-share ghost" title={t('collab.create.action')} aria-label={t('collab.create.action')} onClick={() => show('enable')} data-ui="share-enable"><Users /><span>{t('collab.create.action')}</span></button>
-        {collab.createdPlan && <button type="button" className="cb-text-action" onClick={collab.recoverCreatedPlan}>{t('collab.create.recover')}</button>}
+        {createAllowed && <button ref={triggerRef} type="button" className="cb-share ghost" title={t('collab.create.action')} aria-label={t('collab.create.action')} onClick={() => show('enable')} data-ui="share-enable"><Users /><span>{t('collab.create.action')}</span></button>}
+        {collab.createdPlan && <button type="button" className="cb-text-action xmf-button xmf-button-text xmf-button-small" onClick={collab.recoverCreatedPlan}>{t('collab.create.recover')}</button>}
         {open === 'enable' && <EnableShareModal onClose={closeCreate} />}
       </div>
     )
@@ -63,11 +68,11 @@ export default function ShareCluster() {
         {members.length > 5 && <span className="cb-face more">+{members.length - 5}</span>}
       </div>
       {plan && (
-        <button type="button" className="cb-share" title={t(collab.role === 'owner' ? 'collab.create.invite' : 'collab.create.members')} aria-label={t(collab.role === 'owner' ? 'collab.create.invite' : 'collab.create.members')} onClick={() => show('share')} data-ui="plan-share">
+        <button ref={triggerRef} type="button" className="cb-share" title={t(collab.role === 'owner' ? 'collab.create.invite' : 'collab.create.members')} aria-label={t(collab.role === 'owner' ? 'collab.create.invite' : 'collab.create.members')} onClick={() => show('share')} data-ui="plan-share">
           {collab.role === 'owner' ? <UserPlus /> : <Users />}<span>{t(collab.role === 'owner' ? 'collab.create.invite' : 'collab.create.members')}</span>
         </button>
       )}
-      {!plan && collab.createdPlan && <button type="button" className="cb-text-action" onClick={collab.recoverCreatedPlan} data-ui="plan-recovery">{t('collab.create.recover')}</button>}
+      {!plan && collab.createdPlan && <button type="button" className="cb-text-action xmf-button xmf-button-text xmf-button-small" onClick={collab.recoverCreatedPlan} data-ui="plan-recovery">{t('collab.create.recover')}</button>}
       {open === 'share' && <ShareModal onClose={close} onDeliver={() => { collab.closeInvite(); show('deliver') }} />}
       {open === 'deliver' && <DeliverModal onClose={close} />}
       {open === 'enable' && <EnableShareModal onClose={closeCreate} />}

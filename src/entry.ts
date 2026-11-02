@@ -8,8 +8,10 @@
 //	&name=小屋             标签页的名字
 //	&copy=1               打开之后存一份到自己的存档里（登录了就跟着同步进账号）
 //	?view=1               只看模式：嵌在方案页里，只有 3D 画面和分步手册，不改、不存
+//	?view=locked          锁定预览：禁止编辑，不提供打开编辑器的入口
 //	?export=manual|bom|bompng|shareimg|qdf|json|link   注册完回来，接着导出（link 是复制分享链接）
 //	?lang=zh|en|de        界面语言，嵌在别的页面里时跟着那一页
+//	?background=grass|home 导入造型时使用来源页选择的背景，成功导入后应用
 //
 // 共享方案（托管版设了 VITE_SYNC_BASE 才认）：
 //
@@ -21,19 +23,25 @@
 //	?import=qdf                    打开后直接进入批量导入 .qdf
 //	?room=brief:<id>               画房间边界，画完写回需求单
 //	?doc=<doc id>                  打开自己「我的设计」里的这一座；没登录先去登录，登录完回到这个地址
-//	?new=1                         新开一个空白标签页，已开的标签页都留着（工作台「新建造型」）
+//	?embedded=model#model-editor?src=...  嵌入工作区使用固定导航，来源片段仍决定同一份草稿与账号读取
+//	?new=1                         托管版新建独立草稿；离线版在原会话中新开标签页
+//	?draft=<UUID>                  托管版当前临时造型，刷新只恢复这一份
+//	?recover=1                     本机草稿列表，不启动三维编辑器或完整模型同步
 //
-// 除了只看模式，参数读完就从地址栏去掉：刷新一下不该再打开一遍、再存一份。
-// ?doc= 和 ?new= 在处理完以后才去掉：?doc= 没登录时跳去登录页，要带着它回来；
-// ?new= 要等这台设备上记着的标签页恢复出来，再在它们后面新开一个。
+// 托管版保留来源与草稿标识，按来源恢复唯一编辑会话；恢复与登录承接参数在持久化后移除。
+// 离线版处理完来源参数后移除，原有多标签会话保持。
 // 当前标签页是共享方案时，地址栏由 CollabProvider 写成这个方案的地址。
 
-export type ResumeExport = 'manual' | 'bom' | 'bompng' | 'shareimg' | 'qdf' | 'json' | 'link'
+export type ResumeExport = 'manual' | 'bom' | 'bompng' | 'shareimg' | 'qdf' | 'json' | 'link' | 'save'
 
-const RESUMES: ResumeExport[] = ['manual', 'bom', 'bompng', 'shareimg', 'qdf', 'json', 'link']
+const RESUMES: ResumeExport[] = ['manual', 'bom', 'bompng', 'shareimg', 'qdf', 'json', 'link', 'save']
+export const SINGLE_MODEL = Boolean(import.meta.env.VITE_SYNC_BASE)
+export const RECOVERY_ONLY = new URLSearchParams(location.search).get('recover') === '1'
+export const RESOURCE_MODE = new URLSearchParams(location.search).get('resources') === '1'
 
 export interface Entry {
   view: boolean
+  lockedView: boolean
   src: string | null
   /** ?src= 里的来源标记 */
   source: string | null
@@ -59,6 +67,7 @@ export interface Entry {
   doc: string | null
   /** 新开一个空白标签页 */
   blank: boolean
+  background: 'grass' | 'home' | null
 }
 
 let entry: Entry | null = null
@@ -70,25 +79,34 @@ function sameSite(p: string | null): string | null {
 }
 
 const SOURCE_RE = /^(pro|plan|invite|delivery):[A-Za-z0-9_-]+$/
+const EDITOR_HASH = '#model-editor?'
 
 const collab = Boolean(import.meta.env.VITE_SYNC_BASE)
 
 /** 按地址上的参数读出打开方式；collab 是托管版有没有设 VITE_SYNC_BASE */
 export function readEntry(search: string, hash: string, collab: boolean): Entry {
   const q = new URLSearchParams(search)
+  if (q.get('embedded') === 'model' && hash.startsWith(EDITOR_HASH)) {
+    const model = new URLSearchParams(hash.slice(EDITOR_HASH.length))
+    for (const key of ['src', 'plan', 'name']) if (model.has(key)) q.set(key, model.get(key)!)
+  }
+  const lockedView = q.get('view') === 'locked'
+  if (lockedView) collab = false
   const lang = q.get('lang')
   const resume = q.get('export') as ResumeExport | null
   const src = q.get('src')
   const cmp = (q.get('compare') || '').split(',').map(s => s.trim()).filter(Boolean)
   const room = q.get('room') || ''
+  const background = q.get('background')
   return {
-    view: q.get('view') === '1',
+    view: lockedView || q.get('view') === '1',
+    lockedView,
     src: sameSite(src),
     source: src && SOURCE_RE.test(src) ? src : null,
     origin: sameSite(q.get('origin')) ?? sameSite(src),
     name: q.get('name'),
-    copy: q.get('copy') === '1',
-    resume: resume && RESUMES.includes(resume) ? resume : null,
+    copy: !lockedView && q.get('copy') === '1',
+    resume: !lockedView && resume && RESUMES.includes(resume) ? resume : null,
     lang: lang === 'zh' || lang === 'en' || lang === 'de' ? lang : null,
     hash,
     plan: collab ? q.get('plan') : null,
@@ -98,19 +116,20 @@ export function readEntry(search: string, hash: string, collab: boolean): Entry 
     compare: collab && cmp.length === 2 ? [cmp[0], cmp[1]] : null,
     delivery: collab ? q.get('delivery') : null,
     assembly: collab && !!q.get('delivery') && q.get('assembly') === '1',
-    importQdf: q.get('import') === 'qdf',
+    importQdf: !lockedView && q.get('import') === 'qdf',
     roomBrief: collab && room.startsWith('brief:') ? room.slice('brief:'.length) : null,
     doc: collab ? q.get('doc') : null,
     blank: collab && q.get('new') === '1',
+    background: background === 'grass' || background === 'home' ? background : null,
   }
 }
 
 export function bootEntry(): Entry {
   if (entry) return entry
   entry = readEntry(location.search, location.hash, collab)
-  if (!entry.view) {
+  if (!entry.view && !SINGLE_MODEL && !(window.parent !== window && new URLSearchParams(location.search).get('embedded') === 'model')) {
     const q = new URLSearchParams(location.search)
-    for (const k of ['src', 'origin', 'name', 'copy', 'export', 'lang', 'import']) q.delete(k)
+    for (const k of ['src', 'origin', 'name', 'copy', 'export', 'lang', 'import', 'background']) q.delete(k)
     const rest = q.toString()
     history.replaceState(null, '', `${location.pathname}${rest ? `?${rest}` : ''}${location.hash}`)
   }
@@ -120,11 +139,66 @@ export function bootEntry(): Entry {
 /** 只看模式：嵌在方案页里的 3D 画面和分步手册。 */
 export const VIEW_ONLY = bootEntry().view
 
+export const EDITOR_EMBED = window.parent !== window && new URLSearchParams(location.search).get('embedded') === 'model'
+if(EDITOR_EMBED)document.documentElement.dataset.editorEmbed='true'
+function singleSession(): string | undefined {
+  const editorEntry = bootEntry()
+  if (!SINGLE_MODEL || RECOVERY_ONLY || RESOURCE_MODE || editorEntry.view || editorEntry.delivery || editorEntry.roomBrief || editorEntry.version) return undefined
+  if (editorEntry.plan) return `model-editor:plan:${editorEntry.plan}`
+  if (editorEntry.doc) return `model-editor:doc:${editorEntry.doc}`
+  if (editorEntry.src?.match(/^\/quadro\/library\/[a-f0-9]+\/native$/)) return `model-editor:${editorEntry.src}`
+  const url = new URL(location.href)
+  let draft = url.searchParams.get('draft')
+  if (!draft || !/^[a-f0-9-]{36}$/.test(draft)) { draft = crypto.randomUUID(); url.searchParams.set('draft', draft) }
+  url.searchParams.delete('new')
+  history.replaceState(null, '', url)
+  return `single-draft:${draft}`
+}
+export let EDITOR_SESSION = singleSession()
+
+/** 另存的个人文档使用独立恢复入口，刷新不能重新载入原对象。 */
+export function adoptPersonalEntry(doc: string): string {
+  const url = new URL(location.href)
+  for (const key of ['src', 'draft', 'name', 'copy', 'newModelKind', 'newModelSlot']) url.searchParams.delete(key)
+  if (url.hash.startsWith(EDITOR_HASH)) url.hash = ''
+  url.searchParams.set('doc', doc)
+  history.replaceState(null, '', url)
+  entry = readEntry(url.search, url.hash, collab)
+  EDITOR_SESSION = `model-editor:doc:${doc}`
+  return EDITOR_SESSION
+}
+
+/** 仅在嵌入应用已卸载后替换来源；下一份文档重新走完整读取和权限检查。 */
+export function replaceEditorEntry(href: string) {
+  const url = new URL(href, location.href)
+  const owner = new URLSearchParams(location.search).get('editorOwner')
+  const allowed = ['embedded', 'editorProtocol', 'editorOwner', 'lang', 'editorRename', 'draft', 'plan', 'src', 'name', 'newModelKind', 'newModelSlot']
+  if (!EDITOR_EMBED || url.origin !== location.origin || url.pathname !== location.pathname || (url.hash && !url.hash.startsWith(EDITOR_HASH)) || url.username || url.password ||
+    url.searchParams.get('embedded') !== 'model' || !owner || url.searchParams.get('editorOwner') !== owner ||
+    [...url.searchParams.keys()].some(key => !allowed.includes(key) || url.searchParams.getAll(key).length !== 1)) throw new Error('Invalid embedded editor entry')
+  const model = new URLSearchParams(url.hash.slice(EDITOR_HASH.length))
+  if ([...model.keys()].some(key => !['src', 'plan', 'name'].includes(key) || model.getAll(key).length !== 1 || url.searchParams.has(key)) ||
+    (url.searchParams.has('editorProtocol') && url.searchParams.get('editorProtocol') !== '2')) throw new Error('Invalid embedded model entry')
+  const next = readEntry(url.search, url.hash, collab)
+  if (next.src && !/^\/quadro\/library\/[a-f0-9]+\/native$/.test(next.src)) throw new Error('Invalid embedded model source')
+  if (next.plan && !/^[A-Za-z0-9_-]{4,64}$/.test(next.plan)) throw new Error('Invalid embedded plan')
+  if ([next.src, next.plan, url.searchParams.get('draft')].filter(Boolean).length !== 1) throw new Error('Embedded editor requires one source')
+  const draft = url.searchParams.get('draft')
+  if (draft && !/^[a-f0-9-]{36}$/.test(draft)) throw new Error('Invalid embedded draft')
+  if (url.searchParams.has('newModelKind') || url.searchParams.has('newModelSlot')) {
+    const kind = url.searchParams.get('newModelKind'), slot = Number(url.searchParams.get('newModelSlot'))
+    if (!draft || !['share', 'shared'].includes(kind || '') || !Number.isSafeInteger(slot) || slot <= 0) throw new Error('Invalid new model target')
+  }
+  history.replaceState(null, '', url)
+  entry = next
+  EDITOR_SESSION = singleSession()
+}
+
 /**
  * 只放一座、不读也不写这台设备上的标签页的打开方式：只看、交付查看、画房间。
  * 它们都不是这个人自己的标签页，不能盖掉。共享方案是标签页里的一个，照常读写。
  */
-export const SESSIONLESS = VIEW_ONLY || !!bootEntry().delivery || !!bootEntry().roomBrief || !!bootEntry().version
+export const SESSIONLESS = RECOVERY_ONLY || RESOURCE_MODE || VIEW_ONLY || !!bootEntry().delivery || !!bootEntry().roomBrief || !!bootEntry().version
 
 /**
  * 交付查看嵌在交付页的 iframe 里：拖动旋转、逐层拼装、全屏和版本名都由交付页自己画，
@@ -159,6 +233,12 @@ export function fullBuilderUrl(): string {
 export function dropParam(key: string) {
   const q = new URLSearchParams(location.search)
   q.delete(key)
+  let hash = location.hash
+  if (q.get('embedded') === 'model' && hash.startsWith(EDITOR_HASH)) {
+    const model = new URLSearchParams(hash.slice(EDITOR_HASH.length))
+    model.delete(key)
+    hash = model.size ? EDITOR_HASH + model.toString() : ''
+  }
   const rest = q.toString()
-  history.replaceState(null, '', `${location.pathname}${rest ? `?${rest}` : ''}${location.hash}`)
+  history.replaceState(null, '', `${location.pathname}${rest ? `?${rest}` : ''}${hash}`)
 }

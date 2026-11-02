@@ -1,0 +1,12 @@
+.qb-save-conflict {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  width: calc(100vw - 32px);
+  max-width: 384px;
+  max-height: calc(100dvh - 32px);
+  padding: 20px;
+  overflow: auto;
+}
+.qb-save-conflict::backdrop { background: rgba(0, 0, 0, .28); backdrop-filter: blur(3px); }
+.qb-save-conflict button { min-height: 44px; }

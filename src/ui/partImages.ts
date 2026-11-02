@@ -35,6 +35,7 @@ const LEGACY_PART_IMAGES: ReadonlySet<string> = new Set([
   'panel_40x40_clock',
   'panel_40x40_grid',
   'panel_40x40_maze',
+  'panel_sector_20',
   'panel_sector_40',
   'rope',
   'textile_long',

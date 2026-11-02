@@ -57,7 +57,6 @@ export function BomPane() {
   const { t, lang } = useI18n()
   const bom = api.bom
   const empty = !bom || bom.totals.tubes + bom.totals.connectors + bom.totals.panels + bom.totals.other === 0
-  const exportBtn = 'flex-1 text-xs rounded-lg border border-gray-700 bg-gray-800 hover:border-teal-400 px-2 py-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed'
 
   return (
     <>
@@ -96,13 +95,8 @@ export function BomPane() {
               <Section title={t('bom.textiles')} rows={bom.textiles} onPick={r => api.highlight(r.kind, r.id || '', r.color)} />
               <Section title={t('bom.fittings')} rows={bom.fittings} onPick={r => api.highlight(r.kind, r.id || '')} />
               <Section title={t('bom.reinforcements')} rows={bom.reinforcements} onPick={r => api.highlight(r.kind, r.id || '')} />
-              <Section title={t('bom.screws')} rows={bom.screws} onPick={r => api.highlight(r.kind, r.id || '', r.color)} />
             </>
           )}
-        <div className="flex gap-1.5 mt-2 pt-3 border-t border-gray-800">
-          <button disabled={empty} onClick={api.exportBomCsv} className={exportBtn}>{t('bomx.csv')}</button>
-          <button disabled={empty} onClick={() => void api.exportBomPng()} className={exportBtn}>{t('bomx.png')}</button>
-        </div>
       </div>
     </>
   )

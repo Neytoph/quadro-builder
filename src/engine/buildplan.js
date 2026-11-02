@@ -6,8 +6,8 @@
 // Ebene. Platten und Stoffe kommen erst am Schluss, wenn das Rohrgeruest steht.
 // Die Kupplungstypen werden aus dem FERTIGEN Modell abgeleitet.
 
-import { inferConnectorType, connectorsForNode } from "./bom.js";
-import { getTube, getConnector, getPanel, colorName, partName, reinforcementPart } from "./catalog.js";
+import { inferConnectorType, connectorsForNode, reinforcementRuns } from "./bom.js";
+import { getTube, getConnector, getPanel, getPartById, colorName, partName, reinforcementPart } from "./catalog.js";
 import { getLang, t } from "./i18n.js";
 import { isOriginalComponent, componentInstallCopy, componentPartId, componentOutputColor, componentColorName } from './accessoryInfo.js';
 import { computeAssemblyPlan } from './assemblyPlan.js';
@@ -165,22 +165,18 @@ function countPanels(panels) {
   }).sort((a, b) => a.name.localeCompare(b.name));
 }
 
-// Holz-Profile eines Schritts. Gekauft wird nur die 80-cm-Laenge; sie deckt
-// 80 cm Knotenabstand (ein 75er-Rohr oder zwei 35er in einer Linie). Gezaehlt
-// wird deshalb die verstaerkte Strecke des Schritts, nicht die Zahl der Rohre.
+// 75 cm 内置加固铝管对应 80 cm 节点间距，按本步骤加固的节点间距计数。
 function countReinforcements(model, tubes) {
   const part = reinforcementPart();
   if (!part) return [];
-  let strecke = 0;
-  for (const t of tubes) {
-    if (!t.reinforced) continue;
-    const a = model.nodes.get(t.a), b = model.nodes.get(t.b);
-    if (!a || !b) continue;
-    strecke += Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
+  const ids = new Set(tubes.map(tube => tube.id)), counts = new Map();
+  for (const run of reinforcementRuns(model)) {
+    if (!ids.has(run.tubeIds.at(-1))) continue;
+    const def = run.partId ? getPartById(run.partId) : part;
+    const count = run.explicit ? 1 : Math.max(1, Math.round(run.length / (def.coverage_cm || 80)));
+    counts.set(def.id, (counts.get(def.id) || 0) + count);
   }
-  if (strecke <= 0) return [];
-  const count = Math.max(1, Math.round(strecke / (part.length_cm || 80)));
-  return [{ id: part.id, name: partName(part), count, price: part.price || 0 }];
+  return [...counts].map(([id, count]) => { const def = getPartById(id); return { id, name: partName(def), count, price: def.price || 0 }; });
 }
 
 // So nah muss ein Rutschenteil am Ausgang des Teils darueber liegen, damit es

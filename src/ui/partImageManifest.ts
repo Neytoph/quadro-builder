@@ -58,6 +58,10 @@ export const PART_IMAGE_MANIFEST = {
       "src": "parts/TC1.png",
       "srcLarge": "parts/large/TC1.png"
     },
+    "TC15": {
+      "src": "parts/TC15.png",
+      "srcLarge": "parts/large/TC15.png"
+    },
     "TS1": {
       "src": "parts/TS1.png",
       "srcLarge": "parts/large/TS1.png"
@@ -109,6 +113,10 @@ export const PART_IMAGE_MANIFEST = {
     "acrylic_platform_40x40": {
       "src": "parts/acrylic_platform_40x40.png",
       "srcLarge": "parts/large/acrylic_platform_40x40.png"
+    },
+    "alu_connector": {
+      "src": "parts/alu_connector.png",
+      "srcLarge": "parts/large/alu_connector.png"
     },
     "bag": {
       "src": "parts/bag.png",
@@ -286,6 +294,10 @@ export const PART_IMAGE_MANIFEST = {
       "src": "parts/panel_80x80.png",
       "srcLarge": "parts/large/panel_80x80.png"
     },
+    "panel_sector_20": {
+      "src": "parts/panel_sector_20.png",
+      "srcLarge": "parts/large/panel_sector_20.png"
+    },
     "panel_sector_40": {
       "src": "parts/panel_sector_40.png",
       "srcLarge": "parts/large/panel_sector_40.png"
@@ -305,6 +317,14 @@ export const PART_IMAGE_MANIFEST = {
     "pool_liner_xxl": {
       "src": "parts/pool_liner_xxl.png",
       "srcLarge": "parts/large/pool_liner_xxl.png"
+    },
+    "reinforce35": {
+      "src": "parts/reinforce35.png",
+      "srcLarge": "parts/large/reinforce35.png"
+    },
+    "reinforce55": {
+      "src": "parts/reinforce55.png",
+      "srcLarge": "parts/large/reinforce55.png"
     },
     "reinforce80": {
       "src": "parts/reinforce80.png",
@@ -469,6 +489,10 @@ export const PART_IMAGE_MANIFEST = {
     "wheel_floating": {
       "src": "parts/wheel_floating.png",
       "srcLarge": "parts/large/wheel_floating.png"
+    },
+    "windmill": {
+      "src": "parts/windmill.png",
+      "srcLarge": "parts/large/windmill.png"
     }
   },
   "aliases": {
@@ -477,7 +501,8 @@ export const PART_IMAGE_MANIFEST = {
     "11670": "pool_liner_l",
     "11680": "pool_liner_xxl",
     "12600": "balls",
-    "40641": "screw_acrylic",
+    "40274": "alu_connector",
+    "40275": "reinforce55",
     "slide-new2": "slide_integral",
     "CS6": "6way",
     "CS5": "5way",
@@ -493,6 +518,7 @@ export const PART_IMAGE_MANIFEST = {
     "flexi-connector3": "flexi_hinge",
     "CXA": "flexi_bolt",
     "bolt2": "flexi_bolt",
+    "WINDMILL": "windmill",
     "CH3": "hole_t",
     "CH2": "hole_2",
     "CH1": "hole_1",
@@ -508,6 +534,7 @@ export const PART_IMAGE_MANIFEST = {
     "PAC": "acrylic_panel_40x40",
     "P7C": "panel_70x120",
     "RV8": "reinforce80",
+    "alu-connector2": "alu_connector",
     "bearing2": "wheel_bearing",
     "TCP": "tube_cap",
     "tube-cap2": "tube_cap",

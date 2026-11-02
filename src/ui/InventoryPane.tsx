@@ -5,6 +5,7 @@ import { labelOf } from '../names'
 import { inventoryCatalog, INV_SECTIONS, INV_SECTION_TITLE, type InvCatalogItem, type InvGroup, type InvSection } from '../data/inventoryCatalog'
 import PartThumbnail from './PartThumbnail'
 import { bumpCount, track } from '../analytics/track'
+import ReplenishmentList from './ReplenishmentList'
 
 function QtyField({
   value, onCommit, name, minus, plus,
@@ -146,6 +147,7 @@ export default function InventoryPane() {
       </div>
 
       <div className="px-3 py-2 border-b border-gray-800 space-y-2">
+        {hasStock && <ReplenishmentList showRows={false} />}
         <p className="text-[11px] text-gray-500 leading-snug">{t('inv.hint')}</p>
         <input
           value={query}
@@ -163,9 +165,9 @@ export default function InventoryPane() {
         </div>
         <div className="flex gap-1.5">
           <button type="button" onClick={api.exportInventory}
-            className="flex-1 text-xs rounded-lg border border-gray-700 bg-gray-800 hover:border-teal-400 px-2 py-1.5 cursor-pointer">{t('btn.invExport')}</button>
+            className="qb-btn qb-btn-ghost qb-btn-sm flex-1">{t('btn.invExport')}</button>
           <button type="button" onClick={() => fileRef.current?.click()}
-            className="flex-1 text-xs rounded-lg border border-gray-700 bg-gray-800 hover:border-teal-400 px-2 py-1.5 cursor-pointer">{t('btn.invImport')}</button>
+            className="qb-btn qb-btn-ghost qb-btn-sm flex-1">{t('btn.invImport')}</button>
           <input ref={fileRef} type="file" accept="application/json,.json" hidden
             onChange={e => {
               const f = e.target.files?.[0]

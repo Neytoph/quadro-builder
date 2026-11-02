@@ -1,50 +1,66 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { bumpCount, track } from '../analytics/track'
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { bumpCount, track, entryAnalyticsObject, setAnalyticsObject } from '../analytics/track'
 import {
   BuildModel, Builder, SceneManager, loadCatalog, computeBOM, compareInventory, connectorsForNode, computeSafety,
   parseQDF, parseDesign, designEntry, buildQDF, buildableTubes, buildableCurvedTubes, buildablePanels, tubeColors, allConnectors, accessories,
-  panels, geometry, RANDOM_COLOR, BUILD_ORDERS, docs, storage, setLang as setEngineLang, t as engineT,
-  computeBuildPlan, partsOfModel, textilePart,
+  panels, geometry, RANDOM_COLOR, docs, storage, setLang as setEngineLang, t as engineT,
+  computeBuildPlan, partsOfModel, partsOfData, textilePart,
 } from '../engine-api'
 import { useI18n } from '../i18n'
 import { onSyncEvent, syncSavedDoc, syncNow, syncProbe, syncStarted } from '../sync/bootstrap'
 import { pushDocToServer, type PushDocOptions } from '../sync/docPublish'
 import { tabOpenedFrom, tabSavedAs } from '../sync/origin'
 import { pullDoc } from '../sync/docEntry'
-import { bootEntry, SESSIONLESS, VIEW_ONLY, type ResumeExport } from '../entry'
+import { bootEntry, dropParam, adoptPersonalEntry, SESSIONLESS, VIEW_ONLY, EDITOR_EMBED, EDITOR_SESSION, SINGLE_MODEL, RESOURCE_MODE, type ResumeExport } from '../entry'
+import {deliverResourceFile,sendResourceMessage} from '../resourceDownload'
+import { draftHandoff, entryDraft } from './draftEntry'
+import { clearSlotAccess, slotLocked, slotAccess, saveCapacityFull, updateSlotAccess } from '../sync/slotAccess'
+import { chooseSharing, SharingCancelled } from '../shareOptions'
 import { publishSharePage, sharePagesEnabled, stampFor, type ExportKind, type Stamp } from '../sharePage'
 import { statsOfModel } from '../designStats'
+import { createStatsQueue } from '../sync/statsQueue'
 import { geometricPreset, jsonToFragment } from '../data/presets'
 import pyramidQdf from '../data/A0128.qdf?raw'
-import { clearSharePayload, decodeShare, peekSharePayload, shareUrl } from '../share'
+import { clearSharePayload, decodeShare, peekSharePayload, shareUrl, productOnly } from '../share'
 import { isUntitledName, labelOf as nameLabel } from '../names'
 import { fetchOfficialQdf, officialCacheVersion, cachedOfficialQdf, officialLibId, OFFICIAL_BY_ID, parseOfficialId } from '../data/official'
 import { versionPublicSource } from '../engine/publicResources.js'
+import { readModelSource } from './modelSource'
 import { applyFrameHex, loadTune } from '../engine/colorTune.js'
-import { exportAssemblyPdf as runAssemblyPdf } from '../engine/assemblyManual.js'
 import { ACCESSORY_IDS } from '../engine/accessoryPack.js'
 import { takeModelThumb, waitSceneReady } from '../engine/thumbShot.js'
 import { bomToCsv, bomToPngDataUrl, loadImage } from '../ui/bomExport'
 import { shareImageDataUrl } from '../ui/shareImage'
 import { MOTION } from '../ui/motion'
+import { paintOpening, type ModelOpeningState } from '../ui/ModelOpening'
 import { createTabDoc, dropTabDoc, memoryDoc, openTabDoc, readPersonalState, writePersonalState, SEED_ORIGIN, type LocalDoc } from '../collab/localDocs'
-import { partCountOf, writeJSON, type ModelJSON } from '../collab/ymodel'
+import { partCountOf, writeJSON, setPlanName, type ModelJSON } from '../collab/ymodel'
 import { appendTab } from './tabs'
+import { modelColors, selectionColor } from '../engine/customColors.js'
 import { modelContent, personalDecision, personalRecordUnconfirmed, personalSaveBaseline, readPersonalBinding, restorePersonalBinding, samePersonalBinding, savedGenerationUnchanged, savedRecordState, type PersonalState } from './personalTabs'
-import { renderModelCover } from './modelCover'
-import { computeAssemblyPlan } from '../engine/assemblyPlan.js'
+import { computeAssemblyPlan, computeLayeredManualPlan } from '../engine/assemblyPlan.js'
 import { ensureAssemblyMeshes } from '../engine/assemblyNativeMesh.js'
 import { createAssemblyReadingPlan } from '../engine/assemblyReadingPlan.js'
 import { proposeAssemblyRepairs } from '../engine/connectionResolver.js'
 import { validAssemblyConfig } from '../engine/assemblyConfig.js'
 import { assemblyPdfStrings, assemblyStrings } from '../ui/assemblyStrings'
 import { UI_ESCAPE_EVENT } from '../ui/events'
+import { validHomeContext, placeInRoom } from '../home/context.js'
+import { readRoom } from '../home/rooms'
+import { refreshedRoomBackground, roomBackgroundWarnings } from '../home/refresh'
+import { installationChoices, selectInstallation, type CatalogueChoice } from './installationCatalogue'
+import { captureTool, ToolMemory, type BuilderTool, type ToolState } from './toolMemory'
+import { editorScenes } from './scenePool'
+import { newModelTarget, pendingNewModel, finishNewModel } from './newModel'
+import { recordCreatedSlot } from '../sync/slotAccess'
+import { librarySaveIdentity, LibrarySaveError, readLibrarySnapshot, saveLibraryModel } from './librarySave'
+import { sourceEntryAction } from './sourceEntry'
 
 // 引擎来自 Vanilla JS，这里不跟它的推断类型较劲。
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type E = any
 type AnyRec = Record<string, E>
-type ToastKind = 'ok' | 'warn' | 'err'
+type ToastKind = 'ok' | 'warn' | 'err' | 'saved'
 type NameAsk = { title: string; ok: string; value: string; resolve: (name: string | null) => void }
 export type SidePanel = 'bom' | 'inventory'
 export type AssemblyConfig = { version: 1; regions: Array<{ id: string; name: string; partIds: string[] }>; order: string[] }
@@ -75,6 +91,11 @@ export interface SafetyResult {
 export type ThumbJob = { kind: 'official' | 'preset'; id: string } | { kind: 'model'; data: unknown }
 
 export interface TabInfo extends PersonalState {
+	 readOnly?: boolean
+	 slotLocked?: boolean
+	 libraryId?: string
+	 libraryRevision?: number
+	 libraryOwner?: string
   statsPending?: boolean
   tabId: string
   docId: string | null
@@ -120,8 +141,7 @@ export interface BomView {
   wheels: BomRow[]
   fittings: BomRow[]
   reinforcements: BomRow[]
-  screws: BomRow[]
-  totals: { tubes: number; connectors: number; panels: number; screws: number; other: number; price: number }
+  totals: { tubes: number; connectors: number; panels: number; other: number; price: number }
   openEnds: number
 }
 
@@ -141,11 +161,15 @@ export interface Inventory {
   panels: Record<string, number>
   reinforcements: Record<string, number>
   fittings: Record<string, number>
-  screws: Record<string, number>
 }
 
 interface EngineApi {
+  opening: ModelOpeningState | null
+  editorState: () => { dirty: boolean; name: string; readOnly: boolean }
+  checkpointEditor: () => Promise<void>
+  discardEditor: () => Promise<void>
   ready: boolean
+  saving: boolean
   entryReady: boolean
   completeEntry: () => void
   error: string | null
@@ -163,14 +187,24 @@ interface EngineApi {
   canUndo: boolean
   canRedo: boolean
   selectionCount: number
+  selectionTransform: {key:string;mode:string;snap:boolean;position:number[];busy:boolean;error:string|null;rotation:{axis:'X'|'Y'|'Z'|'free';degrees:number;revision:number}|null} | null
+  setSelectionTransformMode: (mode:'translate'|'rotate')=>void
+  setSelectionTransformSnap: (on:boolean)=>void
+  setSelectionPosition: (position:number[])=>boolean
+  rotateSelectionAxis: (axis:'X'|'Y'|'Z',degrees:number)=>boolean
+  selectTransformBlock: ()=>void
+  boxSelect: boolean
+  setBoxSelect: (on: boolean) => void
   installationPreview: InstallationPreview | null
-  insetScrewAxis: 'vertical' | 'horizontal'
-  setInsetScrewAxis: (axis: 'vertical' | 'horizontal') => void
+  insetScrewAxis: 'auto' | 'vertical' | 'horizontal'
+  setInsetScrewAxis: (axis: 'auto' | 'vertical' | 'horizontal') => void
+  selectedPanelFixing: { partId: string; axis: string | null } | null
+  setSelectedPanelFixing: (axis: 'vertical' | 'horizontal') => void
   canFlipAccessory: boolean
   confirmInstallation: () => void
   cancelInstallation: () => void
   flipAccessory: () => void
-  toast: { message: string; kind: ToastKind } | null
+  toast: { message: string; kind: ToastKind; id: number } | null
   tabs: TabInfo[]
   activeTabId: string | null
   bom: BomView | null
@@ -178,9 +212,7 @@ interface EngineApi {
   invRows: InvRow[]
   feasible: boolean | null
   sizeCm: [number, number, number] | null
-  assembly: { step: number; max: number; active: boolean; order: string }
-  assemblyOrders: string[]
-  setAssemblyOrder: (order: string) => void
+  assembly: { step: number; max: number; active: boolean; order: string; pending: boolean; error: boolean; progress: number }
   exportInventory: () => void
   importInventory: (file: File) => Promise<void>
   canPaste: boolean
@@ -192,7 +224,15 @@ interface EngineApi {
   dismissToast: () => void
   bump: () => void
   setMode: (mode: string) => void
+  activateTool: (tool: BuilderTool) => void
+  toggleLastTool: () => void
   setColor: (id: string) => void
+  modelColors: string[]
+  selectionColor: string | null
+  previewingColor: boolean
+  beginColorPreview: () => boolean
+  previewColor: (hex: string) => void
+  finishColorPreview: (hex?: string) => boolean
   recolorAll: (colors: string[]) => void
   setTube: (id: string) => void
   setPanel: (id: string) => void
@@ -201,7 +241,8 @@ interface EngineApi {
   setClamp: (id: string) => void
   startPool: (id: string) => void
   startC45: () => void
-  startReinforce: () => void
+  startReinforce: (partId?: string) => void
+  reinforcementPartId: string
   placeConnector: (id: string) => void
   placingConnector: string | null
   buildStep: (dir: number[]) => void
@@ -227,6 +268,15 @@ interface EngineApi {
   frame: () => void
   toggleGrass: () => void
   grassOn: boolean
+  frameOnly: boolean
+  toggleFrameOnly: () => void
+  background: 'grass' | 'blank' | 'home'
+  setBackground: (mode: 'grass' | 'blank' | 'home') => void
+  homeZones: { obstacles: boolean; usable: boolean }
+  setHomeZones: (kind: 'obstacles' | 'usable', visible: boolean) => void
+  homeContext: AnyRec | null
+  bindHome: (record: AnyRec | null, expectedTabId?: string | null) => boolean
+  frameHome: () => void
   highlight: (kind: string, id: string, color?: string | null) => void
   /** 按零件 id 高亮一批（安全审查点行用），再点同一批取消 */
   highlightIds: (key: string, ids: string[]) => void
@@ -245,6 +295,9 @@ interface EngineApi {
   askName: (title: string, ok: string, value: string) => Promise<string | null>
   answerName: (name: string | null) => void
   nameAsk: { title: string; ok: string; value: string } | null
+  saveConflict: boolean
+  answerSaveConflict: (choice: 'copy' | 'latest' | 'cancel') => void
+  saveWasCancelled: () => boolean
   openDoc: (docId: string) => Promise<boolean>
   retrySave: (tabId: string) => Promise<void>
   /** `local`：本次保存尚未全部交给服务器。 */
@@ -255,7 +308,7 @@ interface EngineApi {
   pushDoc: (docId: string, options?: PushDocOptions) => Promise<boolean>
   importFile: (file: File) => Promise<void>
   openLibraryId: (id: string) => Promise<void>
-  exportQdf: () => void
+  exportQdf: () => boolean
   exportJson: () => void
   setAssembly: (on: boolean) => void
   stepAssembly: (delta: number) => void
@@ -271,18 +324,18 @@ interface EngineApi {
   exportBomCsv: () => Promise<void>
   /** 料表存成一张图，发群里直接能看 */
   exportBomPng: () => Promise<void>
-  exportAssemblyPdf: () => Promise<void>
-  confirmExportManual: (cover?: string | null) => Promise<void>
+  exportAssemblyPdf: () => Promise<{status:'done'|'cancelled'|'failed';message?:string}|void>
+  confirmExportManual: (cover?: string | null) => Promise<{status:'done'|'cancelled'|'failed';message?:string}|void>
   cancelExportManual: () => void
   exportManualConfirm: boolean
   manualPreview: ManualPreview | null
   updateManualConfig: (config: AssemblyConfig) => void
-  updateManualOrder: (order: string) => void
   saveManualConfig: () => boolean
   reviewManualRepairs: (nodeIds: string[]) => void
   applyManualRepairs: () => boolean
   discardManualRepairs: () => void
-  exportingManual: { page: number; total: number } | null
+  exportingManual: { page: number; total: number; phase?: string; progress?: number } | null
+  cancelManualExport: () => void
   shareCurrent: () => Promise<void>
   /**
    * 导出文件要先有账号（部署设了 VITE_REGISTER_URL 时）。register：还没登录，问要不要
@@ -335,7 +388,7 @@ function cleanBomText(v: unknown): string {
 }
 
 function emptyInv(): Inventory {
-  return { tubes: {}, connectors: {}, panels: {}, reinforcements: {}, fittings: {}, screws: {} }
+  return { tubes: {}, connectors: {}, panels: {}, reinforcements: {}, fittings: {} }
 }
 
 function inventoryUsed(inv: Inventory) {
@@ -351,7 +404,7 @@ function inventoryRows(inv: Inventory) {
   return n
 }
 
-const INV_GROUPS = ['tubes', 'connectors', 'panels', 'reinforcements', 'fittings', 'screws'] as const
+const INV_GROUPS = ['tubes', 'connectors', 'panels', 'reinforcements', 'fittings'] as const
 const QDF_COLORS = new Set(['red', 'green', 'blue', 'yellow', 'black'])
 
 function parseInventory(src: unknown): Inventory | null {
@@ -366,6 +419,7 @@ function parseInventory(src: unknown): Inventory | null {
     const group = payload[g]
     if (!group || typeof group !== 'object') continue
     for (const [k, v] of Object.entries(group as Record<string, unknown>)) {
+      if (k.startsWith('screw_')) continue
       const n = Number(v)
       if (Number.isFinite(n) && n > 0) next[g][k] = n
     }
@@ -390,9 +444,7 @@ function modelPartCount(model: unknown) {
   return n(rec.tubes) + n(rec.panels) + n(rec.slides) + n(rec.fittings)
 }
 
-// 「搭完一座」的门槛：最小的官方造型是 20 件管和板（不算连接件，口径同
-// modelPartCount）。用户亲手改出来的一座到了这个规模，就算搭出了一座完整的架子。
-// 后台来源看板（小麦坊 gateway/internal/store/sources.go）用同一个数判断老数据。
+// 保留历史规模事件，表示编辑后达到20件；不代表设计完成或成功保存。
 const BUILT_MIN_PARTS = 20
 
 // 选件打点。连着选同一个不重复发——工具条的下拉每打开一次就会把当前件
@@ -407,8 +459,7 @@ function pickPart(kind: string, id: string) {
 
 // 存盘时的构成快照。比"每放一根管发一条"便宜几百倍，回答的还是更该问的
 // 那个问题：什么件真的被留下了——试了又删的不算数，那才是定价和二手
-// 该看的口径。props 最多 8 个（gateway/internal/events 的 maxProps），
-// 保存时加上 named 和访问标识，正好是 8 个。
+// 该看的口径。构成字段与版本、访问、对象标识一起控制在服务端字段上限内。
 function modelShape(model: unknown) {
   const rec = (model && typeof model === 'object' ? model : {}) as AnyRec
   const n = (v: unknown) => Array.isArray(v) ? v.length : (v && typeof v === 'object' ? Object.keys(v).length : 0)
@@ -441,9 +492,38 @@ type Tab = TabInfo & {
   idTag?: string
   /** 共享方案里的评论者和访客、交付查看：只能看 */
   readOnly?: boolean
+	 slotLocked?: boolean
+}
+
+// 只在内存中核对修改与成功快照；模型、名称和文档ID均不发送给统计服务。
+type TabAnalytics = { baseline: string; edited: boolean; lastOutput: string; object: string }
+
+// 共享方案的私人房间只保存在本机视图中，不写入协作文档。
+function tabHomeContext(tab: Tab | undefined, modelHome: AnyRec | null): AnyRec | null {
+  return tab?.planId && tab.view && Object.hasOwn(tab.view, 'homeContext') ? tab.view.homeContext : modelHome
+}
+const tabAnalytics = new WeakMap<Tab, TabAnalytics>()
+function resetTabAnalytics(tab: Tab, data: ModelJSON, object = '') {
+  const state = { baseline: modelContent(data), edited: false, lastOutput: '', object }
+  tabAnalytics.set(tab, state)
+  return state
+}
+function outputCandidate(tab: Tab | undefined, data: ModelJSON) {
+  const state = tab && tabAnalytics.get(tab)
+  const content = modelContent(data)
+  const eligible = state && state.edited && content !== state.baseline && modelPartCount(data) > 0
+  return (kind: string) => {
+    if (!eligible || content === state.lastOutput) return
+    state.lastOutput = content
+    track('builder.design.output', { kind, object: state.object, ...modelShape(data) })
+  }
 }
 
 const EMPTY_MODEL: ModelJSON = { format: 2, nodes: [], tubes: [] }
+
+function reportStartup(step: string) {
+  if (EDITOR_EMBED) parent.postMessage({ type: 'xmf-model-editor:progress', phase: 'prepare', step }, location.origin)
+}
 
 /** 让引擎按它的规矩读一遍再导出：旧格式升上来、坐标取整，写进文档的都是当前格式。 */
 function normalizeModel(data: unknown): ModelJSON | null {
@@ -459,6 +539,7 @@ function normalizeModel(data: unknown): ModelJSON | null {
 function replaceTabModel(tab: Tab, json: ModelJSON) {
   writeJSON(tab.local.doc, json, SEED_ORIGIN)
   tab.local.history.clear()
+  resetTabAnalytics(tab, json)
 }
 
 /** 新标签页，文档里是 seed。只放一座的打开方式不在本机留库。 */
@@ -470,8 +551,8 @@ function makeTab(seed: ModelJSON, name: string, docId: string | null): Tab {
 
 function persistPersonal(tab: Tab) {
   if (tab.planId || tab.readOnly || SESSIONLESS) return
-  const { docId, name, dirty, baseRev, savedContent, editGeneration, saveId, saveState, conflictDocId } = tab
-  writePersonalState(tab.local, { bindingVersion: 1, docId, name, dirty, baseRev, savedContent, editGeneration, saveId, saveState, conflictDocId })
+  const { docId, name, dirty, baseRev, savedContent, savedName, editGeneration, saveId, saveState, conflictDocId,libraryId,libraryRevision,libraryOwner,pendingLibrarySave,entrySource } = tab
+  writePersonalState(tab.local, { bindingVersion: 1,libraryBindingVersion:1,libraryId,libraryRevision,libraryOwner,pendingLibrarySave,entrySource, docId, name, dirty, baseRev, savedContent, savedName, editGeneration, saveId, saveState, conflictDocId })
 }
 
 /**
@@ -497,7 +578,7 @@ function pruneSessionTabs(tabs: Tab[]) {
 
 function loadInv(): Inventory {
   const raw = (storage.loadInventory?.() as Inventory | null) || emptyInv()
-  return { ...emptyInv(), ...raw, tubes: raw.tubes || {}, connectors: raw.connectors || {}, panels: raw.panels || {}, reinforcements: raw.reinforcements || {}, fittings: raw.fittings || {}, screws: raw.screws || {} }
+  return parseInventory(raw) || emptyInv()
 }
 
 const ROOM_KEY = 'quadro.room.v1'
@@ -534,11 +615,7 @@ function designFromText(text: string): unknown {
 }
 
 function download(name: string, text: string, type: string) {
-  const a = document.createElement('a')
-  a.href = URL.createObjectURL(new Blob([text], { type }))
-  a.download = name
-  a.click()
-  URL.revokeObjectURL(a.href)
+  deliverResourceFile(new Blob([text], { type }),name)
 }
 
 export function asBom(raw: AnyRec): BomView {
@@ -597,23 +674,16 @@ export function asBom(raw: AnyRec): BomView {
     key: `reinforcements:${r.id}`, name: cleanBomText(r.name), count: Number(r.count),
     subtotal: Number(r.subtotal || 0), id: cleanBomText(r.id), kind: 'reinforcements',
   }))
-  const screws = ((raw.screws as AnyRec[]) || []).map(r => ({
-    key: `screws:${r.id}|${r.color || ''}`, name: cleanBomText(r.name), count: Number(r.count),
-    color: (r.color as string) || null, subtotal: Number(r.subtotal || 0), id: cleanBomText(r.id), kind: 'screws',
-  }))
   const sum = (rows: BomRow[]) => rows.reduce((s, r) => s + r.count, 0)
   const totals = (raw.totals as AnyRec) || {}
-  const price = Number(totals.price ?? (
-    [...tubes, ...connectors, ...panels, ...textiles, ...slides, ...wheels, ...fittings, ...reinforcements, ...screws]
-      .reduce((s, r) => s + (r.subtotal || 0), 0)
-  ))
+  const price = [...tubes, ...connectors, ...panels, ...textiles, ...slides, ...wheels, ...fittings, ...reinforcements]
+    .reduce((s, r) => s + (r.subtotal || 0), 0)
   return {
-    tubes, connectors, panels, textiles, slides, wheels, fittings, reinforcements, screws,
+    tubes, connectors, panels, textiles, slides, wheels, fittings, reinforcements,
     totals: {
       tubes: Number(totals.tubes ?? sum(tubes)),
       connectors: Number(totals.connectors ?? sum(connectors)),
       panels: Number(totals.panels ?? sum(panels)),
-      screws: Number(totals.screws ?? sum(screws)),
       other: Number(totals.other ?? (sum(textiles) + sum(slides) + sum(wheels) + sum(fittings) + sum(reinforcements))),
       price,
     },
@@ -622,10 +692,11 @@ export function asBom(raw: AnyRec): BomView {
 }
 
 export function EngineProvider({ children }: { children: ReactNode }) {
+  const sessionKey = useRef(EDITOR_SESSION)
   const { t, lang } = useI18n()
   const hostRef = useRef<HTMLDivElement | null>(null)
   const eng = useRef<{ scene: E; model: E; builder: E } | null>(null)
-  const thumbBatch = useRef<{ json: unknown; camera: unknown; sceneOn: boolean; mode: string } | null>(null)
+  const thumbBatch = useRef<{ json: unknown; camera: unknown; sceneOn: boolean; mode: string; frameOnly: boolean } | null>(null)
   // 截图一次只做一件：存下时截的封面、开启共享时截的封面、发布前截的画面可能同时来，
   // 两批叠在一起，先结束的那一批会把场景复位，后一批截到的就是错的
   const shotTurn = useRef<Promise<unknown>>(Promise.resolve())
@@ -649,16 +720,84 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const clipboard = useRef<unknown>(null)
   const sessionTimer = useRef<number | null>(null)
   const highlightKey = useRef<string | null>(null)
+  const toolMemory = useRef(new ToolMemory())
+  const toolEntries = useRef<CatalogueChoice[]>([])
+  const toolApi = useRef<EngineApi | null>(null)
+  const rememberTool = useCallback(() => {
+    const b = eng.current?.builder
+    if (!b || switching.current || thumbBatch.current) return
+    const state: ToolState = { mode: b.mode, panelId: b.panelId, tubeId: b.tubeId, slideKind: b.slideKind,
+      clampPart: b.clampPart, placingConnector: b.placeConnectorId, fittingKind: b.fittingKind,
+      fittingPart: b.fittingPart, poolLinerId: b.poolLinerId, pasting: b.pasting, color: b.color,
+      insetScrewAxis: b.insetScrewAxis, reinforcementPartId: b.reinforcementPartId }
+    toolMemory.current.remember(activeRef.current, captureTool(state, toolEntries.current))
+  }, [])
 
   const [ready, setReady] = useState(false)
+  const [opening, setOpening] = useState<ModelOpeningState | null>(null)
+  const openingRef = useRef(false)
+  useEffect(() => {
+    if (EDITOR_EMBED && opening) parent.postMessage({ type: 'xmf-model-editor:progress', phase: opening.phase }, location.origin)
+  }, [opening])
+  const [saving,setSaving]=useState(false),savingRef=useRef(false)
+  const saveCancelled = useRef(false)
+  const [saveConflict, setSaveConflict] = useState(false)
+  const saveConflictRef = useRef<((choice: 'copy' | 'latest' | 'cancel') => void) | null>(null)
+  const answerSaveConflict = useCallback((choice: 'copy' | 'latest' | 'cancel') => {
+    const resolve = saveConflictRef.current
+    saveConflictRef.current = null
+    setSaveConflict(false)
+    resolve?.(choice)
+  }, [])
+  useEffect(() => {
+    const cancel = () => answerSaveConflict('cancel')
+    const stop = storage.onAccountChange(cancel)
+    return () => { stop(); saveConflictRef.current?.('cancel'); saveConflictRef.current = null }
+  }, [answerSaveConflict])
+  const libraryStatsQueue=useMemo(()=>createStatsQueue(),[])
+  const capacityNotice = useRef(false)
+  useEffect(()=>()=>libraryStatsQueue.cancel(),[libraryStatsQueue])
   const [entryReady, setEntryReady] = useState(false)
   const completeEntry = useCallback(() => setEntryReady(true), [])
   const [error, setError] = useState<string | null>(null)
   const [tick, setTick] = useState(0)
-  const [toast, setToast] = useState<{ message: string; kind: ToastKind } | null>(null)
+  const [toast, setToast] = useState<{ message: string; kind: ToastKind; id: number } | null>(null)
+  const toastSequence = useRef(0)
   const [tabs, setTabs] = useState<TabInfo[]>([])
   const [activeTabId, setActiveTabId] = useState<string | null>(null)
   const [inventory, setInventory] = useState<Inventory>(loadInv)
+  useEffect(()=>{
+    if(!ready||!import.meta.env.VITE_SYNC_BASE||SESSIONLESS)return
+    let closed=false,pending=false
+    const refresh=async()=>{
+      if(pending||closed)return;pending=true
+      try{
+        const scope=String(storage.getAccountScope()),owner=scope.startsWith('user:')?scope.slice(5):null
+        if(!owner){clearSlotAccess();return}
+        const response=await fetch('/quadro/library',{credentials:'include',cache:'no-store',headers:{'X-Builder-User-ID':owner}})
+        if(!response.ok)throw new Error('Slot permissions '+response.status)
+        const result=await response.json()
+        if(closed||String(storage.getAccountScope())!==scope)return
+        updateSlotAccess(result.slots)
+        const draft=tabsRef.current.find(tab=>tab.tabId===activeRef.current)
+        const entry=bootEntry()
+        if(saveCapacityFull()&&draft&&!draft.docId&&!draft.libraryId&&!draft.planId&&!newModelTarget(draft.local)&&!entry.plan&&!entry.src&&!entry.doc&&!capacityNotice.current){capacityNotice.current=true;notifyRef.current(t('capacity.cloudFull'),'warn')}
+        else if(!saveCapacityFull())capacityNotice.current=false
+        for(const tab of tabsRef.current){
+          if(tab.planId)continue
+          const locked=slotLocked(tab.docId,tab.libraryId)
+          if(locked){tab.slotLocked=true;tab.readOnly=true}
+          else if(tab.slotLocked){tab.slotLocked=false;tab.readOnly=false}
+        }
+        const tab=tabsRef.current.find(x=>x.tabId===activeRef.current)
+        if(tab)eng.current?.builder.setReadOnly(!!tab.readOnly)
+        syncTabsRef.current()
+      }catch(error){console.warn('[slot permissions]',error)}finally{pending=false}
+    }
+    void refresh();const timer=window.setInterval(()=>void refresh(),5000)
+    window.addEventListener('focus',refresh)
+    return()=>{closed=true;window.clearInterval(timer);window.removeEventListener('focus',refresh)}
+  },[ready])
   useEffect(() => {
     const refresh = () => setInventory(loadInv())
     const stop = storage.onInventoryChange(refresh)
@@ -668,7 +807,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   }, [])
   const [room, setRoomState] = useState<RoomSettings>(loadRoom)
   const [side, setSide] = useState<SidePanel>('bom')
-  const [exportingManual, setExportingManual] = useState<{ page: number; total: number } | null>(null)
+  const [exportingManual, setExportingManual] = useState<{ page: number; total: number; phase?: string; progress?: number } | null>(null)
   const [exportManualConfirm, setExportManualConfirm] = useState(false)
   const [manualPreview, setManualPreview] = useState<ManualPreview | null>(null)
   const manualPreviewRef = useRef<ManualPreview | null>(null)
@@ -677,6 +816,12 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     setManualPreview(preview)
   }
   const exportingManualRef = useRef(false)
+  const manualAbort = useRef<AbortController | null>(null)
+  const cancelManualExport = useCallback(() => {
+    manualAbort.current?.abort()
+    setExportingManual(value => value && { ...value, phase: 'cancelling' })
+  }, [])
+  useEffect(() => () => manualAbort.current?.abort(), [])
   const [nameAsk, setNameAsk] = useState<NameAsk | null>(null)
   const [accountAsk, setAccountAsk] = useState<EngineApi['accountAsk']>(null)
   const nameAskRef = useRef<NameAsk | null>(null)
@@ -686,8 +831,13 @@ export function EngineProvider({ children }: { children: ReactNode }) {
 
   const bump = useCallback(() => setTick(n => n + 1), [])
   const notify = useCallback((message: string, kind: ToastKind = 'ok') => {
-    setToast({ message, kind })
+    setToast({ message, kind, id: ++toastSequence.current })
   }, [])
+  const dismissToast = useCallback(() => setToast(null), [])
+  useEffect(() => {
+    const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
+    if (SINGLE_MODEL && ready && tab && !tab.docId && !tab.libraryId && !tab.planId) newModelTarget(tab.local)
+  }, [ready, activeTabId])
 
   /**
    * 模型里有、文档里还没有的改动写进文档。编辑都经 Builder 的 recordHistory 交给文档，
@@ -699,7 +849,9 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
     if (!e || !tab || switching.current || thumbBatch.current || e.builder.busy()) return
     if (e.builder.history !== tab.local.history) return
-    tab.local.history.commit(JSON.stringify(tab.local.history.toJSON()), JSON.stringify(e.model.toJSON()))
+    const before=tab.local.history.toJSON(),after=e.model.toJSON() as ModelJSON
+    if(tab.libraryId&&modelContent(before)===modelContent(after))return
+    tab.local.history.commit(JSON.stringify(before), JSON.stringify(after))
   }, [])
 
   /**
@@ -715,16 +867,16 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const active = tabsRef.current.find(x => x.tabId === activeRef.current)
     if (e && active) {
       flushModel()
-      active.view = { ...(e.builder.uiState() as AnyRec), camera: e.scene.cameraState() }
+      active.view = { ...active.view, ...(e.builder.uiState() as AnyRec), camera: e.scene.cameraState() }
     }
     return docs.saveSession({
       tabs: tabsRef.current.map(tb => ({
         tabId: tb.tabId, docId: tb.docId, name: tb.name, dirty: tb.dirty, planId: tb.planId, view: tb.view,
         baseRev: tb.baseRev, savedContent: tb.savedContent, editGeneration: tb.editGeneration, saveId: tb.saveId,
-        saveState: tb.saveState, conflictDocId: tb.conflictDocId,
+        saveState: tb.saveState, savedName: tb.savedName, conflictDocId: tb.conflictDocId,libraryId:tb.libraryId,libraryRevision:tb.libraryRevision,libraryOwner:tb.libraryOwner,pendingLibrarySave:tb.pendingLibrarySave,entrySource:tb.entrySource,
       })),
       activeTabId: activeRef.current,
-    }) as Promise<void>
+    }, sessionKey.current) as Promise<void>
   }, [flushModel])
 
   const persistSession = useCallback(() => {
@@ -735,8 +887,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
 
   const syncTabs = useCallback(() => {
     for (const tab of tabsRef.current) persistPersonal(tab)
-    setTabs(tabsRef.current.map(({ tabId, docId, name, dirty, planId, baseRev, savedContent, editGeneration, saveId, saveState, conflictDocId, statsPending }) =>
-      ({ tabId, docId, name, dirty, planId, baseRev, savedContent, editGeneration, saveId, saveState, conflictDocId, statsPending })))
+    setTabs(tabsRef.current.map(({ tabId, docId, name, dirty, planId, baseRev, savedContent, editGeneration, saveId, saveState, conflictDocId, statsPending,libraryId,libraryRevision,libraryOwner,readOnly,slotLocked }) =>
+      ({ tabId, docId, name, dirty, planId, baseRev, savedContent, editGeneration, saveId, saveState, conflictDocId, statsPending,libraryId,libraryRevision,libraryOwner,readOnly,slotLocked })))
     setActiveTabId(activeRef.current)
     persistSession()
   }, [persistSession])
@@ -756,6 +908,13 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     // 每个标签页只记一次，打开官方造型、导入文件那一下不算：那是换进来的，
     // 在它上面接着改一步才算用户自己搭出来的。
     const e2 = eng.current
+    if (tab && e2 && !tab.readOnly && !loadingModel.current) {
+      const state = tabAnalytics.get(tab)
+      if (state && !state.edited && modelContent(e2.model.toJSON()) !== state.baseline) {
+        state.edited = true
+        track('builder.design.edited', { object: state.object })
+      }
+    }
     if (tab && e2 && !loadingModel.current && !builtTabs.current.has(tab.tabId)) {
       const parts = modelPartCount(e2.model.toJSON())
       if (parts >= BUILT_MIN_PARTS) {
@@ -772,15 +931,28 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     switching.current = true
     e.builder.modelReplaced()
     e.builder.setHistory(tab.local.history)
-    e.builder.setReadOnly(!!tab.readOnly)
+    e.builder.setReadOnly(!!tab.readOnly || bootEntry().lockedView)
     e.model.idTag = tab.idTag || ''
     const res = e.model.loadJSON(tab.local.history.toJSON())
     if (!res.ok) throw new Error(`tab ${tab.tabId} does not load: ${res.reason}`)
+    const analytics = tabAnalytics.get(tab) || resetTabAnalytics(tab, e.model.toJSON())
+    setAnalyticsObject(analytics.object)
     e.builder.setUiState(tab.view || {})
+    // 引擎的旧界面快照不含具体布件、连接件和安装方向；用本页会话记录恢复，避免串页。
+    const remembered = toolMemory.current.get(tab.tabId)
+    e.builder.fittingPart = remembered?.fittingPart || null
+    e.builder.insetScrewAxis = remembered?.insetScrewAxis || 'auto'
+    e.builder.placeConnectorId = tab.view?.mode === 'add' && remembered?.tool === 'connectors' ? remembered.partId : null
     e.builder.setMode((tab.view?.mode as string) || 'select')
-    if (tab.view?.camera) e.scene.restoreCameraState(tab.view.camera)
+    const home = tabHomeContext(tab, e.model.homeContext)
+    const restoreCamera = tab.view?.camera && (!home || tab.view.camera.sceneViewVersion === 1)
+    if (restoreCamera) e.scene.restoreCameraState(tab.view!.camera)
     else e.scene.resetCamera(e.model, { animate: true, swoop: true })
     e.builder.refresh()
+    e.scene.setHomeContext(home)
+    const background=e.model.previewBackground || (home ? 'home' : 'grass')
+    e.scene.setBackground(background==='home'&&!home?'grass':background)
+    if (home && !restoreCamera) e.scene.frameHomeProduct()
     switching.current = false
     bump()
   }, [bump])
@@ -788,19 +960,22 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   /** 标签页的造型，从它的 Yjs 文档导出。当前页先把模型里没交出去的改动写进文档。 */
   const exportTab = useCallback((tab: Tab): ModelJSON => {
     if (tab.tabId === activeRef.current) flushModel()
-    return tab.local.history.toJSON()
+    const data = tab.local.history.toJSON()
+    return tab.planId && tab.view && Object.hasOwn(tab.view, 'homeContext')
+      ? { ...data, homeContext: structuredClone(tab.view.homeContext) } : data
   }, [flushModel])
 
   const snapshotActive = useCallback(() => {
     const e = eng.current
     const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
     if (!e || !tab) return
+    rememberTool()
     flushModel()
-    tab.view = { ...(e.builder.uiState() as AnyRec), camera: e.scene.cameraState() }
-  }, [flushModel])
+    tab.view = { ...tab.view, ...(e.builder.uiState() as AnyRec), camera: e.scene.cameraState() }
+  }, [flushModel, rememberTool])
 
   const reconcilePersonalNow = useCallback(async (tab: Tab, supplied?: AnyRec | null) => {
-    if (!tab.docId || tab.planId || tab.readOnly || SESSIONLESS) return
+    if (!tab.docId || tab.libraryId || tab.planId || tab.readOnly || SESSIONLESS) return
     if (tab.tabId === activeRef.current && eng.current?.builder.busy()) return
     if (tab.tabId === activeRef.current) snapshotActive()
     const originalId = tab.docId
@@ -860,7 +1035,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       tab.dirty = !savedGenerationUnchanged(tab, generation, current, tab.local.history.toJSON())
       tab.saveState = 'conflict'
       tab.conflictDocId = remoteData ? originalId : undefined
-      if (remoteData && !tabsRef.current.some(x => x.docId === originalId)) {
+      if (!SINGLE_MODEL && remoteData && !tabsRef.current.some(x => x.docId === originalId)) {
         const latest = makeTab(remoteData, String(record?.name || ''), originalId)
         Object.assign(latest, { baseRev: Number(record?.rev || 0), savedContent: modelContent(remoteData), saveId: record?.saveId, saveState: 'synced' })
         tabsRef.current.push(latest)
@@ -937,7 +1112,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
           if (tab.saveState === 'syncing' || tab.saveState === 'local') tab.saveState = 'failed'
         }
         syncTabsRef.current()
-        notifyRef.current(t('sync.failed'), 'warn')
+        notifyRef.current(t(event.type === 'quota' && ['save','designs'].includes(event.feature) ? 'capacity.cloudFull' : 'sync.failed'), 'warn')
       }
       if (event.type === 'pulled' || event.type === 'idle' || event.type === 'conflict') reconcile()
     })
@@ -966,9 +1141,13 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       return
     }
 
+    const sceneOwner = EDITOR_EMBED ? new URLSearchParams(location.search).get('editorOwner') : null
+    let initialized = false
+    let currentScene: InstanceType<typeof SceneManager> | null = null
     ;(async () => {
       try {
         const identityReady = syncProbe()
+        reportStartup('catalog')
         await loadCatalog()
         if (dead) return
         setCatalog({
@@ -979,7 +1158,11 @@ export function EngineProvider({ children }: { children: ReactNode }) {
           connectors: allConnectors(),
           accessories: accessories(),
         })
-        const scene = new SceneManager(host)
+        reportStartup('scene')
+        const scene = (sceneOwner && String(storage.getAccountScope()) === `user:${sceneOwner}` ? editorScenes.take(sceneOwner, host) : null) || new SceneManager(host)
+        currentScene = scene
+        scene.onCameraChange = () => {}
+        scene.setHomeContext(null)
         scene.setMotion(MOTION)
         scene.setTheme(false)
         // 默认开草地。没存过偏好（null）算开，只有显式关过（'0'）才关——
@@ -998,6 +1181,9 @@ export function EngineProvider({ children }: { children: ReactNode }) {
           if (!switching.current) persistSessionRef.current()
           bumpRef.current()
         }
+        scene.onCameraChange = () => {
+          if (!switching.current) persistSessionRef.current()
+        }
         builder.onPreview = () => bumpRef.current()
         builder.onHistoryChange = () => markDirtyRef.current()
         builder.onNotice = ((msg: string, kind?: string) => notifyRef.current(String(msg), kind === 'warn' ? 'warn' : 'ok')) as E
@@ -1006,21 +1192,27 @@ export function EngineProvider({ children }: { children: ReactNode }) {
         // 开发模式下把引擎挂到 window 上，浏览器测试脚本靠它摆相机、查手柄
         if (import.meta.env.DEV) (window as unknown as { __quadroDev?: unknown }).__quadroDev = eng.current
         // 账号库必须等身份回来。界面已经在画，这一步只挡住存档。
+        reportStartup('identity')
         await identityReady
         if (dead) return
 
         // 只看、交付、画房间：只放这一座，不读这台设备上记着的标签页。
         // 交付由 CollabProvider 取到以后 attachDoc 换进来。
+        reportStartup('session')
         if (!SESSIONLESS) await docs.migrateOldDrafts()
-        const session = SESSIONLESS ? null : await docs.loadSession()
+        const session = SESSIONLESS ? null : await docs.loadSession(sessionKey.current)
         if (dead) return
         if (session?.tabs?.length) {
           const mapped: Tab[] = []
-          for (const tb of session.tabs as AnyRec[]) {
+          const activeStored = session.tabs.find((tab: AnyRec) => tab.tabId === session.activeTabId) || session.tabs[0]
+          const restoredTabs = SINGLE_MODEL ? [activeStored] : session.tabs
+          for (const tb of restoredTabs as AnyRec[]) {
             const tabId = String(tb.tabId)
             // 旧版本把造型 JSON 记在会话里：本机还没有这一页的文档时，拿它生成一份
             const legacy = tb.model ? normalizeModel(tb.model) : null
+            reportStartup('document')
             const local = await openTabDoc(tabId, legacy)
+            reportStartup('document-ready')
             if (dead) return
             const restored: Tab = {
               tabId,
@@ -1032,10 +1224,12 @@ export function EngineProvider({ children }: { children: ReactNode }) {
               local,
               baseRev: typeof tb.baseRev === 'number' ? tb.baseRev : undefined,
               savedContent: typeof tb.savedContent === 'string' ? tb.savedContent : undefined,
+              savedName: typeof tb.savedName === 'string' ? tb.savedName : undefined,
               editGeneration: Number(tb.editGeneration || 0),
               saveId: tb.saveId,
               saveState: tb.saveState,
               conflictDocId: tb.conflictDocId,
+              libraryId:tb.libraryId,libraryRevision:tb.libraryRevision,libraryOwner:tb.libraryOwner,pendingLibrarySave:tb.pendingLibrarySave,entrySource:tb.entrySource,
             }
             mapped.push(restored.planId || restored.readOnly || SESSIONLESS ? restored
               : restorePersonalBinding(restored, readPersonalState(local)))
@@ -1047,6 +1241,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
             }
           }
           tabsRef.current = mapped
+          reportStartup('reconcile')
           for (const tb of [...mapped]) {
             await reconcileRef.current(tb)
             if (dead) return
@@ -1058,24 +1253,63 @@ export function EngineProvider({ children }: { children: ReactNode }) {
             ? session.activeTabId
             : tabsRef.current[0].tabId
           activeRef.current = wanted
+          reportStartup('view')
           applyTabRef.current(tabsRef.current.find(x => x.tabId === wanted)!)
         } else {
           const tab = makeTab(EMPTY_MODEL, t('tab.untitled'), null)
+          if(SINGLE_MODEL){tab.savedContent=modelContent(EMPTY_MODEL);tab.savedName=tab.name}
           tabsRef.current = [tab]
           activeRef.current = tab.tabId
           applyTabRef.current(tab)
         }
+        if (SINGLE_MODEL && !SESSIONLESS) {
+          reportStartup('draft')
+          const scope=String(storage.getAccountScope()),owner=scope.startsWith('user:')?scope.slice(5):null
+          const seed=await entryDraft(owner,()=>window.confirm(t('single.claim')))
+          if(seed){
+            if(!session?.tabs?.length){
+              const data=normalizeModel(seed.text?designFromText(seed.text):seed.data)
+              if(!data)throw new Error(t('single.failed'))
+              const active=tabsRef.current.find(tab=>tab.tabId===activeRef.current)!
+              replaceTabModel(active,data);active.name=seed.name||t('tab.untitled');active.dirty=true
+              if(bootEntry().origin)tabOpenedFrom(active.tabId,bootEntry().origin!)
+              applyTabRef.current(active)
+            }
+            await saveSessionNow();seed.complete()
+          }
+        }
         syncTabsRef.current()
+        initialized = true
+        reportStartup('engine-ready')
         setReady(true)
         // 画布这时才露面，第一次载入的动画从这一刻开始放
         scene.releaseLoadGate()
         bumpRef.current()
       } catch (err) {
+        track('builder.app.fail', { reason: 'load' })
         setError(err instanceof Error ? err.message : String(err))
       }
     })()
 
-    return () => { dead = true }
+    return () => {
+      dead = true
+      if (!EDITOR_EMBED) return
+      if (sessionTimer.current) window.clearTimeout(sessionTimer.current)
+      const current = eng.current
+      eng.current = null
+      current?.builder.dispose()
+      const documents = tabsRef.current.map(tab => tab.local)
+      tabsRef.current = []
+      activeRef.current = null
+      for (const local of documents) {
+        local.history.destroy()
+        void (async () => { await local.persistence?.destroy(); local.doc.destroy() })().catch(error => console.error('[editor document cleanup]', error))
+      }
+      if (!currentScene) return
+      currentScene.onMeshesReady = currentScene.onCameraChange = () => {}
+      if (initialized && sceneOwner && String(storage.getAccountScope()) === `user:${sceneOwner}`) editorScenes.put(sceneOwner, currentScene)
+      else currentScene.dispose()
+    }
   }, [])
 
   useEffect(() => {
@@ -1100,11 +1334,68 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const builder = e?.builder
   const model = e?.model
   const scene = e?.scene
+  const homeContext = tabHomeContext(tabsRef.current.find(tab => tab.tabId === activeRef.current), model?.homeContext || null)
 
-  const bom = useMemo(() => {
+  useEffect(() => {
+    if (ready && scene && model) scene.setHomeContext(homeContext)
+  }, [ready, scene, model, homeContext, tick])
+
+  const bindHome = useCallback((record: AnyRec | null, expectedTabId?: string | null) => {
+    const current = eng.current
+    if (!current || current.builder.busy()) return false
+    const tab = tabsRef.current.find(item => item.tabId === activeRef.current)
+    if (!tab || expectedTabId && tab.tabId !== expectedTabId || tab.readOnly && !tab.planId) return false
+    const bounds = current.scene.homeProductBounds()
+    if (record && !record.placement && !current.model.isEmpty() && !bounds) return false
+    const context = record ? placeInRoom(record, bounds) : null
+    if (context && record?.placement) context.placement = structuredClone(record.placement)
+    if (context && !validHomeContext(context)) return false
+    if (tab.planId) {
+      tab.view = { ...tab.view, homeContext: context }
+      persistSession()
+    } else current.builder.recordHistory(() => { current.model.homeContext = context; current.model.previewBackground = context ? 'home' : 'blank' })
+    current.scene.setHomeContext(context)
+    current.scene.setBackground(context ? 'home' : 'blank')
+    if (context) current.scene.frameHomeProduct()
+    current.builder.refresh()
+    bump()
+    return true
+  }, [bump, persistSession])
+
+  useEffect(() => {
+    if (!ready) return
+    const query = new URLSearchParams(location.search), key = query.get('homeSession')
+    if (!key) return
+    const raw = sessionStorage.getItem(key)
+    if (!raw) { notify(lang === 'zh' ? '房间选择已失效，请重新加载' : lang === 'de' ? 'Raumauswahl abgelaufen. Bitte erneut laden.' : 'Room selection expired. Please load again.', 'err'); return }
+    let alive = true
+    const tabId = activeRef.current
+    void (async () => {
+      try {
+        const record = JSON.parse(raw)
+        if (record.ownerID) {
+          const response = await fetch('/whoami', { credentials: 'same-origin', cache: 'no-store' })
+          if (!response.ok) throw new Error('Cannot verify room account')
+          const who = await response.json()
+          if (!who.authenticated || String(who.user_id) !== String(record.ownerID)) throw new Error('Room account changed')
+        }
+        if (!alive || activeRef.current !== tabId) return
+        if (!bindHome(record)) throw new Error('Invalid room or busy builder')
+        query.delete('homeSession'); history.replaceState(null, '', location.pathname + (query.size ? '?' + query : '') + location.hash)
+        sessionStorage.removeItem(key)
+      } catch (error) { if (alive) { console.error(error); notify(lang === 'zh' ? '房间无法加载，请确认登录账号。内容已保留' : lang === 'de' ? 'Raum nicht ladbar. Angemeldetes Konto prüfen. Inhalt bleibt erhalten.' : 'Cannot load room. Check your account. Your content is retained.', 'err') } }
+    })()
+    return () => { alive = false }
+  }, [ready, bindHome, notify, lang])
+
+  // 引擎会原地修改零件；完整内容指纹同时覆盖编辑、撤销和协作更新。
+  // 选择和工具切换不重复运行全模型分析，读取指纹也不修改成组状态。
+  const modelSnapshot = useMemo(() => model && ready ? JSON.stringify(model.toJSON({ pruneGroups: false })) : null, [model, ready, tick])
+  const rawBom = useMemo(() => {
     if (!model || !ready) return null
-    try { return asBom(computeBOM(model) as AnyRec) } catch { return null }
-  }, [model, ready, tick, lang])
+    try { return computeBOM(model) as AnyRec } catch { return null }
+  }, [model, ready, modelSnapshot, lang])
+  const bom = useMemo(() => rawBom ? asBom(rawBom) : null, [rawBom])
 
   const safety = useMemo<SafetyResult | null>(() => {
     if (!model || !ready) return null
@@ -1112,22 +1403,22 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       room: room.visible ? { w: room.w, d: room.d } : null,
       indoor: room.visible,
     }) as SafetyResult
-  }, [model, ready, tick, room])
+  }, [model, ready, modelSnapshot, room])
 
   const cmp = useMemo(() => {
-    if (!model || !ready) return { rows: [] as InvRow[], feasible: null as boolean | null }
+    if (!rawBom) return { rows: [] as InvRow[], feasible: null as boolean | null }
     try {
-      const raw = compareInventory(computeBOM(model), inventory) as { rows: InvRow[]; feasible: boolean }
+      const raw = compareInventory(rawBom, inventory) as { rows: InvRow[]; feasible: boolean }
       return { rows: raw.rows, feasible: inventoryUsed(inventory) ? raw.feasible : null }
     } catch { return { rows: [], feasible: null } }
-  }, [model, ready, tick, inventory, lang])
+  }, [rawBom, inventory, lang])
 
   const sizeCm = useMemo<[number, number, number] | null>(() => {
     if (!model || !ready) return null
     const b = model.bounds?.(2.5) as { size: number[] } | null
     if (!b) return null
     return [Math.round(b.size[0]), Math.round(b.size[2]), Math.round(b.size[1])]
-  }, [model, ready, tick])
+  }, [model, ready, modelSnapshot])
 
   bomRef.current = bom
   sizeRef.current = sizeCm
@@ -1175,10 +1466,11 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   }, [builder])
 
   const setMode = useCallback((mode: string) => {
+    rememberTool()
     clearBomHighlight()
     builder?.setMode(mode)
     bump()
-  }, [builder, bump, clearBomHighlight])
+  }, [builder, bump, clearBomHighlight, rememberTool])
   const setColor = useCallback((id: string) => { track('builder.color.set', { id }); builder?.setColor(id); bump() }, [builder, bump])
   const setTube = useCallback((id: string) => {
     pickPart('tubes', id)
@@ -1190,7 +1482,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const setPanel = useCallback((id: string) => {
     pickPart('panels', id)
     clearBomHighlight()
-    builder?.setPanel(id)
+    builder?.setPanel(id, { refresh: false })
     builder?.setMode('panel')
     bump()
   }, [builder, bump, clearBomHighlight])
@@ -1204,26 +1496,77 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const setFitting = useCallback((kind: string, partId?: string) => {
     pickPart('fittings', partId || kind)
     clearBomHighlight()
-    builder?.setFitting(kind, partId)
+    builder?.setFitting(kind, partId, { refresh: false })
     builder?.setMode('fitting')
     bump()
   }, [builder, bump, clearBomHighlight])
   const setClamp = useCallback((id: string) => {
     pickPart('clamps', id)
     clearBomHighlight()
-    builder?.setClampPart(id)
+    builder?.setClampPart(id, { refresh: false })
     builder?.setMode('clamp')
     bump()
   }, [builder, bump, clearBomHighlight])
   const startPool = useCallback((id: string) => {
     pickPart('pools', id)
+    rememberTool()
     clearBomHighlight()
-    builder?.startPool?.(id)
+    if (builder?.startPool?.(id)) toolMemory.current.remember(activeRef.current, {
+      tool: 'pools', partId: id, color: builder.color, insetScrewAxis: builder.insetScrewAxis,
+    })
+    bump()
+  }, [builder, bump, clearBomHighlight, rememberTool])
+  const startC45 = useCallback(() => { pickPart('tubes', 'c45'); clearBomHighlight(); builder?.setMode('c45'); bump() }, [builder, bump, clearBomHighlight])
+  const startReinforce = useCallback((partId?: string) => {
+    if (!builder || builder.readOnly) return
+    const selected = partId || builder.reinforcementPartId || 'reinforce80'
+    pickPart('reinforcements', selected)
+    clearBomHighlight()
+    builder.reinforcementPartId = selected
+    builder.setMode('reinforce')
     bump()
   }, [builder, bump, clearBomHighlight])
-  const startC45 = useCallback(() => { pickPart('tubes', 'c45'); clearBomHighlight(); builder?.setMode('c45'); bump() }, [builder, bump, clearBomHighlight])
-  const startReinforce = useCallback(() => { pickPart('reinforcements', 'reinforce'); clearBomHighlight(); builder?.setMode('reinforce'); bump() }, [builder, bump, clearBomHighlight])
-  const placeConnector = useCallback((id: string) => { pickPart('connectors', id); clearBomHighlight(); builder?.placeConnector?.(id); bump() }, [builder, bump, clearBomHighlight])
+  const placeConnector = useCallback((id: string) => {
+    if (!builder || builder.readOnly) return
+    rememberTool()
+    pickPart('connectors', id)
+    clearBomHighlight()
+    builder.placeConnector(id)
+    toolMemory.current.remember(activeRef.current, { tool: 'connectors', partId: id, color: builder.color, insetScrewAxis: builder.insetScrewAxis })
+    bump()
+  }, [builder, bump, clearBomHighlight, rememberTool])
+
+  const activateTool = useCallback((tool: BuilderTool) => {
+    const api = toolApi.current
+    if (!api || !builder || builder.readOnly || builder.busy() || builder.pasting) return
+    rememberTool()
+    const saved = toolMemory.current.get(activeRef.current, tool)
+    const defaults: Partial<Record<BuilderTool, string>> = { tubes: geometry().defaultTube, panels: geometry().defaultPanel,
+      connectors: '6way', wheels: 'wheel', textiles: 'textile', slides: 'slide_integral', reinforce: 'reinforce80' }
+    const choices = toolEntries.current.filter(entry => entry.tool === tool)
+    const entry = choices.find(entry => entry.id === saved?.partId)
+      || choices.find(entry => entry.id === defaults[tool]) || choices[0]
+    clearBomHighlight()
+    builder.setMode('select')
+    // 只恢复工具配色，不调用会给选中零件上色的 setColor。
+    if (saved) { builder.color = saved.color; builder.insetScrewAxis = saved.insetScrewAxis }
+    if (tool === 'reinforce') api.startReinforce(entry?.id)
+    else if (tool === 'slides' && saved) api.setSlide(saved.partId)
+    else if (entry) selectInstallation(entry, api)
+    rememberTool()
+    bump()
+  }, [builder, bump, clearBomHighlight, rememberTool])
+
+  const toggleLastTool = useCallback(() => {
+    if (!builder || builder.readOnly || builder.busy() || builder.pasting) return
+    if (builder.mode === 'select') activateTool(toolMemory.current.get(activeRef.current)?.tool || 'tubes')
+    else setMode('select')
+  }, [builder, activateTool, setMode])
+
+  useEffect(() => {
+    rememberTool()
+    toolMemory.current.retain(tabs.map(tab => tab.tabId))
+  }, [tick, tabs, rememberTool])
 
   const highlight = useCallback((kind: string, id: string, color?: string | null) => {
     if (!builder || !model) return
@@ -1250,7 +1593,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     } else if (kind === 'slides') {
       for (const sl of model.slides.values()) if (sl.kind === id) ids.add(sl.id)
     } else if (kind === 'reinforcements') {
-      for (const tb of model.tubes.values()) if (tb.reinforced) ids.add(tb.id)
+      for (const tb of model.tubes.values()) if (tb.reinforced && (tb.reinforcement?.partId || 'reinforce80') === id) ids.add(tb.id)
+      if (id === 'alu_connector') for (const f of model.fittings.values()) if (f.kind === 'alu-connector2') ids.add(f.id)
     } else if (kind === 'textiles') {
       // 普通布面、短布面、彩虹带各是一行：按这块布认出来的零件比对
       for (const tx of model.textiles.values()) {
@@ -1429,7 +1773,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     tab.dirty = true
     tab.saveState = 'unsaved'
     syncTabs()
-  }, [syncTabs, t])
+    if (SINGLE_MODEL) void saveSessionNow()
+  }, [saveSessionNow, syncTabs, t])
 
   /** 共享方案的标签页跟着方案的名字走：名字随文档同步，不算没保存。 */
   const setTabName = useCallback((tabId: string, name: string) => {
@@ -1468,6 +1813,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   async function saveSnapshot(tab: Tab, options: Parameters<typeof docs.saveDoc>[0]) {
     try { return await docs.saveDoc(options) }
     catch (error) {
+      track('builder.save.fail', { reason: 'local_io', object: tabAnalytics.get(tab)?.object || '' })
       console.warn('[save local]', error)
       if (tabsRef.current.includes(tab)) {
         tab.dirty = true
@@ -1479,10 +1825,170 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  const saveCurrent = useCallback(async (name?: string) => {
+  const allowCloudSave = useCallback(async (docId?: string | null) => {
+    const scope=String(storage.getAccountScope())
+    if(!import.meta.env.VITE_SYNC_BASE||!scope.startsWith('user:')||!navigator.onLine)return true
+    try{
+      const response=await fetch('/quadro/library',{credentials:'include',cache:'no-store',headers:{'X-Builder-User-ID':scope.slice(5)}})
+      if(!response.ok)throw new Error('Capacity check '+response.status)
+      const result=await response.json()
+      if(String(storage.getAccountScope())!==scope)return false
+      updateSlotAccess(result.slots)
+      if((docId&&slotAccess(docId))||!saveCapacityFull())return true
+      await saveSessionNow()
+      notify(t('capacity.cloudFull'),'warn')
+      return false
+    }catch(error){console.warn('[capacity check]',error);notify(t('sync.failed'),'warn');return false}
+  },[notify,saveSessionNow,t])
+
+  const saveCurrentNow = useCallback(async (name?: string) => {
+    if(RESOURCE_MODE)return null
     const e2 = eng.current
     const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
     if (!e2 || !tab || tab.readOnly) return null
+    if(SINGLE_MODEL && String(storage.getAccountScope())==='anonymous'){
+      await saveSessionNow();needAccount('save');return null
+    }
+    const creation = SINGLE_MODEL && !tab.docId && !tab.libraryId && !tab.planId ? newModelTarget(tab.local) : null
+    if (creation) {
+      if (e2.builder.busy()) { notify(t('sync.waiting'), 'warn'); return null }
+      let saveName = name || tab.name
+      if (!name && isUntitledName(tab.name)) {
+        const typed = await askName(t('saves.saveTitle'), t('saves.saveOk'), '')
+        if (typed === null) return null
+        saveName = typed.trim() || t('tab.untitled')
+      }
+      if (!tabsRef.current.includes(tab)) return null
+      const owner = String(storage.getAccountScope()), epoch = storage.getAccountEpoch()
+      const body = pendingNewModel(tab.local, creation, saveName, structuredClone(exportTab(tab)))
+      // 重试沿用同一快照与请求号；回执丢失也不会重复占位。
+      await saveSessionNow()
+      tab.readOnly = true; e2.builder.setReadOnly(true); syncTabs()
+      try {
+        const res = await fetch('/quadro/library', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', 'X-Builder-User-ID': owner.slice(5) }, body: JSON.stringify(body) })
+        if (!res.ok) throw new Error(t('sync.failed') + ' (' + res.status + ')')
+        const result = await res.json() as { id: string; backend: string; revision: number }
+        if (storage.getAccountEpoch() !== epoch || String(storage.getAccountScope()) !== owner || !tabsRef.current.includes(tab)) return null
+        tab.savedContent = modelContent(body.data); tab.savedName = body.name
+        tab.dirty = modelContent(exportTab(tab)) !== tab.savedContent || tab.name !== body.name && !isUntitledName(tab.name)
+        if (!tab.dirty) tab.name = body.name
+        tab.saveState = tab.dirty ? 'unsaved' : 'synced'
+        if (creation.kind === 'shared') {
+          // 用当前快照接入协作，不把本机草稿的历史及元数据传给成员。
+          const planTab = makePlanTab(result.backend, tab.name)
+          writeJSON(planTab.local.doc, structuredClone(exportTab(tab)), SEED_ORIGIN)
+          setPlanName(planTab.local.doc, result.backend, tab.name)
+          planTab.readOnly = true
+          tabsRef.current = tabsRef.current.map(existing => existing === tab ? planTab : existing)
+          if (activeRef.current === tab.tabId) { activeRef.current = planTab.tabId; applyTab(planTab) }
+          void dropTabDoc(tab.tabId, tab.local)
+        }
+        else { tab.libraryId = result.id; tab.libraryOwner = owner.slice(5); tab.libraryRevision = result.revision }
+        finishNewModel(tab.local)
+        recordCreatedSlot(creation.slot, creation.kind, result)
+        syncTabs(); notify(t('toast.saved', { name: body.name }), 'saved')
+        return { docId: result.id, name: body.name, data: body.data }
+      } catch (error) {
+        console.warn('[create model]', error)
+        if (storage.getAccountEpoch() === epoch) notify(error instanceof Error ? error.message : t('sync.failed'), 'err')
+        return null
+      } finally {
+        if (storage.getAccountEpoch() === epoch && tabsRef.current.includes(tab)) {
+          tab.readOnly = !!tab.planId
+          if (activeRef.current === tab.tabId) e2.builder.setReadOnly(!!tab.planId)
+          syncTabs()
+        }
+      }
+    }
+    if(tab.libraryId){
+      if(e2.builder.busy())return null
+      if(!navigator.onLine){notify(t('sync.failed'),'err');return null}
+      const data=structuredClone(exportTab(tab)),generation=tab.editGeneration||0
+      const binding={id:tab.libraryId,owner:tab.libraryOwner,revision:tab.libraryRevision,baseContent:tab.savedContent,baseName:tab.savedName}
+      let stats
+      // 个人保存的统计由详情按实际内容计算，保存只等待模型写入回执。
+      // 分享内容仍需同步更新公开尺寸和手册步数。
+      if(slotAccess(null,binding.id)?.kind!=='save'){
+        try{stats=await libraryStatsQueue.compute(binding.id,data)}catch(error){console.warn('[library stats]',error);notify(t('sync.localFailed'),'err');return null}
+      }
+      const saveName = name || tab.name, epoch = storage.getAccountEpoch()
+      const requestAbort = new AbortController()
+      const stopRequestWatch = storage.onAccountChange(() => requestAbort.abort())
+      const active = () => storage.getAccountEpoch() === epoch && String(storage.getAccountScope()) === `user:${binding.owner}`
+        && tabsRef.current.includes(tab) && tab.libraryId === binding.id && tab.libraryOwner === binding.owner
+      const access = { id: binding.id, owner: binding.owner || '', active, normalize: normalizeModel, signal: requestAbort.signal }
+      try {
+        const identity = await librarySaveIdentity(saveName, data, tab.pendingLibrarySave)
+        if (!active()) return null
+        tab.pendingLibrarySave = identity
+        await saveSessionNow()
+        const result = await saveLibraryModel({ ...access, revision: binding.revision || 0, name: saveName, data,
+          saveId: identity.saveId, parts: partsOfData(data), stats, baseContent: binding.baseContent, baseName: binding.baseName })
+        if (!active()) return null
+        if (result.status === 'saved') {
+          tab.libraryRevision = result.revision
+          tab.pendingLibrarySave = undefined
+          tab.savedName = saveName; tab.savedContent = modelContent(data)
+          if (savedGenerationUnchanged(tab, generation, data, exportTab(tab))) { tab.dirty = false; tab.name = saveName; tab.saveState = 'synced' }
+          syncTabs(); await saveSessionNow()
+          if (result.recovered) track('builder.save.recovered', { reason: 'receipt', object: binding.id })
+          notify(t('toast.saved', { name: saveName }), 'saved')
+          return { docId: binding.id, name: saveName, data }
+        }
+        // 独立草稿保存完整快照，既不占云端容量，也不由后台同步自动上传。
+        const work = structuredClone(exportTab(tab)), workName = tab.name
+        const backupTab = docs.newTabId()
+        await docs.saveSession({ tabs: [{ tabId: backupTab, docId: null, name: saveName, dirty: true, model: data }], activeTabId: backupTab }, `single-draft:${identity.saveId}`)
+        if (modelContent(work) !== modelContent(data) || workName !== saveName) {
+          const latestTab = docs.newTabId()
+          await docs.saveSession({ tabs: [{ tabId: latestTab, docId: null, name: workName, dirty: true, model: work }], activeTabId: latestTab }, `single-draft:${crypto.randomUUID()}`)
+        }
+        if (!active()) return null
+        tab.saveState = 'conflict'; syncTabs()
+        e2.builder.setReadOnly(true)
+        let choice: 'copy' | 'latest' | 'cancel'
+        try { choice = await new Promise(resolve => { saveConflictRef.current = resolve; setSaveConflict(true) }) }
+        finally { if (active() && activeRef.current === tab.tabId) e2.builder.setReadOnly(!!tab.readOnly) }
+        if (!active()) return null
+        if (choice === 'cancel') { saveCancelled.current = true; return null }
+        if (choice === 'latest') {
+          const remote = await readLibrarySnapshot(access)
+          if (!active() || modelContent(exportTab(tab)) !== modelContent(work) || tab.name !== workName) return null
+          replaceTabModel(tab, remote.data)
+          tab.name = remote.name; tab.savedName = remote.name; tab.savedContent = modelContent(remote.data)
+          tab.libraryRevision = remote.revision; tab.pendingLibrarySave = undefined; tab.dirty = false; tab.saveState = 'synced'
+          if (activeRef.current === tab.tabId) applyTab(tab)
+          syncTabs(); await saveSessionNow()
+          track('builder.save.recovered', { reason: 'latest', object: binding.id })
+          return { docId: binding.id, name: remote.name, data: remote.data }
+        }
+        if (!await allowCloudSave() || !active()) return null
+        const copyData = structuredClone(exportTab(tab)), copyGeneration = tab.editGeneration || 0
+        const copy = await saveSnapshot(tab, { docId: null, name: t('saves.copyName', { name: tab.name }), data: copyData })
+        if (!copy || !active()) return null
+        tab.libraryId = undefined; tab.libraryOwner = undefined; tab.libraryRevision = undefined; tab.pendingLibrarySave = undefined
+        tab.docId = copy.id; tab.saveId = String(copy.saveId); tab.baseRev = Number(copy.rev || 0)
+        const unchanged = savedGenerationUnchanged(tab, copyGeneration, copyData, exportTab(tab))
+        tab.savedContent = modelContent(copyData); tab.savedName = copy.name
+        if (unchanged) tab.name = copy.name
+        tab.conflictDocId = undefined; tab.dirty = !unchanged; tab.saveState = tab.dirty ? 'unsaved' : 'syncing'
+        tabSavedAs(tab.tabId, copy.id)
+        const previousSession = sessionKey.current
+        sessionKey.current = adoptPersonalEntry(String(copy.id))
+        syncTabs(); await saveSessionNow()
+        if (previousSession && previousSession !== sessionKey.current) await docs.saveSession({ tabs: [], activeTabId: null }, previousSession)
+        await pushSaved(String(copy.id), String(copy.name), copyData, String(copy.saveId), tab)
+        track('builder.save.recovered', { reason: 'copy', object: binding.id })
+        const syncedCopy = await docs.getDoc(String(copy.id)) as AnyRec | null
+        return syncedCopy?.syncedSaveId === copy.saveId && !tab.dirty ? { docId: String(copy.id), name: String(copy.name), data: copyData } : null
+      } catch (error) {
+        console.warn('[library save]', error)
+        if (!active()) return null
+        if (error instanceof LibrarySaveError && error.status === 423) { tab.readOnly = true; e2.builder.setReadOnly(true) }
+        track('builder.save.fail', { reason: error instanceof LibrarySaveError ? 'http_' + error.status : 'library_io', object: binding.id })
+        notify(t('sync.failed'), 'err'); syncTabs(); return null
+      } finally { stopRequestWatch() }
+    }
     if (tab.planId) {
       notify(t('collab.autoSynced'))
       return null
@@ -1499,6 +2005,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       notify(t('sync.waiting'), 'warn')
       return null
     }
+    if(!await allowCloudSave(tab.docId))return null
+    if(!tabsRef.current.includes(tab))return null
     let saveName = name || tab.name
     if (!name && !tab.docId && isUntitledName(tab.name)) {
       const typed = await askName(t('saves.saveTitle'), t('saves.saveOk'), '')
@@ -1508,6 +2016,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     if (!tabsRef.current.includes(tab)) return null
     if (tab.tabId === activeRef.current && e2.builder.busy()) { notify(t('sync.waiting'), 'warn'); return null }
     const data = structuredClone(exportTab(tab))
+    const output = outputCandidate(tab, data)
     const generation = tab.editGeneration || 0
     const stillCurrent = beginLocalSave(tab)
     // 没有可靠基线时只能保存成新设计，不能借存档库最新 rev 覆盖原设计。
@@ -1523,6 +2032,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       if ((tab.editGeneration || 0) === generation) tab.name = saved.name
       tab.baseRev = Number(saved.rev || 0)
       tab.savedContent = modelContent(data)
+      tab.savedName = saved.name
       tab.saveId = String(saved.saveId)
       tab.conflictDocId = targetId && String(saved.id) !== targetId ? targetId : undefined
       tab.dirty = !savedGenerationUnchanged(tab, generation, data, tab.local.history.toJSON())
@@ -1532,9 +2042,11 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     }
     syncTabs()
     track('builder.design.save', { ...modelShape(data), named: !!name })
+    output('save')
     if (attached && tab.conflictDocId) notify(t('sync.conflictProtected'), 'warn')
     else notify(t(syncStarted() ? 'sync.syncing' : 'sync.local'))
-    void pushSaved(String(saved.id), String(saved.name), data, String(saved.saveId), attached ? tab : undefined)
+    const pushed=pushSaved(String(saved.id), String(saved.name), data, String(saved.saveId), attached ? tab : undefined)
+    if(SINGLE_MODEL){await pushed;if(tab.saveState!=='synced')return null}
     void coverSaved(String(saved.id), data, saved.updatedAt, String(saved.saveId)).catch(error => {
       console.warn('[cover]', error)
       notify(t('sync.coverFailed'), 'warn')
@@ -1542,13 +2054,52 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     return { docId: String(saved.id), name: String(saved.name), data }
     // coverSaved、pushSaved 每次渲染重建，只在回调里调用，不进依赖表
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [askName, exportTab, notify, syncTabs, t])
+  }, [allowCloudSave, askName, exportTab, notify, saveSessionNow, syncTabs, t])
+
+  const saveCurrent=useCallback(async(name?:string)=>{
+    if(savingRef.current || SINGLE_MODEL && !entryReady)return null
+    saveCancelled.current = false
+    savingRef.current=true;setSaving(true)
+    try{return await saveCurrentNow(name)}finally{savingRef.current=false;setSaving(false)}
+  },[entryReady,saveCurrentNow])
+
+  const refreshedRoomEntries=useRef(new Set<string>())
+  useEffect(()=>{
+    const refresh=()=>{const tab=tabsRef.current.find(x=>x.tabId===activeRef.current);if(tab){refreshedRoomEntries.current.delete(tab.tabId);bump()}}
+    window.addEventListener('xmf-room-background-refresh',refresh)
+    return()=>window.removeEventListener('xmf-room-background-refresh',refresh)
+  },[bump])
+  useEffect(()=>{
+    const tab=tabsRef.current.find(x=>x.tabId===activeRef.current),scope=String(storage.getAccountScope()),e2=eng.current
+    if(SESSIONLESS||!ready||!entryReady||!tab||!e2||tab.planId||tab.readOnly||!scope.startsWith('user:')||refreshedRoomEntries.current.has(tab.tabId))return
+    const context=e2.model.homeContext
+    if(!context?.roomId)return
+    refreshedRoomEntries.current.add(tab.tabId)
+    const source=JSON.stringify(context),account=scope,tabId=tab.tabId
+    void (async()=>{
+      try{
+        const room=await readRoom({id:context.roomId,rev:context.roomRev,name:context.name,data:context.snapshot,ownerID:Number(scope.slice(5))},(zh,en,de)=>lang==='zh'?zh:lang==='de'?de:en)
+        if(String(storage.getAccountScope())!==account||activeRef.current!==tabId||eng.current!==e2||JSON.stringify(e2.model.homeContext)!==source)return
+        const updated=refreshedRoomBackground(context,room)
+        if(!updated)return
+        const clean=!tab.dirty&&!!(tab.docId||tab.libraryId)&&modelContent(exportTab(tab))===tab.savedContent
+        e2.builder.recordHistory(()=>{e2.model.homeContext=updated})
+        e2.scene.setHomeContext(updated);e2.builder.refresh();bump()
+        const warning=roomBackgroundWarnings(updated,e2.scene.homeProductBounds())
+        if(warning.outside||warning.overlap)notify(lang==='zh'?'房间已更新，造型位置保持；造型外包范围可能超出房间或与家具、留空区重叠，请检查摆放。':lang==='de'?'Raum aktualisiert, Modellposition bleibt. Modellumfang kann außerhalb des Raums oder in Möbeln/Freizonen liegen. Platzierung prüfen.':'Room refreshed, model position kept. Its bounds may extend outside the room or overlap furniture / reserved areas. Check placement.','warn')
+        if(clean){const saved=await saveCurrent();if(!saved)notify(lang==='zh'?'房间背景已更新，尚未保存；原缩略图保留。':lang==='de'?'Raum aktualisiert, noch nicht gespeichert. Vorschaubild bleibt.':'Room refreshed but not saved. Previous thumbnail kept.','warn')}
+        else notify(lang==='zh'?'房间背景已更新，随当前草稿保存后更新缩略图。':lang==='de'?'Raum aktualisiert. Vorschaubild folgt nach dem Speichern.':'Room refreshed. Save your draft to update its thumbnail.')
+      }catch(error){console.warn('[room background refresh]',error);if(String(storage.getAccountScope())===account&&activeRef.current===tabId)notify(error instanceof Error?error.message:lang==='zh'?'暂未获取到源房间，保留上次背景；可从场景菜单重试。':lang==='de'?'Quellraum nicht verfügbar. Letzter Hintergrund bleibt.':'Source room unavailable. Previous background kept.','warn')}
+    })()
+  },[ready,entryReady,activeTabId,tick,lang,exportTab,saveCurrent,notify,bump])
 
   /**
    * 使用独立场景给已保存快照生成封面；JSON 无需等待，晚到封面按 saveId 核对内容。
    */
   async function coverSaved(docId: string, data: ModelJSON, updatedAt: number, saveId: string) {
-    if (!syncStarted()) return
+    // 托管单模型封面由平台按当前内容生成，避免后台封面再次提交整份旧模型。
+    if (SINGLE_MODEL || !syncStarted()) return
+    const { renderModelCover } = await import('./modelCover')
     const cover = await renderModelCover(data)
     if (!cover && modelPartCount(data) > 0) throw new Error('saved cover unavailable')
     if (cover) {
@@ -1570,10 +2121,12 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       result = { status: 'pending', id: docId, saveId, error }
     }
     const binding = { docId, saveId }
+    track(result.status === 'synced' ? 'builder.sync.done' : 'builder.sync.fail', { reason: result.status, object: tab && tabAnalytics.get(tab)?.object || '' })
     if (tab && tabsRef.current.includes(tab) && samePersonalBinding(tab, binding)) {
       if (result.status === 'synced') {
         tab.baseRev = result.rev
         if (!tab.dirty) tab.saveState = 'synced'
+        notify(t('toast.saved', { name }), 'saved')
       } else if (result.status === 'conflict') {
         const read = await readPersonalBinding(tab, binding, () => tabsRef.current.includes(tab),
           () => docs.getDoc(result.copyId) as Promise<AnyRec | null>)
@@ -1595,6 +2148,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       syncTabs()
     }
     if (result.status !== 'synced') return
+    if (!tab) notify(t('toast.saved', { name }), 'saved')
     window.dispatchEvent(new CustomEvent('quadro:design-saved', {
       detail: { docId, name, parts: modelPartCount(data) },
     }))
@@ -1618,13 +2172,17 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const e2 = eng.current
     const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
     if (!e2 || !tab) return
+    if(tab.readOnly||slotLocked(tab.docId,tab.libraryId,tab.planId)){notify(t('toast.srcFailed')+' (423)','err');return}
     if (e2.builder.busy()) { notify(t('sync.waiting'), 'warn'); return }
+    if(!await allowCloudSave())return
+    if(!tabsRef.current.includes(tab))return
     const suggested = isUntitledName(tab.name) ? '' : await freeDocName(tab.name)
     const typed = await askName(t('saves.saveAsTitle'), t('saves.saveOk'), suggested)
     if (typed == null) return
     if (!tabsRef.current.includes(tab)) return
     if (tab.tabId === activeRef.current && e2.builder.busy()) { notify(t('sync.waiting'), 'warn'); return }
     const data = structuredClone(exportTab(tab))
+    const output = outputCandidate(tab, data)
     const generation = tab.editGeneration || 0
     const stillCurrent = beginLocalSave(tab)
     const saved = await saveSnapshot(tab, { docId: null, name: typed.trim() || t('tab.untitled'), data })
@@ -1633,6 +2191,9 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     // 共享方案另存一份到「我的设计」：标签页还是那个方案
     const attached = !tab.planId && stillCurrent()
     if (attached) {
+      tab.libraryId = undefined
+      tab.libraryRevision = undefined
+      tab.libraryOwner = undefined
       tab.docId = saved.id
       if ((tab.editGeneration || 0) === generation) tab.name = saved.name
       tab.baseRev = Number(saved.rev || 0)
@@ -1645,6 +2206,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     }
     syncTabs()
     track('builder.design.saveAs', { ...modelShape(data) })
+    output('save_as')
     notify(t(syncStarted() ? 'sync.syncing' : 'sync.local'))
     void pushSaved(String(saved.id), String(saved.name), data, String(saved.saveId), attached ? tab : undefined)
     void coverSaved(String(saved.id), data, saved.updatedAt, String(saved.saveId)).catch(error => {
@@ -1653,9 +2215,10 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     })
     // coverSaved、pushSaved 每次渲染重建，只在回调里调用，不进依赖表
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [askName, freeDocName, notify, syncTabs, t])
+  }, [allowCloudSave, askName, freeDocName, notify, syncTabs, t])
 
   const duplicateDoc = useCallback(async (docId: string) => {
+    if(slotLocked(docId)){notify(t('toast.srcFailed')+' (423)','err');return}
     const doc = await docs.getDoc(docId) as AnyRec | null
     if (!doc) return
     const saved = await docs.saveDoc({ docId: null, name: await freeDocName(String(doc.name)), data: doc.data })
@@ -1685,6 +2248,11 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   }, [notify, syncTabs, t])
 
   const openDoc = useCallback(async (docId: string) => {
+    if (openingRef.current) return false
+    openingRef.current = true
+    setOpening({ phase: 'read' })
+    try {
+    await paintOpening()
     await syncProbe()
     if (syncStarted()) {
       try {
@@ -1700,6 +2268,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     }
     const doc = await docs.getDoc(docId)
     if (!doc) return false
+    setOpening({ phase: 'build', name: String(doc.name) })
+    await paintOpening()
     snapshotActive()
     const existing = tabsRef.current.find(x => x.docId === docId)
     if (existing) {
@@ -1725,9 +2295,19 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     applyTab(tab)
     syncTabs()
     return true
+    } finally {
+      await paintOpening()
+      openingRef.current = false
+      setOpening(null)
+    }
   }, [applyTab, notify, reconcilePersonal, snapshotActive, syncTabs, t])
 
   const openLibraryId = useCallback(async (id: string) => {
+    if (openingRef.current) return
+    openingRef.current = true
+    setOpening({ phase: 'read', name: OFFICIAL_BY_ID.get(parseOfficialId(id) || '')?.name })
+    try {
+    await paintOpening()
     const official = parseOfficialId(id)
     let qdfText: string | null = null
     let name = t('tab.untitled')
@@ -1740,7 +2320,6 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       const cachedText = cachedOfficialQdf(cached, official)
       if (cachedText) qdfText = cachedText
       else {
-        notify(t('lib.loading', { name }))
         try {
           qdfText = await fetchOfficialQdf(official)
           const built = designEntry(libId, `${official}.qdf`, qdfText) as { name?: string; qdf?: string } | null
@@ -1767,6 +2346,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       notify(t('lib.loadFailed'), 'err')
       return
     }
+    setOpening({ phase: 'build', name })
+    await paintOpening()
     const data = parseDesign(qdfText)
     if (!data) {
       notify(t('lib.loadFailed'), 'err')
@@ -1781,28 +2362,47 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       notify(t('lib.loadFailed'), 'err')
       return
     }
+    if(SINGLE_MODEL){
+      if(!active || active.docId || active.libraryId || active.planId)return
+      if((active.dirty || modelPartCount(e2.model.toJSON())>0)&&!window.confirm(t('confirm.loadPreset')))return
+      replaceTabModel(active,json);active.name=name;active.dirty=true
+      resetTabAnalytics(active,json,official?'official:'+official:'');applyTab(active);syncTabs();return
+    }
     // 共享方案的标签页不让给别的造型
     const reuse = !!active && !active.planId && !active.docId && !active.dirty && modelPartCount(e2.model.toJSON()) === 0
     if (reuse && active) {
       active.name = name
       active.dirty = false
       replaceTabModel(active, json)
+      resetTabAnalytics(active, json, official ? 'official:' + official : '')
       applyTab(active)
     } else {
       const tab = makeTab(json, name, null)
+      resetTabAnalytics(tab, json, official ? 'official:' + official : '')
       tabsRef.current = [...tabsRef.current, tab]
       activeRef.current = tab.tabId
       applyTab(tab)
     }
     syncTabs()
+    if (official) track('builder.content.adopt', { object: 'official:' + official })
     notify(t('lib.loaded', { name }))
+    } finally {
+      await paintOpening()
+      openingRef.current = false
+      setOpening(null)
+    }
   }, [applyTab, notify, snapshotActive, syncTabs, t])
 
   const importFile = useCallback(async (file: File) => {
     const e2 = eng.current
-    if (!e2) return
+    if (!e2 || openingRef.current) return
+    openingRef.current = true
+    setOpening({ phase: 'read', name: file.name })
     try {
+      await paintOpening()
       const text = await file.text()
+      setOpening({ phase: 'build', name: file.name })
+      await paintOpening()
       const trimmed = text.trim()
       const looksJson = trimmed.startsWith('{') || file.name.toLowerCase().endsWith('.json')
       let data: unknown
@@ -1839,17 +2439,26 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       // 导入失败的比例说明格式支持得够不够。只记格式，不记文件名——
       // 文件名是用户起的，属于自由文本。
       track('builder.design.import', { kind: 'unknown', ok: false })
+      track('builder.import.fail', { reason: 'format' })
       notify(t('toast.importFailed', { err: err instanceof Error ? err.message : String(err) }), 'err')
+    } finally {
+      await paintOpening()
+      openingRef.current = false
+      setOpening(null)
     }
   }, [bump, notify, syncTabs, t])
 
   const exportQdf = useCallback(() => {
     const e2 = eng.current
-    if (!e2) return
-    if (needAccount('qdf')) return
-    const out = buildQDF(e2.model, { camera: e2.scene.cameraForQdf?.() }) as { text?: string; warnings?: Array<{ code: string; partId: string; id: string }> } | string
+    if (!e2) return false
+    if (needAccount('qdf')) return false
+    let out: { text?: string; warnings?: Array<{ code: string; partId: string; id: string }> } | string
+    try {
+      out = buildQDF(e2.model, { camera: e2.scene.cameraForQdf?.() })
+      download(`${activeName()}.qdf`, typeof out === 'string' ? out : (out.text || ''), 'text/plain')
+    } catch (error) { track('builder.export.fail', { reason: 'qdf' }); throw error }
     track('builder.export.qdf')
-    download(`${activeName()}.qdf`, typeof out === 'string' ? out : (out.text || ''), 'text/plain')
+    outputCandidate(tabsRef.current.find(x => x.tabId === activeRef.current), e2.model.toJSON())('qdf')
     const warnings = typeof out === 'string' ? undefined : out.warnings
     const separator = lang === 'zh' ? '、' : ', '
     const omitted = [...new Set(warnings?.filter(w => w.code === 'omitted_accessory').map(w => nameLabel(w.partId)) || [])].join(separator)
@@ -1859,6 +2468,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     else if (simplified) notify(t('accessory.qdf.simplified', { parts: simplified }), 'warn')
     else if (!warnings && [...e2.model.fittings.values()].some((f: AnyRec) => ACCESSORY_IDS.has(f.kind))) notify(t('toast.exportedQdfNoAccessories'), 'warn')
     else notify(t(qdfWillMapColors(e2.model) ? 'toast.exportedQdfMapped' : 'toast.exported'))
+    return true
     // needAccount 每次渲染重建，只在回调里调用，不进依赖表
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notify, t])
@@ -1867,8 +2477,10 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const e2 = eng.current
     if (!e2) return
     if (needAccount('json')) return
+    try { download(`${activeName()}.json`, JSON.stringify(e2.model.toJSON(), null, 2), 'application/json') }
+    catch (error) { track('builder.export.fail', { reason: 'json' }); throw error }
     track('builder.export.json')
-    download(`${activeName()}.json`, JSON.stringify(e2.model.toJSON(), null, 2), 'application/json')
+    outputCandidate(tabsRef.current.find(x => x.tabId === activeRef.current), e2.model.toJSON())('json')
     notify(t('toast.exported'))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notify, t])
@@ -1878,6 +2490,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   }
 
   const copy = useCallback(() => {
+    if(builder?.readOnly){notify(t('toast.srcFailed')+' (423)','err');return}
     const frag = builder?.copySelection?.()
     if (!frag) { notify(t('toast.copyEmpty'), 'warn'); return }
     clipboard.current = frag
@@ -1930,12 +2543,6 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     if (builder?.cancelPaste?.()) bump()
   }, [builder, bump])
 
-  const setAssemblyOrder = useCallback((order: string) => {
-    track('builder.assembly.order', { key: order })
-    builder?.setAssemblyOrder?.(order)
-    bump()
-  }, [builder, bump])
-
   const exportInventory = useCallback(() => {
     track('builder.inventory.export')
     download('quadro-inventory.json', JSON.stringify({ format: 'quadro.inventory.v1', inventory }, null, 2), 'application/json')
@@ -1981,7 +2588,14 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     }
     e2.builder.refresh()
     if (opts?.frame !== false) e2.scene.resetCamera(e2.model, { animate: true, swoop: true })
+    e2.scene.setHomeContext(e2.model.homeContext)
+    if (e2.model.homeContext) {
+      e2.scene.setBackground('home')
+      if (opts?.frame !== false) e2.scene.frameHomeProduct()
+    }
     tab.dirty = true
+    resetTabAnalytics(tab, e2.model.toJSON())
+    setAnalyticsObject('')
     syncTabs()
     bump()
     return true
@@ -2013,7 +2627,9 @@ export function EngineProvider({ children }: { children: ReactNode }) {
    * 返回 true 表示这次导出先停下。开源本地版不设注册页，永远放行。
    */
   function needAccount(kind: ResumeExport) {
-    if (!import.meta.env.VITE_REGISTER_URL || syncStarted()) return false
+    const tab=tabsRef.current.find(x=>x.tabId===activeRef.current)
+    if(tab?.readOnly||tab?.slotLocked||tab&&slotLocked(tab.docId,tab.libraryId,tab.planId)){notify(t('toast.srcFailed')+' (423)','err');return true}
+    if (!import.meta.env.VITE_REGISTER_URL || syncStarted() || RESOURCE_MODE && String(storage.getAccountScope()).startsWith('user:')) return false
     track('builder.export.gate', { kind })
     setAccountAsk({ kind, phase: 'register' })
     return true
@@ -2046,22 +2662,29 @@ export function EngineProvider({ children }: { children: ReactNode }) {
    * 导出前把这一座存成方案页，拿到印在文件上的网址和二维码。部署没接方案页就是 null。
    * 存不上就抛错：印一个打不开的二维码没有意义，这次导出跟着停下。
    */
-  async function makeStamp(kind: ExportKind, cover: string, preview?: ManualPreview): Promise<Stamp | null> {
+  async function makeStamp(kind: ExportKind, _cover: string, preview?: ManualPreview): Promise<Stamp | null> {
+    if(kind!=='link')return null
     if (!sharePagesEnabled()) return null
     const e2 = eng.current
     const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
     if (!e2 || !tab) throw new Error('no design')
+    const data=structuredClone(preview?.data||e2.model.toJSON()),title=preview?.name||tab.name
     await ensureAssemblyMeshes()
-    const stampModel = preview ? new BuildModel() : e2.model
-    if (preview && !stampModel.loadJSON(preview.data).ok) throw new Error('invalid frozen design')
+    const stampModel = new BuildModel()
+    if (!stampModel.loadJSON(data).ok) throw new Error('invalid frozen design')
     const b = stampModel.bounds(geometry().connectorSize / 2) as { size: number[] }
+    const sharing=await chooseSharing(!!stampModel.homeContext,lang)
+    const { renderModelCover } = await import('./modelCover')
+    const cover=await renderModelCover(sharing.attachRoom?data:productOnly(data))
+    if(!cover)throw new Error('cover shot failed')
     const url = await publishSharePage({
+      ...sharing,
       key: preview ? `${preview.tabId || 'manual'}-manual` : tab.docId || tab.tabId,
-      title: preview?.name || tab.name,
+      title,
       model: stampModel.toJSON(),
       parts: partsOfModel(stampModel) as Record<string, Record<string, number>>,
       size: [Math.round(b.size[0]), Math.round(b.size[2]), Math.round(b.size[1])],
-      steps: preview ? createAssemblyReadingPlan(stampModel, preview.plan).steps.length : (computeBuildPlan(e2.model, e2.builder.assemblyOrder || 'y+') as { steps: unknown[] }).steps.length,
+      steps: preview ? createAssemblyReadingPlan(stampModel, preview.plan).steps.length : (computeBuildPlan(stampModel, 'y+') as { steps: unknown[] }).steps.length,
       cover,
       stats: statsOfModel(stampModel),
     })
@@ -2072,6 +2695,13 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const e2 = eng.current
     if (!e2) return
     if (needAccount('shareimg')) return
+    if(RESOURCE_MODE){
+      const { renderModelCover } = await import('./modelCover')
+      const cover=await renderModelCover(e2.model.toJSON())
+      if(!cover){notify(t('toast.pngFailed'),'err');return}
+      deliverResourceFile(await (await fetch(cover)).blob(),`${activeName()}.png`)
+      track('builder.export.png',{stamp:false});notify(t('toast.pngSaved'));return
+    }
     const shot = e2.scene.snapshot?.() as string | null
     if (!shot) { notify(t('toast.pngFailed'), 'err'); return }
     let stamp: Stamp | null = null
@@ -2164,11 +2794,11 @@ export function EngineProvider({ children }: { children: ReactNode }) {
 
   const cancelExportManual = useCallback(() => { pendingManualOpen.current = false; if (exportingManualRef.current) return; setExportManualConfirm(false); putManualPreview(null) }, [])
 
-  function makeManualPreview(data: ModelJSON, previous?: ManualPreview): ManualPreview {
+  function makeManualPreview(data: ModelJSON, previous?: Pick<ManualPreview, 'source' | 'tabId' | 'name' | 'repair'>, suppliedPlan?: E): ManualPreview {
     const frozen = new BuildModel()
     if (!frozen.loadJSON(data).ok) throw new Error('invalid assembly snapshot')
-    const order = previous?.order || eng.current?.builder.assemblyOrder || 'y+'
-    const plan = computeAssemblyPlan(frozen, frozen.assemblyConfig || {}, order)
+    const order = 'y+'
+    const plan = suppliedPlan || computeAssemblyPlan(frozen, frozen.assemblyConfig || {}, order)
     const config: AssemblyConfig = frozen.assemblyConfig || {
       version: 1,
       regions: plan.regions.map((r: E) => ({ id: r.id, name: r.name, partIds: [...r.partIds] })),
@@ -2182,12 +2812,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     if (!prev || !validAssemblyConfig(config)) return
     putManualPreview(makeManualPreview({ ...prev.data, assemblyConfig: structuredClone(config) }, prev))
   }
-  function updateManualOrder(order: string) {
-    const prev = manualPreviewRef.current
-    if (!prev || !BUILD_ORDERS.includes(order)) return
-    putManualPreview(makeManualPreview(prev.data, { ...prev, order }))
-  }
   function saveManualConfig() {
+    if(RESOURCE_MODE)return false
     const prev = manualPreviewRef.current
     const e2 = eng.current
     if (!prev || !e2 || e2.builder.readOnly || prev.tabId !== activeRef.current || JSON.stringify(e2.model.toJSON()) !== prev.source || prev.repair) return false
@@ -2212,6 +2838,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     if (prev?.repair) putManualPreview(makeManualPreview(prev.repair.before, { ...prev, repair: null }))
   }
   function applyManualRepairs() {
+    if(RESOURCE_MODE)return false
     const prev = manualPreviewRef.current
     const e2 = eng.current
     if (!prev?.repair?.canApply || !e2 || e2.builder.readOnly || prev.tabId !== activeRef.current || JSON.stringify(e2.model.toJSON()) !== prev.source) return false
@@ -2232,15 +2859,13 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     if (!e2 || exportingManualRef.current) return
     if (modelPartCount(e2.model.toJSON()) === 0) {
       notify(t('toast.manualEmpty'), 'warn')
-      return
+      return {status:'failed' as const,message:t('toast.manualEmpty')}
     }
     if (needAccount('manual')) return
-    await ensureAssemblyMeshes()
-    putManualPreview(makeManualPreview(structuredClone(e2.model.toJSON()) as ModelJSON))
-    track('builder.export.manual.ask', { parts: modelPartCount(e2.model.toJSON()) })
-    setExportManualConfirm(true)
+    putManualPreview(null)
+    return await confirmExportManual()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [notify, t, entryReady])
+  }, [notify, t, entryReady, lang])
 
   useEffect(() => {
     if (entryReady && pendingManualOpen.current) void exportAssemblyPdf()
@@ -2252,30 +2877,22 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener(UI_ESCAPE_EVENT, cancelPending)
   }, [])
 
-  const confirmExportManual = useCallback(async (previewCover?: string | null) => {
+  const confirmExportManual = useCallback(async (_previewCover?: string | null) => {
     const e2 = eng.current
-    const preview = manualPreviewRef.current
-    if (!e2 || !preview || !preview.plan.canExport || exportingManualRef.current) return
+    if (!e2 || exportingManualRef.current) return
     if (needAccount('manual')) return
+    const data = structuredClone(manualPreviewRef.current?.data || e2.model.toJSON()) as ModelJSON
+    const preview = manualPreviewRef.current || { data, name: activeName(), tabId: activeRef.current }
     const frozen = new BuildModel()
-    if (!frozen.loadJSON(preview.data).ok) throw new Error('invalid assembly snapshot')
+    if (!frozen.loadJSON(data).ok) throw new Error('invalid assembly snapshot')
+    const manualTab = tabsRef.current.find(x => x.tabId === preview.tabId)
+    const output = outputCandidate(manualTab, preview.data)
+    const manualObject = manualTab && tabAnalytics.get(manualTab)?.object || ''
     track('builder.export.manual.go')
     exportingManualRef.current = true
-    setExportingManual({ page: 0, total: 1 })
-    let stamp: Stamp | null = null
-    if (sharePagesEnabled()) {
-      const cover = previewCover
-      try {
-        if (!cover) throw new Error('cover')
-        stamp = await makeStamp('manual', cover, preview)
-      } catch (err) {
-        console.error('Assembly manual share page failed', err)
-        exportingManualRef.current = false
-        setExportingManual(null)
-        notify(t('toast.stampFailed'), 'err')
-        return
-      }
-    }
+    const controller = new AbortController()
+    manualAbort.current = controller
+    setExportingManual({ page: 0, total: 0, phase: 'resources' })
     const locale = lang === 'zh' ? 'zh-CN' : lang === 'de' ? 'de-DE' : 'en-US'
     const b = frozen.bounds?.(2.5) as { size: number[] } | null
     const sizeLine = b
@@ -2283,18 +2900,23 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       : ''
     const fileBase = (preview.name || 'design').replace(/[\\/:*?"<>|]+/g, '_').trim() || 'design'
     try {
+      // 先绘制进度，再按高度冻结分层资料。
+      await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+      controller.signal.throwIfAborted()
+      const plan = computeLayeredManualPlan(frozen)
       const bomNow = asBom(computeBOM(frozen) as AnyRec)
+      const { exportAssemblyPdf: runAssemblyPdf } = await import('../engine/assemblyManual.js')
       await runAssemblyPdf({
         model: frozen,
+        signal: controller.signal,
         modelJSON: preview.data,
-        plan: preview.plan,
-        assemblyConfig: preview.config,
-        order: preview.order,
+        plan,
         name: preview.name,
         bom: bomNow,
         filename: `${fileBase}-${t('manual.fileSuffix')}.pdf`,
-        onProgress: (p: { page: number; total: number }) => setExportingManual(p),
-        stamp: stamp && { ...stamp, hint: t('stamp.hint') },
+        save: !RESOURCE_MODE,
+        onDocument: RESOURCE_MODE ? ({blob}:{blob:Blob})=>deliverResourceFile(blob,`${fileBase}-${t('manual.fileSuffix')}.pdf`) : undefined,
+        onProgress: (p: { page: number; total: number; phase?: string }) => setExportingManual(value => controller.signal.aborted ? value : p),
         copy: {
           ...assemblyPdfStrings[lang],
           product: t('app.title'),
@@ -2320,23 +2942,29 @@ export function EngineProvider({ children }: { children: ReactNode }) {
           gWheels: t('bom.wheels'),
           gFittings: t('bom.fittings'),
           gReinforcements: t('bom.reinforcements'),
-          gScrews: t('bom.screws'),
         },
       })
-      track('builder.export.manual.done')
+      track('builder.export.manual.done', { object: manualObject })
+      output('manual')
       notify(t('toast.manualSaved'))
+      return {status:'done' as const}
     } catch (err) {
+      if (controller.signal.aborted && err === controller.signal.reason) { notify(t('manual.cancelled')); sendResourceMessage({type:'xmf-resource:result',status:'cancelled'}); return {status:'cancelled' as const} }
+      track('builder.manual.fail', { reason: (err as { code?: string })?.code === 'empty' ? 'empty' : 'render', object: manualObject })
       console.error('Assembly manual export failed', err)
       if ((err as { code?: string })?.code === 'empty') notify(t('toast.manualEmpty'), 'warn')
       else notify(t('toast.manualFailed'), 'err')
+      sendResourceMessage({type:'xmf-resource:result',status:'failed',message:t('toast.manualFailed')})
+      return {status:'failed' as const,message:t('toast.manualFailed')}
     } finally {
+      manualAbort.current = null
       exportingManualRef.current = false
       setExportingManual(null)
       bump()
     }
     // coverShot、makeStamp 每次渲染重建，只在回调里调用，不进依赖表
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bump, lang, notify, snapshotActive, t])
+  }, [bump, lang, notify, t])
 
   const shareCurrent = useCallback(async () => {
     const e2 = eng.current
@@ -2362,8 +2990,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       let url: string
       try {
         url = await link
-      } catch {
-        notify(t('toast.linkFailed'), 'err')
+      } catch (error) {
+        if(!(error instanceof SharingCancelled))notify(t('toast.linkFailed'), 'err')
         // 已经说过没存上；剪贴板那头随后被拒是同一件事，不再另报
         void wrote.then(() => undefined, () => undefined)
         return
@@ -2401,6 +3029,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const e2 = eng.current
     const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
     if (!e2 || !tab) return
+    if(tab.readOnly||slotLocked(tab.docId,tab.libraryId,tab.planId)){notify(t('toast.srcFailed')+' (423)','err');return}
     if (e2.builder.busy()) { notify(t('sync.waiting'), 'warn'); return }
     const data = exportTab(tab)
     const generation = tab.editGeneration || 0
@@ -2410,6 +3039,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     tabSavedAs(tab.tabId, saved.id)
     const attached = stillCurrent()
     if (attached) {
+      tab.libraryId=undefined;tab.libraryRevision=undefined;tab.libraryOwner=undefined
       tab.docId = saved.id
       if ((tab.editGeneration || 0) === generation) tab.name = saved.name
       tab.baseRev = Number(saved.rev || 0)
@@ -2436,43 +3066,124 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     if (!payload && !ent.src) { if (!ent.doc) setEntryReady(true); return }
     entryOpened.current = true
     void (async () => {
+      openingRef.current = true
+      setOpening({ phase: 'read', name: ent.name || undefined })
+      await paintOpening()
       let data: unknown = null
+      let libraryRevision:number|undefined,libraryOwner:string|undefined,libraryName:string|undefined
       if (payload) {
         data = await decodeShare(payload)
         clearSharePayload()
       } else {
-        const res = await fetch(versionPublicSource(ent.src as string), { credentials: 'include' })
-        if (!res.ok) { notify(t('toast.srcFailed'), 'err'); return }
-        try { data = designFromText(await res.text()) } catch { data = null }
+        const expectedOwner=EDITOR_EMBED?new URLSearchParams(location.search).get('editorOwner'):RESOURCE_MODE?new URLSearchParams(location.search).get('resourceOwner'):null
+        const nativeLibrary = !!ent.src?.match(/^\/quadro\/library\/[a-f0-9]+\/native$/)
+        const sourceURL = nativeLibrary ? ent.src + '?snapshot=1' : versionPublicSource(ent.src as string)
+        const { response: res, text: sourceText } = await readModelSource(sourceURL, { credentials: 'include',...(expectedOwner?{headers:{'X-Builder-User-ID':expectedOwner}}:{}) })
+        if (!res.ok) { track('builder.app.fail', { reason: 'source_http' }); notify(t('toast.srcFailed'), 'err');if(EDITOR_EMBED||RESOURCE_MODE){if(EDITOR_EMBED&&res.status===423)parent.postMessage({type:'xmf-model-editor:readonly'},location.origin);else setError(t('toast.srcFailed')+' ('+res.status+')')} return }
+        libraryRevision=Number(res.headers.get('X-Library-Revision')||0)||undefined
+        libraryOwner=res.headers.get('X-Builder-User-ID')||undefined
+        if (ent.src?.match(/^\/quadro\/library\/[a-f0-9]+\/native$/) && (!Number.isSafeInteger(libraryRevision) || !libraryRevision || libraryRevision < 1 || !libraryOwner || expectedOwner && libraryOwner !== expectedOwner)) {
+          console.error('[model source] invalid library binding', { revision: libraryRevision, ownerMatches: libraryOwner === expectedOwner })
+          throw new Error(t('toast.srcInvalid'))
+        }
+        setOpening({ phase: 'build', name: ent.name || undefined })
+        await paintOpening()
+        if (nativeLibrary) {
+          const snapshot = JSON.parse(sourceText) as { name: string; revision: number; data: unknown }
+          if (snapshot.revision !== libraryRevision || typeof snapshot.name !== 'string') throw new Error(t('toast.srcInvalid'))
+          libraryName = snapshot.name; data = snapshot.data
+        } else {
+          try { data = designFromText(sourceText) } catch { data = null }
+        }
       }
-      if (!data) { notify(t('toast.shareInvalid'), 'err'); return }
+      if (!data) { track('builder.app.fail', { reason: 'source_format' }); notify(t('toast.shareInvalid'), 'err');if(EDITOR_EMBED||RESOURCE_MODE)setError(t('toast.shareInvalid')); return }
+      setOpening({ phase: 'build', name: ent.name || undefined })
+      await paintOpening()
       const e2 = eng.current
       if (!e2) return
-      if (modelPartCount(e2.model.toJSON()) > 0) createEmptyTab()
+      const restored = tabsRef.current.find(x => x.tabId === activeRef.current)
+      const requestedLibrary=ent.src?.match(/^\/quadro\/library\/([a-f0-9]+)\/native$/)?.[1]
+      const source = ent.src || (payload ? 'share:' + (await librarySaveIdentity('', normalizeModel(data)!)).signature : '')
+      if (SINGLE_MODEL && !SESSIONLESS) {
+        const action = sourceEntryAction(restored, source, requestedLibrary)
+        if (action === 'restore' && (!requestedLibrary || restored?.libraryOwner === libraryOwner)) {
+          setEntryReady(true); return
+        }
+        if (action === 'new' || requestedLibrary && restored?.libraryOwner !== libraryOwner) {
+          const owner = String(storage.getAccountScope())
+          if (restored?.dirty) {
+            const backup = docs.newTabId(), backupData = structuredClone(exportTab(restored))
+            await docs.saveSession({ tabs: [{ tabId: backup, docId: null, name: restored.name, dirty: true, model: backupData }], activeTabId: backup }, `single-draft:${crypto.randomUUID()}`)
+          }
+          if (String(storage.getAccountScope()) !== owner) return
+          const fresh = makeTab(EMPTY_MODEL, ent.name || t('tab.untitled'), null)
+          tabsRef.current = [fresh]; activeRef.current = fresh.tabId; applyTab(fresh)
+          if (restored) {
+            restored.local.history.destroy()
+            await restored.local.persistence?.destroy()
+            restored.local.doc.destroy()
+          }
+        }
+      }
+      if (!SINGLE_MODEL && !EDITOR_EMBED && modelPartCount(e2.model.toJSON()) > 0) createEmptyTab()
       // 当前是共享方案的标签页时 applyModelJson 自己会新开一个
-      if (!applyModelJson(data, { undoable: false })) { notify(t('toast.shareInvalid'), 'err'); return }
+      if (!applyModelJson(data, { undoable: false })) { track('builder.app.fail', { reason: 'source_format' }); notify(t('toast.shareInvalid'), 'err');if(EDITOR_EMBED||RESOURCE_MODE)setError(t('toast.shareInvalid')); return }
+      if (ent.background === 'grass' || (ent.background === 'home' && e2.model.homeContext)) {
+        e2.scene.setBackground(ent.background)
+        bump()
+      }
       const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
-      if (tab && ent.name) {
-        tab.name = ent.name
+      const library=ent.src?.match(/^\/quadro\/library\/([a-f0-9]+)\/native$/)
+      if(tab&&library&&libraryRevision){tab.libraryId=library[1];tab.libraryRevision=libraryRevision;tab.libraryOwner=libraryOwner;tab.dirty=false;tab.savedName=libraryName||tab.name;tab.savedContent=modelContent(tab.local.history.toJSON());tab.saveState='synced'}
+      if (tab) {
+        tab.entrySource = source
+        if (libraryName !== undefined) tab.name = libraryName
+        else if (ent.name) tab.name = ent.name
         syncTabs()
       }
       if (tab && ent.origin) tabOpenedFrom(tab.tabId, ent.origin)
+      if (tab) {
+        resetTabAnalytics(tab, e2.model.toJSON(), entryAnalyticsObject())
+        setAnalyticsObject(entryAnalyticsObject())
+      }
       track('builder.design.open', { from: payload ? 'share' : 'src', view: VIEW_ONLY, copy: ent.copy })
-      if (ent.copy && !VIEW_ONLY) await copyToAccount()
+      if (ent.copy && !VIEW_ONLY) { await copyToAccount(); dropParam('copy') }
+      if (SINGLE_MODEL && !SESSIONLESS) {
+        await saveSessionNow()
+        if (!requestedLibrary) dropParam('src')
+      }
       setEntryReady(true)
-    })().catch(err => notify(err instanceof Error ? err.message : String(err), 'err'))
+    })().catch(err => {
+      console.error('[model source] opening failed', err)
+      track('builder.app.fail', { reason: 'source_load' })
+      let message=err instanceof Error ? err.message : String(err)
+      if(err instanceof TypeError || err instanceof DOMException && err.name==='TimeoutError')message=t('toast.srcReadFailed')
+      notify(message, 'err');if(EDITOR_EMBED||RESOURCE_MODE)setError(message)
+    }).finally(async () => {
+      await paintOpening()
+      openingRef.current = false
+      setOpening(null)
+    })
   }, [ready, applyModelJson, copyToAccount, createEmptyTab, notify, syncTabs, t])
+
+  const analyticsReady = useRef(false)
+  useEffect(() => {
+    if (!ready || !entryReady || analyticsReady.current) return
+    analyticsReady.current = true
+    track('builder.app.ready', { reason: VIEW_ONLY ? 'read_only' : 'editable' })
+    if (!VIEW_ONLY && entryAnalyticsObject()) track('builder.content.adopt', { object: entryAnalyticsObject() })
+  }, [ready, entryReady])
 
   // 注册完从注册页回来（?export=）：确认登录上了，问一句要不要接着导出。
   // 下载要由一次点击触发，浏览器才不会拦，所以不直接开始。
   const resumed = useRef(false)
   useEffect(() => {
-    if (!ready || resumed.current || VIEW_ONLY) return
+    if (!ready || !entryReady || resumed.current || VIEW_ONLY) return
     const kind = bootEntry().resume
     if (!kind) return
     resumed.current = true
-    void syncProbe().then(ok => { if (ok) setAccountAsk({ kind, phase: 'resume' }) })
-  }, [ready])
+    void syncProbe().then(ok => { if (ok) { setAccountAsk({ kind, phase: 'resume' }); dropParam('export') } })
+  }, [ready,entryReady])
 
   const exporters = useRef<Record<ResumeExport, () => void>>({} as Record<ResumeExport, () => void>)
   exporters.current = {
@@ -2483,6 +3194,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     qdf: () => exportQdf(),
     json: () => exportJson(),
     link: () => { void shareCurrent() },
+    save: () => { void saveCurrent() },
   }
 
   const answerAccount = useCallback((go: boolean) => {
@@ -2495,11 +3207,18 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     }
     // 去注册之前把标签页记下，注册完回来还是这一座
     track('builder.export.register', { kind: ask.kind })
-    const next = `${location.pathname}?export=${ask.kind}`
     void saveSessionNow().then(() => {
+      let next = `${location.pathname}?export=${ask.kind}`
+      if(SINGLE_MODEL){
+        const tab=tabsRef.current.find(tab=>tab.tabId===activeRef.current)!
+        const draft=crypto.randomUUID(),token=draftHandoff(tab.name,exportTab(tab),draft)
+        const url=new URL(location.pathname,location.origin);url.searchParams.set('draft',draft);url.searchParams.set('handoff',token);url.searchParams.set('export',ask.kind);url.searchParams.set('lang',lang)
+        if(bootEntry().origin)url.searchParams.set('origin',bootEntry().origin!)
+        next=url.pathname+url.search
+      }
       location.href = `${import.meta.env.VITE_REGISTER_URL}?next=${encodeURIComponent(next)}`
-    })
-  }, [accountAsk, saveSessionNow])
+    }).catch(error=>{console.warn('[draft handoff]',error);notify(t('sync.localFailed'),'err')})
+  }, [accountAsk, saveSessionNow,exportTab,lang,notify,t])
 
   const setViewCubePad = useCallback((right: number, bottom: number, size?: number) => {
     eng.current?.scene?.setViewCubePad?.(right, bottom, size)
@@ -2527,7 +3246,9 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       camera: e.scene.cameraState(),
       sceneOn: !!e.scene._sceneOn,
       mode: String(e.builder.mode || 'select'),
+      frameOnly: !!e.builder.frameOnly,
     }
+    e.builder.frameOnly = false
     e.builder.cancelPaste?.()
     e.builder.setMode('select')
     e.builder.modelReplaced()
@@ -2545,6 +3266,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       // 截图期间文档可能被别人改过：按文档现在的样子放回去
       const tab = tabsRef.current.find(x => x.tabId === activeRef.current)
       e.model.loadJSON(tab ? tab.local.history.toJSON() : prev.json)
+      e.builder.frameOnly = prev.frameOnly
       e.builder.setMode(prev.mode || 'select')
       e.scene.setScene(prev.sceneOn)
       if (prev.camera) e.scene.restoreCameraState(prev.camera)
@@ -2600,10 +3322,44 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [endThumbBatch, startThumbBatch])
 
+  function changeBackground(mode: 'grass' | 'blank' | 'home') {
+    const current=eng.current,tab=tabsRef.current.find(item=>item.tabId===activeRef.current)
+    if (!current) return
+    let before='blank'
+    if (current.scene._sceneOn) before='grass'
+    else if (current.scene._homeGroup&&!current.scene._homeHidden) before='home'
+    if (before===mode || !current.scene.setBackground(mode)) return
+    if (tab && !tab.readOnly && !current.builder.readOnly && !slotLocked(tab.docId,tab.libraryId,tab.planId)) {
+      current.builder.recordHistory(()=>{current.model.previewBackground=mode})
+    }
+    bump()
+  }
+
   const value: EngineApi = {
-    ready, entryReady, completeEntry, error, hostRef, tick,
+    ready, saving, entryReady, completeEntry, error, opening, hostRef, tick,
+    editorState: () => {
+      flushModel()
+      const tab=tabsRef.current.find(x=>x.tabId===activeRef.current)
+      const dirty=!!tab && !tab.planId && !!tab.dirty && (tab.savedContent!==modelContent(exportTab(tab)) || tab.name!==(tab.savedName??bootEntry().name))
+      if(tab&&!tab.planId&&!dirty&&tab.dirty){tab.dirty=false;syncTabs()}
+      return {dirty,name:tab?.name||'',readOnly:!!tab?.readOnly}
+    },
+    checkpointEditor: async () => { await saveSessionNow() },
+    discardEditor: async () => {
+      if(!EDITOR_EMBED)return
+      if(sessionTimer.current)window.clearTimeout(sessionTimer.current)
+      const discarded=tabsRef.current;tabsRef.current=[];activeRef.current=null;eng.current?.builder.setReadOnly(true)
+      for(const tab of discarded)await dropTabDoc(tab.tabId,tab.local)
+      await docs.saveSession({tabs:[],activeTabId:null},sessionKey.current)
+    },
     mode: (builder?.mode as string) || 'select',
     color: (builder?.color as string) || 'random',
+    modelColors: modelColors(model),
+    selectionColor: selectionColor(model, builder?.selection),
+    previewingColor: !!builder?._colorPreview,
+    beginColorPreview: () => { const ok = !!builder?.beginColorPreview(); bump(); return ok },
+    previewColor: (hex) => { builder?.previewColor(hex) },
+    finishColorPreview: (hex) => { const ok = !!builder?.finishColorPreview(hex); bump(); return ok },
     recolorAll: (colors) => { track('builder.color.all', { n: colors.length }); builder?.recolorAll?.(colors); bump() },
     tubeId: (builder?.tubeId as string) || 'T35',
     panelId: (builder?.panelId as string) || '',
@@ -2615,9 +3371,19 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     canUndo: !!builder?.canUndo?.(),
     canRedo: !!builder?.canRedo?.(),
     selectionCount: builder?.selection?.size ?? 0,
+    selectionTransform: builder?.selectionTransformState?.() ?? null,
+    setSelectionTransformMode: mode=>{builder?.setSelectionTransformMode(mode);bump()},
+    setSelectionTransformSnap: on=>{if(builder){builder.transformSnap=on;bump()}},
+    setSelectionPosition: position=>{const ok=!!builder?.setSelectionPosition(position);bump();return ok},
+    rotateSelectionAxis: (axis,degrees)=>{const ok=!!builder?.rotateSelectionAxis(axis,degrees);bump();return ok},
+    selectTransformBlock: ()=>{builder?.selectTransformBlock();bump()},
+    boxSelect: !!builder?.boxSelect,
+    setBoxSelect: (on) => { rememberTool(); clearBomHighlight(); builder?.setBoxSelect(on); bump() },
     installationPreview: builder?.installationPreview ?? null,
-    insetScrewAxis: builder?.insetScrewAxis || 'vertical',
+    insetScrewAxis: builder?.insetScrewAxis || 'auto',
     setInsetScrewAxis: axis => { if (!builder || builder.readOnly) return; builder.setInsetScrewAxis(axis); bump() },
+    selectedPanelFixing: builder?.selectedPanelFixing?.() ?? null,
+    setSelectedPanelFixing: axis => { if (!builder || builder.readOnly) return; builder.setSelectedPanelFixing(axis); bump() },
     canFlipAccessory: !builder?.readOnly && !!builder?.canFlipSelectedAccessory?.(),
     confirmInstallation: () => { if (!builder || builder.readOnly) return; builder.confirmInstallation(); bump() },
     cancelInstallation: () => { if (!builder) return; builder.cancelInstallation(); bump() },
@@ -2630,24 +3396,26 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     toast,
     tabs, activeTabId, bom, inventory,
     invRows: cmp.rows, feasible: cmp.feasible, sizeCm, room, setRoom, roomOverflow,
-    loadPreset, placeModule, exportPng, exportBomCsv, exportBomPng, exportAssemblyPdf, confirmExportManual, cancelExportManual, exportManualConfirm, exportingManual, shareCurrent,
-    manualPreview, updateManualConfig, updateManualOrder, saveManualConfig, reviewManualRepairs, applyManualRepairs, discardManualRepairs,
+    loadPreset, placeModule, exportPng, exportBomCsv, exportBomPng, exportAssemblyPdf, confirmExportManual, cancelExportManual, exportManualConfirm, exportingManual, cancelManualExport, shareCurrent,
+    manualPreview, updateManualConfig, saveManualConfig, reviewManualRepairs, applyManualRepairs, discardManualRepairs,
     accountAsk, answerAccount,
     assembly: {
       step: builder?.assemblyStep ?? 0,
       max: Math.max(0, (builder?.buildPlan?.steps?.length ?? 1) - 1),
       active: builder?.mode === 'assembly',
       order: (builder?.assemblyOrder as string) || 'y+',
+      pending: !!builder?.assemblyPending,
+      error: !!builder?.assemblyError,
+      progress: builder?.assemblyProgress ?? 0,
     },
-    assemblyOrders: BUILD_ORDERS,
-    setAssemblyOrder, exportInventory, importInventory,
+    exportInventory, importInventory,
     canPaste: !!clipboard.current,
     pasting: !!builder?.pasting,
     pasteHeightCm: builder?.pasteHeightCm ?? null,
     side, setSide, notify,
-    dismissToast: () => setToast(null),
+    dismissToast,
     placingConnector: (builder?.placeConnectorId as string) || null,
-    bump, setMode, setColor, setTube, setPanel, setSlide, setFitting, setClamp, startPool, startC45, startReinforce, placeConnector,
+    bump, setMode, activateTool, toggleLastTool, setColor, setTube, setPanel, setSlide, setFitting, setClamp, startPool, startC45, startReinforce, reinforcementPartId: builder?.reinforcementPartId || 'reinforce80', placeConnector,
     buildStep: (dir) => { bumpCount('builder.edit.step'); builder?.buildStep?.(dir); bump() },
     moveSelection: (dir) => { bumpCount('builder.edit.move'); builder?.moveSelectionBy?.(dir); bump() },
     cameraAxes: () => ({
@@ -2676,12 +3444,32 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     toggleGrass: () => {
       const next = !scene?._sceneOn
       track('builder.scene.grass', { on: next })
-      scene?.setScene?.(next)
+      changeBackground(next ? 'grass' : homeContext ? 'home' : 'blank')
       try { localStorage.setItem('quadro.scene.v1', next ? '1' : '0') } catch { /* ignore */ }
       bump()
     },
     grassOn: !!scene?._sceneOn,
-    highlight, highlightIds, safety, setInv, newTab, closeTab, activateTab, renameTab, setTabName, saveCurrent, saveCurrentAs, askName, answerName, nameAsk, openDoc, retrySave,
+    frameOnly: !!builder?.frameOnly,
+    toggleFrameOnly: () => {
+      if (!builder || !scene || thumbBatch.current) return
+      builder.frameOnly = !builder.frameOnly
+      builder.refresh()
+      if (builder.frameOnly) {
+        const visible = scene.selectableParts()
+        let removed = false
+        for (const id of builder.selection.keys()) if (!visible.has(id)) { builder.selection.delete(id); removed = true }
+        if (removed) builder.refresh()
+      }
+      bump()
+    },
+    background: scene?._sceneOn ? 'grass' : homeContext && !scene?._homeHidden ? 'home' : 'blank',
+    setBackground: changeBackground,
+    homeZones: { obstacles: scene?._homeObstaclesVisible !== false, usable: scene?._homeUsableVisible !== false },
+    setHomeZones: (kind, visible) => { scene?.setHomeZones(kind, visible); bump() },
+    homeContext,
+    bindHome,
+    frameHome: () => { changeBackground('home'); scene?.frameHome(); bump() },
+    highlight, highlightIds, safety, setInv, newTab, closeTab, activateTab, renameTab, setTabName, saveCurrent, saveCurrentAs, askName, answerName, nameAsk, saveConflict, answerSaveConflict, saveWasCancelled: () => saveCancelled.current, openDoc, retrySave,
     listDocs: async () => (await docs.listDocs()).map((d: AnyRec) => ({ id: String(d.id), name: String(d.name), updatedAt: Number(d.updatedAt || 0), local: !Number(d.rev) || !!d.dirty || (!!d.saveId && d.syncedSaveId !== d.saveId) })),
     removeDoc: async (id) => { await docs.removeDoc(id); bump() },
     renameDoc: async (id, name) => { await docs.renameDoc(id, name); bump() },
@@ -2709,6 +3497,11 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     engine,
   }
 
+  const catalogueChoices = useMemo(() => ready ? installationChoices(value, t) : [], [ready, catalog, t])
+  useLayoutEffect(() => {
+    toolApi.current = value
+    toolEntries.current = catalogueChoices
+  })
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }
 

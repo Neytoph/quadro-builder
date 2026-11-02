@@ -7,6 +7,7 @@ import { useDock } from './dock'
 import { formatKitPrice } from '../money'
 import { track } from '../analytics/track'
 import PartThumbnail from './PartThumbnail'
+import ReplenishmentList from './ReplenishmentList'
 
 function advisorPartName(part: AdvisorPart) {
   const name = labelOf(part.id, part.name)
@@ -24,12 +25,11 @@ export default function KitAdvisor() {
   const missing = useMemo(() => shortages(mapped.used, stock.owned, mapped.parts), [mapped.used, stock.owned, mapped.parts])
   const rows = usedRows(mapped.used)
   const cheapest = buildable.find(k => k.price != null)
-  const hasStock = api.feasible != null
+  const empty = tab === 'inv' ? !api.invRows.some(row => row.need > 0) : mapped.total === 0
 
   const copyList = () => {
     const lines = [t('kit.listTitle'), '', t('kit.used') + ':']
     rows.forEach(([i, v]) => lines.push(`  ${skuLabel(i)} ×${v}`))
-    if (mapped.screws) lines.push(`  ${t('bom.screws')} ×${mapped.screws}`)
     if (mapped.unmapped.length) {
       lines.push('', t('kit.unmapped') + ':')
       mapped.unmapped.forEach(u => lines.push(`  ${labelOf(u.id, u.name)} ×${u.count}`))
@@ -61,7 +61,7 @@ export default function KitAdvisor() {
         </div>
       </div>
 
-      {mapped.total === 0 ? (
+      {empty ? (
         <div className="p-4 text-sm text-gray-400">{t('kit.empty')}</div>
       ) : tab === 'buy' ? (
         <div className="p-3 space-y-4">
@@ -81,16 +81,6 @@ export default function KitAdvisor() {
                 </div>
               ))}
             </div>
-            {mapped.screws > 0 && (
-              <div className="mt-2 text-gray-500">
-                {api.bom?.screws.map(row => <div key={row.key} data-ui="advisor-screw-row" data-part-id={row.id} className="qb-material-row flex items-center gap-2">
-                  <PartThumbnail id={row.id} imageKey={row.key} kind="screws" />
-                  <span className="qb-material-name flex-1 min-w-0">{labelOf(row.id || '', row.name)}</span>
-                  <span className="qb-material-count tabular-nums">×{row.count}</span>
-                </div>)}
-                <p className="text-[10px] leading-relaxed mt-1">{t('kit.screws', { n: mapped.screws })}</p>
-              </div>
-            )}
             {mapped.unmapped.length > 0 && (
               <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2">
                 <div className="text-[11px] text-amber-800 mb-1">{t('kit.unmapped')}</div>
@@ -121,33 +111,14 @@ export default function KitAdvisor() {
             {cheapest && <div className="mt-2.5 text-sm text-emerald-700">{t('kit.cheapest', { name: cheapest.disp, price: formatKitPrice(cheapest.price ?? 0, lang) })}</div>}
           </div>
           <div className="flex flex-col gap-1.5">
-            <button onClick={copyList} className="w-full bg-teal-500 hover:bg-teal-400 text-white font-semibold text-sm rounded-lg py-2.5 cursor-pointer">{t('kit.copy')}</button>
-            <button onClick={() => setPane('bom')} className="w-full bg-gray-800 hover:bg-gray-700 text-sm rounded-lg py-2.5 cursor-pointer">{t('kit.continue')}</button>
+            <button onClick={copyList} className="qb-btn w-full">{t('kit.copy')}</button>
+            <button onClick={() => setPane('bom')} className="qb-btn qb-btn-ghost w-full">{t('kit.continue')}</button>
           </div>
         </div>
       ) : (
         <div className="p-3 space-y-4">
-          {!hasStock ? (
-            <div className="text-sm text-gray-400">{t('kit.noStock')}</div>
-          ) : missing.length === 0 ? (
-            <div className="text-sm text-emerald-600">{t('kit.stockOk')}</div>
-          ) : (
-            <div>
-              <div className="text-sm text-amber-700 mb-2">{t('kit.stockShort')}</div>
-              <div className="space-y-1">
-                {missing.map(m => (
-                  <div key={m.index} data-ui="advisor-shortage-group" data-sku-index={m.index}>
-                    <div className="flex justify-between gap-2 text-[10px] text-gray-500 mt-2"><span>{m.parts.length === 1 ? advisorPartName(m.parts[0]) : m.name}</span><span className="qb-material-count text-amber-700 tabular-nums">−{m.short}</span></div>
-                    {m.parts.map(part => <div key={part.key} data-ui="advisor-shortage-row" data-part-id={part.id} className="qb-material-row flex items-center gap-2">
-                      <PartThumbnail id={part.id} imageKey={part.key} />
-                      <span className="qb-material-name text-gray-400 min-w-0 flex-1">{advisorPartName(part)}<span className="block text-[10px] text-gray-500 mt-0.5">{t('side.need')} {part.count}</span></span>
-                    </div>)}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-          <button onClick={() => setPane('bom')} className="w-full bg-gray-800 hover:bg-gray-700 text-sm rounded-lg py-2.5 cursor-pointer">{t('kit.continue')}</button>
+          <ReplenishmentList />
+          <button onClick={() => setPane('bom')} className="qb-btn qb-btn-ghost w-full">{t('kit.continue')}</button>
         </div>
       )}
     </div>

@@ -1,10 +1,12 @@
 // Stueckliste (BOM) + Kupplungstyp-Heuristik + Bestands-/Machbarkeitscheck.
 
-import { getTube, getConnector, getPanel, colorName, partName, reinforcementPart, partForFitting, getPartById, getScrew, poolLinerFor, geometry, slideKindName, textilePart } from "./catalog.js";
+import { getTube, getConnector, getPanel, colorName, partName, reinforcementPart, partForFitting, getPartById, poolLinerFor, geometry, slideKindName, textilePart } from "./catalog.js";
 import { round2, xAxisOf, yAxisOf, zAxisOf } from "./util.js";
 import { POOL_KINDS, isHolePart, isBoltPart, BOLT_PART, HINGE_PART, ARM_FITTINGS } from "./model.js";
 import { isOriginalComponent, componentKitFields, componentPartId, componentColorName, componentOutputColor, componentFittingKey, componentSizeLabel } from './accessoryInfo.js';
 import { CONN_TYPE_MASK, DIRECTIONS } from './config.js';
+import { SOFT_PARTS } from './softParts.js';
+export { SOFT_PARTS } from './softParts.js';
 
 // Einheitsvektoren der Nachbarn eines Knotens. Doppelrohr-Verbindungen (link)
 // sind KEIN Arm der Kupplung und zaehlen nicht in die Kupplungstyp-Heuristik
@@ -104,7 +106,7 @@ function neighborDirs(model, node) {
  * Weltachsen.
  */
 function localDirs(model, node, dirs) {
-  const achsen = frameOf(model, node);
+  const achsen = connectorFrameOf(model, node);
   if (!achsen) return dirs;
   const [ex, ey, ez] = achsen;
   const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -121,7 +123,7 @@ function localDirs(model, node, dirs) {
  * Winkelkupplung und der Wuerfel steht kardinal (siehe `_slopeRotationAxis` in
  * scene.js, dieselbe Regel).
  */
-function frameOf(model, node) {
+export function connectorFrameOf(model, node) {
   if (node.quat && node.quat.length === 4) {
     return [xAxisOf(node.quat), yAxisOf(node.quat), zAxisOf(node.quat)];
   }
@@ -144,17 +146,36 @@ function frameOf(model, node) {
     k = [0, 1, 2].find((a) => !act.includes(a));
     break;
   }
-  if (k < 0) return null;
+  if (k < 0) return orthogonalFrame(rohre);
   const [i, j] = [0, 1, 2].filter((a) => a !== k);
   const S = Math.SQRT1_2;
   const e = (a, b, va, vb) => { const v = [0, 0, 0]; v[a] = va; v[b] = vb; return v; };
-  const ex = e(i, j, S, S), ey = e(i, j, -S, S), ez = e(k, k, 1, 1);
+  const ex = e(i, j, S, S), ey = e(i, j, -S, S);
+  // XZ 平面中的第三轴朝 -Y，必须保持右手坐标系才能转换成 Quaternion。
+  const ez = [ex[1] * ey[2] - ex[2] * ey[1], ex[2] * ey[0] - ex[0] * ey[2], ex[0] * ey[1] - ex[1] * ey[0]];
   const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
   const passt = rohre.every((u) => {
     const l = [dot(u, ex), dot(u, ey), dot(u, ez)];
     return Math.max(Math.abs(l[0]), Math.abs(l[1]), Math.abs(l[2])) >= 0.99;
   });
-  return passt ? [ex, ey, ez] : null;
+  return passt ? [ex, ey, ez] : orthogonalFrame(rohre);
+}
+
+// 从真实直角管端恢复整体倾斜后的接头朝向，保留坐标舍入误差。
+// 所有管端都必须落在同一组正交轴上，锐角连接仍由诊断拦截。
+function orthogonalFrame(dirs) {
+  if (dirs.length < 2 || dirs.every(d => Math.max(...d.map(Math.abs))>1-1e-8)) return null;
+  const dot = (a, b) => a.reduce((sum, v, i) => sum + v * b[i], 0);
+  const ex = dirs[0];
+  const second = dirs.find(d => Math.abs(dot(ex, d)) < 0.01);
+  if (!second) return null;
+  const along = dot(ex, second);
+  const perpendicular = second.map((v, i) => v - along * ex[i]);
+  const length = Math.hypot(...perpendicular);
+  const ey = perpendicular.map(v => v / length);
+  const ez = [ex[1] * ey[2] - ex[2] * ey[1], ex[2] * ey[0] - ex[0] * ey[2], ex[0] * ey[1] - ex[1] * ey[0]];
+  const frame = [ex, ey, ez];
+  return dirs.every(d => frame.some(axis => Math.abs(dot(d, axis)) > 0.99)) ? frame : null;
 }
 
 /**
@@ -296,15 +317,23 @@ export function inferConnectorType(model, node) {
   return resolveNodeConnection(model, node).type;
 }
 
+function physicalDirs(node, dirs) {
+  const out = dirs.slice();
+  for (const arm of node.arms || []) {
+    if (!out.some((d) => d.reduce((sum, v, i) => sum + v * arm[i], 0) > 0.95)) out.push(arm);
+  }
+  return out;
+}
+
 function legacyConnectorType(model, node) {
   if (node.part) return node.part;
+  if (node.preferType && !node.c45body) return node.preferType;
   const dirs = neighborDirs(model, node);
-  if (dirs.length === 0) return null;
   // Die Winkelkupplung sitzt auf ihrem eigenen Knoten (dem Adapter-Koerper).
   // Die Kupplung, die sie TRAEGT, heisst weiter nach ihren eigenen Armen -- der
   // Stutzen unter der Huelse ist einer davon.
   if (node.c45body) return "diagonal";
-  return connectorTypeForDirs(dirs);
+  return connectorTypeForDirs(physicalDirs(node, dirs));
 }
 
 // Liefert ALLE an einem Knoten verbauten Kupplungen als Liste von Typen.
@@ -346,7 +375,7 @@ function legacyConnectorsForNode(model, node) {
     return [node.part, t && t !== "end" ? t : "straight"];
   }
   const dirs = neighborDirs(model, node);
-  if (dirs.length === 0) return node.preferType ? [node.preferType] : [];
+  if (dirs.length === 0 && !node.arms?.length) return node.preferType ? [node.preferType] : [];
   // Adapter-Koerper (c45body): genau HIER sitzt die 45-Grad-Winkelkupplung --
   // sie steckt mit ihrer Huelse auf dem Rohrende der Basiskupplung und nimmt
   // mit dem 45-Grad-Arm die Schraege auf. Es gibt sie nur einarmig, also immer
@@ -365,16 +394,16 @@ function legacyConnectorsForNode(model, node) {
       if (t.a !== node.id && t.b !== node.id) continue;
       if (t.arm) arme++; else if (!t.link) andere++;
     }
-    if (arme && !andere) return ["straight"];
+    if (arme && !andere && !node.arms?.length) return ["straight"];
   }
   if (!node.c45) {
     const pref = getConnector(node.preferType);
-    if (pref && (pref.arms || 0) > dirs.length) return [node.preferType];
-    const t = connectorTypeForDirs(dirs);
+    if (pref) return [node.preferType];
+    const t = connectorTypeForDirs(physicalDirs(node, dirs));
     return t && t !== "end" ? [t] : [];
   }
   const axis = [], diag = [];
-  for (const d of localDirs(model, node, dirs)) (isC45Dir(d) ? diag : axis).push(d);
+  for (const d of localDirs(model, node, physicalDirs(node, dirs))) (isC45Dir(d) ? diag : axis).push(d);
   const out = [];
   const baseType = connectorTypeForDirs(axis);
   if (baseType && baseType !== "end") out.push(baseType);
@@ -434,8 +463,8 @@ export function resolveNodeConnection(model, nodeOrId) {
   let types = node.unused ? [] : legacyConnectorsForNode(model, node);
   let type = node.unused ? null : legacyConnectorType(model, node);
   // 重复端口不能凭 degree 增加一个不存在的连接件臂。
-  if (ordinary && nonAxis.length === 0 && unique.length) {
-    const geometric = connectorTypeForDirs(unique);
+  if (ordinary && nonAxis.length === 0 && (unique.length || preferredPattern || savedArms?.length)) {
+    const geometric = connectorTypeForDirs(physicalDirs(node, worldDirs));
     type = preferredPattern ? node.preferType : geometric;
     types = type === 'end' ? [] : [type];
   }
@@ -443,7 +472,7 @@ export function resolveNodeConnection(model, nodeOrId) {
   const importedAdapter = hasStandaloneFileC45(model, node);
   if (importedAdapter && !types.includes('diagonal')) types = [...types, 'diagonal'];
   for (const value of types) if (!getConnector(value)) diag('UNKNOWN_CONNECTOR', `连接件 ${value} 不在零件目录中。`, '选择实际可用的连接件。');
-  const frame = frameOf(model, node), renderDirs = [...worldDirs];
+  const frame = connectorFrameOf(model, node), renderDirs = [...worldDirs];
   const addRender = d => { const length = Math.hypot(...d) || 1, normalized = d.map(v => v / length); if (!renderDirs.some(e => e.reduce((s, v, i) => s + v * normalized[i], 0) > 0.99)) renderDirs.push(normalized); };
   for (const d of node.arms || []) if (Array.isArray(d) && d.length === 3) addRender(d);
   if (preferredPattern) for (const d of preferredPattern.arms) addRender(frame ? [0, 1, 2].map(i => d.reduce((s, v, j) => s + v * frame[j][i], 0)) : d);
@@ -492,6 +521,8 @@ export function reinforcementRuns(model) {
       const d1 = dirOf(list[i]);
       if (!d1) continue;
       for (let j = i + 1; j < list.length; j++) {
+        const a = list[i].reinforcement, b = list[j].reinforcement;
+        if ((a || b) && (!a || !b || a.group !== b.group || a.partId !== b.partId)) continue;
         const d2 = dirOf(list[j]);
         if (!d2) continue;
         const dot = d1[0] * d2[0] + d1[1] * d2[1] + d1[2] * d2[2];
@@ -503,239 +534,14 @@ export function reinforcementRuns(model) {
   const runs = new Map(); // Wurzel -> { segments, length }
   for (const t of reinforced) {
     const r = find(t.id);
-    if (!runs.has(r)) runs.set(r, { segments: 0, length: 0, tubeIds: [] });
+    if (!runs.has(r)) runs.set(r, { segments: 0, length: 0, tubeIds: [],
+      ...(t.reinforcement ? { partId: t.reinforcement.partId, explicit: true } : {}) });
     const run = runs.get(r);
     run.segments++;
     run.tubeIds.push(t.id);
     run.length += lenOf(t);
   }
   return [...runs.values()];
-}
-
-// --- Schrauben ------------------------------------------------------------
-// Sie werden nur gerechnet: kein Teil im Modell, nichts zu setzen, nichts zu
-// zeichnen. Grundregel des Systems: an einer Kupplung hat ein Rohr genau EIN
-// Loch. Deshalb wird nicht addiert, sondern belegt -- jedes Rohr bringt zwei
-// PLAETZE mit (je Ende einen), Platten- und Rutschenschrauben nehmen sich
-// welche davon, und was uebrig bleibt, sind die Rohrschrauben.
-
-// So nah muss ein Knoten liegen, damit eine Schraube ihn als ihren Platz
-// nimmt: eine halbe Kupplung plus Toleranz.
-const SCREW_SLOT_EPS = 6;
-// Rutschenschrauben laufen durch das Geruest daneben -- dort darf der Knoten
-// weiter weg liegen (eine Rutschenbreite).
-const SCREW_SLIDE_EPS = 45;
-
-/**
- * Schrauben eines Modells. Liefert Zeilen wie die uebrigen Abschnitte:
- * `{ key, id, name, color, colorName, count, price, subtotal }`. `price` ist
- * der STUECKpreis (Packpreis / Packgroesse) -- gekauft werden Packungen, die
- * Liste rechnet anteilig.
- */
-export function computeScrews(model) {
-  const allocations = [];
-  const allocate = (id, partId, count, color = null, positions = [], precision = 'region-reference') => {
-    const record = { id, partId, count, color, positions, precision };
-    allocations.push(record); return record;
-  };
-  // 1. Plaetze aufspannen: je Rohrende einer. Arme und Doppelrohr-Verbindungen
-  //    sind keine Rohre und tragen keine Schrauben.
-  const slots = new Map();            // "tubeId@nodeId" -> { tube, node, frei }
-  const slotsAtNode = new Map();      // nodeId -> [slotKey]
-  for (const t of model.tubes.values()) {
-    if (t.arm || t.link) continue;
-    for (const nodeId of [t.a, t.b]) {
-      const key = t.id + "@" + nodeId;
-      slots.set(key, { tube: t, node: nodeId, free: true });
-      if (!slotsAtNode.has(nodeId)) slotsAtNode.set(nodeId, []);
-      slotsAtNode.get(nodeId).push(key);
-    }
-  }
-  const takeSlot = (key) => {
-    const slot = key && slots.get(key);
-    if (!slot || !slot.free) return false;
-    slot.free = false;
-    return true;
-  };
-  /** Freien Platz an einem Knoten belegen -- egal an welchem seiner Rohre. */
-  const takeAtNode = (nodeId) => {
-    for (const key of slotsAtNode.get(nodeId) || []) if (takeSlot(key)) return true;
-    return false;
-  };
-  /** Knoten, der einem Punkt am naechsten liegt (innerhalb `eps`). */
-  const nodeNear = (point, eps) => {
-    let best = null, bestDist = eps;
-    for (const n of model.nodes.values()) {
-      const d = Math.hypot(n.x - point[0], n.y - point[1], n.z - point[2]);
-      if (d <= bestDist) { best = n; bestDist = d; }
-    }
-    return best;
-  };
-
-  /** Richtung eines Rohrs (normiert) -- null, wenn die Knoten fehlen. */
-  const dirOf = (t) => {
-    const a = model.nodes.get(t.a), b = model.nodes.get(t.b);
-    if (!a || !b) return null;
-    const d = [b.x - a.x, b.y - a.y, b.z - a.z];
-    const len = Math.hypot(d[0], d[1], d[2]);
-    return len < 1e-6 ? null : d.map((v) => v / len);
-  };
-  /** Waagerechtes Rohr, das dem Punkt am naechsten liegt -- der Traeger. */
-  const horizontalTubeNear = (point) => {
-    let best = null, bestDist = SCREW_SLIDE_EPS;
-    for (const t of model.tubes.values()) {
-      if (t.arm || t.link) continue;
-      const d = dirOf(t);
-      if (!d || Math.abs(d[1]) > 0.2) continue;          // nicht waagerecht
-      const a = model.nodes.get(t.a), b = model.nodes.get(t.b);
-      // Abstand des Punktes von der Strecke a..b
-      const ab = [b.x - a.x, b.y - a.y, b.z - a.z];
-      const ap = [point[0] - a.x, point[1] - a.y, point[2] - a.z];
-      const lenSq = ab[0] * ab[0] + ab[1] * ab[1] + ab[2] * ab[2] || 1;
-      const tt = Math.max(0, Math.min(1, (ap[0] * ab[0] + ap[1] * ab[1] + ap[2] * ab[2]) / lenSq));
-      const dist = Math.hypot(ap[0] - ab[0] * tt, ap[1] - ab[1] * tt, ap[2] - ab[2] * tt);
-      if (dist <= bestDist) { best = t; bestDist = dist; }
-    }
-    return best;
-  };
-  /** Rohr, das von diesem Knoten nach OBEN geht -- der Pfosten daneben. */
-  const tubeUpwardFrom = (nodeId) => {
-    for (const t of model.tubes.values()) {
-      if (t.arm || t.link) continue;
-      if (t.a !== nodeId && t.b !== nodeId) continue;
-      const d = dirOf(t);
-      if (!d) continue;
-      const up = t.a === nodeId ? d[1] : -d[1];          // Richtung WEG vom Knoten
-      if (up > 0.9) return t;
-    }
-    return null;
-  };
-
-  const count = { panel: 0, acrylic: 0, conical: 0, counter: 0, slide: 0 };
-
-  // 2. Platten: vier Schrauben. Eine Platte hat ZWEI Lippen mit je zwei
-  //    Schrauben, sie wird also an einem Rohr-PAAR verschraubt -- nicht an allen
-  //    vier Kanten. Welches Paar, sagt ihre Drehung: ungedreht sind es die
-  //    beiden Tragrohre (p.a und p.b), gedreht die beiden quer dazu. Die
-  //    Schrauben laufen durch das Rohr in die Kupplung; liegt dort schon eine,
-  //    ist der Platz weg.
-  //    Die Acrylglasplatte ist eine Rahmenplatte: sie haengt wie jede Platte an
-  //    vier Plattenschrauben, und ihre Scheibe sitzt mit vier eigenen
-  //    Acrylglasschrauben im Rahmen -- die belegen keinen Platz am Rohr.
-  for (const p of model.panels.values()) {
-    if (p.poolPart) continue;                  // Baellebad ist eine Folie
-    // 原创套装使用随附固定夹或绑带，不占标准板螺丝的位置。
-    if (isOriginalComponent(p)) continue;
-    const corners = model.panelCorners(p);
-    count.panel += 4;
-    allocate('screw_panel', p.id, 4, null, corners || [], 'panel-corner-anchor');
-    const pdef = getPanel(p.panelId);
-    if (pdef && pdef.acrylic) { count.acrylic += 4; allocate('screw_acrylic', p.id, 4, null, corners || [], 'acrylic-frame-reference'); }
-    if (!corners) continue;
-    // corners: [Anfang a, Ende a, Ende b, Anfang b]
-    if (!p.turned) {
-      for (const [tubeId, punkt] of [[p.a, corners[0]], [p.a, corners[1]],
-                                     [p.b, corners[3]], [p.b, corners[2]]]) {
-        const t = model.tubes.get(tubeId);
-        if (!t) continue;
-        const node = nodeNear(punkt, SCREW_SLOT_EPS);
-        if (!node) continue;                   // Platte sitzt mitten auf dem Rohr
-        takeSlot(t.id + "@" + node.id);
-      }
-      continue;
-    }
-    // Gedreht: die Lippen liegen auf den Querrohren. Gesucht ist an jeder Ecke
-    // das Rohr, das zur GEGENUEBERLIEGENDEN Ecke derselben Kante laeuft.
-    const quer = [[corners[0], corners[3]], [corners[1], corners[2]]];
-    for (const [von, nach] of quer) {
-      const nv = nodeNear(von, SCREW_SLOT_EPS), nn = nodeNear(nach, SCREW_SLOT_EPS);
-      if (!nv || !nn) continue;
-      const t = model.tubeBetween ? model.tubeBetween(nv.id, nn.id) : null;
-      if (!t) continue;
-      takeSlot(t.id + "@" + nv.id);
-      takeSlot(t.id + "@" + nn.id);
-    }
-  }
-
-  // 3. Rutschen. Die Integralrutsche braucht keine Schraube; Kettenteile
-  //    schon: je Verbindung zwei konische Schrauben mit Gegenstueck und zwei
-  //    Rutschenschrauben, und der Einstieg haengt mit zwei konischen Schrauben
-  //    und zwei Plattenschrauben am Geruest.
-  const slides = [...(model.slides ? model.slides.values() : [])];
-  const belegt = new Set();                    // Rutschen, die an einem Ausgang haengen
-  for (const s of slides) {
-    const exit = model.slideExit(s);
-    if (!exit) continue;
-    const folge = slides.find((o) => o.id !== s.id
-      && Math.hypot(o.x - exit.pos[0], o.y - exit.pos[1], o.z - exit.pos[2]) < 5);
-    if (!folge) continue;
-    belegt.add(folge.id);
-    count.conical += 2;
-    count.counter += 2;
-    count.slide += 2;
-    allocate('screw_slide_conical', s.id, 2, null, [exit.pos], 'slide-joint-anchor');
-    allocate('screw_slide_conical_counter', s.id, 2, null, [exit.pos], 'slide-joint-anchor');
-    allocate('screw_slide', s.id, 2, null, [exit.pos], 'slide-joint-anchor');
-    const node = nodeNear(exit.pos, SCREW_SLIDE_EPS);
-    if (node) { takeAtNode(node.id); takeAtNode(node.id); }
-  }
-  for (const s of slides) {
-    // Kopf der Kette = Rutschenkoerper, der an keinem Ausgang haengt.
-    if (!model.slideExit(s) || belegt.has(s.id)) continue;
-    count.conical += 2;
-    count.panel += 2;
-    const entry = s.hook && s.hook.length === 3 ? s.hook : [s.x, s.y, s.z];
-    const conicalFixing = allocate('screw_slide_conical', s.id, 2, null, [entry], 'slide-entry-reference');
-    const panelFixing = allocate('screw_panel', s.id, 2, null, [entry], 'slide-entry-reference');
-    // Wo genau: die beiden Plattenschrauben sitzen im WAAGERECHTEN Rohr, auf
-    // dem die Rutsche aufliegt (je Ende eine), die beiden konischen in den
-    // Rohren, die von dessen Kupplungen nach OBEN gehen.
-    const einstieg = s.hook && s.hook.length === 3 ? s.hook : [s.x, s.y, s.z];
-    const traeger = horizontalTubeNear(einstieg);
-    if (!traeger) continue;
-    const anchors = [traeger.a, traeger.b].map(id => model.nodes.get(id)).filter(Boolean).map(n => [n.x, n.y, n.z]);
-    panelFixing.positions = anchors; panelFixing.precision = 'support-connector-anchor';
-    conicalFixing.positions = anchors; conicalFixing.precision = 'upright-connector-anchor';
-    takeSlot(traeger.id + "@" + traeger.a);
-    takeSlot(traeger.id + "@" + traeger.b);
-    for (const nodeId of [traeger.a, traeger.b]) {
-      const pfosten = tubeUpwardFrom(nodeId);
-      if (pfosten) takeSlot(pfosten.id + "@" + nodeId);
-    }
-  }
-
-  // 4. Rohrschrauben: was an Plaetzen uebrig ist, nach Rohrfarbe.
-  const tubeScrews = new Map();                // Farbe -> Anzahl
-  for (const slot of slots.values()) {
-    if (!slot.free) continue;
-    const color = slot.tube.color || null;
-    tubeScrews.set(color, (tubeScrews.get(color) || 0) + 1);
-    const node = model.nodes.get(slot.node);
-    allocate('screw_tube', slot.tube.id, 1, color, node ? [[node.x, node.y, node.z]] : [], 'connector-anchor');
-  }
-
-  const rows = [];
-  const push = (id, anzahl, color = null) => {
-    if (!anzahl) return;
-    const def = getScrew(id);
-    if (!def) return;
-    const stueck = round2((def.price || 0) / (def.pack || 1));
-    rows.push({
-      key: id + (color ? "|" + color : ""), id, name: partName(def),
-      color, colorName: color ? colorName(color) : null,
-      count: anzahl, pack: def.pack || 1,
-      price: stueck, subtotal: round2(stueck * anzahl),
-      allocations: allocations.filter(a => a.id === id && a.color === color),
-    });
-  };
-  for (const [color, anzahl] of [...tubeScrews.entries()]
-    .sort((a, b) => b[1] - a[1])) push("screw_tube", anzahl, color);
-  push("screw_panel", count.panel);
-  push("screw_acrylic", count.acrylic);
-  push("screw_slide_conical", count.conical);
-  push("screw_slide_conical_counter", count.counter);
-  push("screw_slide", count.slide);
-  return rows;
 }
 
 /**
@@ -919,6 +725,7 @@ export function computeBOM(model) {
     // wird dafuer nichts -- es steht deshalb weder in der Stueckliste noch in
     // der Aufbau-Liste.
     if (f.kind === "open-connector2") continue;
+    if (f.kind === 'alu-connector2') continue;
     // 软包滚筒按管长分行：35 的和 75 的是两种东西
     if (f.kind === "sleeve") {
       const tb = model.tubes.get(f.tube);
@@ -986,38 +793,26 @@ export function computeBOM(model) {
   const slideCount = slides.reduce((s, r) => s + r.count, 0);
 
   // --- Verstaerkungen ---
-  // Zu kaufen gibt es nur EINE Laenge: das Holz-Profil mit 80 cm. Es deckt
-  // 80 cm Knotenabstand -- ein 75er-Rohr oder zwei 35er in einer Linie.
-  // Gezaehlt wird deshalb nicht nach Laufllaenge, sondern in Profilen: ein Lauf
-  // von 160 cm braucht zwei. (Aus Herstellerdateien kommen auch andere Laengen
-  // verstaerkt herein; die werden auf ganze Profile aufgerundet.)
+  // 铝管实际长 75 cm，每根对应 80 cm 节点间距；数量按节点间距计算。
   const runs = reinforcementRuns(model);
   const reinforcements = [];
   const part = reinforcementPart();
-  const profilLaenge = (part && part.length_cm) || 80;
-  const profileCount = runs.reduce(
-    (s, run) => s + Math.max(1, Math.round(run.length / profilLaenge)), 0);
-
-  if (profileCount > 0 && part) {
-    reinforcements.push({
-      key:      part.id,
-      id:       part.id,
-      len:      profilLaenge,
-      name:     partName(part),
-      count:    profileCount,
-      pieces:   profileCount,
-      price:    part.price,
-      subtotal: round2(part.price * profileCount),
-    });
+  const counts = new Map();
+  for (const run of runs) {
+    const def = run.partId ? getPartById(run.partId) : part;
+    if (!def) throw new Error(`Unknown reinforcement: ${run.partId}`);
+    const count = run.explicit ? 1 : Math.max(1, Math.round(run.length / (def.coverage_cm || 80)));
+    counts.set(def.id, (counts.get(def.id) || 0) + count);
   }
-
-  // Gesamtzahl der Profile (erscheint im Summen-Footer).
-  const reinfCount = profileCount;
-
-  const screwRows = computeScrews(model);
+  for (const fitting of model.fittings?.values() || []) if (fitting.kind === 'alu-connector2') counts.set('alu_connector', (counts.get('alu_connector') || 0) + 1);
+  for (const [id, count] of counts) {
+    const def = getPartById(id);
+    reinforcements.push({ key: id, id, len: def.length_cm, name: partName(def), count,
+      pieces: count, price: def.price || 0, subtotal: round2((def.price || 0) * count) });
+  }
+  const reinfCount = reinforcements.reduce((sum, row) => sum + row.count, 0);
 
   const price = round2(
-    screwRows.reduce((s, r) => s + r.subtotal, 0) +
     tubes.reduce((s, r) => s + r.subtotal, 0) +
     connectors.reduce((s, r) => s + r.subtotal, 0) +
     panels.reduce((s, r) => s + r.subtotal, 0) +
@@ -1029,13 +824,11 @@ export function computeBOM(model) {
 
   return {
     tubes, connectors, panels, reinforcements, openEnds, textiles, slides, fittings,
-    screws: screwRows,
     totals: {
       tubes: tubeCount, connectors: connCount, panels: panelCount,
       reinforcements: reinfCount, textiles: textileCount, slides: slideCount,
       fittings: fittingCount, price,
-      screws: screwRows.reduce((s, r) => s + r.count, 0),
-      // Alles, was weder Rohr, Kupplung, Platte noch Schraube ist: Rutschen,
+      // Rutschen,
       // Raeder, Textilien, Anbauteile und die Verstaerkungslaeufe -- gezaehlt
       // wie in den Zeilen darueber.
       other: fittingCount + slideCount + textileCount + reinfCount,
@@ -1044,13 +837,10 @@ export function computeBOM(model) {
 }
 
 // Bestand: benoetigte Mengen je Rohrlaenge (Farbe egal) und je Kupplungstyp.
-// Teile, die NICHT ueber die Machbarkeit entscheiden. Schrauben zaehlt kaum
-// jemand (Sonderregel weiter unten), und alles aus Textilien/Netzen -- Tuch,
+// Teile, die NICHT ueber die Machbarkeit entscheiden: Textilien/Netze -- Tuch,
 // Netz, Rundwand, Spielsack, Dachtextil -- ist Zubehoer: es fehlt vielleicht,
 // aber das Modell steht trotzdem. Die Zeilen bleiben in der Liste und faerben
 // sich rot, nur der Haken bleibt gruen.
-export const SOFT_PARTS = new Set(["textile", "textile_20x40", "textile_long", "textile_round_fourway", "textile_bridge", "textile_rainbow", "lattice", "lattice_curved", "trampoline", "rope", "textile_round", "bag", "roof", "roof_large"]);
-
 export function neededParts(bom) {
   const tubes = new Map();   // tubeId -> count
   for (const r of bom.tubes) tubes.set(r.tubeId, (tubes.get(r.tubeId) || 0) + r.count);
@@ -1080,11 +870,7 @@ export function neededParts(bom) {
   const reinforcements = new Map(); // id -> physische Stueckzahl (40-cm-Profile)
   for (const r of bom.reinforcements || [])
     reinforcements.set(r.id, (reinforcements.get(r.id) || 0) + (r.pieces ?? r.count));
-  // Schrauben: die Rohrschraube steht je Rohrfarbe in einer eigenen Zeile, im
-  // Bestand zaehlt die Summe je Teil.
-  const screws = new Map();
-  for (const r of bom.screws || []) screws.set(r.id, (screws.get(r.id) || 0) + r.count);
-  return { tubes, connectors, panels, reinforcements, fittings, screws };
+  return { tubes, connectors, panels, reinforcements, fittings };
 }
 
 // Vergleicht Bedarf mit Bestand. inv = { tubes:{id:n}, connectors:{type:n}, panels:{id:n} }.
@@ -1123,22 +909,11 @@ export function compareInventory(bom, inv) {
     rows.push({ group: "fittings", key: id, name: partName(def), need: count, owned, ok, soft });
   }
   for (const [id, count] of need.reinforcements) {
-    const def = reinforcementPart() || { name: id };
+    const def = getPartById(id) || { name: id };
     const owned = (inv.reinforcements && inv.reinforcements[id]) || 0;
     const ok = owned >= count;
     if (!ok) feasible = false;
     rows.push({ group: "reinforcements", key: id, name: partName(def), need: count, owned, ok });
-  }
-  for (const [id, count] of need.screws || []) {
-    const def = getScrew(id) || { name: id };
-    const owned = (inv.screws && inv.screws[id]) || 0;
-    const ok = owned >= count;
-    // Sonderregel: Eine 0 heisst "noch nicht gezaehlt", nicht "fehlt". Die
-    // Zeile faerbt sich trotzdem rot -- sie ist ein Hinweis, kein Ausschluss.
-    // Ab dem ersten eingetragenen Stueck zaehlt der Bestand normal mit.
-    const soft = owned === 0;
-    if (!ok && !soft) feasible = false;
-    rows.push({ group: "screws", key: id, name: partName(def), need: count, owned, ok, soft });
   }
   return { rows, feasible };
 }

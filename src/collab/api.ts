@@ -26,6 +26,9 @@ export interface Me {
 }
 
 export interface Plan {
+  viewOnly?: boolean
+  locked?: boolean
+  coverUrl?: string
   id: string
   name: string
   data: ModelJSON | null
@@ -50,6 +53,9 @@ export interface VersionInfo {
 }
 
 export interface Version extends VersionInfo {
+  viewOnly?: boolean
+  locked?: boolean
+  coverUrl?: string
   state: string
   data: ModelJSON
   qdf: string

@@ -2,12 +2,24 @@
 // Bewusst ohne Three.js-Abhaengigkeit, damit es testbar und Backend-tauglich bleibt.
 
 import { MERGE_EPS, FORMAT_VERSION, DIAGONAL_SNAP_TOL, DIRECTIONS, DIAGONAL_DIRECTIONS, DIR_ALIGN_TOL, ARM_ALIGN_TOL, CONN_TYPE_MASK, anchorGap } from "./config.js";
-import { ACCESSORY_IDS, PANEL_ACCESSORY_IDS, accessoryMount, accessoryDiagnostics, panelAccessoryDiagnostics, componentMountsValid, confirmedDiagnostics } from './accessoryPack.js';
-import { confirmedSpec } from './componentPack.js';
-import { confirmedCandidates, ropeCandidate } from './confirmedComponentModel.js';
-import { insetPanelProbes } from './insetPanelMounts.js';
+import { withPlacementPass, placementMemo, placementBounds, pointsBounds, railBounds, railLineScope } from './incrementalPlacement.js';
+import { ACCESSORY_IDS, PANEL_ACCESSORY_IDS, accessoryMount, accessoryDiagnostics, panelAccessoryDiagnostics, componentMountsValid, componentVolumes, componentFrame, confirmedDiagnostics, nativeWheelComponentObstacle } from './accessoryPack.js';
+import { confirmedSpec, usesCustomClimbingColor } from './componentPack.js';
+import { confirmedCandidates, ropeCandidate, supportsPanelFixing, PANEL_RETAINER_LAYOUT, curvePoint } from './confirmedComponentModel.js';
+import { sectorScrewMounts } from './panelScrewMounts.js';
+import { segmentDistance } from './segmentDistance.js';
+import { tubePath, cachedTubePath, tubePathsCross, tubePathsCoincide } from './tubeCollision.js';
+import { insetPanelProbes, INSET_PANEL_IDS, INSET_MOUNT_LAYOUT, oppositeScrewSupports, insetPanelReference } from './insetPanelMounts.js';
 import { validAssemblyConfig } from './assemblyConfig.js';
 import { carouselBaseMounts, addCarouselBearing, carouselBearingValid, rotateCarouselBearing } from './carouselBearingModel.js';
+import { validHomeContext } from '../home/context.js';
+import { isSoftPart } from './softParts.js';
+import { incompleteRigidSelection } from './selectionTransform.js';
+import { nativePanelDiagnostics, nativePanelMounts, nativePanelGeometry } from './nativePanelDiagnostics.js';
+import { assemblyMeshes } from './assemblyNativeMesh.js';
+import { reinforcementPaths, aluminiumConnectorMounts, aluminiumConnectorSupport, isAluminiumConnector, validReinforcementRecords, explicitReinforcementGroups } from './reinforcement.js';
+import { c45PlacementBlocked } from './c45Placement.js';
+import { bearingEndpoints, bearingConnectionProbe, coaxial } from './bearingConnections.js';
 
 // Zellweite des Rasters, mit dem die Kollisionspruefung Nachbarn sucht. Etwas
 // groesser als das laengste Rohr (75 cm + Kupplung): ein Rohr liegt damit in
@@ -39,7 +51,7 @@ export function slopeArmDirsAt(model, node) {
     ...DIRECTIONS.filter((entry) => Math.abs(entry.vec[rotationAxis]) > DIR_ALIGN_TOL),
   ];
 }
-import { round2 as round, quatFromXAxis, quatFromBasis, xAxisOf, yAxisOf, zAxisOf } from "./util.js";
+import { round2 as round, quatFromXAxis, quatFromBasis, xAxisOf, yAxisOf, zAxisOf, panelNormal, modelMiddle } from "./util.js";
 
 // Wohin ein Anbauteil gehoert, gemessen an den 799 Vorkommen in den Dateien des
 // Herstellers: `at` ist der Anker (Kupplung oder Rohr), `offset` der Abstand in
@@ -220,6 +232,7 @@ function rotateX(q) {
  * einmal eine Laenge weiter aussen sitzt.
  */
 export function clampOffset(part, cs = 5) {
+  if (part === "windmill") return 0;
   return part === "bearing" ? cs * 2 : cs;
 }
 
@@ -296,19 +309,19 @@ export function fixedFittingColor(kind) {
  * Maske 31 (+Y -Y +Z) ist dieselbe dreiarmige, um 90 Grad um die Lochachse
  * gedreht -- sie kommt aus einer Datei des Bestands und wird nur gelesen.
  */
-export const HOLE_MASKS = { hole_1: 11, hole_2: 15, hole_t: 59 };
+export const HOLE_MASKS = { hole_1: 11, hole_2: 15, hole_t: 59, windmill: 63 };
 const HOLE_ARM_BITS = [[0x04, 1, 1], [0x08, 1, -1], [0x10, 2, 1], [0x20, 2, -1]];
 
 /** Ist dieser Knoten eine Lochzapfenkupplung? */
 export function isHolePart(part) {
-  return part === "hole_1" || part === "hole_2" || part === "hole_t";
+  return part === "hole_1" || part === "hole_2" || part === "hole_t" || part === "windmill";
 }
 
 /** Katalogteil zu einer Arm-Maske: die Zahl der Arme entscheidet. */
 export function holePartForMask(mask) {
   let arme = 0;
   for (const [bit] of HOLE_ARM_BITS) if (mask & bit) arme++;
-  return arme >= 3 ? "hole_t" : arme === 2 ? "hole_2" : "hole_1";
+  return arme === 4 ? "windmill" : arme >= 3 ? "hole_t" : arme === 2 ? "hole_2" : "hole_1";
 }
 
 /**
@@ -460,10 +473,7 @@ export const POOL_SETS = {
 // Stellung der Scharniere in `hinges` -- Grad um diese Achse, 0 = lokal -Y.
 export const BOLT_PART = "flexi_bolt";
 export const HINGE_PART = "flexi_hinge";
-// Die Kraenze der beiden Scharniere sind verzahnt: sie rasten in 45-Grad-
-// Schritten. Naeher als 90 Grad koennen zwei Scharniere aber nicht
-// zusammenstehen -- dafuer sind ihre Riemen zu breit; im Bestand stehen sie an
-// allen 83 Gelenken 135 Grad auseinander.
+// 单击按45°调整，拖动保留连续角度。两片铰链仍至少相隔90°，避免互相穿过。
 export const HINGE_STEP = 45;
 export const HINGE_MIN_GAP = 90;
 export const MAX_HINGES = 2;
@@ -672,6 +682,8 @@ export class BuildModel {
     // 点到组里任何一件整组一起选。gid -> Set<id>
     this.groups = new Map();
     this.assemblyConfig = null;
+    this.homeContext = null;
+    this.previewBackground = null;
     this._seq = 1;
     // 共享方案里几个人同时加零件：每个编辑端一个标记夹在前缀和序号中间，
     // 各端新建的 id 不会撞上。标记以非数字结尾，id 末尾仍是序号。
@@ -731,17 +743,50 @@ export class BuildModel {
     if (!weg) return;
     for (const f of this.fittings.values()) if (f.kind === 'carousel_bearing'
       && [f.params?.baseNode, f.params?.rotorNode].includes(id)) this.fittings.delete(f.id);
+    const armNeighbors = new Set();
+    const tubeNeighbors = new Set();
     // Die Lagerkupplung gehoert zu der Kupplung, die sie traegt -- faellt die,
     // faellt auch die Klemme.
     if (weg.bearingOn) this.fittings.delete(weg.bearingOn);
     for (const t of [...this.tubes.values()]) {
       if (t.a !== id && t.b !== id) continue;
+      tubeNeighbors.add(t.a === id ? t.b : t.a);
+      if (t.arm) armNeighbors.add(t.a === id ? t.b : t.a);
+      if (t.reinforcement) this.removeReinforcement(t.id);
       this._releaseArms(t);
       this.tubes.delete(t.id);
     }
     this.nodes.delete(id);
+    for (const neighborId of armNeighbors) {
+      // 导入标记属于刚移除的45°件，不能再在承载接头上补画同一件。
+      const neighbor = this.nodes.get(neighborId);
+      if (weg.c45body && neighbor) neighbor.c45file = false;
+      this._syncC45Flag(neighborId);
+    }
     this._prunePanels();
     this._pruneClamps();
+    this._pruneOrphanedC45Bodies(tubeNeighbors);
+  }
+
+  isAutomaticConnector(id) {
+    const node = this.nodes.get(id);
+    return !!node && !node.preferType && !node.part && !node.c45body;
+  }
+
+  /** 自动接头连管一起删；手动接头移除后按剩余连接自动匹配。 */
+  removeConnector(id) {
+    const node = this.nodes.get(id);
+    if (!node) return;
+    if (node.c45body) { this.removeC45(id); return; }
+    if (this.isAutomaticConnector(id)) { this.removeNode(id); return; }
+    delete node.preferType;
+    // 手动接头的插臂随实体移除，锚点继续按实际连接匹配。
+    delete node.arms;
+    delete node.armDirs;
+    if (node.part) {
+      for (const key of ["part", "partMask", "partQuat", "clampOn", "stub", "hinges", "boltDeep"]) delete node[key];
+    }
+    this.removeEmptyNodes([id]);
   }
 
   /**
@@ -906,11 +951,33 @@ export class BuildModel {
   }
 
   /** Profil einschieben. `ids` ist ein 75er oder zwei 35er in einer Linie. */
-  addReinforcement(ids) {
+  /** @param {string[]} ids @param {string | null} partId */
+  addReinforcement(ids, partId = null) {
     const list = ids.map((id) => this.tubes.get(id)).filter(Boolean);
-    if (!list.length) return false;
-    for (const t of list) t.reinforced = true;
+    if (!list.length || list.length !== ids.length) return false;
+    if (partId && !reinforcementPaths(this, ids[0], partId).some(path =>
+      path.tubeIds.length === ids.length && path.tubeIds.every(id => ids.includes(id)))) return false;
+    for (const t of list) {
+      t.reinforced = true;
+      if (partId) t.reinforcement = { partId, group: ids[0] };
+    }
     return true;
+  }
+
+  reinforcementPaths(id, partId) { return reinforcementPaths(this, id, partId); }
+
+  aluminiumConnectorMounts() { return aluminiumConnectorMounts(this); }
+
+  addAluminiumConnector(mount) {
+    const valid = this.aluminiumConnectorMounts().find(candidate => candidate.nodeId === mount?.nodeId);
+    if (!valid) return null;
+    const f = this.addFitting('alu-connector2', ...valid.pos, { quat: valid.quat, w: 40 });
+    f.tube = valid.supportTubes[0];
+    f.supportTubes = valid.supportTubes;
+    f.mounts = valid.supportTubes.map(tube => ({ tube }));
+    f.params = {};
+    f.appearanceVersion = 1;
+    return f;
   }
 
   /**
@@ -920,11 +987,18 @@ export class BuildModel {
   removeReinforcement(id) {
     const t = this.tubes.get(id);
     if (!t || !t.reinforced) return [];
+    if (t.reinforcement) {
+      const group = t.reinforcement.group;
+      const tubes = [...this.tubes.values()].filter(other => other.reinforcement?.group === group);
+      for (const tube of tubes) { tube.reinforced = false; delete tube.reinforcement; }
+      for (const fitting of this.fittings.values()) if (isAluminiumConnector(fitting) && !aluminiumConnectorSupport(this, fitting)) this.fittings.delete(fitting.id);
+      return tubes.map(tube => tube.id);
+    }
     const raus = [t];
     if (this.takesReinforcementPaired(t)) {
       const d1 = this._tubeDir(t);
       for (const o of this.tubes.values()) {
-        if (o.id === t.id || !o.reinforced) continue;
+        if (o.id === t.id || !o.reinforced || o.reinforcement) continue;
         if (!this.takesReinforcementPaired(o)) continue;
         if (o.a !== t.a && o.a !== t.b && o.b !== t.a && o.b !== t.b) continue;
         const d2 = this._tubeDir(o);
@@ -943,18 +1017,27 @@ export class BuildModel {
   // dessen Treffpunkt im Inneren mindestens eines Rohres liegt (z. B. 35er quer
   // ueber ein 75er). Beruehren an einer gemeinsamen Kupplung zaehlt nicht.
   // Liefert das kollidierende Rohr oder null.
-  tubeCollision(p, q) {
+  /**
+   * @param {string|null} [ignoreTubeId]
+   * @param {{ bowCenter?: number[]|null }} [options]
+   */
+  tubeCollision(p, q, ignoreTubeId = null, { bowCenter = null } = {}) {
+    const path = tubePath(p, q, { bow: !!bowCenter, bowCenter });
     for (const t of this.tubes.values()) {
+      if (t.id === ignoreTubeId) continue;
+      if (t.link) continue;
       const a = this.nodes.get(t.a), b = this.nodes.get(t.b);
       if (!a || !b) continue;
-      if (segmentsOverlap(p, q, a, b)) return t;
-      if (segmentsCross(p, q, a, b)) return t;
+      if (path.center || t.bow) {
+        if (tubePathsCross(path, cachedTubePath(a, b, t))) return t;
+      } else if (segmentsOverlap(p, q, a, b) || segmentsCross(p, q, a, b)) return t;
     }
     return null;
   }
 
   removeTube(id) {
     const t = this.tubes.get(id);
+    if (t?.reinforcement) this.removeReinforcement(id);
     if (t) this._releaseArms(t);
     this.tubes.delete(id);
     for (const f of this.fittings.values()) if (f.kind === 'carousel_bearing' && f.supportTubes?.includes(id)) this.fittings.delete(f.id);
@@ -979,7 +1062,7 @@ export class BuildModel {
     let weg = 0;
     for (const id of ids) {
       const n = this.nodes.get(id);
-      if (!n || n.part) continue;
+      if (!n || n.part || n.preferType) continue;
       let belegt = false;
       for (const t of this.tubes.values()) if (t.a === id || t.b === id) { belegt = true; break; }
       if (belegt) continue;
@@ -1020,24 +1103,33 @@ export class BuildModel {
     return out;
   }
 
-  // Verwaiste c45body-Knoten entfernen: Adapter-Koerper ohne Diagonalrohr
-  // (nur noch per Arm-Kante mit der Eck-Kupplung verbunden) werden geloescht.
-  _pruneOrphanedC45Bodies() {
+  // 已装在承载接头上的45°件可独立保留；只清理失去承载连接的残留节点。
+  _pruneOrphanedC45Bodies(ids = null) {
+    const armNeighbors = new Set();
     for (const n of [...this.nodes.values()]) {
       if (!n.c45body) continue;
-      let hasNonArmTube = false;
+      if (ids && !ids.has(n.id)) continue;
+      let hasNonArmTube = false, hasArm = false;
       for (const t of this.tubes.values()) {
-        if ((t.a === n.id || t.b === n.id) && !t.arm && !t.link) { hasNonArmTube = true; break; }
+        if (t.a !== n.id && t.b !== n.id) continue;
+        if (t.arm) hasArm = true;
+        else if (!t.link) hasNonArmTube = true;
       }
+      if (hasArm) continue;
       if (!hasNonArmTube) {
         for (const t of [...this.tubes.values()]) {
           if (t.a !== n.id && t.b !== n.id) continue;
+          if (t.arm) armNeighbors.add(t.a === n.id ? t.b : t.a);
           this._releaseArms(t);
           this.tubes.delete(t.id);
         }
         this.nodes.delete(n.id);
+      } else {
+        this._syncC45Flag(n.id);
       }
     }
+    // 转接头移除后同步承载接头，避免继续绘制已不存在的斜向管头。
+    for (const id of armNeighbors) this._syncC45Flag(id);
   }
 
   // --- Platten -----------------------------------------------------------
@@ -1082,11 +1174,13 @@ export class BuildModel {
    * Platte um 90 Grad drehen. Sie hat zwei LIPPEN mit je zwei Schrauben; die
    * Drehung entscheidet, an welchem Rohrpaar sie verschraubt wird -- laengs der
    * Tragrohre (Vorgabe) oder quer dazu. Geometrisch deckt sie dasselbe Feld,
-   * nur die Schrauben wandern (siehe computeScrews in bom.js).
+   * die Befestigungsrichtung bleibt im Modell gespeichert.
    */
   turnPanel(id) {
     const p = this.panels.get(id);
     if (!p) return false;
+    if (PANEL_ACCESSORY_IDS.has(p.panelId) && !['panel_40x40', 'panel_40x20', 'panel_30x30', 'hole_panel_40x40'].includes(p.panelId)) return false;
+    if(p.params?.screwAxis && supportsPanelFixing(p.panelId))return this.setPanelFixing(id,p.params.screwAxis==='horizontal'?'vertical':'horizontal');
     p.turned = !p.turned;
     // Eine eingelesene Platte behaelt ihre Lage aus der Datei -- die Drehung um
     // die Normale gehoert dann mitgedreht, sonst schriebe der Export weiter die
@@ -1157,17 +1251,15 @@ export class BuildModel {
   }
 
   /**
-   * Liegt an dieser Stelle schon eine Platte (oder ein Netz)? Geprueft werden
-   * beide Sammlungen -- gestapelt wird nichts.
+   * 检查硬质面板是否占用开口；软装不阻止面板安装。
    */
-  panelAt(aId, bId, t0, len) {
+  panelAt(aId, bId, t0, len, ignoreId = null) {
     const probe = this.panelCorners({ a: aId, b: bId, t0, len });
     if (!probe) return null;
-    for (const map of [this.panels, this.textiles]) {
-      for (const p of map.values()) {
-        const c = this.panelCorners(p);
-        if (c && this._panelsOverlap(c, probe)) return p;
-      }
+    for (const p of this.panels.values()) {
+      if (p.id === ignoreId || isSoftPart(this, p)) continue;
+      const c = this.panelCorners(p);
+      if (c && this._panelsOverlap(c, probe)) return p;
     }
     return null;
   }
@@ -1181,6 +1273,12 @@ export class BuildModel {
    * daraus ergeben sich die moeglichen Abschnitte.
    */
   panelPartners(railId, dims, tol = 1.5) {
+    // 调用方会追加连续框边，返回独立数组，避免污染共享查询结果。
+    return placementMemo(this,'partners:'+JSON.stringify([railId,dims,tol]),{groups:['nodes','tubes'],bounds:railBounds(this,railId,Math.max(...dims)+tol+8),ids:new Set([railId])},
+      ()=>this._computePanelPartners(railId,dims,tol)).map(p=>({...p}));
+  }
+
+  _computePanelPartners(railId,dims,tol) {
     const ra = this._rail(railId);
     if (!ra) return [];
     const out = [];
@@ -1227,7 +1325,7 @@ export class BuildModel {
    */
   addPanel(aId, bId, t0, len, panelId, color, side = 1) {
     if (!this._rail(aId) || !this._rail(bId)) return null;
-    if (this.panelAt(aId, bId, t0, len)) return null;
+    if (!isSoftPart(this, { panelId }) && this.panelAt(aId, bId, t0, len)) return null;
     const panel = {
       id: this._id("p"), a: aId, b: bId, t0: round(t0), len: round(len),
       panelId, color: confirmedSpec(panelId)?.fixedColor || color || confirmedSpec(panelId)?.defaultColor, side: side < 0 ? -1 : 1,
@@ -1242,19 +1340,32 @@ export class BuildModel {
     return panel;
   }
 
+  // 翻面检查共用于模型与点击入口，失败时保留当前板件。
+  panelFlipDiagnostics(id) {
+    const part = this.panels.get(id) || this.textiles.get(id);
+    if (!part) return { valid: false, reason: 'missing_support' };
+    if (part.appearanceVersion && part.panelId === 'panel_40x40_pocket') return { valid: false, reason: 'pocket_facing' };
+    const flipped = { ...part, side: -(part.side || 1) };
+    if ((part.appearanceVersion || part.params?.mountLayout===PANEL_RETAINER_LAYOUT) && PANEL_ACCESSORY_IDS.has(part.panelId)) {
+      const diagnostic = this.panelAccessoryDiagnostics(flipped);
+      if (!diagnostic.valid) return diagnostic;
+      if (componentVolumes(this, flipped).some(box => box.pos[1] - box.axes.reduce((sum, axis, i) => sum + Math.abs(axis[1]) * box.half[i], 0) < -0.01)) {
+        return { ...diagnostic, valid: false, reason: 'ground_clearance' };
+      }
+    }
+    return { ...flipped, valid: true, reason: null };
+  }
+
   /** Platte auf die andere Seite der Rohre legen. Liefert die neue Seite. */
   flipPanelSide(id) {
     const p = this.panels.get(id) || this.textiles.get(id);
     if (!p) return null;
-    if (p.appearanceVersion && p.panelId === 'panel_40x40_pocket') return null;
-    if (p.appearanceVersion && PANEL_ACCESSORY_IDS.has(p.panelId)) {
-      const flipped = { ...p, side: -(p.side || 1) };
-      if (!this.panelAccessoryDiagnostics(flipped).valid) return null;
-    }
+    if (!this.panelFlipDiagnostics(id).valid) return null;
     p.side = (p.side || 1) < 0 ? 1 : -1;
     // Die eigene Lage aus der Datei kennt die alte Seite -- ab jetzt rechnet
     // sich die Platte wieder aus ihrem Rohrpaar.
-    delete p.geom;
+    if(!p.appearanceVersion && p.params?.mountLayout===PANEL_RETAINER_LAYOUT)p.geom=nativePanelGeometry(this,p);
+    else delete p.geom;
     return p.side;
   }
 
@@ -1301,23 +1412,68 @@ export class BuildModel {
   }
 
   accessoryMounts(kind) {
-    return [...this.tubes.keys()].map(id => accessoryMount(this, kind, id)).filter(Boolean);
+    return withPlacementPass(this,()=>[...this.tubes.keys()].map(id=>this.accessoryDiagnostics(kind,id)).filter(mount=>mount.valid));
   }
 
-  accessoryDiagnostics(kind, tubeId, opts = {}) { return accessoryDiagnostics(this, kind, tubeId, opts); }
+  accessoryDiagnostics(kind, tubeId, opts = {}) {
+    const scope=kind==='gym_rings'?railLineScope(this,tubeId,80):{bounds:railBounds(this,tubeId,80),ids:new Set([tubeId])};
+    delete scope.groups;
+    return placementMemo(this,'accessory-diagnostic:'+JSON.stringify([kind,tubeId,opts]),scope,()=>accessoryDiagnostics(this,kind,tubeId,opts));
+  }
 
   panelAccessoryDiagnostics(probe, opts = {}) { return panelAccessoryDiagnostics(this, probe, opts); }
 
+  // 普通板安装按原厂板身和卡边复核；网格尚未加载时保留保守检查。
+  panelPlacementDiagnostics(probe, opts = {}) {
+    const candidate = this.panelAccessoryDiagnostics(probe, opts);
+    const needsGeometry = probe.nativeGeometry || !candidate.valid && candidate.reason === 'component_space';
+    if (needsGeometry && ['panel_40x40', 'panel_40x20'].includes(probe.panelId) && assemblyMeshes()) {
+      return { ...nativePanelDiagnostics(this, probe), nativeGeometry: true };
+    }
+    return candidate;
+  }
+
+  _panelMountCandidate(probe, options = {}) {
+    return placementMemo(this,'panel-diagnostic:'+JSON.stringify([probe,options.ignoreId]),()=>({
+      bounds:placementBounds(this,probe),ids:new Set([probe.a,probe.b,probe.tube,...(probe.supportTubes||[])].filter(Boolean))
+    }),()=>this._uncachedPanelMountCandidate(probe,options));
+  }
+
+  _uncachedPanelMountCandidate(probe, options = {}) {
+    const candidate = this.panelPlacementDiagnostics(probe, options);
+    if (candidate.valid || !candidate.mounts?.length) return candidate;
+    const opposite = this.panelPlacementDiagnostics({ ...probe, side: -(probe.side || 1) }, options);
+    return opposite.valid ? opposite : candidate;
+  }
+
   addPanelAccessory(probe,color) {
+    if (probe.nativeGeometry && ['panel_40x40', 'panel_40x20'].includes(probe.panelId)) return this.addNativePanel(probe, color, { nativeGeometry: true });
     const candidate=this.panelAccessoryDiagnostics(probe);
-    if(!candidate.valid || this.panelAt(candidate.a,candidate.b,candidate.t0,candidate.len))return null;
+    if(!candidate.valid || !isSoftPart(this,candidate) && this.panelAt(candidate.a,candidate.b,candidate.t0,candidate.len))return null;
     const record={...candidate,id:this._id('p'),color:color || probe.color || null};
     for(const key of ['valid','reason','pos','obstacle'])delete record[key];
     this.panels.set(record.id,record);return record;
   }
 
-  panelAccessoryMounts(panelId,{screwAxis='vertical'}={}) {
-    if (confirmedSpec(panelId)) return this.confirmedMounts(panelId,{screwAxis}).filter(p => p.valid);
+  // 不同板型返回各自扩展字段，保留既有动态候选接口。
+  /** @returns {Array<any>} */
+  panelAccessoryMounts(panelId,{screwAxis='auto',oppositeRetainers=true}={}) {
+    return withPlacementPass(this,()=>this._incrementalPanelAccessoryMounts(panelId,{screwAxis,oppositeRetainers}));
+  }
+
+  _incrementalPanelAccessoryMounts(panelId,{screwAxis='auto',oppositeRetainers=true}={}) {
+    if(screwAxis==='auto'){
+      const seen=new Set();
+      return ['vertical','horizontal'].flatMap(axis=>this._panelAccessoryMounts(panelId,axis,true)).filter(part=>{
+        const key=this.panelCorners(part)?.map(p=>p.map(round).join(',')).sort().join('|');
+        if(!key || seen.has(key))return false;seen.add(key);return true;
+      });
+    }
+    return this._panelAccessoryMounts(panelId,screwAxis,oppositeRetainers);
+  }
+
+  _panelAccessoryMounts(panelId,screwAxis,oppositeRetainers) {
+    if (confirmedSpec(panelId)) return this.confirmedMounts(panelId,{screwAxis,oppositeRetainers}).filter(p => p.valid);
     const mounts = [], seen = new Set();
     for (const tube of this.tubes.values()) for (const partner of this.panelPartners(tube.id, [40, 40])) {
       const count = Math.max(1, Math.floor((partner.hi - partner.lo + 0.5) / 40));
@@ -1325,14 +1481,13 @@ export class BuildModel {
         const probe = { a: tube.id, b: partner.id, t0: partner.lo + k * 40, len: 40, panelId, side: 1,params:{screwAxis} };
         const key = this.panelCorners(probe)?.map(c => c.map(round).join(',')).sort().join('|');
         if (!key || seen.has(key)) continue;
-        seen.add(key);
-        const mount = this.panelAccessoryDiagnostics(probe);
-        if (mount.valid) mounts.push(mount);
+        const mount = this._panelMountCandidate(probe);
+        if (mount.valid) { mounts.push(mount); seen.add(key); }
       }
     }
     if(panelId==='panel_40x40_busy')for(const probe of insetPanelProbes(this,40,40)){
       const key=this.panelCorners(probe)?.map(c=>c.map(round).join(',')).sort().join('|');if(!key || seen.has(key))continue;
-      const mount=this.panelAccessoryDiagnostics({...probe,panelId,side:1,params:{screwAxis}});if(mount.valid){mounts.push(mount);seen.add(key);}
+      const mount=this._panelMountCandidate({...probe,panelId,side:1,params:{screwAxis}});if(mount.valid){mounts.push(mount);seen.add(key);}
     }
     return mounts;
   }
@@ -1341,17 +1496,83 @@ export class BuildModel {
     const mount = accessoryMount(this, kind, tubeId, opts);
     if (!mount) return null;
     const f = this.addFitting(kind, ...mount.pos, { color, quat: mount.quat });
-    f.tube = tubeId;
+    f.tube = mount.tube;
     for (const key of ['mounts', 'supportTubes', 'appearanceVersion', 'params', 'facing']) f[key] = structuredClone(mount[key]);
     return f;
   }
 
-  confirmedMounts(partId,options={}) { return confirmedCandidates(this, partId,options).map(p => confirmedDiagnostics(this, p)); }
+  // 配件候选字段由目录类型决定，保留调用方原有动态字段访问。
+  /** @returns {Array<any>} */
+  confirmedMounts(partId,options={}) {
+    return withPlacementPass(this,()=>this._incrementalConfirmedMounts(partId,options));
+  }
+
+  _incrementalConfirmedMounts(partId,options={}) {
+    // 同一次同步枚举中，承载方向筛选与返回结果共用检查；下次枚举仍读取当前模型。
+    const checked=new Map(),collisionCache=new Map(),mountCache=new Map();
+    const diagnose=probe=>{
+      if(!checked.has(probe))checked.set(probe,this._panelMountCandidate(probe,{collisionCache,mountCache}));
+      return checked.get(probe);
+    };
+    const candidates=confirmedCandidates(this,partId,{...options,isPanelCandidateValid:probe=>diagnose(probe).valid});
+    return candidates.map(p=>p.panelId ? diagnose(p) : placementMemo(this,'fitting-diagnostic:'+JSON.stringify(p),()=>({
+      bounds:placementBounds(this,p),ids:new Set(p.supportTubes||[])
+    }),()=>confirmedDiagnostics(this,p,{collisionCache,mountCache,candidates})));
+  }
   ropeDiagnostics(first, second) { return confirmedDiagnostics(this, ropeCandidate(this, first, second)); }
-  confirmedDiagnostics(probe) { return confirmedDiagnostics(this, probe); }
+  confirmedDiagnostics(probe) { return probe.nativeGeometry ? this.panelPlacementDiagnostics(probe) : confirmedDiagnostics(this, probe); }
+  nativePanelDiagnostics(probe) { return nativePanelDiagnostics(this, probe); }
+  nativePanelMounts(panelId) { return nativePanelMounts(this,panelId); }
+
+  panelFixingDiagnostics(id,screwAxis) {
+    const part=this.panels.get(id);
+    if(!part || !supportsPanelFixing(part.panelId) || !['vertical','horizontal'].includes(screwAxis))return {valid:false,reason:'missing_support'};
+    const probe={...part,params:{...part.params,screwAxis}};
+    // 切换固定边时从原姿态重建引用，加载旧存档时保持原记录。
+    if(INSET_PANEL_IDS.has(part.panelId) || confirmedSpec(part.panelId)){
+      const frame=componentFrame(this,part),spec=confirmedSpec(part.panelId) || {width:40,height:40};
+      const supports=oppositeScrewSupports(this,frame,spec.width,spec.height,{screwAxis});
+      if(!supports)return {valid:false,reason:'opposite_edges'};
+      probe.params.mountLayout=INSET_PANEL_IDS.has(part.panelId)?INSET_MOUNT_LAYOUT:PANEL_RETAINER_LAYOUT;
+      Object.assign(probe,insetPanelReference(this,frame,spec.width,spec.height,supports,{screwAxis}));
+      probe.side=1;
+      const normal=componentFrame(this,probe)?.axes[2];
+      if(normal && normal.reduce((sum,v,i)=>sum+v*frame.axes[2][i],0)<0)probe.side=-1;
+    }
+    return this.panelAccessoryDiagnostics(probe);
+  }
+
+  setPanelFixing(id,screwAxis) {
+    const candidate=this.panelFixingDiagnostics(id,screwAxis),part=this.panels.get(id);
+    if(!candidate.valid || !part)return false;
+    const customColor=usesCustomClimbingColor(part);
+    for(const key of ['a','b','t0','len','side','params','mounts','supportTubes','appearanceVersion'])part[key]=structuredClone(candidate[key]);
+    if(customColor)part.params.colorMode='custom';
+    return true;
+  }
+
+  // 普通方板与半高围板使用工厂原生形状，保留实际固定边引用。
+  addNativePanel(probe, color, { nativeGeometry = false } = {}) {
+    if (!['panel_40x40', 'panel_40x20'].includes(probe?.panelId)) return null;
+    const candidate = nativeGeometry ? nativePanelDiagnostics(this, { ...probe, id: undefined }) : confirmedDiagnostics(this, { ...probe, id: undefined });
+    if (!candidate.valid) return null;
+    const panel = {
+      id: this._id('p'), a: candidate.a, b: candidate.b,
+      t0: round(candidate.t0), len: round(candidate.len), panelId: candidate.panelId,
+      color: color || probe.color || null, side: candidate.side < 0 ? -1 : 1,
+    };
+    if(candidate.params?.mountLayout===PANEL_RETAINER_LAYOUT){
+      for(const key of ['params','mounts','supportTubes'])panel[key]=structuredClone(candidate[key]);
+      panel.geom=nativePanelGeometry(this,candidate);
+      if(this._panelTurnedFromQuat(panel))panel.turned=true;
+    }
+    this.panels.set(panel.id, panel);
+    return panel;
+  }
 
   addConfirmedComponent(probe, color) {
-    const candidate = confirmedDiagnostics(this, probe);
+    if (probe.nativeGeometry && ['panel_40x40', 'panel_40x20'].includes(probe.panelId)) return this.addNativePanel(probe, color, { nativeGeometry: true });
+    const candidate = confirmedDiagnostics(this, {...probe,id:undefined});
     if (!candidate.valid) return null;
     const record = { ...candidate, color: confirmedSpec(candidate.panelId || candidate.kind)?.fixedColor || color || probe.color || confirmedSpec(candidate.panelId || candidate.kind)?.defaultColor || null, id: this._id(candidate.panelId ? 'p' : 'f') };
     for (const key of ['valid', 'reason', 'pos', 'obstacle']) delete record[key];
@@ -1376,6 +1597,19 @@ export class BuildModel {
    */
   rotateFitting(id) {
     if (this.fittings.get(id)?.kind === 'carousel_bearing') return rotateCarouselBearing(this, id);
+    const wheel = this.fittings.get(id);
+    if (confirmedSpec(wheel?.kind || wheel?.partId)?.feature === 'sector') {
+      const flipped = confirmedDiagnostics(this, { ...wheel, facing: -(wheel.facing || 1) });
+      if (!flipped.valid) return false;
+      wheel.facing = flipped.facing; wheel.quat = flipped.quat;
+      return true;
+    }
+    if (wheel?.kind === "multi-wheel2") {
+      const [x, y, z, w] = wheel.quat || [0, 0, 0, 1];
+      // Half turn around the wheel's local Y axis, keeping its centre fixed.
+      wheel.quat = [-z, w, x, -y].map(v => Math.abs(v) < 1e-10 ? 0 : v);
+      return true;
+    }
     const step = this._nextFittingMount(id);
     if (!step) return false;
     const { f, mount } = step;
@@ -1397,6 +1631,9 @@ export class BuildModel {
   /** Laesst sich dieses Anbauteil weiterdrehen? (fuer Zeiger und Meldung) */
   canRotateFitting(id) {
     if (this.fittings.get(id)?.kind === 'carousel_bearing') return carouselBearingValid(this, this.fittings.get(id));
+    const fitting=this.fittings.get(id);
+    if (confirmedSpec(fitting?.kind || fitting?.partId)?.feature === 'sector') return true;
+    if (this.fittings.get(id)?.kind === "multi-wheel2") return true;
     return !!this._nextFittingMount(id);
   }
 
@@ -1438,73 +1675,230 @@ export class BuildModel {
    * Klemm-Kupplung weiterdrehen: der offene Anschluss rueckt um 90 Grad um das
    * umschlossene Rohr weiter, alles daran Steckende dreht mit.
    */
-  rotateTubeClamp(nodeId, cs = 5) {
-    const node = this.nodes.get(nodeId);
-    if (!node || !node.clampOn || !node.stub) return false;
-    const t = this.tubes.get(node.clampOn.tubeId);
-    const a = t && this.nodes.get(t.a), b = t && this.nodes.get(t.b);
-    if (!a || !b) return false;
-    const ab = [b.x - a.x, b.y - a.y, b.z - a.z];
-    const L = Math.hypot(ab[0], ab[1], ab[2]) || 1;
-    const u = [ab[0] / L, ab[1] / L, ab[2] / L];
-    const off = nodeClampOffset(node, cs);
-    const axis = [node.x - node.stub[0] * off, node.y - node.stub[1] * off, node.z - node.stub[2] * off];
-    // 45 Grad um die Rohrachse (Rodrigues). Acht Stellungen -- die Kupplungen
-    // sitzen am Rohr, sie muessen sich nicht ins Achsraster fuegen.
-    const co = Math.SQRT1_2, si = Math.SQRT1_2;
-    const turn = (p) => {
-      const r = [p[0] - axis[0], p[1] - axis[1], p[2] - axis[2]];
-      const c = cross3(u, r);
-      const d = dot3(u, r) * (1 - co);
-      return [
-        axis[0] + r[0] * co + c[0] * si + u[0] * d,
-        axis[1] + r[1] * co + c[1] * si + u[1] * d,
-        axis[2] + r[2] * co + c[2] * si + u[2] * d,
-      ];
+  rotateTubeClamp(nodeId, cs = 5, radians = Math.PI / 4) {
+    return this.rotateJoint({ kind: 'tubeClamp', nodeId }, radians, cs);
+  }
+
+  /** 可活动关节的轴与活动组；共享铰链节点始终留在固定侧。 */
+  rotationJoint(ref, cs = 5) {
+    const n = this.nodes.get(ref.nodeId);
+    if (!n) return null;
+    const j = { ...ref, nodes: new Set(), tubes: new Set(), clamps: new Set(), sharedHinges: [], blocked: false };
+    const frozen = new Set(), frozenTubes = new Set();
+    if (ref.kind === 'bearing') {
+      const f = n.bearingOn && this.fittings.get(n.bearingOn);
+      if (!f?.quat || n.clampOn) return null;
+      return { ...j, origin: [f.x, f.y, f.z], axis: norm3(xAxisOf(f.quat)), dir: norm3(yAxisOf(f.quat)), fittingId: f.id };
+    }
+    if (ref.kind === 'hinge') {
+      if (!isBoltPart(n.part) || !Number.isInteger(ref.index) || ref.index < 0 || ref.index >= (n.hinges || []).length) return null;
+      j.origin = [n.x, n.y, n.z]; j.axis = boltAxis(n).map(v => -v);
+      j.dir = hingeDir(n, n.hinges[ref.index]);
+      frozen.add(n.id);
+      for (const t of this.tubes.values()) {
+        const other = t.a === n.id ? this.nodes.get(t.b) : t.b === n.id ? this.nodes.get(t.a) : null;
+        if (!other) continue;
+        const dir = norm3([other.x - n.x, other.y - n.y, other.z - n.z]);
+        if (dot3(dir, j.dir) > 0.99) j.tubes.add(t.id);
+        else frozenTubes.add(t.id);
+      }
+    } else if (ref.kind === 'hole') {
+      if (!isHolePart(n.part) || !n.partQuat || n.clampOn) return null;
+      j.origin = [n.x, n.y, n.z]; j.axis = norm3(xAxisOf(n.partQuat)); j.dir = holeArmDirs(n)[0];
+      j.nodes.add(n.id);
+      const carrier = this._holeCarrier(n, cs);
+      if (carrier) {
+        frozen.add(carrier.id);
+        for (const t of this.tubes.values()) if (t.a === carrier.id || t.b === carrier.id) frozenTubes.add(t.id);
+      }
+    } else if (ref.kind === 'tubeClamp') {
+      const t = n.clampOn && this.tubes.get(n.clampOn.tubeId);
+      const a = t && this.nodes.get(t.a), b = t && this.nodes.get(t.b);
+      if (!a || !b || !n.stub) return null;
+      const off = nodeClampOffset(n, cs);
+      j.origin = [n.x - n.stub[0] * off, n.y - n.stub[1] * off, n.z - n.stub[2] * off];
+      j.axis = norm3([b.x - a.x, b.y - a.y, b.z - a.z]); j.dir = n.stub.slice();
+      j.nodes.add(n.id); frozen.add(a.id); frozen.add(b.id); frozenTubes.add(t.id);
+    } else return null;
+    for (const node of this.nodes.values()) if (isBoltPart(node.part) && coaxial(j.origin,j.axis,this.nodePos(node.id),boltAxis(node))) frozen.add(node.id);
+    const addTube = id => {
+      if (!this.tubes.has(id)) return;
+      if (frozenTubes.has(id)) { j.blocked = true; return; }
+      j.tubes.add(id);
     };
-    const branch = this._branchFrom(nodeId).map((n) => ({ n, p: turn([n.x, n.y, n.z]) }));
-    if (branch.some((e) => this.isBelowGround(e.p[1]))) return false;
-    const nodeMoves = new Map(branch.map((e) => [e.n.id, e.p]));
-    const bowMoves = [];
-    for (const t of this.tubes.values()) {
+    let size = -1;
+    while (size !== j.nodes.size + j.tubes.size + j.clamps.size) {
+      size = j.nodes.size + j.tubes.size + j.clamps.size;
+      for (const id of j.tubes) {
+        const t = this.tubes.get(id);
+        for (const nid of [t.a, t.b]) if (!frozen.has(nid)) j.nodes.add(nid);
+      }
+      for (const t of this.tubes.values()) if (j.nodes.has(t.a) || j.nodes.has(t.b)) addTube(t.id);
+      for (const node of this.nodes.values()) {
+        if (node.id !== n.id && isHolePart(node.part) && !node.clampOn) {
+          const carrier = this._holeCarrier(node, cs);
+          if (carrier && j.nodes.has(carrier.id)) j.nodes.add(node.id);
+          if (carrier && j.nodes.has(node.id)) {
+            if (frozen.has(carrier.id)) j.blocked = true;
+            else j.nodes.add(carrier.id);
+          }
+        }
+        if (!node.clampOn || node.id === n.id) continue;
+        if (j.tubes.has(node.clampOn.tubeId)) {
+          if (frozen.has(node.id)) j.blocked = true;
+          else j.nodes.add(node.id);
+        }
+        if (j.nodes.has(node.id)) {
+          // 同一固定管上共同托住活动框架的轴承，围绕同一轴一起转。
+          if (node.bearingOn && this._jointCoaxialTube(j,node.clampOn.tubeId)) continue;
+          addTube(node.clampOn.tubeId);
+        }
+      }
+      for (const c of this.clamps.values()) {
+        const a = this._clampBaseTube(c), b = this._clampSecondTube(c);
+        if (!(a && j.tubes.has(a.id)) && !(b && j.tubes.has(b.id))) continue;
+        j.clamps.add(c.id); if (a) addTube(a.id); if (b) addTube(b.id);
+      }
+      for (const part of [...this.panels.values(), ...this.textiles.values(), ...this.fittings.values(), ...this.slides.values()]) {
+        const supports = this._jointSupports(part);
+        if (supports.some(id => j.tubes.has(id))) supports.forEach(addTube);
+      }
+    }
+    // 回接到固定侧的闭环不能靠转动拉伸管；铰链的原始活动管允许共享轴心。
+    for (const id of j.tubes) {
+      const t = this.tubes.get(id);
+      for (const nid of [t.a, t.b]) if (frozen.has(nid)) {
+        const other = this.nodes.get(t.a === nid ? t.b : t.a);
+        const shared=this.nodes.get(nid);
+        const index=isBoltPart(shared?.part)&&coaxial(j.origin,j.axis,this.nodePos(nid),boltAxis(shared))
+          ? (shared.hinges||[]).findIndex(angle=>dot3(norm3([other.x-shared.x,other.y-shared.y,other.z-shared.z]),hingeDir(shared,angle))>.99) : -1;
+        if(index<0)j.blocked=true;
+        else if(!j.sharedHinges.some(h=>h.nodeId===nid&&h.index===index))j.sharedHinges.push({nodeId:nid,index});
+      }
+    }
+    return j;
+  }
+
+  _jointCoaxialTube(j,tubeId) {
+    const tube=this.tubes.get(tubeId),a=tube&&this.nodes.get(tube.a),b=tube&&this.nodes.get(tube.b);
+    return !!a&&!!b&&!tube.bow&&coaxial(j.origin,j.axis,[a.x,a.y,a.z],[b.x-a.x,b.y-a.y,b.z-a.z]);
+  }
+
+  _jointSupports(part) {
+    return Array.isArray(part.supportTubes) ? part.supportTubes : [part.tube, part.a, part.b].filter(id => this.tubes.has(id));
+  }
+
+  _holeCarrier(n, cs = 5) {
+    if (!n.partQuat) return null;
+    const axis = norm3(xAxisOf(n.partQuat)), p = [n.x, n.y, n.z].map((v, i) => v - axis[i] * cs);
+    let nearest = null, distance = 2;
+    for (const other of this.nodes.values()) {
+      if (other.id === n.id) continue;
+      const d = Math.hypot(other.x - p[0], other.y - p[1], other.z - p[2]);
+      if (d < distance) { distance = d; nearest = other; }
+    }
+    return nearest;
+  }
+
+  jointMovesPart(j, id, kind) {
+    if (kind === 'hinge') return j.kind === 'hinge' && id === hingeKey(j.nodeId, j.index) || !!(splitHingeKey(id) && j.nodes.has(splitHingeKey(id).nodeId));
+    if (kind === 'node') return j.nodes.has(id) || j.kind === 'bearing' && j.nodeId === id;
+    if (kind === 'tube') return j.tubes.has(id);
+    if (kind === 'clamp') return j.clamps.has(id);
+    const part = ({ panel: this.panels, textile: this.textiles, fitting: this.fittings, slide: this.slides })[kind]?.get(id);
+    if (!part) return false;
+    if (id === j.fittingId) return true;
+    if ([...j.nodes].some(nid => this.nodes.get(nid)?.bearingOn === id)) return true;
+    const supports = this._jointSupports(part);
+    if (supports.length) return supports.every(tid => j.tubes.has(tid));
+    const point = part.hook || [part.x, part.y, part.z];
+    return [...j.nodes].some(nid => { const n = this.nodes.get(nid); return Math.hypot(n.x - point[0], n.y - point[1], n.z - point[2]) <= 3; });
+  }
+
+  /** 连续旋转整个活动组，先验证后写入，失败时不留下半组移动。 */
+  rotateJoint(ref, radians, cs = 5, { skipHingeGap = false } = {}) {
+    if (!Number.isFinite(radians) || Math.abs(radians) < 1e-9 || Math.abs(radians) >= Math.PI * 2 - 1e-9) return false;
+    const j = this.rotationJoint(ref, cs), n = j && this.nodes.get(j.nodeId);
+    if (!j || j.blocked) return false;
+    if (j.kind === 'bearing') {
+      const f = this.fittings.get(j.fittingId);
+      f.quat = spinAroundAxis(f.quat, j.axis, radians); n.quat = f.quat.slice(); return true;
+    }
+    let hingeAngle;
+    if (j.kind === 'hinge') {
+      const delta = radians * 180 / Math.PI, from = n.hinges[j.index];
+      const others = n.hinges.filter((_, i) => i !== j.index);
+      const steps = skipHingeGap ? 1 : Math.max(1, Math.ceil(Math.abs(delta) / 2));
+      for (let step = 1; step <= steps; step++) if (others.some(g => hingeGap(from + delta * step / steps, g) < HINGE_MIN_GAP - 1e-6)) return false;
+      hingeAngle = round4(((from + delta) % 360 + 360) % 360);
+    }
+    const sharedAngles=[];
+    for(const shared of j.sharedHinges||[]){
+      if(j.kind==='hinge'&&shared.nodeId===j.nodeId&&shared.index===j.index)continue;
+      const node=this.nodes.get(shared.nodeId),delta=dot3(j.axis,boltAxis(node).map(v=>-v))*radians*180/Math.PI;
+      const angle=node.hinges[shared.index],others=node.hinges.filter((_,i)=>i!==shared.index);
+      for(let k=1;k<=Math.max(1,Math.ceil(Math.abs(delta)/2));k++)if(others.some(g=>hingeGap(angle+delta*k/Math.max(1,Math.ceil(Math.abs(delta)/2)),g)<HINGE_MIN_GAP-1e-6))return false;
+      sharedAngles.push({node,index:shared.index,angle:round4(((angle+delta)%360+360)%360)});
+    }
+    const affected = new Set([...j.nodes,...sharedAngles.map(h=>h.node.id)]);
+    if (j.kind === 'hinge') affected.add(n.id);
+    if (this._incompleteComponentMove({ nodes: affected })) return false;
+    const co = Math.cos(radians), si = Math.sin(radians), ax = { o: j.origin, u: j.axis };
+    const turn = p => rodriguesAt(p, ax.o, ax.u, co, si);
+    const moved = [...j.nodes].map(id => ({ n: this.nodes.get(id), p: turn(this.nodePos(id)) }));
+    if (moved.some(e => this.isBelowGround(e.p[1]))) return false;
+    const bows = [];
+    for (const id of j.tubes) {
+      const t = this.tubes.get(id);
       if (!t.bow || !t.bowCenter) continue;
-      const a = this.nodes.get(t.a), b = this.nodes.get(t.b);
-      if (!a || !b || (!nodeMoves.has(a.id) && !nodeMoves.has(b.id))) continue;
-      const p = turn(t.bowCenter);
-      for (const n of [a, b]) {
-        const actual = nodeMoves.get(n.id) || [n.x, n.y, n.z];
-        const rigid = turn([n.x, n.y, n.z]);
-        if (Math.hypot(...actual.map((v, i) => v - rigid[i])) > 0.02) return false;
-      }
-      const pa = nodeMoves.get(a.id) || [a.x, a.y, a.z];
-      const pb = nodeMoves.get(b.id) || [b.x, b.y, b.z];
-      if (this.isBelowGround(this._bowLowestY(pa, pb, p))) return false;
-      bowMoves.push({ t, p });
+      const p = turn(t.bowCenter), a = turn(this.nodePos(t.a)), b = turn(this.nodePos(t.b));
+      if (this.isBelowGround(this._bowLowestY(a, b, p))) return false;
+      bows.push({ t, p });
     }
-    for (const e of branch) { e.n.x = round(e.p[0]); e.n.y = round(e.p[1]); e.n.z = round(e.p[2]); }
-    for (const e of bowMoves) e.t.bowCenter = e.p.map(round);
-    const gedreht = new Set(branch.map((e) => e.n.id));
-    this._moveTubeGeom(gedreht);
-    this._movePanelGeom(gedreht);
-    const st = node.stub;
-    const c = cross3(u, st), d = dot3(u, st) * (1 - co);
-    const ns = [st[0] * co + c[0] * si + u[0] * d, st[1] * co + c[1] * si + u[1] * d, st[2] * co + c[2] * si + u[2] * d];
-    // Die Richtung feiner runden als Koordinaten: bei 45-Grad-Schritten summiert
-    // sich der Rundungsfehler sonst ueber mehrere Drehungen sichtbar auf.
-    const L2 = Math.hypot(ns[0], ns[1], ns[2]) || 1;
-    const r4 = (v) => Math.round((v / L2) * 1e4) / 1e4;
-    node.stub = [r4(ns[0]), r4(ns[1]), r4(ns[2])];
-    // Die Lagerkupplung sitzt auf der Rohrachse und bleibt liegen -- nur ihr
-    // Maul dreht mit, es zeigt weiter von der getragenen Kupplung weg.
-    if (node.bearingOn) {
-      const f = this.fittings.get(node.bearingOn);
-      if (f) {
-        f.quat = bearingQuat([-node.stub[0], -node.stub[1], -node.stub[2]], u);
-        node.quat = f.quat.slice();
-      }
+    const bearingDone = new Set(moved.map(e => e.n.bearingOn).filter(Boolean));
+    for (const id of bearingDone) {
+      const f = this.fittings.get(id);
+      if (f && this.isBelowGround(turn([f.x, f.y, f.z])[1])) return false;
     }
+    for (const id of j.clamps) {
+      const c = this.clamps.get(id), p = turn([c.x, c.y, c.z]);
+      const off = rodriguesDir(c.off, ax.u, co, si);
+      if (this.isBelowGround(p[1]) || this.isBelowGround(p[1] + off[1])) return false;
+    }
+    const extras = [];
+    for (const [kind, map] of [['fitting', this.fittings], ['slide', this.slides]]) for (const part of map.values()) {
+      if (bearingDone.has(part.id) || !this.jointMovesPart(j, part.id, kind)) continue;
+      const p = turn([part.x, part.y, part.z]);
+      if (this.isBelowGround(p[1])) return false;
+      extras.push({ part, p });
+    }
+    this._syncAutomaticConnectorFrames(moved.map(e => e.n));
+    for (const e of moved) {
+      if (isHolePart(e.n.part) && !e.n.partQuat) e.n.partQuat = [0, 0, 0, 1];
+      [e.n.x, e.n.y, e.n.z] = e.p.map(round); this._spinNodeAround(e.n, ax, co, si, radians);
+    }
+    for (const e of bows) e.t.bowCenter = e.p.map(round);
+    for (const id of j.clamps) {
+      const c = this.clamps.get(id);
+      [c.x, c.y, c.z] = turn([c.x, c.y, c.z]).map(round);
+      c.dir = rodriguesDir(c.dir, ax.u, co, si).map(round4);
+      c.off = rodriguesDir(c.off, ax.u, co, si).map(round);
+    }
+    for (const { part, p } of extras) {
+      [part.x, part.y, part.z] = p.map(round);
+      part.quat = spinAroundAxis(part.quat || [0, 0, 0, 1], ax.u, radians);
+      if (part.hook) part.hook = turn(part.hook).map(round);
+    }
+    if (typeof hingeAngle === 'number') n.hinges[j.index] = hingeAngle;
+    for(const shared of sharedAngles)shared.node.hinges[shared.index]=shared.angle;
+    this._moveTubeGeom(j.nodes); this._movePanelGeom(j.nodes);
     return true;
   }
+
+  nodePos(id) {
+    const n = this.nodes.get(id); return [n.x, n.y, n.z];
+  }
+
 
   /**
    * Montagestellen eines Anbauteils. Die Regeln sind an den Herstellerdateien
@@ -1514,7 +1908,7 @@ export class BuildModel {
    */
   fittingMounts(kind, cs = 5) {
     if (kind === 'carousel_bearing') return carouselBaseMounts(this);
-    if (kind === "multi-wheel2") return this._wheelMounts();
+    if (kind === "multi-wheel2") return this._wheelMounts().filter(m => !this._nativeWheelComponentBlocked(kind, m.pos, m.quat || quatFromXAxis(m.dir)));
     if (kind === "hub-cap2" || kind === "tube-cap2") return this._wheelCapMounts();
     if (kind === "textil-round2") return this._roundCoverMounts();
     const spec = FITTING_MOUNTS[kind];
@@ -1549,7 +1943,15 @@ export class BuildModel {
     const pos = [a.x + u[0] * s, a.y + u[1] * s, a.z + u[2] * s];
     // Stoesst es an ein anderes Teil auf demselben Rohr?
     if (this._fittingBlocked(kind, pos, u, half)) return null;
+    if (this._nativeWheelComponentBlocked(kind, pos, quatFromXAxis(u))) return null;
     return { pos, dir: u, tubeId };
+  }
+
+  _nativeWheelComponentBlocked(kind, pos, quat) {
+    if (kind !== 'multi-wheel2') return false;
+    if ([...this.nodes.values()].some(n => n.part === 'windmill'
+      && Math.hypot(n.x - pos[0], n.y - pos[1], n.z - pos[2]) < 2)) return true;
+    return !!nativeWheelComponentObstacle(this, { kind, x: pos[0], y: pos[1], z: pos[2], quat });
   }
 
   /**
@@ -1558,6 +1960,10 @@ export class BuildModel {
    * Punkte zeigen nur, welche Rohre in Frage kommen.
    */
   tubeFittingSpots(kind, cs = 5) {
+    return withPlacementPass(this,()=>this._incrementalTubeFittingSpots(kind,cs));
+  }
+
+  _incrementalTubeFittingSpots(kind, cs) {
     if (!TUBE_FITTINGS[kind]) return [];
     const out = [];
     for (const t of this.tubes.values()) {
@@ -1565,7 +1971,7 @@ export class BuildModel {
       const a = this.nodes.get(t.a), b = this.nodes.get(t.b);
       if (!a || !b) continue;
       const mid = [(a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2];
-      const m = this.tubeFittingMount(t.id, mid, kind, cs);
+      const m = placementMemo(this,'tube-fitting:'+JSON.stringify([t.id,kind,cs]),{bounds:railBounds(this,t.id,80),ids:new Set([t.id])},()=>this.tubeFittingMount(t.id, mid, kind, cs));
       if (m) out.push(m);
     }
     return out;
@@ -1626,9 +2032,27 @@ export class BuildModel {
       if (f.kind !== "bearing2" || !f.quat) continue;
       const ax = rotateX(f.quat);
       out.push({ pos: [round(f.x + ax[0] * BEARING_LEN), round(f.y + ax[1] * BEARING_LEN),
-        round(f.z + ax[2] * BEARING_LEN)], dir: ax, quat: f.quat.slice() });
+        round(f.z + ax[2] * BEARING_LEN)], dir: ax, quat: f.quat.slice(), bearingId: f.id });
     }
     return out;
+  }
+
+  // 风火轮与多向轮共用轮轴承末端，保持原生孔销节点的旋转与存档语义。
+  windmillBearingMounts() {
+    return this._wheelMounts().filter(m => !this.isBelowGround(m.pos[1])
+      && !this.findNodeNear(...m.pos)
+      && !this._fittingBlocked('multi-wheel2', m.pos, m.dir, BEARING_LEN * 0.45));
+  }
+
+  addWindmillAtBearing(bearingId) {
+    const mount = this.windmillBearingMounts().find(m => m.bearingId === bearingId);
+    if (!mount) return null;
+    const node = this.addNode(...mount.pos);
+    node.part = 'windmill';
+    node.partMask = HOLE_MASKS.windmill;
+    node.partQuat = mount.quat.slice();
+    node.stub = holeArmDirs(node)[0];
+    return node;
   }
 
   /**
@@ -1715,6 +2139,7 @@ export class BuildModel {
       const C = t.bowCenter;
       // Ecke gegenueber dem Mittelpunkt: dort sitzt der Bezugspunkt des Tuchs.
       bows.push({
+        id: t.id,
         O: [a.x + b.x - C[0], a.y + b.y - C[1], a.z + b.z - C[2]],
         u: norm3([a.x - (a.x + b.x - C[0]), a.y - (a.y + b.y - C[1]), a.z - (a.z + b.z - C[2])]),
         v: norm3([b.x - (a.x + b.x - C[0]), b.y - (a.y + b.y - C[1]), b.z - (a.z + b.z - C[2])]),
@@ -1739,7 +2164,7 @@ export class BuildModel {
         // entscheidet die Rechtshaendigkeit gegen die Achse zum zweiten Bogen.
         let ey = p.u, ex = [-p.v[0], -p.v[1], -p.v[2]];
         if (dot3(cross3(ex, ey), ez) < 0) { ey = p.v; ex = [-p.u[0], -p.u[1], -p.u[2]]; }
-        out.push({ pos: p.O, dir: ex, quat: quatFromBasis(ex, ey, ez) });
+        out.push({ pos: p.O, dir: ex, quat: quatFromBasis(ex, ey, ez), tubeIds: [p.id, s.id] });
       }
     }
     return out;
@@ -1751,8 +2176,13 @@ export class BuildModel {
   // An der Kupplung: jede kardinale Richtung ohne Rohr, nicht unter den Boden.
   // Die Laufrolle haengt immer nach unten, sie kennt nur diese eine Stelle.
   _fittingNodeMounts(spec, cs = 5, kind = null) {
+    return [...this.nodes.values()].flatMap(n=>placementMemo(this,'node-fitting:'+JSON.stringify([n.id,spec,cs,kind]),
+      {bounds:pointsBounds([[n.x,n.y,n.z]],Math.max(cs,Math.abs(spec.offset))+12),ids:new Set([n.id])},()=>this._computeFittingNodeMounts(spec,cs,kind,[n])));
+  }
+
+  _computeFittingNodeMounts(spec, cs, kind, nodes) {
     const out = [];
-    for (const n of this.nodes.values()) {
+    for (const n of nodes) {
       if (n.c45body) continue;                       // Adapterkoerper ist keine Kupplung
       // Knoten mit festem Katalogteil (Lochzapfen-, Lagerkupplung, Flexi) sind
       // keine Kupplung mit freien Stutzen -- ein Anbauteil sitzt dort nicht.
@@ -1848,12 +2278,36 @@ export class BuildModel {
       // schraeg. Ohne das boete sie die Weltachsen an und ein angestecktes Rohr
       // liefe im falschen Winkel weg.
       node.quat = f.quat.slice();
+    } else if (part === "windmill") {
+      const ex = norm3(this._tubeDir(this.tubes.get(tubeId)));
+      const ey = norm3(m.stub);
+      node.part = part;
+      node.partMask = HOLE_MASKS[part];
+      node.partQuat = quatFromBasis(ex, ey, cross3(ex, ey)).map(round4);
     } else {
       node.part = part;
     }
     node.clampOn = { tubeId, t: m.t };
     node.stub = m.stub;
     return node;
+  }
+
+  bearingEndpoints() { return bearingEndpoints(this); }
+
+  bearingConnectionProbe(nodeId,tubeId,point,cs=5) {
+    const probe=bearingConnectionProbe(this,nodeId,tubeId,point,cs);
+    if(probe.center)probe.fitting={kind:'bearing-connector4',x:probe.center[0],y:probe.center[1],z:probe.center[2],quat:bearingQuat(probe.stub.map(v=>-v),probe.axis)};
+    return probe;
+  }
+
+  connectExistingBearing(nodeId,tubeId,point,cs=5) {
+    const probe=this.bearingConnectionProbe(nodeId,tubeId,point,cs);
+    if(!probe.valid)return probe;
+    const node=this.nodes.get(nodeId),quat=bearingQuat(probe.stub.map(v=>-v),probe.axis);
+    const fitting=this.addFitting('bearing-connector4',...probe.center,{quat});
+    node.bearingOn=fitting.id;node.clampOn={tubeId,t:round(probe.t)};
+    node.stub=probe.stub.slice();node.quat=quat.slice();
+    return {...probe,fittingId:fitting.id};
   }
 
   /**
@@ -1913,16 +2367,8 @@ export class BuildModel {
    * sich waehlen, in welcher Richtung das Rohr spaeter durchlaeuft. Steckt schon
    * eines darin, gilt `rotateTubeClamp`.
    */
-  turnBearingMouth(nodeId) {
-    const n = this.nodes.get(nodeId);
-    if (!n || !n.bearingOn || n.clampOn) return false;
-    const f = this.fittings.get(n.bearingOn);
-    if (!f || !f.quat) return false;
-    // +Y wandert auf +Z, die Ausrichtung (+X) bleibt.
-    f.quat = quatFromBasis(xAxisOf(f.quat), zAxisOf(f.quat),
-      cross3(xAxisOf(f.quat), zAxisOf(f.quat)));
-    n.quat = f.quat.slice();
-    return true;
+  turnBearingMouth(nodeId, radians = Math.PI / 2) {
+    return this.rotateJoint({ kind: 'bearing', nodeId }, radians);
   }
 
   /** Rohr im Maul einer Lagerkupplung vermerken. */
@@ -1962,8 +2408,13 @@ export class BuildModel {
    * -X-Achse).
    */
   holeArmMounts(cs = 5) {
+    return [...this.nodes.values()].flatMap(n=>placementMemo(this,'hole-arm:'+JSON.stringify([n.id,cs]),
+      {bounds:pointsBounds([[n.x,n.y,n.z]],cs+12),ids:new Set([n.id])},()=>this._computeHoleArmMounts(cs,[n])));
+  }
+
+  _computeHoleArmMounts(cs,nodes) {
     const out = [];
-    for (const n of this.nodes.values()) {
+    for (const n of nodes) {
       if (n.part || n.bearingOn || n.unused || n.c45body) continue;
       const belegt = [];
       for (const t of this.tubes.values()) {
@@ -2026,19 +2477,10 @@ export class BuildModel {
 
   /**
    * Lochzapfenkupplung um 90 Grad um ihre Lochachse weiterdrehen -- damit ihre
-   * Arme woandershin zeigen. Steckt schon ein Rohr darin, bleibt sie stehen:
-   * sonst risse die Drehung das Rohr von seinem Arm.
+   * Arme und alle daran angeschlossenen Komponenten drehen gemeinsam.
    */
-  turnHoleClamp(nodeId) {
-    const n = this.nodes.get(nodeId);
-    if (!n || !isHolePart(n.part) || !n.partQuat) return false;
-    if (this.degree(n.id) > 0) return false;
-    const ex = xAxisOf(n.partQuat), ez = zAxisOf(n.partQuat);
-    // +Y wandert auf +Z, die Lochachse (+X) bleibt.
-    n.partQuat = quatFromBasis(ex, ez, cross3(ex, ez)).map(round4);
-    const arme = holeArmDirs(n);
-    if (arme.length) n.stub = arme[0];
-    return true;
+  turnHoleClamp(nodeId, radians = Math.PI / 2) {
+    return this.rotateJoint({ kind: 'hole', nodeId }, radians);
   }
 
   /**
@@ -2101,6 +2543,14 @@ export class BuildModel {
     n.part = BOLT_PART;
     n.partQuat = quatFromBasis(ex, ey, cross3(ex, ey)).map(round4);
     n.hinges = [];
+    return n;
+  }
+
+  /** 整套安装仍保存为一根栓和两片铰链，清单与 QDF 沿用独立零件。 */
+  addFlexiJoint(nodeId, cs = 5) {
+    const n = this.addBolt(nodeId, cs);
+    if (!n) return null;
+    n.hinges = [90, 225];
     return n;
   }
 
@@ -2177,21 +2627,188 @@ export class BuildModel {
    * Scharnier um 45 Grad um die Bolzenachse weiterdrehen. Stellungen, die dem
    * anderen Scharnier naeher als 90 Grad kaemen, werden dabei uebersprungen --
    * der Klick geht also weiter, bis die naechste erlaubte Rastung kommt.
-   * Haengt an diesem Arm ein Rohr, bleibt es stehen: sonst risse die Drehung
-   * das Rohr vom Stutzen.
+   * 活动臂上已连接的管和配件随铰链一起转动。
    */
   turnHinge(nodeId, index = 0) {
     const n = this.nodes.get(nodeId);
     if (!isBoltPart(n && n.part) || !n.hinges || index >= n.hinges.length) return false;
-    if (this._armHasTube(n, hingeDir(n, n.hinges[index]))) return false;
+    if (index < 0 || !Number.isInteger(index)) return false;
     const andere = n.hinges.filter((_, i) => i !== index)
       .map((g) => ((g % 360) + 360) % 360);
     let g = n.hinges[index];
     for (let i = 0; i < 360 / HINGE_STEP; i++) {
       g = (g + HINGE_STEP) % 360;
-      if (andere.every((h) => hingeGap(g, h) >= HINGE_MIN_GAP)) { n.hinges[index] = g; return true; }
+      if (andere.every((h) => hingeGap(g, h) >= HINGE_MIN_GAP)) return this._rotateHingeTo(n, index, g);
     }
     return false;
+  }
+
+  /** 连续转动一片铰链；到达另一片的边界时停住，不跳过禁用角度。 */
+  rotateHingeBy(nodeId, index, delta) {
+    const node = this.nodes.get(nodeId);
+    if (!isBoltPart(node?.part) || !Number.isInteger(index) || index < 0
+        || !node.hinges || index >= node.hinges.length || !Number.isFinite(delta)) return false;
+    const angle = node.hinges[index];
+    let move = delta;
+    for (let i = 0; i < node.hinges.length; i++) {
+      if (i === index) continue;
+      const relative = ((angle - node.hinges[i]) % 360 + 360) % 360;
+      if (relative < HINGE_MIN_GAP - 0.01 || relative > 360 - HINGE_MIN_GAP + 0.01) return false;
+      move = Math.max(HINGE_MIN_GAP - relative, Math.min(360 - HINGE_MIN_GAP - relative, move));
+    }
+    return this._rotateHingeTo(node, index, Math.round((((angle + move) % 360 + 360) % 360) * 1e4) / 1e4 % 360);
+  }
+
+  /** 从这一片的接管方向出发，截断栓上的其他连接，找出可整体跟转的分支。 */
+  _hingeBranch(node, index) {
+    const direction = hingeDir(node, node.hinges[index]);
+    const roots = new Set(), fixed = new Set();
+    for (const tube of this.tubes.values()) {
+      const id = tube.a === node.id ? tube.b : tube.b === node.id ? tube.a : null;
+      if (!id) continue;
+      const end = this.nodes.get(id);
+      if (!end) continue;
+      const aligned = !tube.link && dot3(norm3(this._tubeDirAt(tube, node, end)), direction) > 0.9;
+      (aligned ? roots : fixed).add(id);
+    }
+    const adj = this._nodeAdj({origin:[node.x,node.y,node.z],axis:boltAxis(node)});
+    const join = (ids) => {
+      for (const id of ids) for (const other of ids) {
+        if (id === other) continue;
+        if (!adj.has(id)) adj.set(id, []);
+        adj.get(id).push(other);
+      }
+    };
+    for (const map of [this.panels, this.textiles, this.fittings, this.slides]) for (const part of map.values()) {
+      join([...new Set(this._jointSupports(part).flatMap(id => {
+        const tube = this.tubes.get(id);
+        return tube ? [tube.a, tube.b] : [];
+      }).concat(part.nodes || []))]);
+    }
+    for (const part of this.nodes.values()) {
+      if (!isHolePart(part.part) || part.clampOn) continue;
+      const carrier = this._holeCarrier(part);
+      if (carrier) join([part.id, carrier.id]);
+    }
+    for (const clamp of this.clamps.values()) {
+      const a = this._clampBaseTube(clamp), b = this._clampSecondTube(clamp);
+      if (a && b) join([a.a, a.b, b.a, b.b]);
+    }
+    const nodes = new Set(roots), queue = [...roots];
+    for (let i = 0; i < queue.length; i++) for (const id of adj.get(queue[i]) || []) {
+      if (id === node.id || nodes.has(id)) continue;
+      nodes.add(id); queue.push(id);
+    }
+    if ([...fixed].some(id => nodes.has(id))) return null;
+    // 管夹或板件在栓上还有独立固定点时，也不能把固定结构从锚点扯走。
+    const original = this._nodeAdj().get(node.id) || [];
+    if (original.some(id => nodes.has(id) && !roots.has(id))) return null;
+    const tubes = new Set();
+    for (const tube of this.tubes.values()) {
+      if (nodes.has(tube.a) && nodes.has(tube.b)
+          || tube.a === node.id && roots.has(tube.b)
+          || tube.b === node.id && roots.has(tube.a)) tubes.add(tube.id);
+    }
+    const joint={origin:[node.x,node.y,node.z],axis:boltAxis(node)};
+    for(const id of nodes){const part=this.nodes.get(id);if(part.clampOn&&!tubes.has(part.clampOn.tubeId)&&(!part.bearingOn||!this._jointCoaxialTube(joint,part.clampOn.tubeId)))return null;}
+    return { nodes, tubes };
+  }
+
+  _rotateHingeTo(node, index, angle) {
+    this.hingeRotationFailure = null;
+    const branch = this._hingeBranch(node, index);
+    if (!branch) { this.hingeRotationFailure = "connected"; return false; }
+    const affected = new Set(branch.nodes); affected.add(node.id);
+    if (this._incompleteComponentMove({ nodes: affected })) {
+      this.hingeRotationFailure = "connected"; return false;
+    }
+    const change = ((angle - node.hinges[index] + 540) % 360) - 180;
+    if (Math.abs(change) < 1e-7) return true;
+    const radians = -change * Math.PI / 180;
+    const ax = { o: [node.x, node.y, node.z], u: boltAxis(node) };
+    const co = Math.cos(radians), si = Math.sin(radians);
+    const point = p => rodriguesAt(p, ax.o, ax.u, co, si).map(round);
+    const direction = d => rodriguesDir(d, ax.u, co, si).map(round4);
+    const spin = q => spinAroundAxis(q || [0, 0, 0, 1], ax.u, radians);
+    const positions = new Map([...branch.nodes].map(id => {
+      const n = this.nodes.get(id); return [id, point([n.x, n.y, n.z])];
+    }));
+    const bows = new Map();
+    for (const id of branch.tubes) {
+      const tube = this.tubes.get(id);
+      if (tube.bow && tube.bowCenter) {
+        const center = point(tube.bowCenter);
+        const a = this.nodes.get(tube.a), b = this.nodes.get(tube.b);
+        if (this.isBelowGround(this._bowLowestY(positions.get(a.id) || [a.x, a.y, a.z], positions.get(b.id) || [b.x, b.y, b.z], center))) {
+          this.hingeRotationFailure = "ground"; return false;
+        }
+        bows.set(id, center);
+      }
+    }
+    if ([...positions.values()].some(p => this.isBelowGround(p[1]))) {
+      this.hingeRotationFailure = "ground"; return false;
+    }
+    // 配件按实际宿主管／节点归属；靠近分支的固定配件不会被顺带抓走。
+    const onBranch = (x, y, z, tubeId) => {
+      if (tubeId) return branch.tubes.has(tubeId);
+      let nearest = Infinity, moving = false;
+      const consider = (distance, belongs) => {
+        if (distance < nearest - 1e-6) { nearest = distance; moving = belongs; }
+        else if (Math.abs(distance - nearest) < 1e-6 && !belongs) moving = false;
+      };
+      for (const n of this.nodes.values()) consider(Math.hypot(n.x - x, n.y - y, n.z - z), branch.nodes.has(n.id));
+      for (const tube of this.tubes.values()) {
+        const a = this.nodes.get(tube.a), b = this.nodes.get(tube.b);
+        if (a && b && !tube.arm && !tube.link) consider(distPointToSeg(x, y, z, a, b), branch.tubes.has(tube.id));
+      }
+      return moving && nearest < 16;
+    };
+    const bearingIds = new Set([...branch.nodes].map(id => this.nodes.get(id).bearingOn).filter(Boolean));
+    if ([...bearingIds].some(id => {
+      const fitting = this.fittings.get(id);
+      return fitting && this.isBelowGround(point([fitting.x, fitting.y, fitting.z])[1]);
+    })) { this.hingeRotationFailure = "ground"; return false; }
+    const extras = [...this.fittings.values()].filter(f => !bearingIds.has(f.id) && onBranch(f.x, f.y, f.z, f.tube));
+    const clamps = [...this.clamps.values()].filter(c => branch.tubes.has(this._clampBaseTube(c)?.id));
+    const slideIds = new Set();
+    for (const slide of this.slides.values()) {
+      const entry = this.slideEntry(slide);
+      if (entry && onBranch(entry.x, entry.y, entry.z)) for (const id of this._slideChainIds(slide.id)) slideIds.add(id);
+    }
+    const slides = [...slideIds].map(id => this.slides.get(id));
+    if ([...extras, ...clamps, ...slides].some(o => this.isBelowGround(point([o.x, o.y, o.z])[1]))) {
+      this.hingeRotationFailure = "ground"; return false;
+    }
+    const snapshot = this.toJSON(), collidedBefore = this.collisions({ only: branch.tubes });
+    this._syncAutomaticConnectorFrames([...positions.keys()].map(id => this.nodes.get(id)));
+    for (const [id, p] of positions) {
+      const n = this.nodes.get(id); [n.x, n.y, n.z] = p;
+      this._spinNodeAround(n, ax, co, si, radians);
+    }
+    for (const id of branch.tubes) {
+      const tube = this.tubes.get(id);
+      if (bows.has(id)) tube.bowCenter = bows.get(id);
+      if (tube.geom) tube.geom = { ...tube.geom, p0: point(tube.geom.p0), dir: direction(tube.geom.dir),
+        ...(tube.geom.up ? { up: direction(tube.geom.up) } : {}) };
+    }
+    for (const map of [this.panels, this.textiles]) for (const part of map.values()) {
+      if (!branch.tubes.has(part.a) || !branch.tubes.has(part.b)) continue;
+      if (part.geom?.p) part.geom = { ...part.geom, p: point(part.geom.p), ...(part.geom.quat ? { quat: spin(part.geom.quat) } : {}) };
+      if (part.pool?.p) part.pool = { ...part.pool, p: point(part.pool.p), quat: spin(part.pool.quat) };
+    }
+    for (const o of [...extras, ...clamps, ...slides]) {
+      [o.x, o.y, o.z] = point([o.x, o.y, o.z]);
+      if (o.quat || o.kind) o.quat = spin(o.quat);
+      if (o.dir) o.dir = direction(o.dir);
+      if (o.off) o.off = rodriguesDir(o.off, ax.u, co, si).map(round);
+      if (o.hook) o.hook = point(o.hook);
+      if (o.foot?.p0) o.foot = { ...o.foot, p0: point(o.foot.p0), dir: direction(o.foot.dir) };
+    }
+    node.hinges[index] = angle;
+    if ([...this.collisions({ only: branch.tubes })].some(id => !collidedBefore.has(id))) {
+      this.loadJSON(snapshot); this.hingeRotationFailure = "collision"; return false;
+    }
+    return true;
   }
 
   /**
@@ -2203,6 +2820,11 @@ export class BuildModel {
   tubeClampMount(tubeId, point, part, cs = 5) {
     const g = this._clampGeom(tubeId, point);
     if (!g) return null;
+    if (part === 'windmill') {
+      const tube = this.tubes.get(tubeId), a = this.nodes.get(tube.a), b = this.nodes.get(tube.b);
+      const length = Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
+      if (g.t < cs / 2 || g.t > length - cs / 2) return null;
+    }
     const off = clampOffset(part, cs);
     const pos = [g.axis[0] + g.stub[0] * off, g.axis[1] + g.stub[1] * off, g.axis[2] + g.stub[2] * off];
     if (this.isBelowGround(pos[1])) return null;
@@ -2319,6 +2941,24 @@ export class BuildModel {
     return [round4(quer[0] / L), round4(quer[1] / L), round4(quer[2] / L)];
   }
 
+  _textileRailRange(tubeId, rail) {
+    const tube = this.tubes.get(tubeId);
+    const range = { lo: 0, hi: rail.len };
+    // 轴承的横向连接体与横管组成连续承托，不把布带截在管端接头处。
+    for (const [id, start] of [[tube.a, true], [tube.b, false]]) {
+      const node = this.nodes.get(id);
+      const bearing = node?.bearingOn && this.fittings.get(node.bearingOn);
+      if (!bearing || bearing.kind !== 'bearing-connector4') continue;
+      const offset = [bearing.x - rail.p0[0], bearing.y - rail.p0[1], bearing.z - rail.p0[2]];
+      const along = dot3(offset, rail.dir);
+      const distance = Math.hypot(...offset.map((v, i) => v - along * rail.dir[i]));
+      if (distance > .05) continue;
+      if (start) range.lo = Math.min(range.lo, along);
+      else range.hi = Math.max(range.hi, along);
+    }
+    return range;
+  }
+
   /**
    * Gegenrohre fuer ein Netz. Anders als eine Platte hat das Netz keine
    * feste Groesse -- die Datei speichert seine Masse -- deshalb passt jeder
@@ -2332,13 +2972,15 @@ export class BuildModel {
    * @param {string} railId
    * @param {number} [tol]
    * @param {{ along: number, gap: number } | null} [size]
+   * @param {boolean} [flexible] 彩虹门按实际管间距和连续承托长度安装。
    */
-  latticePartners(railId, tol = 1.5, size = null) {
+  latticePartners(railId, tol = 1.5, size = null, flexible = false) {
     const gaps = size ? [size.gap] : LATTICE_GAPS;
     const step = size ? size.along : LATTICE_STEP;
     const max = size ? size.along : LATTICE_MAX;
     const ra = this._rail(railId);
     if (!ra) return [];
+    const aRange = flexible ? this._textileRailRange(railId, ra) : { lo: 0, hi: ra.len };
     const out = [];
     for (const t of this.tubes.values()) {
       if (t.id === railId || t.arm || t.link || t.bow) continue;
@@ -2350,13 +2992,14 @@ export class BuildModel {
       const along = off[0] * ra.dir[0] + off[1] * ra.dir[1] + off[2] * ra.dir[2];
       const perp = [off[0] - ra.dir[0] * along, off[1] - ra.dir[1] * along, off[2] - ra.dir[2] * along];
       const gap = Math.hypot(perp[0], perp[1], perp[2]);
-      if (!gaps.some((g) => Math.abs(g - gap) <= tol)) continue;
-      const e = along + rb.len * dot;
-      const lo = Math.max(0, Math.min(along, e));
-      const hi = Math.min(ra.len, Math.max(along, e));
+      if (flexible ? gap <= 5 : !gaps.some((g) => Math.abs(g - gap) <= tol)) continue;
+      const bRange = flexible ? this._textileRailRange(t.id, rb) : { lo: 0, hi: rb.len };
+      const b0 = along + bRange.lo * dot, b1 = along + bRange.hi * dot;
+      const lo = Math.max(aRange.lo, Math.min(b0, b1));
+      const hi = Math.min(aRange.hi, Math.max(b0, b1));
       const span = hi - lo;
-      if (span < step - tol) continue;
-      const len = Math.min(max, Math.floor((span + tol) / step) * step);
+      if (flexible ? span <= 5 : span < step - tol) continue;
+      const len = flexible ? span : Math.min(max, Math.floor((span + tol) / step) * step);
       out.push({ id: t.id, gap: round(gap), len, lo: round(lo), hi: round(hi) });
     }
     return out;
@@ -2367,14 +3010,15 @@ export class BuildModel {
    * 避免竖管对和横管对在同一面上叠两块绿。size 是固定尺寸布面的 { along, gap }。
    * @param {string} kind
    * @param {{ along: number, gap: number } | null} [size]
+   * @param {boolean} [flexible]
    */
-  railFittingMounts(kind, size = null) {
+  railFittingMounts(kind, size = null, flexible = false) {
     const out = [];
     const seenPair = new Set();
     const seenFace = new Set();
     for (const t of this.tubes.values()) {
       if (t.arm || t.link || t.bow) continue;
-      const partners = kind === "bag2" ? this.bagPartners(t.id) : this.latticePartners(t.id, 1.5, size);
+      const partners = kind === "bag2" ? this.bagPartners(t.id) : this.latticePartners(t.id, 1.5, size, flexible);
       for (const p of partners) {
         const count = Math.max(1, Math.floor((p.hi - p.lo + 0.5) / p.len));
         for (let k = 0; k < count; k++) {
@@ -2382,15 +3026,11 @@ export class BuildModel {
           const pairKey = [t.id, p.id].sort().join("|") + "|" + t0 + "|" + p.len;
           if (seenPair.has(pairKey)) continue;
           seenPair.add(pairKey);
-          if (this._railFittingTaken(kind, t.id, p.id, t0, p.len)) continue;
           const cor = this.panelCorners({ a: t.id, b: p.id, t0, len: p.len });
           if (!cor) continue;
           const faceKey = this._railFaceKey(cor);
-          if (seenFace.has(faceKey) || this._railFaceTaken(kind, cor)) continue;
+          if (seenFace.has(faceKey)) continue;
           seenFace.add(faceKey);
-          // Auf einer Platte, einem Tuch oder quer ueber ein Rohr laesst sich
-          // nichts spannen -- das Feld muss frei sein.
-          if (!this._openingFree(cor)) continue;
           out.push({ a: t.id, b: p.id, t0, len: p.len, corners: cor });
         }
       }
@@ -2399,55 +3039,16 @@ export class BuildModel {
   }
 
   /**
-   * 两根承重管之间这一段还空着吗？kind 为 null 按面板算（面板和布面都不许叠），
-   * 网 / 布面 / 玩具袋用自己的占位规则，和 railFittingMounts 出绿格子是同一套。
+   * 面板检查硬质面板占用；网 / 布面 / 玩具袋允许重叠放置。
    */
   sectionFree(kind, aId, bId, t0, len) {
     if (!kind) return !this.panelAt(aId, bId, t0, len);
-    if (this._railFittingTaken(kind, aId, bId, t0, len)) return false;
     const cor = this.panelCorners({ a: aId, b: bId, t0, len });
-    return !!cor && !this._railFaceTaken(kind, cor) && this._openingFree(cor);
+    return !!cor;
   }
 
   _railFaceKey(cor) {
     return cor.map((c) => c.map((v) => Math.round(v)).join(",")).sort().join(";");
-  }
-
-  _railFaceTaken(kind, cor) {
-    const faceKey = this._railFaceKey(cor);
-    if (kind === "textil2") {
-      for (const x of this.textiles.values()) {
-        const existing = this.panelCorners(x);
-        if (existing && this._railFaceKey(existing) === faceKey) return true;
-      }
-      return false;
-    }
-    const mid = [0, 1, 2].map((i) => cor.reduce((s, q) => s + q[i], 0) / 4);
-    const near = kind === "bag2" ? 5 : 2;
-    for (const f of this.fittings.values()) {
-      if (f.kind !== kind) continue;
-      if (Math.hypot(f.x - mid[0], f.y - mid[1], f.z - mid[2]) < near) return true;
-    }
-    return false;
-  }
-
-  _railFittingTaken(kind, aId, bId, t0, len) {
-    if (kind === "textil2") {
-      for (const x of this.textiles.values()) {
-        if (((x.a === aId && x.b === bId) || (x.a === bId && x.b === aId))
-          && Math.abs((x.t0 || 0) - t0) < 2) return true;
-      }
-      return false;
-    }
-    const cor = this.panelCorners({ a: aId, b: bId, t0, len });
-    if (!cor) return false;
-    const c = [0, 1, 2].map((i) => cor.reduce((s, q) => s + q[i], 0) / 4);
-    const near = kind === "bag2" ? 5 : 2;
-    for (const f of this.fittings.values()) {
-      if (f.kind !== kind) continue;
-      if (Math.hypot(f.x - c[0], f.y - c[1], f.z - c[2]) < near) return true;
-    }
-    return false;
   }
 
   /**
@@ -2478,7 +3079,6 @@ export class BuildModel {
     const perp = [off[0] - ra.dir[0] * along, off[1] - ra.dir[1] * along, off[2] - ra.dir[2] * along];
     const gap = Math.hypot(perp[0], perp[1], perp[2]);
     if (gap < 1) return null;
-    if (this.panelAt(aId, bId, t0, len)) return null;        // dort liegt schon ein Tuch oder eine Platte
     const tx = {
       id: this._id("x"), a: aId, b: bId, t0: round(t0), len: round(len),
       w: round(len - 5), h: round(gap - 5), color: color || null, side: 1,
@@ -2518,9 +3118,6 @@ export class BuildModel {
     ];
     const ey = [ra.dir[0] * sign, ra.dir[1] * sign, ra.dir[2] * sign];
     const ez = [up[1] * ey[2] - up[2] * ey[1], up[2] * ey[0] - up[0] * ey[2], up[0] * ey[1] - up[1] * ey[0]];
-    for (const f of this.fittings.values()) {
-      if (f.kind === "lattice2" && Math.hypot(f.x - c[0], f.y - c[1], f.z - c[2]) < 2) return null;
-    }
     return this.addFitting("lattice2", c[0], c[1], c[2],
       { quat: quatFromBasis(up, ey, ez), color: color || null, w, h });
   }
@@ -2560,9 +3157,6 @@ export class BuildModel {
       A[1] + ra.dir[1] * (len / 2) + perp[1] / 2,
       A[2] + ra.dir[2] * (len / 2) + perp[2] / 2,
     ];
-    for (const f of this.fittings.values()) {
-      if (f.kind === "bag2" && Math.hypot(f.x - c[0], f.y - c[1], f.z - c[2]) < 5) return null;
-    }
     // Dreibein wie in den Herstellerdateien: lokales X laeuft AM ROHR entlang,
     // Y zeigt nach oben, Z zum zweiten Rohr. (Gemessen an allen fuenf Saecken:
     // Kupplungen liegen lokal bei (+-200, 0, 0) und (+-200, 0, 400).)
@@ -2603,8 +3197,10 @@ export class BuildModel {
     }
     const half = (FITTING_WIDTH[kind] || 0) / 2;
     if (half && this._fittingBlocked(kind, mount.pos, mount.dir || [1, 0, 0], half)) return null;
+    const quat = mount.quat || quatFromXAxis(mount.dir);
+    if (this._nativeWheelComponentBlocked(kind, mount.pos, quat)) return null;
     const f = this.addFitting(kind, mount.pos[0], mount.pos[1], mount.pos[2],
-      { quat: mount.quat || quatFromXAxis(mount.dir), color: color || null });
+      { quat, color: color || null });
     // Eine Laufrolle sitzt immer auf ihrem Adapter -- der kommt deshalb im
     // selben Zug mit. In der Stueckliste bleiben es zwei Teile.
     if (f && kind === "casters2") {
@@ -2637,7 +3233,8 @@ export class BuildModel {
   //
   // 竖管到横梁就结束（两层立方框的顶面）时，滑梯也能搭在顶梁上——这时绿面
   // 是横梁下方那一格；只有上面什么都不接时才这样算，免得同一根横梁出两个面。
-  slideMounts(width = 40, tol = 2, kind = "slide-new2", includeOccupied = false) {
+  /** @param {number[] | null} preferredNormal */
+  slideMounts(width = 40, tol = 2, kind = "slide-new2", includeOccupied = false, preferredNormal = null) {
     // Ein Koerper einer Kette endet nicht hier: hinter ihm kommt das naechste
     // Teil, sein Fuss muss also nichts tragen. Einteilige Rutschen brauchen
     // Boden oder Geruest unter dem Auslauf.
@@ -2676,10 +3273,14 @@ export class BuildModel {
         const sdist = (n.x - hook[0]) * nrm[0] + (n.z - hook[2]) * nrm[2];
         if (sdist > 5) front++; else if (sdist < -5) back++;
       }
-      let dir = front > back ? [-nrm[0], 0, -nrm[2]] : nrm;
+      const directed = Array.isArray(preferredNormal) && preferredNormal.length === 3 && preferredNormal.every(Number.isFinite)
+        && Math.abs(preferredNormal[1]) < 0.01 && Math.abs(Math.hypot(...preferredNormal) - 1) < 0.01;
+      if (preferredNormal != null && (!directed || Math.abs(dot3(preferredNormal, nrm)) < 0.999)) return;
+      let dir = directed ? [...preferredNormal] : front > back ? [-nrm[0], 0, -nrm[2]] : nrm;
       const usable = (vec) => this._slidePathFree(hook, vec, mass)
         && (!brauchtAuflage || this._slideFootRests(hook, vec, groundY, mass));
       if (!usable(dir)) {
+        if (directed) return;
         const other = [-dir[0], 0, -dir[2]];
         if (!usable(other)) return;
         dir = other;
@@ -2743,24 +3344,16 @@ export class BuildModel {
   }
 
   /**
-   * Ist dieses Feld frei -- keine Platte, kein Tuch, kein Netz darauf, kein
-   * Rohr und keine Kupplung mittendrin? Der Rand (die tragenden Rohre und ihre
-   * Kupplungen) zaehlt nicht. Platten und Tuecher werden ueber die gemeinsame
-   * Ebene und Trennachsen verglichen, so faellt auch ein breiteres Tuch auf,
-   * das dieses Feld nur mit abdeckt.
+   * 开口检查硬质面板、管件和接头；软装不占用开口，承载边不算障碍。
    */
   _openingFree(corners) {
+    return placementMemo(this,'opening-free:'+JSON.stringify(corners),{bounds:pointsBounds(corners,12)},()=>this._computeOpeningFree(corners));
+  }
+
+  _computeOpeningFree(corners) {
     for (const p of this.panels.values()) {
+      if (isSoftPart(this, p)) continue;
       const c = this.panelCorners(p);
-      if (c && this._panelsOverlap(corners, c)) return false;
-    }
-    for (const x of this.textiles.values()) {
-      const c = this.panelCorners(x);
-      if (c && this._panelsOverlap(corners, c)) return false;
-    }
-    for (const f of this.fittings.values()) {
-      if (f.kind !== "lattice2") continue;
-      const c = this._latticeCorners(f);
       if (c && this._panelsOverlap(corners, c)) return false;
     }
     const [c0, c1, , c3] = corners;
@@ -3300,7 +3893,7 @@ export class BuildModel {
     if (!map) return false;
     const el = map.get(id);
     if (!el || el.color === color) return false;
-    if (el.appearanceVersion === 2 && confirmedSpec(el.panelId || el.partId || el.kind)?.fixedColor) return false;
+    if (el.appearanceVersion === 2 && confirmedSpec(el.panelId || el.partId || el.kind)?.fixedColor && !usesCustomClimbingColor(el)) return false;
     if (kind === 'tube' && fixedTubeColor(el.tubeId)) return false;
     // Arm-/Link-Kanten (C45-Adapter, Doppelrohr-Verbindung) sind keine echten
     // Rohre und werden nicht eingefaerbt.
@@ -3354,6 +3947,7 @@ export class BuildModel {
 
     const flap = this._clampFlap(c);
     const tagged = this._flapNodeAxes(c, flap);
+    if (this._incompleteComponentMove({ nodes: new Set(tagged.keys()) })) return false;
     const hingeAx = { o: [c.x, c.y, c.z], u };
     const frozenBase = new Set();
     for (const cid of flap.clampIds) {
@@ -3405,7 +3999,8 @@ export class BuildModel {
       if (!k || !k.off || !k.dir) continue;
       const base = this._clampBaseTube(k);
       const frozen = base && frozenBase.has(base.id);
-      const ax = frozen ? { o: [k.x, k.y, k.z], u: norm3(k.dir) } : axAt(k.x, k.y, k.z);
+      const axis = norm3(k.dir).map(v => v * (dot3(k.dir, u) < 0 ? -1 : 1));
+      const ax = frozen ? { o: [k.x, k.y, k.z], u: axis } : axAt(k.x, k.y, k.z);
       const pos = frozen ? [k.x, k.y, k.z] : rodriguesAt([k.x, k.y, k.z], ax.o, ax.u, co, si);
       const ko = rodriguesDir(k.off, ax.u, co, si);
       const kd = frozen ? k.dir : rodriguesDir(k.dir, ax.u, co, si);
@@ -3417,22 +4012,14 @@ export class BuildModel {
     const extraMove = [];
     for (const f of this.fittings.values()) {
       if (bearingDone.has(f.id)) continue;
-      let ax = null;
-      for (const [nid, a] of tagged) {
-        const n = this.nodes.get(nid);
-        if (n && Math.hypot(n.x - f.x, n.y - f.y, n.z - f.z) <= 3) { ax = a; break; }
-      }
+      const ax = this.clampPartAxis(flap, tagged, f);
       if (!ax) continue;
       const p = rodriguesAt([f.x, f.y, f.z], ax.o, ax.u, co, si);
       if (this.isBelowGround(p[1])) return false;
       extraMove.push({ o: f, p, ax, hook: null });
     }
     for (const s of this.slides.values()) {
-      let ax = null;
-      for (const [nid, a] of tagged) {
-        const n = this.nodes.get(nid);
-        if (n && Math.hypot(n.x - s.x, n.y - s.y, n.z - s.z) <= 3) { ax = a; break; }
-      }
+      const ax = this.clampPartAxis(flap, tagged, s);
       if (!ax) continue;
       const p = rodriguesAt([s.x, s.y, s.z], ax.o, ax.u, co, si);
       if (this.isBelowGround(p[1])) return false;
@@ -3483,6 +4070,41 @@ export class BuildModel {
       ? center[1] + radius * (un[1] * Math.cos(minimumAngle) + wn[1] * Math.sin(minimumAngle))
       : Infinity;
     return Math.min(a[1], b[1], interior);
+  }
+
+  /** 批量枚举关联管件，拖动期间不逐节点扫描整个模型。 */
+  _syncAutomaticConnectorFrames(nodes) {
+    const entries = new Map(nodes.filter(n => !n.part && !n.preferType && !n.ownConnector && !n.c45
+      && !n.c45body && !n.c45file && !n.bearingOn && !n.stub && !n.armDirs?.length)
+      .map(n => [n.id, { node: n, tubes: [] }]));
+    if (!entries.size) return;
+    for (const tube of this.tubes.values()) {
+      if (tube.arm || tube.link) continue;
+      entries.get(tube.a)?.tubes.push(tube);
+      entries.get(tube.b)?.tubes.push(tube);
+    }
+    for (const { node, tubes } of entries.values()) this._syncAutomaticConnectorFrame(node, tubes);
+  }
+
+  /** 自动接头的坐标随实际直角管件恢复，保留手动型号及空插口。 */
+  _syncAutomaticConnectorFrame(n, tubes) {
+    const dirs = [];
+    for (const tube of tubes) {
+      const other = this.nodes.get(tube.a === n.id ? tube.b : tube.a);
+      if (other) dirs.push(norm3(this._tubeDirAt(tube, n, other)));
+    }
+    if (dirs.length < 2 || dirs.some((d, i) => dirs.slice(0, i).some(e => dot3(d, e) > .99))) return;
+    const axes = n.quat?.length === 4 ? [xAxisOf(n.quat), yAxisOf(n.quat), zAxisOf(n.quat)]
+      : [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+    if (dirs.every(d => axes.some(axis => Math.abs(dot3(d, axis)) > .99999))) return;
+    // 文件里的额外空插口代表独立的实体形状，不能按已接管件缩减。
+    if (n.arms?.some(arm => !dirs.some(d => dot3(norm3(arm), d) > .99))) return;
+    const ex = dirs[0], second = dirs.find(d => Math.abs(dot3(ex, d)) < .01);
+    if (!second) return;
+    const along = dot3(ex, second), ey = norm3(second.map((v, i) => v - along * ex[i])), ez = cross3(ex, ey);
+    if (!dirs.every(d => [ex, ey, ez].some(axis => Math.abs(dot3(d, axis)) > .99999))) return;
+    n.quat = quatFromBasis(ex, ey, ez);
+    if (n.arms?.length) n.arms = dirs.map(d => d.slice());
   }
 
   /** Ausrichtung eines Knotens um Achse `ax.u` mitdrehen (Stutzen, Quaternion). */
@@ -3549,6 +4171,43 @@ export class BuildModel {
   }
 
   _clampBaseTube(c) { return c ? this._clampTubeAt([c.x, c.y, c.z], c.dir) : null; }
+
+  /** 同一直线、实际相连的承载管共用方向，优先夹住已通过该位置的第二根管。 */
+  alignedClampOff(tubeId, off, point) {
+    const rail = this._rail(tubeId);
+    if (!rail) return off;
+    const run = new Set([tubeId]);
+    const nodes = new Set([this.tubes.get(tubeId).a, this.tubes.get(tubeId).b]);
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const tube of this.tubes.values()) {
+        if (run.has(tube.id) || (!nodes.has(tube.a) && !nodes.has(tube.b))) continue;
+        const other = this._rail(tube.id);
+        if (!other || Math.abs(dot3(rail.dir, other.dir)) < .99999) continue;
+        run.add(tube.id);
+        nodes.add(tube.a); nodes.add(tube.b);
+        grew = true;
+      }
+    }
+    let best = null, distance = Infinity, covered = false;
+    for (const clamp of this.clamps.values()) {
+      if (!clamp.off || !run.has(this._clampBaseTube(clamp)?.id)) continue;
+      const second = this._clampSecondTube(clamp);
+      const secondRail = second && this._rail(second.id);
+      if (!secondRail) continue;
+      const hole = point.map((v, i) => v + clamp.off[i]);
+      const along = dot3(hole.map((v, i) => v - secondRail.p0[i]), secondRail.dir);
+      const half = Math.hypot(...clamp.off) / 2;
+      const covers = along > half && along < secondRail.len - half;
+      if (!covers && dot3(norm3(off), norm3(clamp.off)) <= 0) continue;
+      if (covered && !covers) continue;
+      const d = Math.hypot(clamp.x - point[0], clamp.y - point[1], clamp.z - point[2]);
+      if ((covers && !covered) || d < distance) { best = clamp.off; distance = d; covered = covers; }
+    }
+    return best ? norm3(best).map(v => v * Math.hypot(...off)) : off;
+  }
+
   _clampSecondTube(c) {
     if (!c || !c.off) return null;
     return this._clampTubeAt([c.x + c.off[0], c.y + c.off[1], c.z + c.off[2]], c.dir);
@@ -3642,14 +4301,15 @@ export class BuildModel {
     let grow = true;
     while (grow) {
       grow = false;
-      for (const map of [this.panels, this.textiles]) {
+      for (const map of [this.panels, this.textiles, this.fittings]) {
         for (const p of map.values()) {
-          const a = second.has(p.a), bHas = second.has(p.b);
-          if (a === bHas) continue;
-          const other = a ? p.b : p.a;
-          if (bases.has(other) || second.has(other)) continue;
-          second.add(other);
-          grow = true;
+          const supports = Array.isArray(p.supportTubes) ? p.supportTubes : [p.a, p.b, p.tube].filter(id => this.tubes.has(id));
+          if (!supports.some(id => second.has(id))) continue;
+          for (const other of supports) {
+            if (bases.has(other) || second.has(other)) continue;
+            second.add(other);
+            grow = true;
+          }
         }
       }
       for (const o of this.clamps.values()) {
@@ -3691,6 +4351,8 @@ export class BuildModel {
       while (stack.length) {
         const id = stack.pop();
         for (const t of this.tubes.values()) {
+          // 双管夹的连接桥是铰接约束，不能把底框并入活动刚体。
+          if (t.link) continue;
           const other = t.a === id ? t.b : t.b === id ? t.a : null;
           if (other == null || baseNodes.has(other)) continue;
           if (!second.has(t.id)) { second.add(t.id); grow = true; }
@@ -3712,6 +4374,23 @@ export class BuildModel {
     if (!c) return { clamps: new Set(), tubes: new Set() };
     const flap = this._clampFlap(c);
     return { clamps: flap.clampIds, tubes: new Set(flap.second) };
+  }
+
+  /** 配件与滑梯跟随真实承载管或挂点，管中部的配件也属于活动组。 */
+  clampPartAxis(flap, tagged, part) {
+    const supports = Array.isArray(part.supportTubes) ? part.supportTubes
+      : [part.tube, part.a, part.b].filter(id => this.tubes.has(id));
+    if (supports.length) {
+      if (!supports.every(id => flap.second.has(id))) return null;
+      const tube = this.tubes.get(supports[0]);
+      return tube ? tagged.get(tube.a) || tagged.get(tube.b) || null : null;
+    }
+    const point = part.hook || [part.x, part.y, part.z];
+    for (const [nid, ax] of tagged) {
+      const n = this.nodes.get(nid);
+      if (n && Math.hypot(n.x - point[0], n.y - point[1], n.z - point[2]) <= 3) return ax;
+    }
+    return null;
   }
 
   /**
@@ -3741,22 +4420,47 @@ export class BuildModel {
     d = this._limitSlideDelta(flap, u, d);
     if (Math.abs(d) < 1e-6) return false;
     const vec = [u[0] * d, u[1] * d, u[2] * d];
+    const moved = new Set(tagged.keys());
+    if (this._incompleteComponentMove({ nodes: moved })) return false;
+    // 活动组回接固定管时禁止拉伸真实管件；端点之间的虚拟连接允许随滑动改变。
+    for (const t of this.tubes.values()) {
+      const a = moved.has(t.a), b = moved.has(t.b);
+      if (!t.link && a !== b) return false;
+      if (a && b && t.bow && t.bowCenter) {
+        const na = this.nodes.get(t.a), nb = this.nodes.get(t.b);
+        if (this.isBelowGround(this._bowLowestY([na.x, na.y, na.z], [nb.x, nb.y, nb.z], t.bowCenter) + vec[1])) return false;
+      }
+    }
+    for (const map of [this.panels, this.textiles]) {
+      for (const p of map.values()) {
+        const supports = p.supportTubes || [p.a, p.b];
+        const moving = supports.map(id => {
+          const t = this.tubes.get(id);
+          return !!t && moved.has(t.a) && moved.has(t.b);
+        });
+        if (moving.some(Boolean) && !moving.every(Boolean)) return false;
+      }
+    }
+    const extra = [...this.fittings.values(), ...this.slides.values()].filter(p => this.clampPartAxis(flap, tagged, p));
+    if (extra.some(p => this.isBelowGround(p.y + vec[1]))) return false;
+    // 在节点移动前识别嵌套夹子，否则原位置可能已经找不到承载管。
+    const movingClamps = [...flap.clampIds].map(cid => this.clamps.get(cid))
+      .filter(k => k && flap.second.has(this._clampBaseTube(k)?.id));
     for (const nid of tagged.keys()) {
       const n = this.nodes.get(nid);
       if (n && this.isBelowGround(n.y + vec[1])) return false;
     }
-    const moved = new Set();
     for (const nid of tagged.keys()) {
       const n = this.nodes.get(nid);
       if (!n) continue;
       n.x = round(n.x + vec[0]); n.y = round(n.y + vec[1]); n.z = round(n.z + vec[2]);
-      moved.add(n.id);
     }
-    for (const cid of flap.clampIds) {
-      const k = this.clamps.get(cid);
-      const base = k && this._clampBaseTube(k);
-      if (!k || !base || !flap.second.has(base.id)) continue;
+    for (const k of movingClamps) {
       k.x = round(k.x + vec[0]); k.y = round(k.y + vec[1]); k.z = round(k.z + vec[2]);
+    }
+    for (const p of extra) {
+      p.x = round(p.x + vec[0]); p.y = round(p.y + vec[1]); p.z = round(p.z + vec[2]);
+      if (p.hook) p.hook = p.hook.map((v, i) => round(v + vec[i]));
     }
     this._moveTubeGeom(moved, vec);
     this._movePanelGeom(moved, vec);
@@ -3859,7 +4563,8 @@ export class BuildModel {
     for (const cid of flap.clampIds) {
       const k = this.clamps.get(cid);
       if (!k || !k.dir) continue;
-      const ax = { o: [k.x, k.y, k.z], u: norm3(k.dir) };
+      const axis = norm3(k.dir).map(v => v * (dot3(k.dir, hingeAx.u) < 0 ? -1 : 1));
+      const ax = { o: [k.x, k.y, k.z], u: axis };
       const base = this._clampBaseTube(k);
       const sec = this._clampSecondTube(k);
       if (base && !flap.second.has(base.id)) {
@@ -3910,7 +4615,7 @@ export class BuildModel {
     return tagged;
   }
 
-  _nodeAdj() {
+  _nodeAdj(rotationAxis = null, includeClampLinks = true) {
     const adj = new Map();
     const link = (a, b) => {
       if (!a || !b || a === b) return;
@@ -3919,9 +4624,13 @@ export class BuildModel {
       adj.get(a).push(b);
       adj.get(b).push(a);
     };
-    for (const t of this.tubes.values()) link(t.a, t.b);
+    for (const t of this.tubes.values()) {
+      if (t.link && !includeClampLinks) continue;
+      link(t.a, t.b);
+    }
     for (const n of this.nodes.values()) {
       const t = n.clampOn && this.tubes.get(n.clampOn.tubeId);
+      if (t && rotationAxis && n.bearingOn && this._jointCoaxialTube(rotationAxis,t.id)) continue;
       if (t) { link(n.id, t.a); link(n.id, t.b); }
     }
     return adj;
@@ -4035,7 +4744,7 @@ export class BuildModel {
         const f = this.fittings.get(id);
         if (f) {
           fittings.add(id);
-          if (ACCESSORY_IDS.has(f.kind) || (f.kind==='multi-wheel2' && f.appearanceVersion===2)) {
+          if (ACCESSORY_IDS.has(f.kind) || isAluminiumConnector(f) || (f.kind==='multi-wheel2' && f.appearanceVersion===2)) {
             for (const id of Array.isArray(f.supportTubes) ? f.supportTubes : [f.tube]) {
               const tube = this.tubes.get(id);
               if (tube) addNodes([tube.a, tube.b]);
@@ -4046,7 +4755,7 @@ export class BuildModel {
     }
     for (const f of this.fittings.values()) {
       const tube = this.tubes.get(f.tube);
-      if ((ACCESSORY_IDS.has(f.kind) || (f.kind==='multi-wheel2' && f.appearanceVersion===2)) && tube && (Array.isArray(f.supportTubes) ? f.supportTubes : [f.tube]).every(id => { const t = this.tubes.get(id); return t && nodes.has(t.a) && nodes.has(t.b); })) fittings.add(f.id);
+      if ((ACCESSORY_IDS.has(f.kind) || isAluminiumConnector(f) || (f.kind==='multi-wheel2' && f.appearanceVersion===2)) && tube && (Array.isArray(f.supportTubes) ? f.supportTubes : [f.tube]).every(id => { const t = this.tubes.get(id); return t && nodes.has(t.a) && nodes.has(t.b); })) fittings.add(f.id);
     }
     for (const f of this.fittings.values()) if (f.kind === 'carousel_bearing') {
       if (fittings.has(f.id)) {
@@ -4059,8 +4768,7 @@ export class BuildModel {
   }
 
   /**
-   * Vom angeklickten Teil aus: alles, was ueber Rohre / Adapter / Klemmen
-   * zusammenhaengt. Zwei getrennte Aufbauten bleiben zwei Bloecke.
+   * 沿实际管件选择整块；双管连接桥是活动侧与固定架的边界。
    * extra.hinge / extra.tubes kommen vom Treffer (Scharnier, Verstaerkungsprofil).
    */
   connectedSelection(seedId, seedKind, extra = {}) {
@@ -4103,16 +4811,22 @@ export class BuildModel {
       if (p) { addTube(p.a); addTube(p.b); }
     } else if (kind === "clamp") {
       const c = this.clamps.get(id);
-      if (c) addNear(c.x, c.y, c.z, 12);
+      const tube = this._clampSecondTube(c) || this._clampBaseTube(c);
+      if (tube) addTube(tube.id);
     } else if (kind === "fitting") {
       const f = this.fittings.get(id);
       if (f) {
         if (f.tube) addTube(f.tube);
+        for (const tid of f.supportTubes || []) addTube(tid);
         for (const n of this.nodes.values()) if (n.bearingOn === id) out.add(n.id);
         const reach = POOL_KINDS.has(f.kind)
           ? Math.max(50, Math.hypot(f.w || 0, f.h || 0, f.d || 0) / 2 + 25)
           : 16;
-        addNear(f.x, f.y, f.z, reach);
+        if (!out.size) {
+          const near = POOL_KINDS.has(f.kind) ? this._nodesNearPoint(f.x, f.y, f.z, reach)
+            : this._nearestAttachmentNodes(f.x, f.y, f.z, reach);
+          for (const nid of near) out.add(nid);
+        }
       }
     } else if (kind === "slide") {
       for (const sid of this._slideChainIds(id)) {
@@ -4141,8 +4855,26 @@ export class BuildModel {
     return out;
   }
 
+  /** 无承载引用的旧配件归到最近的实体上，避免跨过双管之间的短距离。 */
+  _nearestAttachmentNodes(x, y, z, maxDist) {
+    let distance = maxDist;
+    const out = new Set();
+    const consider = (d, ids) => {
+      if (d > distance + 1e-6) return;
+      if (d < distance - 1e-6) { out.clear(); distance = d; }
+      for (const id of ids) out.add(id);
+    };
+    for (const n of this.nodes.values()) consider(Math.hypot(n.x - x, n.y - y, n.z - z), [n.id]);
+    for (const tube of this.tubes.values()) {
+      if (tube.link || tube.bow) continue;
+      const a = this.nodes.get(tube.a), b = this.nodes.get(tube.b);
+      if (a && b) consider(distPointToSeg(x, y, z, a, b), [a.id, b.id]);
+    }
+    return out;
+  }
+
   _floodNodes(start) {
-    const adj = this._nodeAdj();
+    const adj = this._nodeAdj(null, false);
     const seen = new Set();
     const q = [];
     for (const id of start) {
@@ -4218,15 +4950,23 @@ export class BuildModel {
       }
     }
     for (const c of this.clamps.values()) {
-      if (this._pointOnIsland(c.x, c.y, c.z, nodes, tubeIds, 12, 8)) sel.set(c.id, "clamp");
+      const tube = this._clampSecondTube(c) || this._clampBaseTube(c);
+      if (tube && tubeIds.has(tube.id)) sel.set(c.id, "clamp");
     }
     for (const f of this.fittings.values()) {
       if (sel.has(f.id)) continue;
-      if (f.tube && tubeIds.has(f.tube)) { sel.set(f.id, 'fitting'); continue; }
+      const supports = Array.isArray(f.supportTubes) ? f.supportTubes : f.tube ? [f.tube] : [];
+      if (supports.length) {
+        if (supports.every(id => tubeIds.has(id))) sel.set(f.id, 'fitting');
+        continue;
+      }
       const nodeReach = POOL_KINDS.has(f.kind)
         ? Math.max(50, Math.hypot(f.w || 0, f.h || 0, f.d || 0) / 2 + 25)
         : 16;
-      if (this._pointOnIsland(f.x, f.y, f.z, nodes, tubeIds, nodeReach, 8)) sel.set(f.id, "fitting");
+      const attached = POOL_KINDS.has(f.kind)
+        ? this._pointOnIsland(f.x, f.y, f.z, nodes, tubeIds, nodeReach, 8)
+        : [...this._nearestAttachmentNodes(f.x, f.y, f.z, nodeReach)].some(id => nodes.has(id));
+      if (attached) sel.set(f.id, "fitting");
     }
     const slideHit = new Set();
     for (const s of this.slides.values()) {
@@ -4511,6 +5251,10 @@ export class BuildModel {
       if (drin) tubeIds.add(t.id);
       return drin;
     }).map(ohneGeom);
+    for (const tube of tubes) if (tube.reinforcement) {
+      const complete = [...this.tubes.values()].filter(other => other.reinforcement?.group === tube.reinforcement.group).every(other => tubeIds.has(other.id));
+      if (!complete) { delete tube.reinforcement; delete tube.reinforced; }
+    }
     const aufRohren = (list) => (list || [])
       .filter((p) => (Array.isArray(p.supportTubes) ? p.supportTubes : [p.a, p.b]).every(id => tubeIds.has(id))).map(ohneGeom);
 
@@ -4603,10 +5347,15 @@ export class BuildModel {
       neu.set(t.id, id);
       out.tubes.push(id);
       const rec = { ...t, id, a, b };
+      if (t.reinforcement) rec.reinforcement = { ...t.reinforcement };
       // 弯管圆心和读进来的管自带的位置，跟节点一样挪到粘贴的地方
       if (t.bowCenter) rec.bowCenter = punktVersetzt(t.bowCenter);
       if (t.geom && t.geom.p0) rec.geom = { ...t.geom, p0: punktVersetzt(t.geom.p0) };
       this.tubes.set(id, rec);
+    }
+    for (const id of out.tubes) {
+      const tube = this.tubes.get(id);
+      if (tube.reinforcement) tube.reinforcement.group = neu.get(tube.reinforcement.group) || id;
     }
     // Klemm-Kupplungen zeigen auf ihr Rohr -- der Verweis muss mitwandern.
     for (const id of out.nodes) {
@@ -4648,7 +5397,7 @@ export class BuildModel {
         || !f.supportTubes?.every(id => neu.has(id)))) continue;
       const rec = versetzt(f, "f", "fittings");
       // 软包滚筒记着管子的 id，片段里的管换了新 id；管没一起带过来就丢掉
-      if (rec.kind === "sleeve" || ACCESSORY_IDS.has(rec.kind) || (rec.kind==='multi-wheel2' && rec.tube)) {
+      if (rec.kind === "sleeve" || ACCESSORY_IDS.has(rec.kind) || isAluminiumConnector(rec) || (rec.kind==='multi-wheel2' && rec.tube)) {
         rec.tube = rec.tube ? neu.get(rec.tube) || null : null;
         if (!rec.tube) continue;
       }
@@ -4747,13 +5496,27 @@ export class BuildModel {
    */
   _syncC45Flag(id) {
     const n = this.nodes.get(id);
-    if (!n || n.c45body) return;
+    if (!n) return;
     let has = false;
     for (const t of this.tubes.values()) {
       if (t.arm && (t.a === id || t.b === id)) { has = true; break; }
     }
+    // 套筒侧接头被删除后，留下的斜管端恢复为空管口。
+    if (n.c45body) {
+      if (!has) this._clearC45Body(n);
+      return;
+    }
     n.c45 = has;
     if (!has) n.c45axis = null;
+  }
+
+  _clearC45Body(node) {
+    node.c45 = false;
+    node.c45body = false;
+    node.c45axis = null;
+    node.c45quat = null;
+    node.c45file = false;
+    node.ownConnector = false;
   }
 
   _applyOffset(tg, dx, dy, dz) {
@@ -5012,17 +5775,12 @@ export class BuildModel {
       return quatFromBasis(ex, ey, ez).map((v) => Math.round(v * 1e4) / 1e4);
     };
 
-    // 板和布在承重管上的起点：管的方向翻过来之后，从另一头量
+    // 承载管的两端一起镜像，沿同一端点保存的 t0 和固定点参数保持不变。
     for (const list of [this.panels, this.textiles]) {
       for (const p of list.values()) {
         if (p.appearanceVersion && (p.panelId === 'panel_40x40_busy' || p.appearanceVersion === 2) && (Array.isArray(p.supportTubes) ? p.supportTubes : [p.a, p.b]).every(id => {
           const carrier = this.tubes.get(id); return carrier && tg.nodes.has(carrier.a) && tg.nodes.has(carrier.b);
         })) p.side = -(p.side || 1);
-        const t = this.tubes.get(p.a);
-        if (!t || !tg.nodes.has(t.a) || !tg.nodes.has(t.b)) continue;
-        const ra = this._rail(p.a);
-        if (!ra || Math.abs(ra.dir[i]) < 0.5) continue;
-        p.t0 = round(ra.len - (p.t0 + p.len));
       }
     }
 
@@ -5061,6 +5819,7 @@ export class BuildModel {
       if (!f) continue;
       flipPos(f);
       if (f.quat) f.quat = flipQuat(f.quat);
+      if (confirmedSpec(f.kind || f.partId)?.feature === 'sector') f.facing = -(f.facing || 1);
       if (f.kind === 'steering_wheel' && f.quat && this._rail(f.tube)) {
         const normal = cross3(this._rail(f.tube).dir, [0, 1, 0]);
         f.facing = dot3(zAxisOf(f.quat), normal) < 0 ? -1 : 1;
@@ -5143,6 +5902,80 @@ export class BuildModel {
       for (const id of validate(this)) if (!badBefore.has(id)) return fail("connector");
     }
     return { ok: true, merged, detached };
+  }
+
+  /** 三轴刚体旋转，沿用移动的安装、碰撞和连接件检查。 */
+  rotateSelectionAxis(sel, axis, radians, pivot, { validate = null, connectorSize = 5 } = {}) {
+    if (!Array.isArray(axis) || axis.length !== 3 || !axis.every(Number.isFinite)
+        || Math.hypot(...axis) < 1e-9 || !Number.isFinite(radians)
+        || !Array.isArray(pivot) || pivot.length !== 3 || !pivot.every(Number.isFinite)) return {ok:false,reason:'empty'};
+    const tg = this.moveTargets(sel);
+    if (incompleteRigidSelection(this,tg)) return {ok:false,reason:'accessory_mounts'};
+    if(!tg.nodes.size && !tg.clamps.size && !tg.slides.size && !tg.fittings.size)return {ok:false,reason:'empty'};
+    const snapshot=this.toJSON(), movedTubes=this.tubesAt(tg.nodes);
+    const collidedBefore=this.collisions({only:movedTubes}), badBefore=validate?.(this);
+    const invalidBefore=this._invalidComponents();
+    const fail=reason=>{this.loadJSON(snapshot);return {ok:false,reason};};
+    const u=axis.map(value=>value/Math.hypot(...axis)), co=Math.cos(radians), si=Math.sin(radians);
+    const point=p=>rodriguesAt(p,pivot,u,co,si).map(round);
+    const direction=v=>rodriguesDir(v,u,co,si).map(round4);
+    const spin=q=>spinAroundAxis(q || [0,0,0,1],u,radians);
+    const move=part=>{[part.x,part.y,part.z]=point([part.x,part.y,part.z]);};
+    const bearingDone=new Set();
+    // 普通旧板没有显式姿态；旋转前固化当前朝向，翻过竖直位置时也不换面。
+    for(const part of this.panels.values()) {
+      if(part.geom || part.appearanceVersion)continue;
+      const rails=[this.tubes.get(part.a),this.tubes.get(part.b)];
+      if(!rails.every(tube=>tube && tg.nodes.has(tube.a) && tg.nodes.has(tube.b)))continue;
+      const corners=this.panelCorners(part);if(!corners)continue;
+      const along=corners[1].map((v,i)=>v-corners[0][i]),across=corners[3].map((v,i)=>v-corners[0][i]);
+      const center=corners[0].map((_,i)=>corners.reduce((sum,p)=>sum+p[i],0)/4);
+      const normal=panelNormal(along,across,center,modelMiddle(this.nodes.values())).map(v=>v*(part.side<0 ? -1 : 1));
+      const x=norm3(part.turned ? across : along),y=cross3(normal,x);
+      const spanX=Math.hypot(...(part.turned ? across : along)),spanZ=Math.hypot(...(part.turned ? along : across));
+      part.geom={p:center,quat:quatFromBasis(x,y,normal),h:spanX-connectorSize,w:spanZ-connectorSize,padW:0,padH:0};
+    }
+    for (const id of tg.nodes) {
+      const node=this.nodes.get(id);
+      move(node);
+      this._spinNodeAround(node,{o:pivot,u},co,si,radians);
+      if (node.bearingOn) bearingDone.add(node.bearingOn);
+    }
+    for (const key of ['clamps','slides','fittings']) for (const id of tg[key]) {
+      if (bearingDone.has(id)) continue;
+      const part=this[key].get(id);
+      move(part);
+      if (part.quat || key!=='clamps') part.quat=spin(part.quat);
+      if (part.dir) part.dir=direction(part.dir);
+      if (part.off) part.off=rodriguesDir(part.off,u,co,si).map(round);
+      if (part.hook) part.hook=point(part.hook);
+      if (part.foot?.p0) part.foot={...part.foot,p0:point(part.foot.p0),dir:direction(part.foot.dir)};
+    }
+    for (const tube of this.tubes.values()) if (tg.nodes.has(tube.a) && tg.nodes.has(tube.b)) {
+      if (tube.bowCenter) tube.bowCenter=point(tube.bowCenter);
+      if (tube.geom) tube.geom={...tube.geom,p0:point(tube.geom.p0),dir:direction(tube.geom.dir),
+        ...(tube.geom.up ? {up:direction(tube.geom.up)} : {})};
+    }
+    for (const map of [this.panels,this.textiles]) for (const part of map.values()) {
+      const supports=part.supportTubes || [part.a,part.b];
+      if (!supports.every(id=>{const tube=this.tubes.get(id);return tube && tg.nodes.has(tube.a) && tg.nodes.has(tube.b);})) continue;
+      if (part.geom?.p) part.geom={...part.geom,p:point(part.geom.p),...(part.geom.quat ? {quat:spin(part.geom.quat)} : {})};
+      if (part.pool?.p) part.pool={...part.pool,p:point(part.pool.p),quat:spin(part.pool.quat)};
+      if (Number.isFinite(part.x)) {move(part);if(part.quat)part.quat=spin(part.quat);}
+    }
+    for (const id of tg.nodes) if (this.isBelowGround(this.nodes.get(id).y)) return fail('ground');
+    for (const key of ['clamps','slides','fittings']) for(const id of tg[key]) {
+      const part=this[key].get(id);
+      if(this.isBelowGround(part.y) || part.off && this.isBelowGround(part.y+part.off[1]))return fail('ground');
+    }
+    for (const tube of this.tubes.values()) if (tube.bowCenter && tg.nodes.has(tube.a) && tg.nodes.has(tube.b)) {
+      const a=this.nodes.get(tube.a),b=this.nodes.get(tube.b);
+      if (this.isBelowGround(this._bowLowestY([a.x,a.y,a.z],[b.x,b.y,b.z],tube.bowCenter))) return fail('ground');
+    }
+    for (const id of this.collisions({only:movedTubes})) if (!collidedBefore.has(id)) return fail('collision');
+    if ([...this._invalidComponents()].some(id=>!invalidBefore.has(id))) return fail('accessory_space');
+    if (badBefore && [...validate(this)].some(id=>!badBefore.has(id))) return fail('connector');
+    return {ok:true,merged:0,detached:0};
   }
 
   /**
@@ -5412,19 +6245,16 @@ export class BuildModel {
    *
    * `only` schraenkt auf bestimmte Rohre ein: beim Ziehen und Einfuegen bewegt
    * sich nur ein Teil, alles Uebrige steht und bildet keine NEUE Ueberlagerung.
+   * @param {{ only?: Set<string>|null, allowCoincide?: boolean }} [options]
    */
   collisions({ only = null, allowCoincide = false } = {}) {
     const out = new Set();
     const list = [];
     for (const t of this.tubes.values()) {
-      if (t.arm || t.link || t.bow) continue;
+      if (t.arm || t.link) continue;
       const a = this.nodes.get(t.a), b = this.nodes.get(t.b);
       if (!a || !b) continue;
-      list.push({
-        id: t.id, a, b,
-        lo: [Math.min(a.x, b.x), Math.min(a.y, b.y), Math.min(a.z, b.z)],
-        hi: [Math.max(a.x, b.x), Math.max(a.y, b.y), Math.max(a.z, b.z)],
-      });
+      list.push({ id: t.id, a, b, ...cachedTubePath(a, b, t) });
     }
     // Raster aufbauen: jedes Rohr liegt in allen Zellen, die seine Kiste beruehrt.
     const grid = new Map();
@@ -5461,8 +6291,13 @@ export class BuildModel {
           gesehen.add(paar);
           const q = list[j];
           if (!beruehrt(p, q)) continue;
-          if (allowCoincide && segmentsCoincide(p.a, p.b, q.a, q.b)) continue;
-          if (segmentsOverlap(p.a, p.b, q.a, q.b) || segmentsCross(p.a, p.b, q.a, q.b)) {
+          const supported = (spoke, axle) => [spoke.a, spoke.b].some(node => node.part === 'windmill' && node.clampOn?.tubeId === axle.id);
+          if (supported(p, q) || supported(q, p)) continue;
+          if (allowCoincide && (p.center || q.center ? tubePathsCoincide(p, q)
+            : segmentsCoincide(p.a, p.b, q.a, q.b))) continue;
+          const hit = p.center || q.center ? tubePathsCross(p, q)
+            : segmentsOverlap(p.a, p.b, q.a, q.b) || segmentsCross(p.a, p.b, q.a, q.b);
+          if (hit) {
             out.add(p.id);
             out.add(q.id);
           }
@@ -5476,7 +6311,7 @@ export class BuildModel {
   tubesAt(nodeIds) {
     const out = new Set();
     for (const t of this.tubes.values()) {
-      if (t.arm || t.link || t.bow) continue;
+      if (t.arm || t.link) continue;
       if (nodeIds.has(t.a) || nodeIds.has(t.b)) out.add(t.id);
     }
     return out;
@@ -5495,6 +6330,10 @@ export class BuildModel {
   }
 
   _incompleteComponentMove(tg) {
+    for (const group of explicitReinforcementGroups(this)) {
+      const nodes = [...new Set(group.tubeIds.flatMap(id => { const tube = this.tubes.get(id); return [tube.a, tube.b]; }))];
+      if (nodes.some(id => tg.nodes.has(id)) && nodes.some(id => !tg.nodes.has(id))) return group.key;
+    }
     for (const part of [...this.panels.values(), ...this.fittings.values()]) {
       if (part.kind === 'carousel_bearing') {
         const baseNodes = (part.supportTubes || []).flatMap(id => { const t = this.tubes.get(id); return t ? [t.a, t.b] : []; });
@@ -5581,37 +6420,124 @@ export class BuildModel {
     return true;
   }
 
-  // Baut von einem bestehenden Knoten in eine Richtung ein Rohr an und legt
-  // (falls noetig) den Zielknoten an. spacing = Rohrlaenge + Kupplungsgroesse.
-  // Rueckgabe:
-  //   { node, tube }            erfolgreich gebaut
-  //   { node, tube:null, duplicate:true }  Ziel existiert und ist schon verbunden (Navigation)
-  //   { collision:true }        Pfad ist durch ein anderes Rohr belegt
-  extend(fromNodeId, dirVec, tubeId, color, length, spacing) {
+  // 自动接头扩建后保留原有空插口，并将新管的实际方向写入导入的臂记录。
+  _extendConnectorArms(tube) {
+    if (!tube) return;
+    for (const [id, otherId] of [[tube.a, tube.b], [tube.b, tube.a]]) {
+      const node = this.nodes.get(id), other = this.nodes.get(otherId);
+      if (!node?.arms || node.part || node.c45body || node.preferType || !other) continue;
+      const dir = norm3(this._tubeDirAt(tube, node, other));
+      if (!node.arms.some(arm => dot3(norm3(arm), dir) > DIR_ALIGN_TOL)) node.arms = [...node.arms, dir];
+    }
+  }
+
+  tubeExtensionContext() {
+    return placementMemo(this,'tube-components',{structure:true},()=>this._computeTubeExtensionContext());
+  }
+
+  _computeTubeExtensionContext() {
+    const edges = new Map(), components = new Map();
+    for (const tube of this.tubes.values()) {
+      if (tube.link) continue;
+      for (const [a, b] of [[tube.a, tube.b], [tube.b, tube.a]]) {
+        if (!edges.has(a)) edges.set(a, []);
+        edges.get(a).push(b);
+      }
+    }
+    for (const id of this.nodes.keys()) {
+      if (components.has(id)) continue;
+      const queue = [id]; components.set(id, id);
+      for (let i = 0; i < queue.length; i++) for (const next of edges.get(queue[i]) || []) {
+        if (!components.has(next)) { components.set(next, id); queue.push(next); }
+      }
+    }
+    const buckets=new Map();
+    for(const node of this.nodes.values()){
+      const key=[node.x,node.y,node.z].map(v=>Math.floor(v/40)).join(',');
+      if(!buckets.has(key))buckets.set(key,[]);
+      buckets.get(key).push(node.id);
+    }
+    return { components, buckets };
+  }
+
+  // 引导、悬停预览与放置共用只读结果；一个刷新周期复用实体连接关系。
+  planTubeExtension(fromNodeId, dirVec, spacing, { snapTol = DIAGONAL_SNAP_TOL,
+    connectorSize = 5, context = this.tubeExtensionContext() } = {}) {
+    const from=this.nodes.get(fromNodeId);if(!from)return null;
+    const start=[from.x,from.y,from.z],target=start.map((v,i)=>v+dirVec[i]*spacing),radius=Math.max(snapTol,connectorSize+MERGE_EPS);
+    const nearby=[];
+    if(context.buckets){
+      const lo=target.map(v=>Math.floor((v-radius)/40)),hi=target.map(v=>Math.floor((v+radius)/40));
+      for(let x=lo[0];x<=hi[0];x++)for(let y=lo[1];y<=hi[1];y++)for(let z=lo[2];z<=hi[2];z++)nearby.push(...(context.buckets.get([x,y,z].join(','))||[]));
+    }else nearby.push(...this.nodes.keys());
+    const connections=nearby.filter(id=>{const n=this.nodes.get(id);return n&&Math.hypot(n.x-target[0],n.y-target[1],n.z-target[2])<=radius;})
+      .map(id=>[id,context.components.get(id)===context.components.get(fromNodeId)]);
+    return placementMemo(this,'tube-plan:'+JSON.stringify([fromNodeId,dirVec,spacing,snapTol,connectorSize,connections]),
+      {bounds:pointsBounds([start,target],radius+12),ids:new Set([fromNodeId,...connections.map(([id])=>id)])},
+      ()=>this._computeTubeExtensionPlan(fromNodeId,dirVec,spacing,{snapTol,connectorSize,context}));
+  }
+
+  _computeTubeExtensionPlan(fromNodeId,dirVec,spacing,{snapTol,connectorSize,context}) {
     const from = this.nodes.get(fromNodeId);
     if (!from) return null;
     if (!this.canExtendFrom(from, dirVec)) return null;
-    const target = {
+    if (armFittingDirsAt(this, from).some(axis => dot3(axis, dirVec) > ARM_ALIGN_TOL)) return null;
+    let target = {
       x: from.x + dirVec[0] * spacing,
       y: from.y + dirVec[1] * spacing,
       z: from.z + dirVec[2] * spacing,
     };
     if (this.isBelowGround(target.y)) return { ground: true };
-    // Bereits verbundener Zielknoten => reine Navigation, kein neuer Bau.
-    const existing = this.findNodeNear(target.x, target.y, target.z);
-    if (existing && this.tubeBetween(from.id, existing.id)) {
-      return { node: existing, tube: null, duplicate: true };
+    let existing = this.findNodeNear(target.x, target.y, target.z);
+    // 同一实体管架闭环时，允许一个连接件孔距内的安装误差；双管虚拟桥不跨组选点。
+    {
+      const sameComponent = id => context.components.get(id) === context.components.get(from.id);
+      let bestDistance = existing ? Math.hypot(existing.x - target.x, existing.y - target.y, existing.z - target.z) : Infinity;
+      let bestConnected = existing && sameComponent(existing.id);
+      for (const node of this.nodes.values()) {
+        if (node.id === from.id || node.unused) continue;
+        const distance = Math.hypot(node.x - target.x, node.y - target.y, node.z - target.z);
+        const sameFrame = sameComponent(node.id);
+        const tolerance = sameFrame ? Math.max(snapTol, connectorSize + MERGE_EPS) : snapTol;
+        if (distance > tolerance || (bestConnected && !sameFrame) || (sameFrame === !!bestConnected && distance >= bestDistance)) continue;
+        const axis = norm3([node.x - from.x, node.y - from.y, node.z - from.z]);
+        if (dot3(axis, norm3(dirVec)) < DIR_ALIGN_TOL) continue;
+        const incoming = axis.map(v => -v);
+        if (!this.canExtendFrom(node, incoming) || armFittingDirsAt(this, node).some(port => dot3(port, incoming) > ARM_ALIGN_TOL)) continue;
+        if (this.tubeCollision(from, node, from.part === 'windmill' ? from.clampOn?.tubeId : null)) continue;
+        existing = node; bestDistance = distance; bestConnected = sameFrame;
+      }
     }
-    // Liegt auf dem Pfad schon ein Rohr? Dann nicht ueberbauen.
-    if (this.tubeCollision(from, target)) {
+    if (existing) {
+      target = { x: existing.x, y: existing.y, z: existing.z };
+      const prior = this.tubeBetween(from.id, existing.id);
+      if (prior && !prior.link) return { node: existing, tube: null, duplicate: true };
+      const incoming = norm3([from.x - target.x, from.y - target.y, from.z - target.z]);
+      const endpoint = existing.unused ? { ...existing, unused: false } : existing;
+      if (!this.canExtendFrom(endpoint, incoming) || armFittingDirsAt(this, endpoint).some(axis => dot3(axis, incoming) > ARM_ALIGN_TOL)) return { collision: true };
+    }
+    if (this.tubeCollision(from, target, from.part === 'windmill' ? from.clampOn?.tubeId : null)) {
       return { collision: true };
     }
-    const to = this.addNode(target.x, target.y, target.z);
+    return { target, existing };
+  }
+
+  extend(fromNodeId, dirVec, tubeId, color, length, spacing, snapTol = DIAGONAL_SNAP_TOL) {
+    const plan = this.planTubeExtension(fromNodeId, dirVec, spacing, { snapTol });
+    if (!plan || !plan.target) return plan;
+    const from = this.nodes.get(fromNodeId);
+    const { target, existing } = plan;
+    const to = existing || this.addNode(target.x, target.y, target.z);
+    delete to.unused;
     // Der neue Knoten steht in derselben Lage wie der, von dem gebaut wird --
     // sonst boete er am Ende einer gedrehten Reihe wieder die Weltachsen an und
     // das naechste Rohr knickte weg.
-    if (from.quat && !to.quat) to.quat = from.quat.slice();
+    if (!existing && isBoltPart(from.part) && Math.abs(dot3(norm3(dirVec),boltAxis(from)))<.01) {
+      const ex=norm3(dirVec),ey=boltAxis(from),ez=cross3(ex,ey);
+      to.quat=quatFromBasis(ex,ey,ez).map(round4);
+    } else if (from.quat && !to.quat) to.quat = from.quat.slice();
     const tube = this.addTube(from.id, to.id, tubeId, color, length);
+    this._extendConnectorArms(tube);
     return { node: to, tube };
   }
 
@@ -5626,6 +6552,7 @@ export class BuildModel {
     const from = this.nodes.get(fromId);
     if (!from) return null;
     if (!this.canExtendFrom(from, c45axis)) return null;
+    if (this.c45AdapterCollision(fromId, c45axis, dir, sleeveLen, armLen)) return { collision: true };
     const bx = from.x + c45axis[0] * sleeveLen + dir[0] * armLen;
     const by = from.y + c45axis[1] * sleeveLen + dir[1] * armLen;
     const bz = from.z + c45axis[2] * sleeveLen + dir[2] * armLen;
@@ -5646,6 +6573,7 @@ export class BuildModel {
     body.c45body = true;
     body.c45axis = c45axis.slice();
     this.addArm(from.id, body.id);
+    this._updateC45Quat(body, from);
     const to = snap || this.addNode(round(target.x), round(target.y), round(target.z));
     const tube = this.addTube(body.id, to.id, tubeId, color, length);
     return { node: to, tube, body };
@@ -5730,6 +6658,9 @@ export class BuildModel {
     const by = body.y - axis[1] * sleeveLen - dir[1] * armLen;
     const bz = body.z - axis[2] * sleeveLen - dir[2] * armLen;
     if (this.isBelowGround(by)) return { ground: true };
+    const candidateBase = { x: round(bx), y: round(by), z: round(bz) };
+    const candidateBody = { ...body, c45axis: axis };
+    if (c45PlacementBlocked(this, candidateBase, candidateBody)) return { collision: true };
     const base = this.addNode(round(bx), round(by), round(bz));
     // Ihre Wuerfelachsen folgen der Huelse: lokal +X zeigt zum Adapter.
     base.quat = quatFromXAxis(axis);
@@ -5738,7 +6669,19 @@ export class BuildModel {
     body.c45axis = axis.slice();
     this.addArm(base.id, body.id);
     this._syncC45Flag(base.id);
+    this._updateC45Quat(body, base);
     return { body, base };
+  }
+
+  c45OnTubeCollision(nodeId, axis, sleeveLen, armLen) {
+    const body = this.nodes.get(nodeId), dir = this.c45TubeDir(body);
+    if (!body || !dir) return true;
+    const base = {
+      x: round(body.x - axis[0] * sleeveLen - dir[0] * armLen),
+      y: round(body.y - axis[1] * sleeveLen - dir[1] * armLen),
+      z: round(body.z - axis[2] * sleeveLen - dir[2] * armLen),
+    };
+    return c45PlacementBlocked(this, base, { ...body, c45axis: axis });
   }
 
   /**
@@ -5749,7 +6692,7 @@ export class BuildModel {
    * steckt der Adapter im Rohr, also dreht sich die Huelsenseite. Traegt die
    * Kupplung an der Huelse schon etwas anderes, bleibt alles stehen.
    */
-  rotateC45Sleeve(bodyId) {
+  rotateC45Sleeve(bodyId, steps = 1) {
     const body = this.nodes.get(bodyId);
     if (!body || !body.c45body || !body.c45axis) return false;
     const dir = this._c45BodyTubeDir(bodyId);
@@ -5769,7 +6712,7 @@ export class BuildModel {
     }
     const dreh = (v) => {
       // 90 Grad um `dir`: v' = (dir x v) + dir (dir . v)
-      const c = cross3(dir, v);
+      const c = cross3(dir, v).map(value => value * (steps < 0 ? -1 : 1));
       const d = dot3(dir, v);
       return [c[0] + dir[0] * d, c[1] + dir[1] * d, c[2] + dir[2] * d];
     };
@@ -5777,11 +6720,15 @@ export class BuildModel {
     const r = dreh([base.x - body.x, base.y - body.y, base.z - body.z]);
     const p = { x: body.x + r[0], y: body.y + r[1], z: body.z + r[2] };
     if (this.isBelowGround(p.y)) return false;
+    const candidateBase = { ...base, x: round(p.x), y: round(p.y), z: round(p.z) };
+    const candidateBody = { ...body, c45axis: achse };
+    if (c45PlacementBlocked(this, candidateBase, candidateBody)) return false;
     base.x = round(p.x); base.y = round(p.y); base.z = round(p.z);
     const L = Math.hypot(achse[0], achse[1], achse[2]) || 1;
     const r4 = (v) => Math.round((v / L) * 1e4) / 1e4;
     body.c45axis = [r4(achse[0]), r4(achse[1]), r4(achse[2])];
     base.quat = quatFromXAxis(body.c45axis);
+    this._updateC45Quat(body, base);
     this._moveTubeGeom(new Set([base.id]));
     return true;
   }
@@ -5807,12 +6754,7 @@ export class BuildModel {
       this._releaseArms(t);
       this.tubes.delete(t.id);
     }
-    body.c45 = false;
-    body.c45body = false;
-    body.c45axis = null;
-    body.c45quat = null;
-    body.c45file = false;
-    body.ownConnector = false;
+    this._clearC45Body(body);
     if (baseId) this._syncC45Flag(baseId);
     // Knoten, die nun nichts mehr halten, verschwinden -- ein Wuerfel ohne
     // Rohr steht sonst allein in der Luft.
@@ -5841,6 +6783,26 @@ export class BuildModel {
     return null;
   }
 
+  c45AdapterCollision(fromId, axis, dir, sleeveLen, armLen, context) {
+    const base = this.nodes.get(fromId);
+    if (!base) return true;
+    for (const tube of this.tubes.values()) {
+      if (tube.link) continue;
+      let otherId = null;
+      if (tube.a === fromId) otherId = tube.b;
+      else if (tube.b === fromId) otherId = tube.a;
+      const other = this.nodes.get(otherId);
+      if (!other) continue;
+      const occupied = tube.arm && other.c45axis ? other.c45axis : this._tubeDirAt(tube, base, other);
+      if (dot3(norm3(occupied), norm3(axis)) > ARM_ALIGN_TOL) return true;
+    }
+    const body = { id: null, c45axis: axis,
+      x: round(base.x + axis[0] * sleeveLen + dir[0] * armLen),
+      y: round(base.y + axis[1] * sleeveLen + dir[1] * armLen),
+      z: round(base.z + axis[2] * sleeveLen + dir[2] * armLen) };
+    return c45PlacementBlocked(this, base, body, context);
+  }
+
   addC45Adapter(fromId, axis, dir, sleeveLen, armLen) {
     const from = this.nodes.get(fromId);
     if (!from) return null;
@@ -5848,12 +6810,14 @@ export class BuildModel {
     const by = from.y + axis[1] * sleeveLen + dir[1] * armLen;
     const bz = from.z + axis[2] * sleeveLen + dir[2] * armLen;
     if (this.isBelowGround(by)) return { ground: true };
+    if (this.c45AdapterCollision(fromId, axis, dir, sleeveLen, armLen)) return { collision: true };
     const body = this.addNode(round(bx), round(by), round(bz));
     body.c45 = true;
     body.c45body = true;
     body.c45axis = axis.slice();
     this.addArm(from.id, body.id);
     this._syncC45Flag(from.id);
+    this._updateC45Quat(body, from);
     return { body };
   }
 
@@ -5861,7 +6825,7 @@ export class BuildModel {
    * Winkelkupplung um 90 Grad um ihre Huelsenachse weiterdrehen -- mit allem,
    * was an ihr haengt. Vier Stellungen, danach ist sie wieder am Anfang.
    */
-  rotateC45(bodyId) {
+  rotateC45(bodyId, steps = 1) {
     const body = this.nodes.get(bodyId);
     if (!body || !body.c45body || !body.c45axis) return false;
     // Die Kupplung, auf der die Huelse steckt: ueber die Arm-Kante.
@@ -5878,7 +6842,7 @@ export class BuildModel {
     // Drehpunkt: die Kupplung selbst; gedreht wird um ihre Huelsenachse.
     const dreh = (p) => {
       const r = [p.x - base.x, p.y - base.y, p.z - base.z];
-      const c = cross3(u, r);
+      const c = cross3(u, r).map(value => value * (steps < 0 ? -1 : 1));
       const d = dot3(u, r);
       // 90 Grad: cos = 0, sin = 1 -> p' = (u x r) + u (u . r)
       return { x: base.x + c[0] + u[0] * d, y: base.y + c[1] + u[1] * d, z: base.z + c[2] + u[2] * d };
@@ -5897,11 +6861,31 @@ export class BuildModel {
     seen.delete(baseId);
     const zweig = [...seen].map((id) => this.nodes.get(id)).filter(Boolean).map((n) => ({ n, p: dreh(n) }));
     if (zweig.some((e) => this.isBelowGround(e.p.y))) return false;
+    const preview = { nodes: new Map(this.nodes), tubes: this.tubes };
+    for (const { n, p } of zweig) preview.nodes.set(n.id, { ...n, x: round(p.x), y: round(p.y), z: round(p.z) });
+    for (const { n } of zweig) {
+      if (!n.c45body) continue;
+      const arm = [...this.tubes.values()].find(t => t.arm && (t.a === n.id || t.b === n.id));
+      const carrier = arm && preview.nodes.get(arm.a === n.id ? arm.b : arm.a);
+      if (carrier && c45PlacementBlocked(preview, carrier, preview.nodes.get(n.id))) return false;
+    }
     for (const e of zweig) { e.n.x = round(e.p.x); e.n.y = round(e.p.y); e.n.z = round(e.p.z); }
+    this._updateC45Quat(body, base);
     const bewegt = new Set(zweig.map((e) => e.n.id));
     this._moveTubeGeom(bewegt);
     this._movePanelGeom(bewegt);
     return true;
+  }
+
+  // 旋转后更新接头自己的朝向，渲染、保存和 QDF 导出使用同一姿态。
+  _updateC45Quat(body, base) {
+    const ex = norm3(body.c45axis);
+    const span = [body.x - base.x, body.y - base.y, body.z - base.z];
+    const along = dot3(span, ex);
+    const ey = norm3(span.map((value, i) => value - ex[i] * along));
+    body.c45quat = quatFromBasis(ex, ey, cross3(ex, ey));
+    const adapters = [...this.tubes.values()].filter(t => t.arm && (t.a === base.id || t.b === base.id));
+    if (adapters.length === 1) base.c45quat = body.c45quat.slice();
   }
 
   // Aussenmasse des Modells in cm. Die Bounding-Box laeuft ueber alle Kupplungen
@@ -5994,24 +6978,7 @@ export class BuildModel {
   // Neusetzen werden die Rohre wieder sauber zusammengefuehrt. Kein C45-Adapter
   // (die Kupplung ist bereits 45-Grad gedreht).
   extendDiagonalSnap(fromId, dir, tubeId, color, length, spacing, snapTol = DIAGONAL_SNAP_TOL) {
-    const from = this.nodes.get(fromId);
-    if (!from) return null;
-    if (!this.canExtendFrom(from, dir)) return null;
-    const tx = from.x + dir[0] * spacing, ty = from.y + dir[1] * spacing, tz = from.z + dir[2] * spacing;
-    let best = null, bestD = snapTol;
-    for (const n of this.nodes.values()) {
-      if (n.id === fromId) continue;
-      const d = Math.hypot(n.x - tx, n.y - ty, n.z - tz);
-      if (d <= bestD) { bestD = d; best = n; }
-    }
-    if (best) {
-      if (this.tubeBetween(fromId, best.id)) return { node: best, tube: null, duplicate: true };
-      if (this.tubeCollision(from, best)) return { collision: true };
-      const tube = this.addTube(fromId, best.id, tubeId, color, length);
-      return { node: best, tube };
-    }
-    // Ohne Rasterpunkt entsteht ein neuer Knoten -- extend() prueft den Boden.
-    return this.extend(fromId, dir, tubeId, color, length, spacing);
+    return this.extend(fromId, dir, tubeId, color, length, spacing, snapTol);
   }
 
   // Bogenrohr (Viertelkreis) anbauen. dirVec ist die Tangente am Startknoten,
@@ -6024,6 +6991,62 @@ export class BuildModel {
     if (dir[1] < 0 && normal[1] > 0)
       minY = Math.min(minY, from.y + R * (normal[1] - Math.hypot(dir[1], normal[1])));
     return this.isBelowGround(minY);
+  }
+
+  // 优先连接同一管架内、位置和插口方向都匹配的端点，避免把无关的接头吸入闭环。
+  closingBowNormal(fromId, dir, radius, preferred) {
+    const from = this.nodes.get(fromId);
+    if (!from || !this.canExtendFrom(from, dir)) return null;
+    const reachable = new Set([fromId]), queue = [fromId];
+    for (let i = 0; i < queue.length; i++) for (const tube of this.tubes.values()) {
+      const next = tube.a === queue[i] ? tube.b : tube.b === queue[i] ? tube.a : null;
+      if (next && !reachable.has(next)) { reachable.add(next); queue.push(next); }
+    }
+    const options = [];
+    for (const id of reachable) {
+      if (id === fromId || this.tubeBetween(fromId, id)) continue;
+      const target = this.nodes.get(id);
+      if (!target) continue;
+      const delta = [target.x - from.x, target.y - from.y, target.z - from.z];
+      const raw = delta.map((v, i) => v / radius - dir[i]), length = Math.hypot(...raw);
+      if (Math.abs(length - 1) > .005 || Math.abs(raw.reduce((s, v, i) => s + v * dir[i], 0)) > .005) continue;
+      const normal = raw.map(v => v / length), incoming = normal.map(v => -v);
+      if (!this.canExtendFrom(target, incoming) || armFittingDirsAt(this, target).some(axis => axis.reduce((s, v, i) => s + v * incoming[i], 0) > ARM_ALIGN_TOL)) continue;
+      if (this.bowBelowGround(from, dir, normal, radius) || this.bowPathCollision(from, dir, normal, radius, target)) continue;
+      options.push(normal);
+    }
+    options.sort((a, b) => b.reduce((s, v, i) => s + v * preferred[i], 0) - a.reduce((s, v, i) => s + v * preferred[i], 0));
+    return options[0] || null;
+  }
+
+  bowPathCollision(from, dir, normal, radius, end, { ignoreId = null, tubeRadius = 2.45, connectorSize = 5 } = {}) {
+    const xyz = node => [node.x, node.y, node.z];
+    const arc = Array.from({ length: 33 }, (_, i) => {
+      const angle = Math.PI * i / 64;
+      return xyz(from).map((v, axis) => v + radius * (Math.sin(angle) * dir[axis] + (1 - Math.cos(angle)) * normal[axis]));
+    });
+    const clearance = 2 * tubeRadius - 0.03 + radius * (1 - Math.cos(Math.PI / 128));
+    return [...this.tubes.values()].some(other => {
+      if (other.id === ignoreId || other.link || other.arm) return false;
+      const p = this.nodes.get(other.a), q = this.nodes.get(other.b);
+      if (!p || !q) return false;
+      const points = other.bow && other.bowCenter
+        ? Array.from({ length: 33 }, (_, i) => curvePoint(this, other.id, i / 32))
+        : other.geom?.p0 && other.geom.dir
+          ? [connectorSize / 2, other.geom.len + (other.geom.pad || 0) + connectorSize / 2].map(distance => other.geom.p0.map((v, axis) => v + other.geom.dir[axis] * distance))
+          : [xyz(p), xyz(q)];
+      if (points.some(point => !point)) return false;
+      const sharesStart = other.a === from.id || other.b === from.id;
+      const sharesEnd = end && (other.a === end.id || other.b === end.id);
+      for (let i = 0; i < arc.length - 1; i++) {
+        const mid = arc[i].map((v, axis) => (v + arc[i + 1][axis]) / 2);
+        // 管段按半径膨胀检查，接头附近需连同管半径让位。
+        if (sharesStart && Math.hypot(...mid.map((v, axis) => v - xyz(from)[axis])) < connectorSize + tubeRadius) continue;
+        if (sharesEnd && Math.hypot(...mid.map((v, axis) => v - xyz(end)[axis])) < connectorSize + tubeRadius) continue;
+        for (let j = 0; j < points.length - 1; j++) if (segmentDistance(arc[i], arc[i + 1], points[j], points[j + 1]) < clearance) return true;
+      }
+      return false;
+    });
   }
 
   extendBow(fromNodeId, dirVec, normal, tubeId, color, R) {
@@ -6041,12 +7064,20 @@ export class BuildModel {
     if (existing && this.tubeBetween(from.id, existing.id)) {
       return { node: existing, tube: null, duplicate: true };
     }
+    if (existing) {
+      const incoming = normal.map(value => -value);
+      if (!this.canExtendFrom(existing, incoming) || armFittingDirsAt(this, existing).some(axis => axis.reduce((sum, value, i) => sum + value * incoming[i], 0) > ARM_ALIGN_TOL)) return { collision: true };
+    }
+    if (this.tubeCollision(from, existing || target, null, { bowCenter: [round(cx), round(cy), round(cz)] })) {
+      return { collision: true };
+    }
     const to = this.addNode(round(target.x), round(target.y), round(target.z));
     if (from.id === to.id) return null;
     const tube = this.addTube(from.id, to.id, tubeId, color, null);
     if (tube) {
       tube.bow = true;
       tube.bowCenter = [round(cx), round(cy), round(cz)];
+      this._extendConnectorArms(tube);
     }
     return { node: to, tube };
   }
@@ -6063,27 +7094,42 @@ export class BuildModel {
    *
    * steps < 0 转另一个方向（Q 键）；pivot 指定绕哪一头转（默认 a 头），
    * 传 b 头就先把两头对调——弯管两头本来就没有先后。
+   * Builder 记住点击方向时传 reverseOnBlock:false，由控制器处理换向。
+   * @param {string} id
+   * @param {number} [steps]
+   * @param {{ pivot?: string, reverseOnBlock?: boolean, tubeRadius?: number, connectorSize?: number }} [options]
    */
-  rotateBow(id, steps = 1, { pivot } = {}) {
+  rotateBow(id, steps = 1, { pivot, reverseOnBlock = true, tubeRadius = 2.45, connectorSize = 5 } = {}) {
     const t = this.tubes.get(id);
     if (!t || !t.bow || !t.bowCenter) return null;
-    if (pivot != null && pivot === t.b) { const tmp = t.a; t.a = t.b; t.b = tmp; }
-    const a = this.nodes.get(t.a), b = this.nodes.get(t.b);
+    const usesTube = (part) => part.tube === id || part.a === id || part.b === id
+      || (Array.isArray(part.supportTubes) && part.supportTubes.includes(id))
+      || (Array.isArray(part.mounts) && part.mounts.some((mount) => mount?.tube === id));
+    const roundCovers = [...this.fittings.values()].filter((f) => f.kind === "textil-round2" && f.quat);
+    const supportedByRoundCover = roundCovers.length && this._roundCoverMounts().some((mount) =>
+      mount.tubeIds.includes(id) && roundCovers.some((cover) =>
+        Math.hypot(cover.x - mount.pos[0], cover.y - mount.pos[1], cover.z - mount.pos[2]) < 2
+        && Math.abs(cover.quat.reduce((sum, value, i) => sum + value * mount.quat[i], 0)) > 0.999));
+    if (supportedByRoundCover || [this.fittings, this.panels, this.textiles].some((parts) => [...parts.values()].some(usesTube))
+        || [...this.nodes.values()].some((node) => node.clampOn?.tubeId === id)) return { blocked: true };
+    const reversed = pivot != null && pivot === t.b;
+    const startId = reversed ? t.b : t.a, endId = reversed ? t.a : t.b;
+    const a = this.nodes.get(startId), b = this.nodes.get(endId);
     if (!a || !b) return null;
     const c = { x: t.bowCenter[0], y: t.bowCenter[1], z: t.bowCenter[2] };
-    const R = Math.hypot(c.x - a.x, c.y - a.y, c.z - a.z);
+    const geom = t.geom?.p0 && t.geom.dir && t.geom.up && Number.isFinite(t.geom.len) ? t.geom : null;
+    const R = geom ? geom.len + (geom.pad || 0) + connectorSize : Math.hypot(c.x - a.x, c.y - a.y, c.z - a.z);
     if (R < 1) return null;
-    const n = [(c.x - a.x) / R, (c.y - a.y) / R, (c.z - a.z) / R];
+    const n = geom ? unit((reversed ? geom.dir.map(value => -value) : geom.up))
+      : [(c.x - a.x) / R, (c.y - a.y) / R, (c.z - a.z) / R];
     // Tangente am Anfang: Sehne minus Radiusanteil, normiert.
-    const t0 = unit([(b.x - a.x) / R - n[0], (b.y - a.y) / R - n[1], (b.z - a.z) / R - n[2]]);
-    // Die drei uebrigen Lagen: 90, 180, 270 Grad um die Tangente. Geht eine
-    // nicht (unter dem Boden, Ziel schon verbunden), wird die naechste
-    // genommen -- sonst liesse sich ein Bogen ueber dem Boden gar nicht mehr
-    // bewegen, weil ausgerechnet der naechste Schritt nach unten zeigt.
+    const t0 = geom ? unit(reversed ? geom.up.map(value => -value) : geom.dir)
+      : unit([(b.x - a.x) / R - n[0], (b.y - a.y) / R - n[1], (b.z - a.z) / R - n[2]]);
+    // 优先转指定方向 90 度；受阻就反向转 90 度，不跳过障碍转 180 度。
     const perp = cross(t0, n);
-    const back = [-n[0], -n[1], -n[2]];
     const anti = [-perp[0], -perp[1], -perp[2]];
-    const order = steps < 0 ? [anti, back, perp] : [perp, back, anti];
+    const directions = steps < 0 ? [anti, perp] : [perp, anti];
+    const order = reverseOnBlock ? directions : directions.slice(0, 1);
     let blocked = null;
     for (const n2 of order) {
       const target = {
@@ -6094,17 +7140,68 @@ export class BuildModel {
       const cy = a.y + n2[1] * R;
       if (this.bowBelowGround(a, t0, n2, R)) { blocked = { ground: true }; continue; }
       const hit = this.findNodeNear(target.x, target.y, target.z);
-      if (hit && hit.id !== t.b && this.tubeBetween(t.a, hit.id)) { blocked = { duplicate: true }; continue; }
+      if (hit && hit.id !== endId && this.tubeBetween(startId, hit.id)) { blocked = { duplicate: true }; continue; }
+      const xyz = (node) => [node.x, node.y, node.z];
+      const arc = Array.from({ length: 33 }, (_, i) => {
+        const angle = Math.PI * i / 64;
+        return xyz(a).map((value, axis) => value + R * (Math.sin(angle) * t0[axis] + (1 - Math.cos(angle)) * n2[axis]));
+      });
+      const clearance = 2 * tubeRadius - 0.03 + R * (1 - Math.cos(Math.PI / 128));
+      const collides = [...this.tubes.values()].some((other) => {
+        if (other.id === id || other.link || other.arm) return false;
+        const p = this.nodes.get(other.a), q = this.nodes.get(other.b);
+        if (!p || !q) return false;
+        const points = other.bow && other.bowCenter
+          ? Array.from({ length: 33 }, (_, i) => curvePoint(this, other.id, i / 32))
+          : other.geom?.p0 && other.geom.dir
+            ? [connectorSize / 2, other.geom.len + (other.geom.pad || 0) + connectorSize / 2]
+              .map((distance) => other.geom.p0.map((value, axis) => value + other.geom.dir[axis] * distance))
+            : [xyz(p), xyz(q)];
+        if (points.some((point) => !point)) return false;
+        const sharesStart = other.a === startId || other.b === startId;
+        const sharesEnd = hit && (other.a === hit.id || other.b === hit.id);
+        for (let i = 0; i < arc.length - 1; i++) {
+          const mid = arc[i].map((value, axis) => (value + arc[i + 1][axis]) / 2);
+          if (sharesStart && Math.hypot(...mid.map((value, axis) => value - xyz(a)[axis])) < connectorSize) continue;
+          if (sharesEnd && Math.hypot(...mid.map((value, axis) => value - xyz(hit)[axis])) < connectorSize) continue;
+          for (let j = 0; j < points.length - 1; j++) {
+            if (segmentDistance(arc[i], arc[i + 1], points[j], points[j + 1]) < clearance) return true;
+          }
+        }
+        return false;
+      });
+      if (collides) { blocked = { blocked: true }; continue; }
+      if (hit && hit.id !== endId) {
+        const incoming = n2.map((value) => -value);
+        const occupied = [...this.tubes.values()].some((other) => {
+          if (other.id === id || other.link) return false;
+          const otherId = other.a === hit.id ? other.b : other.b === hit.id ? other.a : null;
+          const node = otherId && this.nodes.get(otherId);
+          if (!node) return false;
+          const dir = this._tubeDirAt(other, hit, node);
+          const length = Math.hypot(...dir);
+          return length > 0 && dir.reduce((sum, value, i) => sum + value * incoming[i], 0) / length > ARM_ALIGN_TOL;
+        });
+        if (occupied || !this.canExtendFrom(hit, incoming)
+            || armFittingDirsAt(this, hit).some((dir) => dir.reduce((sum, value, i) => sum + value * incoming[i], 0) > ARM_ALIGN_TOL)) {
+          blocked = { blocked: true }; continue;
+        }
+      }
 
-      const oldEnd = t.b;
+      const oldEnd = endId;
+      const detached = this.degree(oldEnd) > 1 || !!(b.part || b.bearingOn || b.c45body || b.clampOn || b.stub || b.preferType)
+        || [...this.fittings.values()].some((f) => Math.hypot(f.x - b.x, f.y - b.y, f.z - b.z) < 2);
+      if (detached) this._releaseArms(t, oldEnd);
       const to = hit || this.addNode(target.x, target.y, target.z);
-      if (to.id === t.a) { blocked = { duplicate: true }; continue; }
+      if (to.id === startId) { blocked = { duplicate: true }; continue; }
+      t.a = startId;
       t.b = to.id;
       t.bowCenter = [round(a.x + n2[0] * R), round(cy), round(a.z + n2[2] * R)];
+      if (t.geom) t.geom = { ...t.geom, p0: [a.x, a.y, a.z], dir: t0, up: n2 };
       // Zurueckgebliebener Knoten ohne Rohr verschwindet.
-      if (oldEnd !== to.id && this.degree(oldEnd) === 0) this.nodes.delete(oldEnd);
+      if (oldEnd !== to.id && this.degree(oldEnd) === 0 && !detached) this.nodes.delete(oldEnd);
       this._prunePanels();
-      return { node: to };
+      return { node: to, detached };
     }
     return blocked || null;
   }
@@ -6118,7 +7215,8 @@ export class BuildModel {
    * nirgends hin und faellt weg.
    */
   _panelRecord(p) {
-    const side = p.side < 0 ? -1 : 1;
+    let side = p.side < 0 ? -1 : 1;
+    if (p.appearanceVersion === 2 && (p.side === null || p.side === undefined)) side = null;
     if (p.a && p.b) {
       const r = { id: p.id, a: p.a, b: p.b, t0: p.t0 || 0, len: p.len || 0, color: p.color, side };
       if (p.geom) r.geom = p.geom;
@@ -6180,6 +7278,8 @@ export class BuildModel {
   }
 
   clear() {
+    this.homeContext = null;
+    this.previewBackground = null;
     this.nodes.clear();
     this.tubes.clear();
     this.panels.clear();
@@ -6193,12 +7293,14 @@ export class BuildModel {
   }
 
   // --- Serialisierung -----------------------------------------------------
-  toJSON() {
+  toJSON({ pruneGroups = true } = {}) {
     // 删过零件的组在这里收拾：存档、撤销快照、复制都经过这一步
-    this._pruneGroups();
+    if (pruneGroups) this._pruneGroups();
     return {
       format: FORMAT_VERSION,
       ...(this.assemblyConfig ? { assemblyConfig: structuredClone(this.assemblyConfig) } : {}),
+      ...(this.homeContext ? { homeContext: structuredClone(this.homeContext) } : {}),
+      ...(this.previewBackground ? { previewBackground: this.previewBackground } : {}),
       nodes: [...this.nodes.values()].map((n) => {
         const o = { id: n.id, x: round(n.x), y: round(n.y), z: round(n.z) };
         if (n.c45) o.c45 = true; // Knoten traegt eine 45-Grad-Winkelkupplung
@@ -6225,6 +7327,7 @@ export class BuildModel {
       tubes: [...this.tubes.values()].map((t) => {
         const o = { id: t.id, a: t.a, b: t.b, tubeId: t.tubeId, color: t.color, length: t.length };
         if (t.reinforced) o.reinforced = true;
+        if (t.reinforcement) o.reinforcement = { ...t.reinforcement };
         if (t.arm) o.arm = true; // C45-Adapter-Arm (kein Rohr)
         if (t.link) o.link = true; // Doppelrohrverbinder-Verbindung (kein Rohr)
         if (t.bow) { o.bow = true; o.bowCenter = t.bowCenter; } // Bogenrohr (Viertelkreis)
@@ -6237,6 +7340,8 @@ export class BuildModel {
       panels: [...this.panels.values()].map((p) => {
         const o = { id: p.id, a: p.a, b: p.b, t0: round(p.t0), len: round(p.len), panelId: p.panelId, color: p.color };
         if ((p.side || 1) < 0) o.side = -1;   // Standard ist oben/aussen
+        // 确认组件缺省方向按居中导入；显式朝外的斜坡板必须保存，避免重载后网格移位。
+        if (p.appearanceVersion === 2 && p.side === 1) o.side = 1;
         if (p.turned) o.turned = true;        // Lippen quer statt laengs (Schrauben)
         if (p.geom) o.geom = p.geom;          // eigene Lage aus der Datei
         if (p.pool) o.pool = p.pool;          // Original-Zeile des Baellebads
@@ -6301,6 +7406,9 @@ export class BuildModel {
       return { ok: false, reason: "format" };
     }
     if (data.assemblyConfig != null && !validAssemblyConfig(data.assemblyConfig)) return { ok: false, reason: 'data' };
+    if (data.homeContext != null && !validHomeContext(data.homeContext)) return { ok: false, reason: 'data' };
+    if (data.previewBackground != null && !['grass', 'blank', 'home'].includes(data.previewBackground)) return { ok: false, reason: 'data' };
+    if (!validReinforcementRecords(data.nodes, data.tubes || [])) return { ok: false, reason: 'data' };
     // 兼容旧 QDF 导入器保存的 id；无效卡扣引用在替换当前模型之前明确拒绝。
     const nodeIds = new Set(data.nodes.map(n => n.id));
     const tubeIds = new Set((data.tubes || []).filter(t => t.a && t.b &&
@@ -6314,6 +7422,8 @@ export class BuildModel {
         || !Array.isArray(f.supportTubes) || f.supportTubes.length !== 4 || !f.supportTubes.every(id => tubeIds.has(id)))) return { ok: false, reason: 'data' };
     this.clear();
     this.assemblyConfig = data.assemblyConfig == null ? null : structuredClone(data.assemblyConfig);
+    this.homeContext = data.homeContext == null ? null : structuredClone(data.homeContext);
+    this.previewBackground = data.previewBackground ?? null;
     let maxSeq = 0;
     for (const n of data.nodes) {
       this.nodes.set(n.id, { id: n.id, x: n.x, y: n.y, z: n.z, c45: !!n.c45, c45body: !!n.c45body,
@@ -6337,6 +7447,7 @@ export class BuildModel {
       this.tubes.set(t.id, {
         id: t.id, a: t.a, b: t.b, tubeId: t.tubeId, color: t.color, length: t.length,
         reinforced: !!t.reinforced, arm: !!t.arm, link: !!t.link,
+        ...(t.reinforcement ? { reinforcement: { ...t.reinforcement } } : {}),
         bow: !!t.bow, bowCenter: t.bowCenter || null, geom: t.geom || null,
       });
       maxSeq = Math.max(maxSeq, parseSeq(t.id));
@@ -6401,6 +7512,11 @@ export class BuildModel {
         ...(f.appearanceVersion != null ? { appearanceVersion: f.appearanceVersion, params: structuredClone(f.params), mounts: structuredClone(f.mounts), supportTubes: structuredClone(f.supportTubes), facing: f.facing || 1 } : {}),
         ...(f.appearanceVersion === 2 ? { partId: f.partId, a: f.a, b: f.b, t0: f.t0, len: f.len, curveReverse: f.curveReverse, ropeLength: f.ropeLength } : {}),
       });
+      const loadedFitting = this.fittings.get(f.id);
+      if (['panel_sector_20', 'panel_sector_40'].includes(kind) && loadedFitting.mounts?.some(m => m?.role === 'arc-retainer') && componentMountsValid(this, loadedFitting)) {
+        loadedFitting.mounts = sectorScrewMounts(this, loadedFitting);
+        loadedFitting.supportTubes = [loadedFitting.a, loadedFitting.b];
+      }
       maxSeq = Math.max(maxSeq, parseSeq(f.id));
     }
     for (const s of data.slides || []) {
@@ -6444,6 +7560,20 @@ export class BuildModel {
       maxSeq = Math.max(maxSeq, parseSeq(g.id));
     }
     this._pruneGroups();
+    // 兼容旧存档中已拆掉套筒连接、仍残留45°件标记的管端。
+    for (const node of this.nodes.values()) if (node.c45body) this._syncC45Flag(node.id);
+    // 旧版本删除弯头会在空套筒锚点留下一根插臂；它不代表实际连接件。
+    for (const node of this.nodes.values()) {
+      if (node.preferType || node.part || node.arms?.length !== 1) continue;
+      const edges = [...this.tubes.values()].filter(tube => tube.a === node.id || tube.b === node.id);
+      if (edges.length !== 1 || !edges[0].arm) continue;
+      const edge = edges[0], other = this.nodes.get(edge.a === node.id ? edge.b : edge.a);
+      if (!other?.c45body) continue;
+      delete node.arms;
+      delete node.armDirs;
+    }
+    // 旧旋转记录可能保存了固定侧朝向并漏掉活动侧插口，只恢复自动直角接头。
+    this._syncAutomaticConnectorFrames([...this.nodes.values()].filter(node => node.quat));
     this._seq = maxSeq + 1;
     return { ok: true };
   }

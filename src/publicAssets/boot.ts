@@ -17,8 +17,14 @@ export function bootLanguage(search: string, getItem: (key: string) => string | 
   return 'en'
 }
 
+/** 只为显式配置的独立HTML入口扩大控制范围。 */
+export function assetControllerScope(config: AssetBoot, pathname: string): string {
+  return config.documentScope === pathname ? pathname : config.base
+}
+
 /** 有界等待当前控制器的准确版本；迟到claim不会重启已经加载的应用。 */
-export function waitForAssetController(serviceWorker: ServiceWorkerContainer | undefined, config: AssetBoot): Promise<boolean> {
+export function waitForAssetController(serviceWorker: ServiceWorkerContainer | undefined, config: AssetBoot,
+  scope: string = config.base): Promise<boolean> {
   if (!serviceWorker) return Promise.resolve(false)
   return new Promise(resolve => {
     let done = false
@@ -48,7 +54,7 @@ export function waitForAssetController(serviceWorker: ServiceWorkerContainer | u
     serviceWorker.addEventListener('controllerchange', hello)
     hello()
     try {
-      void serviceWorker.register(`${config.base}public-assets-sw.js`, { scope: config.base, updateViaCache: 'none' })
+      void serviceWorker.register(`${config.base}public-assets-sw.js`, { scope, updateViaCache: 'none' })
         .then(() => hello(), () => finish(false))
     } catch { finish(false) }
   })
@@ -83,7 +89,7 @@ export async function bootPublicAssets(config: AssetBoot, page: Window = window)
     let serviceWorker: ServiceWorkerContainer | undefined
     try { serviceWorker = page.navigator.serviceWorker }
     catch (error) { console.warn('[public assets controller unavailable]', error) }
-    await waitForAssetController(serviceWorker, config)
+    await waitForAssetController(serviceWorker, config, assetControllerScope(config, page.location.pathname))
     // modulepreload只下载/编译，不执行；与CSS并行，后续同URL模块脚本复用浏览器module map。
     const preload = doc.createElement('link')
     preload.rel = 'modulepreload'

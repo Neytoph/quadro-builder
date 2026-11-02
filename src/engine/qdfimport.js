@@ -28,7 +28,8 @@
 import { round2 as round, panelNormal, modelMiddle, quatFromBasis } from "./util.js";
 import { FORMAT_VERSION, C45_SLEEVE_LEN, C45_ARM_LEN } from "./config.js";
 import { QDF_FEATURE_SUFFIX, qdfPanelDimensionKey } from './qdfFeatures.js';
-import { holePartForMask, holeArmDirs, BOLT_PART, MAX_HINGES, HINGE_STEP } from "./model.js";
+import { holePartForMask, holeArmDirs, BOLT_PART, MAX_HINGES } from "./model.js";
+import { aluminiumConnectorSupport } from './reinforcement.js';
 
 // Alle benannten Richtungen (kardinal + 45°-diagonal) fuer Arm-Erkennung.
 const S45 = Math.SQRT1_2;
@@ -57,6 +58,7 @@ function nearestNamedDir(v) {
 //   sized      = bringt Kantenmasse mit (rest[3]/rest[5], wie panel2)
 //   masked     = fuehrt eine Arm-Maske (rest[4], wie connector3)
 const FITTING_KINDS = {
+  'alu-connector2': { keepRest: true },
   "bearing2":        {},                  // Lagerkupplung, traegt die Radachse
   "multi-wheel2":    {},                  // Speichenrad
   "floating-wheel2": {},                  // schwarzes Laufrad
@@ -633,7 +635,7 @@ export function parseQDF(text, opts = {}) {
       const r6 = (v) => Math.round(v * 1e6) / 1e6;
       tubes.push({
         id: "t" + seq++, a: a.id, b: b.id,
-        tubeId: curvedTubeId, color: materials.get(mat) || FALLBACK_COLOR,
+        tubeId: Math.abs(R - 20) < 0.1 ? "TC15" : curvedTubeId, color: materials.get(mat) || FALLBACK_COLOR,
         length: null, bow: true, bowCenter: [round(cx), round(cy), round(cz)],
         // Wie beim geraden Rohr: eigene Lage aus der Datei (Tangente T, Normale N).
         geom: { p0: [round(sx), round(sy), round(sz)], dir: T.map(r6), up: N.map(r6), len: lenCm,
@@ -684,7 +686,7 @@ export function parseQDF(text, opts = {}) {
       const ey = rotateByQuat(q, [0, 1, 0]);
       holeClamps.push({
         x: round(p.tuple[4] / 10), y: round(p.tuple[5] / 10), z: round(p.tuple[6] / 10),
-        stub: nearestCardinal([-ey[0], -ey[1], -ey[2]]),
+        stub: [-ey[0], -ey[1], -ey[2]].map(v => Math.round(v * 1e4) / 1e4),
         // Arm-Maske wie bei der Kupplung (rest[4]). Die Bits 0x01/0x02 sind das
         // Loch, der Rest sind ihre eigenen Arme -- daran haengt, ob sie ein-,
         // zwei- oder dreiarmig ist. Ohne Angabe die einarmige (51 von 55).
@@ -737,6 +739,7 @@ export function parseQDF(text, opts = {}) {
       // Rohtext merken, damit der Export dieselbe Zeile schreibt wie die
       // Datei sie hatte.
       if (spec.keepRest && p.rawRest) f.rest = p.rawRest;
+      if (p.name === 'alu-connector2') f.w = typeof p.rest[3] === 'number' ? p.rest[3] / 10 : 40;
       fittings.push(f);
     } else if (
       p.name === "slide2" || p.name === "slide-new2" || p.name === "slide-domestic80" || p.name === "slide-domestic60" || p.name === "slide-domestic15" ||
@@ -793,6 +796,41 @@ export function parseQDF(text, opts = {}) {
     return null;
   }
 
+  // 板可以装在长管的一段上，板角不必有接头；只接受两条完整覆盖板边的真实直管。
+  function findPanelRails(q, cx, cy, cz, h1, h2) {
+    const axes = [[1, 0, 0], [0, 1, 0], [0, 0, 1]].map(v => rotateByQuat(q, v));
+    const vector = (a, b) => [b.x - a.x, b.y - a.y, b.z - a.z];
+    const dot = (a, b) => a.reduce((s, v, i) => s + v * b[i], 0);
+    const support = (a, b) => {
+      const edge = vector(a, b), length = Math.hypot(...edge);
+      if (length < 0.01) return null;
+      for (const tube of tubes) {
+        if (tube.bow || tube.arm || tube.link) continue;
+        const start = nodes.find(node => node.id === tube.a), end = nodes.find(node => node.id === tube.b);
+        if (!start || !end) continue;
+        const delta = vector(start, end), span = Math.hypot(...delta);
+        if (span < 0.01) continue;
+        const dir = delta.map(v => v / span), ab = [a, b].map(point => vector(start, point));
+        const along = ab.map(v => dot(v, dir));
+        if (ab.some((v, i) => Math.hypot(...v.map((n, axis) => n - dir[axis] * along[i])) > 0.5)) continue;
+        if (Math.min(...along) < -0.5 || Math.max(...along) > span + 0.5) continue;
+        return { tube, t0: Math.min(...along), len: length };
+      }
+      return null;
+    };
+    for (const [i, j] of [[0, 1], [0, 2], [1, 2]]) for (const [ha, hb] of (h1 === h2 ? [[h1, h2]] : [[h1, h2], [h2, h1]])) {
+      const corner = (s1, s2) => ({ x: cx + axes[i][0] * ha * s1 + axes[j][0] * hb * s2,
+        y: cy + axes[i][1] * ha * s1 + axes[j][1] * hb * s2,
+        z: cz + axes[i][2] * ha * s1 + axes[j][2] * hb * s2 });
+      const corners = [corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1)];
+      for (const [[a, b], [c, d]] of [[[0, 1], [3, 2]], [[1, 2], [0, 3]]]) {
+        const first = support(corners[a], corners[b]), second = support(corners[c], corners[d]);
+        if (first && second && first.tube.id !== second.tube.id) return { first, second, corners };
+      }
+    }
+    return null;
+  }
+
   // Auf welcher Seite der Rohre liegt die Platte? Die Datei sagt es ueber ihre
   // lokale Z-Achse; verglichen wird sie mit der kanonischen Normalen der vier
   // gefundenen Ecken (oben bzw. aussen = +1).
@@ -836,11 +874,13 @@ export function parseQDF(text, opts = {}) {
           ? acrylicPanelsByDims.get(size) || acrylicPanelId
           : featureId || panelIdForDims(dimW + conn, dimH + conn);
       if (!panelId) { skipped[p.name] = (skipped[p.name] || 0) + 1; continue; }
-      const nodesFound = findPanelCorners(q, cx, cy, cz, (dimW + padW + conn) / 2, (dimH + padH + conn) / 2);
-      if (!nodesFound) { skipped[p.name] = (skipped[p.name] || 0) + 1; continue; }
+      const halfW = (dimW + padW + conn) / 2, halfH = (dimH + padH + conn) / 2;
+      const nodesFound = findPanelCorners(q, cx, cy, cz, halfW, halfH);
+      const rails = nodesFound ? null : findPanelRails(q, cx, cy, cz, halfW, halfH);
+      if (!nodesFound && !rails) { skipped[p.name] = (skipped[p.name] || 0) + 1; continue; }
       const mat = matNr;
-      panels.push({ id: "p" + seq++, nodes: nodesFound.map((n) => n.id), panelId,
-        color: materials.get(mat) || FALLBACK_COLOR, side: sideFromQuat(q, nodesFound),
+      panels.push({ id: "p" + seq++, ...(nodesFound ? { nodes: nodesFound.map((n) => n.id) } : { a: rails.first.tube.id, b: rails.second.tube.id, t0: round(rails.first.t0), len: round(rails.first.len) }), panelId,
+        color: materials.get(mat) || FALLBACK_COLOR, side: sideFromQuat(q, nodesFound || rails.corners),
         // Eigene Lage wie beim Rohr: auf Schraegen liegt die Platte in der Datei
         // bis zu 1,2 cm anders als aus dem Rohrpaar gerechnet.
         geom: { quat: [q[1], q[2], q[3], q[0]].map((v) => Math.round(v * 1e4) / 1e4),
@@ -1008,6 +1048,22 @@ export function parseQDF(text, opts = {}) {
     // Die getragene Kupplung steht wie die Klemme -- sonst bietet sie die
     // Weltachsen an und ein angestecktes Rohr laeuft im falschen Winkel weg.
     if (!nd.quat) nd.quat = f.quat.slice();
+    // 根据开口的真实轴找被夹住的管，重开后仍保留转轴与固定侧。
+    const ey = rotateByQuat([f.quat[3], f.quat[0], f.quat[1], f.quat[2]], [0, 1, 0]);
+    let best = 2;
+    for (const t of tubes) {
+      if (t.bow || t.arm || t.link) continue;
+      const a = nodes.find(n => n.id === t.a), b = nodes.find(n => n.id === t.b);
+      if (!a || !b) continue;
+      const ab = [b.x - a.x, b.y - a.y, b.z - a.z], len = Math.hypot(...ab);
+      if (len < 1e-6) continue;
+      const u = ab.map(v => v / len);
+      if (Math.abs(u.reduce((sum, v, i) => sum + v * ey[i], 0)) < 0.99) continue;
+      const rel = [f.x - a.x, f.y - a.y, f.z - a.z];
+      const s = Math.max(0, Math.min(len, rel.reduce((sum, v, i) => sum + v * u[i], 0)));
+      const distance = Math.hypot(...rel.map((v, i) => v - u[i] * s));
+      if (distance < best) { best = distance; nd.clampOn = { tubeId: t.id, t: round(s) }; }
+    }
   }
 
   // 3. Durchlauf: Alu-Verstaerkungsprofile -> markiere getroffene Rohre.
@@ -1016,7 +1072,7 @@ export function parseQDF(text, opts = {}) {
   for (const raw of lines) {
     const p = parseLine(raw);
     if (!p) continue;
-    if (p.name !== "alu2" && p.name !== "alu-connector2") continue;
+    if (p.name !== "alu2") continue;
     if (!p.tuple || p.tuple.length < 7) { skipped[p.name] = (skipped[p.name] || 0) + 1; continue; }
     if (istTot(p)) continue;
     const q = decodeQuat([p.tuple[0], p.tuple[1], p.tuple[2], p.tuple[3]]);
@@ -1031,6 +1087,7 @@ export function parseQDF(text, opts = {}) {
     const u = [d[0] / dl, d[1] / dl, d[2] / dl];
     const span = lenCm + conn;
     let hit = false;
+    const matchingTubes = [];
     for (const t of tubes) {
       const A = nodeById.get(t.a), B = nodeById.get(t.b);
       if (!A || !B) continue;
@@ -1044,9 +1101,26 @@ export function parseQDF(text, opts = {}) {
       const cosang = Math.abs((tx * u[0] + ty * u[1] + tz * u[2]) / tl);
       if (cosang < 0.9) continue; // Rohr nicht parallel zum Alu
       if (!t.reinforced) { t.reinforced = true; reinforced++; }
+      matchingTubes.push(t);
       hit = true;
     }
     if (!hit) skipped[p.name] = (skipped[p.name] || 0) + 1;
+    const partId = Math.abs(lenCm - 40) < 0.6 ? 'reinforce35'
+      : Math.abs(lenCm - 60) < 0.6 ? 'reinforce55' : Math.abs(lenCm - 80) < 0.6 ? 'reinforce80' : null;
+    const totalSpan = matchingTubes.reduce((sum, tube) => {
+      const a = nodeById.get(tube.a), b = nodeById.get(tube.b);
+      return sum + Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
+    }, 0);
+    if (partId && matchingTubes.length && matchingTubes.every(tube => !tube.reinforcement) && Math.abs(totalSpan - lenCm) < 0.6) {
+      for (const tube of matchingTubes) tube.reinforcement = { partId, group: matchingTubes[0].id };
+    }
+  }
+  const reinforcementModel = { tubes: new Map(tubes.map(tube => [tube.id, tube])), nodes: nodeById,
+    fittings: new Map(fittings.map(fitting => [fitting.id, fitting])) };
+  for (const fitting of fittings) if (fitting.kind === 'alu-connector2') {
+    const mount = aluminiumConnectorSupport(reinforcementModel, fitting);
+    if (mount) Object.assign(fitting, { tube: mount.supportTubes[0], supportTubes: mount.supportTubes,
+      mounts: mount.supportTubes.map(tube => ({ tube })), params: {}, appearanceVersion: 1 });
   }
 
   // --- 4. Durchlauf: Doppelrohrverbinder (clamp2) -----------------------------
@@ -1163,7 +1237,7 @@ export function parseQDF(text, opts = {}) {
   {
     const referenced = new Set();
     for (const t of tubes) { referenced.add(t.a); referenced.add(t.b); }
-    for (const pa of panels) for (const id of pa.nodes) referenced.add(id);
+    for (const pa of panels) for (const id of pa.nodes || []) referenced.add(id);
     // Netze/Stoffe haengen genauso an Eck-Kupplungen wie Platten. Fehlten sie
     // hier, wurden deren Ecken als "frei schwebend" geloescht und das Netz zeigte
     // danach auf Knoten, die es nicht mehr gibt.
@@ -1184,15 +1258,21 @@ export function parseQDF(text, opts = {}) {
   // des Rohrs -- dort wird gesucht.
   const clampNodes = new Map(nodes.map((n) => [n.id, n]));
   for (const h of holeClamps) {
-    const axis = [h.x - h.stub[0] * conn, h.y - h.stub[1] * conn, h.z - h.stub[2] * conn];
+    // 孔销套在接头插杆上时，局部 -X 指向真实承载节点；不把自身的管误当转轴。
+    const ex = rotateByQuat([h.quat[3], h.quat[0], h.quat[1], h.quat[2]], [1, 0, 0]);
+    const carrier = [h.x - ex[0] * conn, h.y - ex[1] * conn, h.z - ex[2] * conn];
+    const windmill = holePartForMask(h.mask) === 'windmill';
+    const onPeg = !windmill && [...clampNodes.values()].some(n => Math.hypot(n.x - carrier[0], n.y - carrier[1], n.z - carrier[2]) < 2);
+    const axis = windmill ? [h.x, h.y, h.z] : [h.x - h.stub[0] * conn, h.y - h.stub[1] * conn, h.z - h.stub[2] * conn];
     let onTube = null, best = 6;   // Toleranz: die Huelse sitzt auf der Rohrachse
-    for (const t of tubes) {
+    for (const t of onPeg ? [] : tubes) {
       if (t.bow) continue;
       const a = clampNodes.get(t.a), b = clampNodes.get(t.b);
       if (!a || !b) continue;
       const ab = [b.x - a.x, b.y - a.y, b.z - a.z];
       const L = Math.hypot(ab[0], ab[1], ab[2]) || 1;
       const u = [ab[0] / L, ab[1] / L, ab[2] / L];
+      if (windmill && Math.abs(u[0] * ex[0] + u[1] * ex[1] + u[2] * ex[2]) < 0.99) continue;
       const rel = [axis[0] - a.x, axis[1] - a.y, axis[2] - a.z];
       const s2 = rel[0] * u[0] + rel[1] * u[1] + rel[2] * u[2];
       if (s2 < -1 || s2 > L + 1) continue;
@@ -1210,6 +1290,16 @@ export function parseQDF(text, opts = {}) {
     nd.stub = h.stub;
     if (h.quat) nd.partQuat = h.quat;
     if (onTube) nd.clampOn = onTube;
+
+    if (windmill) {
+      for (const t of tubes) {
+        if (t.id === onTube?.tubeId) continue;
+        for (const end of ['a', 'b']) {
+          const old = clampNodes.get(t[end]);
+          if (old && Math.hypot(old.x - nd.x, old.y - nd.y, old.z - nd.z) < 0.1) t[end] = nd.id;
+        }
+      }
+    }
 
     // Das Rohr steckt IM Zapfen, nicht in der Kupplung daneben: es laeuft an
     // der Muendung los, in Stutzenrichtung. Beim Einlesen der Rohre gab es den
@@ -1346,7 +1436,7 @@ export function parseQDF(text, opts = {}) {
       const arm = einsVec(rotateByQuat(qh, [0, -1, 0]));
       const u = -(arm[0] * ey[0] + arm[1] * ey[1] + arm[2] * ey[2]);   // 0 Grad = -Y
       const v = arm[0] * ez[0] + arm[1] * ez[1] + arm[2] * ez[2];
-      let grad = Math.round((Math.atan2(v, u) * 180) / Math.PI / HINGE_STEP) * HINGE_STEP;
+      let grad = Math.round((Math.atan2(v, u) * 180) / Math.PI * 1e4) / 1e4;
       grad = ((grad % 360) + 360) % 360;
       if (!nd.hinges.includes(grad)) nd.hinges.push(grad);
       flexiWeg.add(h.id);
@@ -1367,7 +1457,7 @@ export function parseQDF(text, opts = {}) {
   if (holeClamps.length) {
     const used = new Set();
     for (const t of tubes) { used.add(t.a); used.add(t.b); }
-    for (const pa of panels) for (const id of pa.nodes) used.add(id);
+    for (const pa of panels) for (const id of pa.nodes || []) used.add(id);
     for (const tx of textiles) for (const id of tx.nodes) used.add(id);
     for (let i = nodes.length - 1; i >= 0; i--) {
       const n = nodes[i];

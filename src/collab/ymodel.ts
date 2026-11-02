@@ -151,6 +151,14 @@ export function applyDelta(doc: Y.Doc, before: ModelJSON, after: ModelJSON, orig
       if (after.assemblyConfig == null) meta.delete('assemblyConfig')
       else meta.set('assemblyConfig', structuredClone(after.assemblyConfig))
     }
+    if (!sameJson(before.homeContext, after.homeContext)) {
+      if (after.homeContext == null) meta.delete('homeContext')
+      else meta.set('homeContext', structuredClone(after.homeContext))
+    }
+    if (before.previewBackground !== after.previewBackground) {
+      if (after.previewBackground == null) meta.delete('previewBackground')
+      else meta.set('previewBackground', after.previewBackground)
+    }
   }, origin)
   return summarize(a, b)
 }
@@ -204,6 +212,10 @@ export function writeJSON(doc: Y.Doc, json: ModelJSON, origin: unknown) {
     if (meta.get('format') !== format) meta.set('format', format)
     if (json.assemblyConfig == null) meta.delete('assemblyConfig')
     else if (!sameJson(meta.get('assemblyConfig'), json.assemblyConfig)) meta.set('assemblyConfig', structuredClone(json.assemblyConfig))
+    if (json.homeContext == null) meta.delete('homeContext')
+    else if (!sameJson(meta.get('homeContext'), json.homeContext)) meta.set('homeContext', structuredClone(json.homeContext))
+    if (json.previewBackground == null) meta.delete('previewBackground')
+    else if (meta.get('previewBackground') !== json.previewBackground) meta.set('previewBackground', json.previewBackground)
   }, origin)
 }
 
@@ -222,6 +234,10 @@ export function docToJSON(doc: Y.Doc): ModelJSON {
   const out: ModelJSON = { format: (metaMap(doc).get('format') as number | undefined) ?? FORMAT_VERSION, nodes: [] }
   const config = metaMap(doc).get('assemblyConfig')
   if (config != null) out.assemblyConfig = structuredClone(config)
+  const home = metaMap(doc).get('homeContext')
+  if (home != null) out.homeContext = structuredClone(home)
+  const background = metaMap(doc).get('previewBackground')
+  if (background != null) out.previewBackground = background
   for (const [coll] of COLLECTIONS) out[coll] = []
   const parts = partsMap(doc)
   for (const [id, ymap] of parts.entries()) {

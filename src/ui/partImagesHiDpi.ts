@@ -14,6 +14,7 @@ export const PART_IMAGES_LARGE: ReadonlySet<string> = new Set([
   "TA35",
   "TA75",
   "TC1",
+  "TC15",
   "TS1",
   "TS2",
   "TS3",
@@ -27,6 +28,7 @@ export const PART_IMAGES_LARGE: ReadonlySet<string> = new Set([
   "acrylic_panel_40x40",
   "acrylic_panel_40x60",
   "acrylic_platform_40x40",
+  "alu_connector",
   "bag",
   "balls",
   "bearing",
@@ -71,11 +73,14 @@ export const PART_IMAGES_LARGE: ReadonlySet<string> = new Set([
   "panel_70x120",
   "panel_80x20",
   "panel_80x80",
+  "panel_sector_20",
   "panel_sector_40",
   "pool_liner_l",
   "pool_liner_s",
   "pool_liner_xs",
   "pool_liner_xxl",
+  "reinforce35",
+  "reinforce55",
   "reinforce80",
   "roof",
   "roof_large",
@@ -110,5 +115,6 @@ export const PART_IMAGES_LARGE: ReadonlySet<string> = new Set([
   "wheel",
   "wheel_adapter",
   "wheel_bearing",
-  "wheel_floating"
+  "wheel_floating",
+  "windmill"
 ])

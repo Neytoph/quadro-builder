@@ -21,6 +21,13 @@ function meshes(model: BuildModel,part: any): THREE.Mesh[] {
 }
 
 describe('确认组件实际安装与生命周期',()=>{
+  it.each(['lattice','textile_bridge'])('%s 保存前包含默认朝向，原生字段完整往返',id=>{
+    const {model,part}=createConfirmedComponentFixture(id)
+    expect((part as any).facing).toBe(1)
+    const saved=model.toJSON(),reopened=new BuildModel()
+    expect(reopened.loadJSON(saved).ok).toBe(true)
+    expect(reopened.toJSON()).toEqual(saved)
+  })
   it.each(CONFIRMED_COMPONENTS.map(p=>p.id))('%s 安装、保存重开、整组变换、复制引用与依赖删除',id=>{
     const {model,part:record}=createConfirmedComponentFixture(id),part=record as any
     expect(componentMountsValid(model,part)).toBe(true)
@@ -51,13 +58,42 @@ describe('确认组件实际安装与生命周期',()=>{
 })
 
 describe('确认组件数据及装配边界',()=>{
+  it('显式自定义攀岩底板色保存后仍可编辑，旧目录板保持固定色',()=>{
+    const {model,part}=createConfirmedComponentFixture('panel_40x40_climbing');
+    part.color='red';expect(confirmedColor(part)).toBe('#39a7df');expect(model.setColorOf('panel',part.id,'green')).toBe(false);
+    part.params={...part.params,colorMode:'custom'};
+    expect(confirmedColor(part)).toBe('red');expect(model.setColorOf('panel',part.id,'green')).toBe(true);expect(confirmedColor(part)).toBe('green');
+    expect(model.setPanelFixing(part.id,'vertical')).toBe(true);expect(part.params.colorMode).toBe('custom');expect(confirmedColor(part)).toBe('green');
+    const body=meshes(model,part).find(m=>m.name.startsWith('plate:'))!;
+    expect((body.material as THREE.MeshPhysicalMaterial).color.getHexString()).toBe('2fcb5a');
+    const restored=new BuildModel();expect(restored.loadJSON(model.toJSON()).ok).toBe(true);
+    const saved=[...restored.panels.values()].find(p=>p.id===part.id)!;expect(confirmedColor(saved)).toBe('green');
+    expect(restored.setColorOf('panel',saved.id,'red')).toBe(true);expect(confirmedColor(saved)).toBe('red');
+  });
+  it('批量装配可获取同一面板的不同承载方向，默认挂位保持按框格去重',()=>{
+    const {model}=createConfirmedComponentFixture('panel_40x40',{install:false})
+    const faceKey=(p: Parameters<BuildModel['panelCorners']>[0])=>model.panelCorners(p)!.map(c=>c.join(',')).sort().join('|')
+    const normal=model.confirmedMounts('panel_40x40'),all=model.confirmedMounts('panel_40x40',{deduplicate:false})
+    expect(new Set(normal.map(faceKey)).size).toBe(normal.length)
+    expect(new Set(all.map(faceKey))).toEqual(new Set(normal.map(faceKey)))
+    expect(all.length).toBeGreaterThan(normal.length)
+    const face=all.filter(p=>faceKey(p)===faceKey(normal[0]))
+    expect(new Set(face.map(p=>JSON.stringify(p.mounts))).size).toBeGreaterThan(1)
+    for(const mount of face){
+      const part=model.addConfirmedComponent(mount,'blue')!
+      expect(componentMountsValid(model,part)).toBe(true)
+      const reopened=new BuildModel();expect(reopened.loadJSON(model.toJSON()).ok).toBe(true)
+      expect(componentMountsValid(reopened,parts(reopened)[0])).toBe(true)
+      model.removePanel(part.id)
+    }
+  })
   it('自由blue语义色使用正式天蓝，经典绿固定件统一底板与凸点',()=>{
     const plain=createConfirmedComponentFixture('panel_40x40'),body=meshes(plain.model,plain.part).find(m=>m.name.startsWith('plate:'))!
     expect((body.material as THREE.MeshPhysicalMaterial).color.getHexString()).toBe('2b8ff0')
     const lego=createConfirmedComponentFixture('panel_40x40_lego'),old=lego.part as any
     old.color='red'
     expect(confirmedColor(old)).toBe(COLOR_HEX.green)
-    for(const mesh of meshes(lego.model,old))expect((mesh.material as THREE.MeshPhysicalMaterial).color.getHexString()).toBe('2fcb5a')
+    for(const mesh of meshes(lego.model,old).filter(m=>m.name.startsWith('plate:')||m.name.startsWith('lego-stud:')))expect((mesh.material as THREE.MeshPhysicalMaterial).color.getHexString()).toBe('2fcb5a')
     expect(old.color).toBe('red')
   })
   it('新握点两个金属螺钉在主体前方且保持原占用深度',()=>{
@@ -116,12 +152,13 @@ describe('确认组件数据及装配边界',()=>{
     expect(part.ropeLength).toBeCloseTo(Math.hypot(15+40*.74-80*.23,40,65))
     expect(componentMountsValid(model,part)).toBe(true)
   })
-  it('扇形板必须有真实弧边支撑，删除弧管清除依赖件',()=>{
+  it('扇形板由两条直边固定，删除弧管不影响安装',()=>{
     const {model,part:record}=createConfirmedComponentFixture('panel_sector_40'),part=record as any
-    const bow=part.supportTubes.find((id: string)=>model.tubes.get(id)?.bow)
-    expect(bow).toBeTruthy();expect(part.mounts.filter((m: any)=>m.role==='arc-retainer')).toHaveLength(3)
-    model.removeTube(bow);expect(model.fittings.has(part.id)).toBe(false)
-    expect(model.confirmedMounts('panel_sector_40')).toHaveLength(0)
+    const bow=[...model.tubes.values()].find((tube: any)=>tube.bow) as any
+    expect(bow).toBeTruthy();expect(part.mounts.filter((m: any)=>m.role==='panel-screw')).toHaveLength(4)
+    model.removeTube(bow.id);expect(model.fittings.has(part.id)).toBe(true)
+    expect(componentMountsValid(model,part)).toBe(true)
+    model.removeTube(part.supportTubes[0]);expect(model.fittings.has(part.id)).toBe(false)
   })
   it('80长桥实际7个软包横杠，长布套管沿80边',()=>{
     for(const id of ['textile_bridge','textile_long']){

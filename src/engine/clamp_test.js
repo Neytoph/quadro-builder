@@ -520,3 +520,23 @@ describe("rotateTubeClamp", () => {
     assert.ok(Math.abs(Math.hypot(...xyz(end).map((v, i) => v - bow.bowCenter[i])) - 40) < 0.02);
   });
 });
+
+describe("两格宽铰接坡道", () => {
+  for (const driven of [0, 1]) it(`驱动第${driven + 1}个夹子时平台保持静止`, () => {
+    const m = new BuildModel();
+    const row = z => [0, 40, 80].map(x => m.addNode(x, 40, z));
+    const base = row(0), back = row(-40), moving = row(5), foot = row(45);
+    const join = (a,b) => m.addTube(a.id,b.id,"T35","blue",35);
+    for (const nodes of [base,back,moving,foot]) for(let i=0;i<2;i++)join(nodes[i],nodes[i+1]);
+    for(let i=0;i<3;i++){join(base[i],back[i]);join(moving[i],foot[i]);m.addLink(base[i].id,moving[i].id);}
+    const clamps=[20,60].map(x=>{const c=m.addClamp(x,40,0);c.dir=[1,0,0];c.off=[0,0,5];return c;});
+    const fixed=[...base,...back].map(n=>({id:n.id,position:xyz(n)}));
+    assert.equal(m.rotateClamp(clamps[driven].id,0.2),true);
+    for(const n of fixed)assert.ok(near(xyz(m.nodes.get(n.id)),n.position,0.001));
+    for(let i=0;i<3;i++){
+      assert.ok(Math.abs(m.nodes.get(moving[i].id).y-(40-5*Math.sin(0.2)))<0.05,JSON.stringify(xyz(m.nodes.get(moving[i].id))));
+      assert.ok(Math.abs(m.nodes.get(foot[i].id).y-(40-45*Math.sin(0.2)))<0.05,JSON.stringify(xyz(m.nodes.get(foot[i].id))));
+    }
+    assert.ok(clamps.every(c=>Math.abs(m.clamps.get(c.id).off[1]+5*Math.sin(0.2))<0.05));
+  });
+});

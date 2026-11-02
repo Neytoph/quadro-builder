@@ -507,14 +507,14 @@ export function removeDoc(docId) {
 // gerade aktive Tab. Geschrieben wird sie nach jeder Änderung (entprellt in
 // ui.js), gelesen genau einmal beim Start.
 
-export function loadSession() {
-  return dbTx(DB_STORES.session, "readonly", (store) => store.get(SESSION_ID))
+export function loadSession(sessionId = SESSION_ID) {
+  return dbTx(DB_STORES.session, "readonly", (store) => store.get(sessionId))
     .then((row) => (row && Array.isArray(row.tabs) ? row : null));
 }
 
-export function saveSession({ tabs, activeTabId }) {
+export function saveSession({ tabs, activeTabId }, sessionId = SESSION_ID) {
   return dbTx(DB_STORES.session, "readwrite",
-    (store) => store.put({ id: SESSION_ID, tabs, activeTabId, savedAt: Date.now() }));
+    (store) => store.put({ id: sessionId, tabs, activeTabId, savedAt: Date.now() }));
 }
 
 export function newTabId() {

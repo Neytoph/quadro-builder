@@ -58,7 +58,7 @@ export function vecFromBom(bom: BomView | null) {
   const used = emptyVec()
   const unmapped: { id: string; name: string; count: number }[] = []
   const parts: AdvisorParts = {}
-  if (!bom) return { used, unmapped, parts, total: 0, screws: 0 }
+  if (!bom) return { used, unmapped, parts, total: 0 }
   const addRows = (rows: BomRow[], fallback = '') => {
     for (const row of rows) {
       const id = row.id || fallback
@@ -80,8 +80,7 @@ export function vecFromBom(bom: BomView | null) {
   addRows(bom.textiles, 'textile')
   addRows(bom.fittings)
   const total = used.reduce((s, n) => s + n, 0)
-  const screws = bom.screws.reduce((s, r) => s + r.count, 0)
-  return { used, unmapped, parts, total, screws }
+  return { used, unmapped, parts, total }
 }
 
 export function vecFromInventory(inv: Inventory) {

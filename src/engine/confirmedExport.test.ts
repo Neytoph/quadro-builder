@@ -118,7 +118,7 @@ describe('确认配件的真实清单、手册和格式转换', () => {
       expect(row.kitContents).toBeTruthy()
       expect(row.loadVerified).toBe(false)
       expect(row.colorName).not.toMatch(/^#[\da-f]{6}$/i)
-      expect(bom.screws.some((p: any) => p.id === 'screw_panel')).toBe(false)
+      expect(bom).not.toHaveProperty('screws')
       for (const lang of ['zh', 'en', 'de']) {
         setLang(lang)
         const step = computeBuildPlan(reopened).steps.find((s: any) => s.kind === 'accessories')
@@ -144,6 +144,26 @@ describe('确认配件的真实清单、手册和格式转换', () => {
       const data = parseQDF(output.text, { tubes: buildableTubes(), panels: panels(), connectorSize: geometry().connectorSize, mergeEps: 2 })
       expect(data.panels).toHaveLength(1)
       expect(data.panels[0].panelId).toBe(id)
+      const reopened = new BuildModel()
+      expect(reopened.loadJSON(data).ok).toBe(true)
+      const restored = [...reopened.panels.values()][0]
+      expect(restored).toBeTruthy()
+      const sorted = (corners: number[][]) => corners.map(point => point.join(',')).sort()
+      expect(sorted(reopened.panelCorners(restored)!)).toEqual(sorted(model.panelCorners([...model.panels.values()][0])!))
     })
   }
+
+  it('长管中段的面板角靠近接头时，QDF 重开不把板角吸附到接头', () => {
+    const model = frame(40)
+    const candidate = model.confirmedMounts('panel_40x20_climbing').find((p: any) => p.valid)!
+    const panel = model.addConfirmedComponent({ ...candidate, t0: 5 }, 'red')!
+    expect(panel).toBeTruthy()
+    const data = parseQDF(buildQDF(model).text, { tubes: buildableTubes(), panels: panels(), connectorSize: geometry().connectorSize, mergeEps: 2 })
+    const reopened = new BuildModel()
+    expect(reopened.loadJSON(data).ok).toBe(true)
+    const restored = [...reopened.panels.values()][0]
+    expect(restored).toBeTruthy()
+    const sorted = (corners: number[][]) => corners.map(point => point.join(',')).sort()
+    expect(sorted(reopened.panelCorners(restored)!)).toEqual(sorted(model.panelCorners(panel)!))
+  })
 })

@@ -1,7 +1,12 @@
 // 3D-Szene + Rendering (Three.js). Kennt das Modell nur zum Zeichnen.
 
 import * as THREE from "three";
-import { ACCESSORY_IDS, PANEL_ACCESSORY_IDS, mountPoint, componentVolumes } from './accessoryPack.js';
+import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
+import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
+import { createHomeEnvironment, disposeHome, setHomeZonesVisible } from '../home/environment.js';
+import { HOME_STYLE } from '../home/visuals.js';
+import { ACCESSORY_IDS, PANEL_ACCESSORY_IDS, componentVolumes } from './accessoryPack.js';
 import { accessoryMeshes, panelAccessoryMeshes } from './accessoryMeshes.js';
 import { carouselBearingMeshes } from './carouselBearingMeshes.js';
 import { confirmedSpec } from './componentPack.js';
@@ -9,16 +14,25 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { geometry, colorHex, connectorColor, getPanel } from "./catalog.js";
 import { panelNormal, modelMiddle } from "./util.js";
 import { nodeClampOffset, isHolePart, HOLE_MASKS, holeArmDirs, BLACK_FITTINGS,
-  isBoltPart, boltAxis, boltShift, hingeDir, hingeKey, POOL_KINDS, fixedFittingColor,
+  isBoltPart, boltAxis, boltShift, hingeDir, hingeKey, splitHingeKey, POOL_KINDS, fixedFittingColor,
   ARM_FITTINGS, SLIDE_HOOK_LIFT, SLIDE_SPECS, SLIDE_PARTS } from "./model.js";
 import { reinforcementProfiles } from "./qdfexport.js";
+import { ALUMINIUM_CONNECTOR, aluminiumConnectorDisplay } from './reinforcement.js';
 import { assemblyProfilePosition, assemblyProfileFallbackVisible } from './assemblyProfilePresentation.js';
-import { loadConnectorMeshes, loadSlideMeshes, loadTubeMeshes, loadFittingMeshes,
+import { loadConnectorMeshes, loadSlideMeshes, loadFittingMeshes,
   loadSurfaceMeshes } from "./meshes.js";
 import { CONNECTOR_ARM_BITS } from "./qdfimport.js";
-import { preferPanelCell } from "./pickcell.js";
+import { preferPanelCell, preferGuideHandle } from "./pickcell.js";
 import { resolveNodeConnection, hasStandaloneFileC45 } from "./bom.js";
-import { shadeHex, hexRgba, DEFAULT_TUNE, DEFAULT_GRADE, gradeHex, displayHex } from "./colorTune.js";
+import { c45FrameFor } from './c45Pose.js';
+import { DEFAULT_TUNE, DEFAULT_GRADE, gradeHex, displayHex } from "./colorTune.js";
+import { createOutdoorVisuals, OUTDOOR_AREA } from './outdoor.js';
+import { PanelPlacementGuides } from './panelPlacementGuides.js';
+import { PANEL_OUTER_FACE, PANEL_CORNER_RELIEF } from './panelScrewMounts.js';
+import { rainbowRibbonLayout, createRainbowRibbonSheet, createRainbowRibbonSleeve } from './rainbowTextile.js';
+import { mergeTubeGuideSegments } from './tubeGuides.js';
+
+const outdoor = createOutdoorVisuals(THREE);
 
 const UP = new THREE.Vector3(0, 1, 0);
 // So viel darf ein Bauteil vor einem Ankerpunkt liegen, ohne ihn zu verdecken
@@ -102,7 +116,7 @@ const QUALITY = {
 
 // Wo die geladenen Modelle liegen: Satz -> Feld der Szene.
 const MESH_FIELDS = {
-  connectors: "_connMeshes", slides: "_slideMeshes", tubes: "_tubeMeshes",
+  connectors: "_connMeshes", slides: "_slideMeshes",
   fittings: "_fitMeshes", surfaces: "_surfMeshes",
 };
 
@@ -178,6 +192,8 @@ const SLIDE_END_FLAT = 47.5 - SLIDE_END_LIP_R;
 // Flaechige Anbauteile verschwinden im Verstaerken- und Kollisions-Modus, wie
 // Platten und Netze auch.
 const FLAT_FITTINGS = new Set(["lattice2", "textil-round2", "roof-large2"]);
+// 框架视图保留承接管件的机械连接件，其余配件随面板一起隐藏。
+const FRAME_FITTINGS = new Set(["adapter2", "bearing2", "steering-lock2", "open-connector2", "tube-cap2"]);
 // Staerke der Baellebad-Folie: nur so dick, dass sie sichtbar ist.
 // Der Nullpunkt des kleinen Beckens liegt 20 cm neben der Mitte seiner
 // Frontwand (abgegriffenes Modell, lokale X-Achse) -- wie in qdfimport.js.
@@ -225,22 +241,13 @@ const GRID_CELL = 20;
 // besten so weit draussen, dass er bei einem eingepassten Modell gar nicht ins
 // Bild kommt. Baeume und Buesche stehen im Ring dahinter -- ausserhalb des
 // Rasters, damit sie nicht in ein grosses Modell hineinragen.
-const GROUND_AREA = 2600;                     // Kantenlaenge der Wiese, cm
-const GRASS_TILE = 80;                        // 大块平铺，颗粒在，纹路不抢眼
-const TREE_RING = [GRID_SIZE / 2 + 120, GROUND_AREA / 2 - 120];
-const BUSH_RING = [GRID_SIZE / 2 + 60, GROUND_AREA / 2 - 100];
+const GROUND_AREA = OUTDOOR_AREA;
 
 const GRID_LIGHT = [0xb88850, 0xd0b08a];   // 主线 / 次线：暖棕，显色底上要压得住
 const GRID_DARK = [0x3d382f, 0x2e2a23];
 
 // 风景退后：草地/树冠灰绿；天空走晴天蓝，避免阴天灰。
 const SCENE_SKY_HORIZON = 0xeaf5fd;
-const SCENE_SKY_ZENITH = 0xa7d9fb;
-const SCENE_TRUNK = 0x6b5a3e;
-const SCENE_CROWN_A = 0x649655;
-const SCENE_CROWN_B = 0x709b62;
-const SCENE_CROWN_C = 0x56804a;
-const SCENE_BUSH = 0x4a7544;
 
 // Ansichtswuerfel: Kanten hell/dunkel (die Flaechen stecken in der Textur).
 const CUBE_EDGE_LIGHT = 0x6e7884;
@@ -333,9 +340,6 @@ function pushUniqueArm(liste, d, bow) {
   liste.push({ d: u, bow: !!bow });
 }
 
-// Halbmesser des abgegriffenen Bogenrohrs (cm): 35er Rohr + Kupplung.
-const BOW_MESH_R = 40;
-
 // So weit rueckt der Import den Punkt des Spielsacks vor (BAG_OFFSET in
 // qdfimport.js). Das abgegriffene Modell braucht den Punkt aus der Datei.
 const BAG_OFFSET = 20;
@@ -409,6 +413,104 @@ const LABEL_BG = {
 };
 
 export class SceneManager {
+  setHomeContext(context) {
+    const key = JSON.stringify(context);
+    if (key !== this._homeKey) {
+      this._homeFramePending = null;
+      disposeHome(this._homeGroup);
+      this._homeGroup = context ? createHomeEnvironment(context) : null;
+      if (this._homeGroup) this.scene.add(this._homeGroup);
+      this._homeKey = key;
+      this._shadowsDirty();
+    }
+    this._updateHomeDisplay();
+    this._applyHomeStyle();
+    this.requestRender();
+  }
+
+  _updateHomeDisplay() {
+    if (!this._homeGroup) return;
+    this._homeGroup.visible = !this._sceneOn && !this._homeHidden;
+    setHomeZonesVisible(this._homeGroup, { usable: this._homeUsableVisible !== false, obstacles: this._homeObstaclesVisible !== false });
+  }
+
+  setHomeZones(kind, visible) {
+    if (!['obstacles', 'usable'].includes(kind)) throw new Error('Unknown home zone');
+    if (kind === 'usable') this._homeUsableVisible = !!visible;
+    else this._homeObstaclesVisible = !!visible;
+    this._updateHomeDisplay();
+    this._shadowsDirty();
+    this.requestRender();
+  }
+
+  setBackground(mode) {
+    if (!['grass', 'blank', 'home'].includes(mode)) throw new Error('Unknown background');
+    if (mode === 'home' && !this._homeGroup) return false;
+    if (mode !== 'home') this._homeFramePending = null;
+    this.setProjection('perspective');
+    this._homeHidden = mode === 'blank';
+    this.setScene(mode === 'grass');
+    this.requestRender();
+    return true;
+  }
+
+  _applyHomeStyle() {
+    const indoor = !!this._homeGroup && !this._sceneOn && !this._homeHidden && !this._homeOutputHidden;
+    this._homeStyleOn = indoor;
+    for (const light of [this._hemiLight, this._dirLight, this._fillLight, this._rimLight]) if (light) light.visible = !indoor;
+    if (this._grid) this._grid.visible = !indoor;
+    this.renderer.toneMapping = indoor ? THREE.ACESFilmicToneMapping : THREE.NoToneMapping;
+    this.renderer.toneMappingExposure = indoor ? HOME_STYLE.exposure : 1;
+    this._applyBackground();
+  }
+
+  _renderMainScene() {
+    this.selectionTransformGizmo?.updateCamera();
+    // 模型、家具和地面共用当前场景的灯光、色调映射与阴影。
+    // 室内使用房间灯光；切换背景及隐藏房间导出由 _applyHomeStyle 统一处理。
+    this._panelPlacementGuides?.update(this.camera, this._appearing, this._sceneOn ? 'grass' : 'home');
+    this.renderer.render(this.scene, this.camera);
+  }
+
+  homeProductBounds() {
+    const box = new THREE.Box3(), pieceBox = new THREE.Box3(), matrix = new THREE.Matrix4();
+    for (const [key, rec] of this._indexParts(this.buildGroup.children)) {
+      const appearing = this._appearing.get(key);
+      for (const piece of rec.pieces) {
+        const geometry = piece.obj.geometry;
+        if (!geometry.boundingBox) geometry.computeBoundingBox();
+        // 镜头和房间摆放使用零件最终位置，不受入场缩放、抬高影响。
+        const original = appearing?.pieces.find(p => p.obj === piece.obj && p.index === piece.index);
+        if (original) matrix.multiplyMatrices(original.P, original.base);
+        else this._pieceWorld(piece, matrix);
+        box.union(pieceBox.copy(geometry.boundingBox).applyMatrix4(matrix));
+      }
+    }
+    return box.isEmpty() ? null : { min: box.min.toArray(), max: box.max.toArray() };
+  }
+
+  frameHome() {
+    if (!this._homeGroup) return;
+    this.setProjection('perspective');
+    const box = new THREE.Box3().setFromObject(this._homeGroup);
+    const direction = this._defaultCameraDirection();
+    this._frameAlong(null, direction, { bounds: { min: box.min.toArray(), max: box.max.toArray(), size: box.getSize(new THREE.Vector3()).toArray() }, animate: true });
+  }
+  frameHomeProduct() {
+    this.setProjection('perspective');
+    const bounds = this.homeProductBounds();
+    if (!bounds) {
+      // 官方零件资源未加载完时，等真实几何出现再定位镜头。
+      if (this._homeGroup && this._renderModel && !this._renderModel.isEmpty()) {
+        this._homeFramePending = this._homeKey;
+        return;
+      }
+      this.frameHome();
+      return;
+    }
+    bounds.size = bounds.max.map((n, a) => n - bounds.min[a]);
+    this._frameAlong(null, this._defaultCameraDirection(), { bounds, animate: true });
+  }
   constructor(container) {
     this.container = container;
 
@@ -462,8 +564,8 @@ export class SceneManager {
     this._dirLight.shadow.camera.bottom = -480;
     this._dirLight.shadow.camera.near   =   1;
     this._dirLight.shadow.camera.far    =  800;
-    this._dirLight.shadow.bias          = -0.0005;
-    this._dirLight.shadow.radius        =   3;
+    this._dirLight.shadow.bias          = -0.0001;
+    this._dirLight.shadow.radius        =   2;
     this.scene.add(this._dirLight);
     // Fuell- und Randlicht: weiches Volumen statt einer Plastik-Hotspot.
     this._fillLight = new THREE.DirectionalLight(0xfff4ea, 0.5);
@@ -502,6 +604,7 @@ export class SceneManager {
     this.scene.add(this.labelGroup);
     this.scene.add(this._hoverPartGroup);
     this.scene.add(this._roomGroup);
+    this._panelPlacementGuides = new PanelPlacementGuides(this.scene);
     // 动效：删掉的零件在这里退场；_appearing 按零件记着还没长完的入场，
     // 中途重画（点一下选中也会重画）时接着原来的进度走，不会一下跳到终点。
     this._motion = false;
@@ -541,6 +644,10 @@ export class SceneManager {
     this._hoverPartExtra = null;
     this._hoverPartExtraKey = "";
     this._hoverPartMode = null;
+    this._hoverPartKind = null;
+    this._hoverPartHinge = null;
+    this._hoverPartProfile = false;
+    this._solidSelectedParts = null;
     this._hoverMat = new THREE.Matrix4();
     this._panning = false;
 
@@ -585,8 +692,38 @@ export class SceneManager {
     this._animate();
   }
 
-  /** 不再用的画面（版本对照关掉时）：停下渲染循环，放掉渲染器和画布。 */
+  /** 同一账号重新打开时，将现有画布与几何缓存接回新的编辑器。 */
+  attachContainer(container) {
+    if (this._disposed) throw new Error('Cannot reuse a disposed scene');
+    this._resizeObserver?.disconnect();
+    this.container = container;
+    container.appendChild(this.renderer.domElement);
+    if (this._spinner) container.appendChild(this._spinner);
+    if (this._selectBox) container.appendChild(this._selectBox);
+    this._resizeObserver?.observe(container);
+    this.onResize();
+  }
+
+  canReuse() {
+    return !this._disposed && !this.renderer.getContext().isContextLost();
+  }
+
+  setPaused(paused) {
+    if (this._disposed || this._suspended === paused) return;
+    this._suspended = paused;
+    if (paused) cancelAnimationFrame(this._animationFrame);
+    else { this.onResize(); this._needsRender = true; this._animate(); }
+  }
+
+  /** 停止渲染循环并释放不再使用的场景。 */
   dispose() {
+    if (this._disposed) return;
+    cancelAnimationFrame(this._animationFrame);
+    this.selectionTransformGizmo?.dispose();
+    this._clearHoverOverlay();
+    this.clearPanelPlacementPreview();
+    this._clearPanelPlacementFlash();
+    this._panelPlacementGuides.dispose();
     this._disposed = true;
     for (const controller of this._meshRequests.values()) controller.abort();
     this._meshRequests.clear();
@@ -632,11 +769,15 @@ export class SceneManager {
    * ueber den Rand zu ragen. Ohne Modell (oder bei leerem) gelten die alten
    * festen Werte.
    */
-  resetCamera(model = null, opts = {}) {
+  _defaultCameraDirection() {
     const start = new THREE.Vector3(...this._defaultCam.pos);
     const heim = new THREE.Vector3(...this._defaultCam.target);
-    const dir = start.clone().sub(heim).normalize();
-    this._frameAlong(model, dir, opts);
+    return start.sub(heim).normalize();
+  }
+
+  resetCamera(model = null, opts = {}) {
+    this.setProjection('perspective');
+    this._frameAlong(model, this._defaultCameraDirection(), opts);
   }
 
   /**
@@ -727,6 +868,7 @@ export class SceneManager {
   }
 
   _frameAlong(model, dir, opts = {}) {
+    this._homeFramePending = null;
     this._camAnim = null;
     this._camFly = null;
     this._needsRender = true;
@@ -923,6 +1065,7 @@ export class SceneManager {
   }
 
   onResize() {
+    if (this._disposed || this._suspended || !this.container.clientWidth || !this.container.clientHeight) return;
     this._needsRender = true;
     const w = this.container.clientWidth, h = this.container.clientHeight;
     if (!w || !h) return;
@@ -1023,6 +1166,12 @@ export class SceneManager {
     return this._raycaster.ray.intersectPlane(plane, p) ? p : null;
   }
 
+  screenPoint(pos) {
+    const point = new THREE.Vector3(...pos).project(this.camera);
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    return [(point.x + 1) * rect.width / 2 + rect.left, (1 - point.y) * rect.height / 2 + rect.top];
+  }
+
   /** Mauszeiger-Form setzen (Builder signalisiert damit "verschiebbar"). */
   setCursor(css) {
     this.container.classList.toggle("qb-cursor-delete", css === "delete-x");
@@ -1088,6 +1237,8 @@ export class SceneManager {
     this.renderer.shadowMap.autoUpdate = false;
     this.renderer.shadowMap.needsUpdate = true;
     this.renderer.shadowMap.enabled = QUALITY[this._quality].shadow > 0;
+    this.renderer.toneMapping = this._homeStyleOn ? THREE.ACESFilmicToneMapping : THREE.NoToneMapping;
+    this.renderer.toneMappingExposure = this._homeStyleOn ? HOME_STYLE.exposure : 1;
     // Die Schnittebene haengt an den MATERIALIEN des Modells, nicht am Renderer
     // -- Boden, Gras, Baeume und Himmel sollen ungeschnitten stehen bleiben.
     this.renderer.localClippingEnabled = true;
@@ -1110,6 +1261,10 @@ export class SceneManager {
         sh.mapSize.set(size, size);
         if (sh.map) { sh.map.dispose(); sh.map = null; }
       }
+      // PCF会取周围阴影像素，偏移覆盖两像素足迹，避免薄板及管面出现自身阴影斜纹。
+      const camera = sh.camera;
+      const texel = Math.max(camera.right - camera.left, camera.top - camera.bottom) / size;
+      sh.normalBias = Math.max(0.08, texel * 2);
     }
     this._shadowsDirty();
   }
@@ -1172,7 +1327,7 @@ export class SceneManager {
     // Rechte Taste bleibt PAN -- mit der Maus. Am Mac-Trackpad gibt es keine
     // mittlere Taste; Querverschieben laeuft ueber ⌥-Ziehen / ⇧+Zwei-Finger.
     controls.touches = { ONE: null, TWO: THREE.TOUCH.DOLLY_PAN };
-    controls.addEventListener("start", () => { this._camFly = null; });
+    controls.addEventListener("start", () => { this._camFly = null; this._homeFramePending = null; });
     controls.addEventListener("end", () => {
       if (!this.orbiting && !this.panning) this._reanchorTarget();
       this.onCameraChange();
@@ -1203,25 +1358,37 @@ export class SceneManager {
   // Rohr-Geometrie, gecacht je Laenge/Radius/Segmentzahl. Vorher entstand pro
   // Rohr und pro Render-Durchlauf eine neue CylinderGeometry (~425 Stueck), die
   // beim naechsten Durchlauf wieder weggeworfen wurde.
-  _tubeGeometry(radius, length, segments) {
-    const key = `${radius.toFixed(2)}:${length.toFixed(2)}:${segments}`;
+  _tubeGeometry(radius, length, segments, hollow = false) {
+    // 缓存身份必须包含实际几何参数；舍入键会让近似长度共用先渲染的管件。
+    const key = `${radius}:${length}:${segments}:${hollow}`;
     let geo = this._tubeGeos.get(key);
     if (!geo) {
-      geo = new THREE.CylinderGeometry(radius, radius, length, segments);
+      // 真管保留 3 mm 管壁和两端环口；接头插杆、加强杆继续用实心几何。
+      const inner = Math.max(0.1, radius - 0.3);
+      geo = hollow ? new THREE.LatheGeometry([
+        new THREE.Vector2(inner, -length / 2), new THREE.Vector2(radius, -length / 2),
+        new THREE.Vector2(radius, length / 2), new THREE.Vector2(inner, length / 2),
+        new THREE.Vector2(inner, -length / 2),
+      ], segments) : new THREE.CylinderGeometry(radius, radius, length, segments);
+      if (hollow) {
+        const colors = new Float32Array(geo.getAttribute("position").count * 3);
+        for (let i = 0; i < colors.length / 3; i++) colors.fill(i % 5 === 0 || i % 5 >= 3 ? 0.45 : 1, i * 3, i * 3 + 3);
+        geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+      } else geo.setAttribute("color", new THREE.BufferAttribute(new Float32Array(geo.getAttribute("position").count * 3).fill(1), 3));
       this._tubeGeos.set(key, geo);
       this._keepGeos.add(geo);
     }
     return geo;
   }
 
-  // Abschluss-Scheibe fuer die Enden eines Bogenrohrs, gecacht wie die
-  // Rohr-Geometrien. Liegt in der XY-Ebene, Normale +Z.
+  // 弯管两端的管壁环，中心保留开口；位于 XY 平面，法线 +Z。
   _capGeometry(radius, segments) {
     if (!this._capGeos) this._capGeos = new Map();
     const key = `${radius.toFixed(2)}:${segments}`;
     let geo = this._capGeos.get(key);
     if (!geo) {
-      geo = new THREE.CircleGeometry(radius, segments);
+      geo = new THREE.RingGeometry(Math.max(0.1, radius - 0.3), radius, segments);
+      geo.setAttribute("color", new THREE.BufferAttribute(new Float32Array(geo.getAttribute("position").count * 3).fill(1), 3));
       this._capGeos.set(key, geo);
       this._keepGeos.add(geo);
     }
@@ -1273,7 +1440,6 @@ export class SceneManager {
       this.onMeshesReady();
     } };
     const laden = which === "slides" ? loadSlideMeshes(fein, options)
-      : which === "tubes" ? loadTubeMeshes(fein, options)
       : which === "fittings" ? loadFittingMeshes(fein, options)
       : which === "surfaces" ? loadSurfaceMeshes(fein, options) : loadConnectorMeshes(fein, options);
     laden.then((rec) => {
@@ -1377,9 +1543,47 @@ export class SceneManager {
     if (!entry) return null;
     const rec = store[entry.id];
     if (!rec) return null;
+    const quat = cubeQuat.clone().multiply(entry.quat);
+    const local = quat.clone().invert();
+    let bowMask = 0;
+    for (const e of dirs) {
+      if (!e.bow) continue;
+      v.fromArray(e.d).applyQuaternion(local);
+      bowMask |= axisBit(v.x, v.y, v.z) & rec.mask;
+    }
+    const source = this._meshGeometry("conn:" + entry.id, rec);
     return {
-      geo: this._meshGeometry("conn:" + entry.id, rec),
-      quat: cubeQuat.clone().multiply(entry.quat),
+      geo: bowMask ? this._cachedGeo(`mesh:conn:${entry.id}:bow:${bowMask}`, () => {
+        // 仅收短插入弯管的隐藏直杆；接头本体、直管及空插口保持原尺寸。
+        // 变体纳入 mesh 缓存，画质升级时随原始网格一起释放。
+        const geo = source.clone();
+        const positions = geo.getAttribute("position"), normals = geo.getAttribute("normal");
+        const half = geometry().connectorSize / 2;
+        const tip = half + geometry().connectorSize * 0.32 - 0.4;
+        const point = new THREE.Vector3(), normal = new THREE.Vector3();
+        for (const [bit, d] of CONNECTOR_ARM_BITS) {
+          if (!(bowMask & bit)) continue;
+          const axis = new THREE.Vector3(...d);
+          let end = half;
+          for (let i = 0; i < positions.count; i++) end = Math.max(end, point.fromBufferAttribute(positions, i).dot(axis));
+          if (end <= tip) continue;
+          const scale = (tip - half) / (end - half);
+          for (let i = 0; i < positions.count; i++) {
+            point.fromBufferAttribute(positions, i);
+            const distance = point.dot(axis);
+            if (distance <= half) continue;
+            point.addScaledVector(axis, (distance - half) * (scale - 1));
+            positions.setXYZ(i, point.x, point.y, point.z);
+            normal.fromBufferAttribute(normals, i);
+            normal.addScaledVector(axis, normal.dot(axis) * (1 / scale - 1)).normalize();
+            normals.setXYZ(i, normal.x, normal.y, normal.z);
+          }
+        }
+        geo.computeBoundingBox();
+        geo.computeBoundingSphere();
+        return geo;
+      }) : source,
+      quat,
     };
   }
 
@@ -1400,7 +1604,7 @@ export class SceneManager {
     const mask = (typeId && store && store[typeId] && store[typeId].mask)
       || CONN_TYPE_MASK[typeId]
       || 0;
-    if (mask && maskPopcount(mask) > dirs.length) {
+    if (mask) {
       const v = new THREE.Vector3();
       for (const [bit, d] of CONNECTOR_ARM_BITS) {
         if (!(mask & bit)) continue;
@@ -1409,6 +1613,12 @@ export class SceneManager {
       }
     }
     return dirs;
+  }
+
+  /** 删除前读取当前画面的实际形状，裸管端没有实体连接件。 */
+  connectorShapeFor(id) {
+    const shape = this._connectorShapes?.get(id);
+    return shape ? { arms: shape.arms.map(d => d.slice()), quat: shape.quat.slice() } : null;
   }
 
   /**
@@ -1499,58 +1709,8 @@ export class SceneManager {
     const basis = this._c45BaseNode(model, n);
     if (!basis) return null;
     const pos = new THREE.Vector3(basis.x, basis.y, basis.z);
-    if (basis.c45quat && basis.c45quat.length === 4) {
-      const q = new THREE.Quaternion(
-        basis.c45quat[0], basis.c45quat[1], basis.c45quat[2], basis.c45quat[3]).normalize();
-      return new THREE.Matrix4().compose(pos, q, ONE);
-    }
-    const achse = n.c45axis || basis.c45axis;
-    if (!achse) return null;
-    const ex = new THREE.Vector3(achse[0], achse[1], achse[2]).normalize();
-    // Richtung des 45-Grad-Arms: zum Adapter-Koerper, sonst aus der Schraege.
-    const ziel = n.c45body ? n : null;
-    const arm = ziel
-      ? new THREE.Vector3(ziel.x - basis.x, ziel.y - basis.y, ziel.z - basis.z)
-      : (this._c45ArmDirAt ? null : null);
-    if (!arm || arm.lengthSq() < 1e-6) return null;
-    const ey = arm.addScaledVector(ex, -arm.dot(ex));
-    if (ey.lengthSq() < 1e-6) return null;
-    ey.normalize();
-    const ez = new THREE.Vector3().crossVectors(ex, ey);
-    return new THREE.Matrix4().makeBasis(ex, ey, ez).setPosition(pos);
-  }
-
-  /**
-   * Bogenrohr als abgegriffenes Originalmodell. Seine Lage ist dieselbe wie in
-   * der Datei: Ursprung im Knoten, lokales +X die Tangente am Bogenanfang,
-   * lokales +Y zum Kreismittelpunkt. Beides steht hier aus der Geometrie zur
-   * Verfügung, also braucht es die Datei-Lage (`t.geom`) nicht -- auch im
-   * Editor gesetzte Bögen kommen so durch.
-   *
-   * Das Modell ist ein festes Viertel mit 40 cm Halbmesser; weicht ein Bogen
-   * davon ab (Winkelrohre mit 135 Grad, ein Zuschlag am Maß), zeichnet der
-   * Aufrufer weiter seinen eigenen Schlauch.
-   */
-  _bowMeshFor(va, vb, center) {
-    const store = this._tubeMeshes;
-    const rec = store && store["round-tube2"];
-    if (!rec) return null;
-    const C = new THREE.Vector3(center[0], center[1], center[2]);
-    const u = va.clone().sub(C), w = vb.clone().sub(C);
-    const R = (u.length() + w.length()) / 2;
-    if (Math.abs(R - BOW_MESH_R) > 0.5) return null;
-    u.normalize(); w.normalize();
-    // Viertelkreis? Sonst passt das Modell nicht.
-    if (Math.abs(u.dot(w)) > 0.02) return null;
-    const N = u.clone().negate();                       // lokales +Y: zum Mittelpunkt
-    const T = w.clone().addScaledVector(u, -u.dot(w));  // lokales +X: Tangente am Anfang
-    if (T.lengthSq() < 1e-6) return null;
-    T.normalize();
-    const B = new THREE.Vector3().crossVectors(T, N);
-    return {
-      geo: this._meshGeometry("tube:round-tube2", rec),
-      matrix: new THREE.Matrix4().makeBasis(T, N, B).setPosition(va),
-    };
+    const frame = c45FrameFor(model, basis, n.c45body ? n : null);
+    return frame ? new THREE.Matrix4().makeBasis(...frame.map(axis => new THREE.Vector3(...axis))).setPosition(pos) : null;
   }
 
   /**
@@ -1631,16 +1791,18 @@ export class SceneManager {
   // mit ausgestanzten Kreisen extrudiert.
   // Wichtig: Der Cache muss in _disposeGroup ausgenommen werden, sonst gibt der
   // naechste Render-Durchlauf die noch benutzte Geometrie frei.
-  // Zwischen zwei Platten bleibt ein schmaler Spalt, damit die Rohre darunter
-  // sichtbar und anklickbar bleiben -- Kante an Kante verdeckt das Geruest.
+  // 旧版外扣功能板也沿普通板的外宽与接头让位，内嵌件保留独立轮廓。
   _panelGeometry(panelId, wSpan, dSpan, thickness) {
-    const w = Math.max(1, wSpan - PANEL_GAP);
-    const d = Math.max(1, dSpan - PANEL_GAP);
+    const standard = ['panel_40x40', 'panel_40x20', 'panel_30x30', 'hole_panel_40x40'].includes(panelId);
+    const squareCorners = !standard && !!confirmedSpec(panelId)?.mountLayout;
+    const gap = squareCorners ? PANEL_GAP : 0;
+    const w = Math.max(1, wSpan - gap);
+    const d = Math.max(1, dSpan - gap);
     const def = getPanel(panelId);
     const holes = (def && def.holes) || 0;
     const acrylic = !!(def && def.acrylic);
     const seg = this._q().notch;
-    const key = `${holes}:${acrylic ? "a" : ""}:${seg}:${w.toFixed(2)}x${d.toFixed(2)}x${thickness}`;
+    const key = `${holes}:${acrylic ? "a" : ""}:${squareCorners ? 'square' : 'notched'}:${seg}:${w.toFixed(2)}x${d.toFixed(2)}x${thickness}`;
     const hit = this._panelGeos.get(key);
     if (hit) return hit;
 
@@ -1648,7 +1810,7 @@ export class SceneManager {
     // connectorSize und steht mit seiner halben Kantenlaenge um den Knoten --
     // genau so gross ist die quadratische Aussparung. Bei sehr kleinen Platten
     // gedeckelt, damit nicht mehr Ecke fehlt als Platte bleibt.
-    const notch = Math.min((geometry().connectorSize || 5) / 2, Math.min(w, d) / 4);
+    const notch = Math.min(PANEL_CORNER_RELIEF, Math.min(w, d) / 4);
     const x0 = -w / 2, x1 = w / 2, y0 = -d / 2, y1 = d / 2;
     // Die Aussparung ist ein Viertelkreis um den Eckpunkt. Der Umriss laeuft
     // gegen den Uhrzeigersinn, die Boegen dagegen -- so schneiden sie in die
@@ -1663,15 +1825,19 @@ export class SceneManager {
       shape.lineTo(sx + (ex - cx), sy + (ey - cy));   // innere Ecke des Quadrats
       shape.lineTo(ex, ey);
     };
-    shape.moveTo(x0 + notch, y0);
-    shape.lineTo(x1 - notch, y0);
-    corner(x1, y0, Math.PI);
-    shape.lineTo(x1, y1 - notch);
-    corner(x1, y1, -HALF);
-    shape.lineTo(x0 + notch, y1);
-    corner(x0, y1, 0);
-    shape.lineTo(x0, y0 + notch);
-    corner(x0, y0, HALF);
+    if (squareCorners) {
+      shape.moveTo(x0, y0);shape.lineTo(x1, y0);shape.lineTo(x1, y1);shape.lineTo(x0, y1);
+    } else {
+      shape.moveTo(x0 + notch, y0);
+      shape.lineTo(x1 - notch, y0);
+      corner(x1, y0, Math.PI);
+      shape.lineTo(x1, y1 - notch);
+      corner(x1, y1, -HALF);
+      shape.lineTo(x0 + notch, y1);
+      corner(x0, y1, 0);
+      shape.lineTo(x0, y0 + notch);
+      corner(x0, y0, HALF);
+    }
     shape.closePath();
     if (holes === 9) {
       const r = Math.min(w, d) * 0.105;   // Lochradius ~4 cm im 40er-Feld
@@ -1731,6 +1897,17 @@ export class SceneManager {
    */
   _fittingMeshes(f) {
     if (f.kind === 'carousel_bearing') return carouselBearingMeshes(this, f);
+    if (f.kind === 'alu-connector2') {
+      const display = aluminiumConnectorDisplay(f), limits = display.bounds;
+      const size = limits.map(([low, high]) => high - low), center = limits.map(([low, high]) => (low + high) / 2);
+      const geo = new THREE.BoxGeometry(...size);
+      geo.translate(...center);
+      const mesh = this._placeFitting(new THREE.Mesh(geo, this._fittingMaterial('#e0e5e9', false)), display,
+        new THREE.Quaternion(...display.quat).normalize());
+      if (!this._materials.aluConnectorEdge) this._materials.aluConnectorEdge = new THREE.LineBasicMaterial({ color: 0x596975 });
+      mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo), this._materials.aluConnectorEdge));
+      return [mesh];
+    }
     if ((f.appearanceVersion === 2 && f.kind !== 'multi-wheel2') || (ACCESSORY_IDS.has(f.kind) && !confirmedSpec(f.kind))) return accessoryMeshes(this, this._renderModel, f, this._look(f.color || 'yellow'));
     const q = f.quat && f.quat.length === 4
       ? new THREE.Quaternion(f.quat[0], f.quat[1], f.quat[2], f.quat[3]).normalize()
@@ -1808,9 +1985,14 @@ export class SceneManager {
         return [mesh];
       }
       case "multi-wheel2": {            // Speichenrad: Scheibe mit Kranz
-        geo = this._wheelGeometry(WHEEL_R, 2.4, true);
-        mat = this._fittingMaterial(hex, false);
-        break;
+        const wheel = new THREE.Mesh(this._wheelGeometry(WHEEL_R, 2.4, true), this._fittingMaterial(hex, false));
+        const hub = new THREE.Mesh(this._cachedGeo("multiWheelFaceHub", () => {
+          const g = new THREE.CylinderGeometry(3.5, 3.5, 0.8, Math.max(12, this._q().tube));
+          g.rotateZ(Math.PI / 2);
+          g.translate(1.6, 0, 0);
+          return g;
+        }), this._fittingMaterial(hex, false));
+        return [wheel, hub].map(m => this._placeFitting(m, f, q));
       }
       case "floating-wheel2": {         // Schwimmrad, knapp 15 cm dick
         geo = this._wheelGeometry(WHEEL_R, 14, false);
@@ -2374,25 +2556,78 @@ export class SceneManager {
     this.requestRender();
   }
 
+  clearPanelPlacementPreview() {
+    if (this._panelPlacementPreview) {
+      this._panelPlacementPreview.removeFromParent();
+      this._panelPlacementPreview.traverse(o => { if (o.material) o.material.dispose(); });
+      this._panelPlacementPreview = null;
+      this.requestRender();
+    }
+    if (this._panelPlacementGuides.setHover(null)) this.requestRender();
+  }
+
+  showPanelPlacementPreview(model, part, railId) {
+    this.clearPanelPlacementPreview();
+    this._panelPlacementGuides.setHover(railId);
+    if (!part?.mounts?.length) { this.requestRender(); return; }
+    const group = new THREE.Group();
+    group.name = 'panel-placement-preview';
+    for (const mesh of panelAccessoryMeshes(this, model, part)) {
+      mesh.material = mesh.material.clone();
+      mesh.material.transparent = true;
+      mesh.material.opacity = .32;
+      mesh.material.depthWrite = false;
+      mesh.material.depthTest = false;
+      mesh.renderOrder = 1000;
+      mesh.castShadow = false; mesh.receiveShadow = false;
+      if (!part.valid) mesh.material.color.set('#e03131');
+      group.add(mesh);
+    }
+    this._panelPlacementPreview = group;
+    this.scene.add(group);
+    this.requestRender();
+  }
+
+  flashPlacedPanel(model, id) {
+    if (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const corners = model.panelCorners(model.panels.get(id));
+    if (!corners) return;
+    this._clearPanelPlacementFlash();
+    const center = new THREE.Vector3(...corners[0]).add(new THREE.Vector3(...corners[2])).multiplyScalar(.5);
+    const points = corners.map(p => new THREE.Vector3(...p).sub(center).multiplyScalar(.91).add(center));
+    points.push(points[0]);
+    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), new THREE.LineBasicMaterial({
+      color: '#f88929', transparent: true, opacity: 1, depthTest: false, depthWrite: false, toneMapped: false,
+    }));
+    line.name = 'panel-placement-success'; line.renderOrder = 1002;
+    this.scene.add(line);
+    this._panelPlacementFlash = { id, line, start: performance.now() };
+    this.requestRender();
+  }
+
+  _clearPanelPlacementFlash() {
+    if (!this._panelPlacementFlash) return;
+    const { line } = this._panelPlacementFlash;
+    line.removeFromParent(); line.geometry.dispose(); line.material.dispose();
+    this._panelPlacementFlash = null;
+  }
+
   showInstallationPreview(model, part, valid = true) {
     this.clearInstallationPreview();
     if (!part?.mounts?.length) return;
     const group = new THREE.Group();
     group.name = 'accessory-installation-preview';
-    const meshes = part.kind ? accessoryMeshes(this, model, part, '#238fe4') : panelAccessoryMeshes(this, model, part);
+    // 连续定位会不断改变绳长；预览几何随预览释放，避免把每个长度都放进永久缓存。
+    const previewScene = part.kind === 'rope' ? Object.create(this) : this;
+    if (part.kind === 'rope') previewScene._cachedGeo = (_key,create) => create();
+    const meshes = part.kind ? accessoryMeshes(previewScene, model, part, '#238fe4') : panelAccessoryMeshes(this, model, part);
     for (const mesh of meshes) {
       mesh.material = mesh.material.clone();
       mesh.material.transparent = true; mesh.material.opacity = 0.45; mesh.material.depthWrite = false;
       if (!valid) mesh.material.color.set('#e03131');
       mesh.userData.previewMaterial = true;
+      if (part.kind === 'rope' || part.kind === 'gym_rings') mesh.userData.previewGeometry = true;
       group.add(mesh);
-    }
-    const positions = part.mounts.map(m => mountPoint(model, m)).filter(Boolean);
-    for (const position of positions) {
-      const marker = new THREE.Mesh(new THREE.SphereGeometry(1.6, 20, 12), new THREE.MeshBasicMaterial({ color: valid ? '#22c55e' : '#e03131', depthTest: false, transparent: true, opacity: 0.85 }));
-      marker.position.fromArray(position); marker.renderOrder = 20;
-      marker.userData.previewGeometry = true; marker.userData.previewMaterial = true;
-      group.add(marker);
     }
     if (part.kind === 'swing') {
       const volumes = componentVolumes(model, part, { sweep: true });
@@ -2409,6 +2644,28 @@ export class SceneManager {
     this._installationGroup = group;
     this.scene.add(group);
     this.requestRender();
+  }
+
+  showBearingConnectionPreview(probe) {
+    this.clearInstallationPreview();
+    if(!probe?.fitting)return;
+    if(this._q().meshes){this._ensureMeshes('fittings');this._ensureMeshes('connectors');}
+    const group=new THREE.Group();group.name='bearing-connection-preview';
+    const color=probe.valid?'#1FA85A':'#e03131';
+    const meshes=this._fittingMeshes(probe.fitting);
+    const quat=new THREE.Quaternion(...probe.fitting.quat),dirs=[{d:probe.stub},{d:probe.stub.map(v=>-v)}];
+    const actual=this._q().meshes?this._connMeshFor(dirs,quat,'straight'):null;
+    const connector=new THREE.Mesh(actual?.geo||this._connGeometry(),this._connMaterial(false));connector.position.fromArray(probe.pos);
+    connector.quaternion.copy(actual?.quat||quat);meshes.push(connector);
+    if(!actual){
+      const cs=geometry().connectorSize,len=cs*.85,offset=cs/2+len/2-.4;
+      const geo=this._tubeGeometry(geometry().armRadius,len,Math.max(6,this._q().tube-4));
+      for(const {d} of dirs){const axis=new THREE.Vector3(...d),stub=new THREE.Mesh(geo,this._connMaterial(false));stub.position.fromArray(probe.pos).addScaledVector(axis,offset);stub.quaternion.setFromUnitVectors(UP,axis);meshes.push(stub);}
+    }
+    for(const mesh of meshes){mesh.material=mesh.material.clone();mesh.material.color.set(color);mesh.material.transparent=true;mesh.material.opacity=.5;mesh.material.depthWrite=false;mesh.userData.previewMaterial=true;mesh.castShadow=false;group.add(mesh);}
+    const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(...probe.pos),new THREE.Vector3(...probe.center)]),new THREE.LineBasicMaterial({color,depthTest:false,transparent:true,opacity:.8}));
+    line.userData.previewGeometry=true;line.userData.previewMaterial=true;group.add(line);
+    this._installationGroup=group;this.scene.add(group);this.requestRender();
   }
 
   _placeFitting(mesh, f, q) {
@@ -2515,6 +2772,21 @@ export class SceneManager {
   // gecacht -- _disposeGroup gibt nur Geometrien frei.
   _selectedMaterial(base) {
     return this._tintMaterial(base, "sel:", HIGHLIGHT_COLOR, HIGHLIGHT_EMISSIVE);
+  }
+
+  // 框选整件着橙色，透明板、纹理和顶点色同样清楚；不改原始材质。
+  _boxSelectedMaterial(base) {
+    const material = this._tintMaterial(base, "box:", HIGHLIGHT_COLOR, HIGHLIGHT_EMISSIVE);
+    material.map = null;
+    material.alphaMap = null;
+    material.emissiveMap = null;
+    material.vertexColors = false;
+    material.opacity = 1;
+    material.transparent = false;
+    material.alphaTest = 0;
+    material.depthWrite = true;
+    if ('transmission' in material) material.transmission = 0;
+    return material;
   }
 
   _hoverMaterial(base) {
@@ -3103,6 +3375,7 @@ export class SceneManager {
         color: new THREE.Color(this._look(colorId)),
         roughness: 0.5,
         metalness: 0,
+        vertexColors: true,
       });
       m.userData.tuneColorId = colorId;
       this._materials[key] = m;
@@ -3123,8 +3396,10 @@ export class SceneManager {
     if (!this._materials[key]) {
       const m = new THREE.MeshStandardMaterial({
         color: new THREE.Color(this._look(colorId)),
-        roughness: transparent ? 0.95 : 0.48, metalness: transparent ? 0.0 : 0.04,
+        roughness: transparent ? 0.95 : 0.48, metalness: 0,
         side: THREE.DoubleSide,
+        // 实心板用背面写入阴影深度，外表面继续双面可见并接收管件的投影。
+        shadowSide: transparent ? null : THREE.BackSide,
         transparent: !!transparent, opacity: transparent ? 0.5 : 1,
         emissive: new THREE.Color(isCurrent ? 0x3a2400 : 0x000000),
       });
@@ -3142,7 +3417,7 @@ export class SceneManager {
     return [Math.max(1, w / 2 - frame), Math.max(1, d / 2 - frame)];
   }
 
-  /** Scheibe der Acrylglasplatte: flache Box im Fenster, duenner als der Rahmen. */
+  /** 透明窗片与板框使用相同板身厚度。 */
   _acrylicPaneGeometry(wSpan, dSpan, thickness) {
     const w = Math.max(1, wSpan - PANEL_GAP);
     const d = Math.max(1, dSpan - PANEL_GAP);
@@ -3150,7 +3425,7 @@ export class SceneManager {
     const hit = this._panelGeos.get(key);
     if (hit) return hit;
     const [ix, iy] = this._acrylicInner(w, d);
-    const geo = new THREE.BoxGeometry(ix * 2 + 0.6, thickness * 0.5, iy * 2 + 0.6);
+    const geo = new THREE.BoxGeometry(ix * 2 + 0.6, thickness, iy * 2 + 0.6);
     this._panelGeos.set(key, geo);
     this._keepGeos.add(geo);
     return geo;
@@ -3182,11 +3457,11 @@ export class SceneManager {
     return this._materials["water"];
   }
 
-  // Verstaerkungsprofil-Stab (Bauen-Modus): dunkles Alu-Metallic.
+  // 内置铝管采用浅银色金属，草地和室内光照下都能辨认边缘。
   _rodMaterial() {
     if (!this._materials["rod"]) {
       this._materials["rod"] = new THREE.MeshStandardMaterial({
-        color: new THREE.Color(0x7a8794), roughness: 0.3, metalness: 0.85,
+        color: new THREE.Color(0xb9c0c5), roughness: 0.45, metalness: 0.25,
       });
     }
     return this._materials["rod"];
@@ -3409,7 +3684,7 @@ export class SceneManager {
     // des Knotens, seine Lage ist die des Teils (lokales -X zeigt zur tragenden
     // Kupplung, die Arme stehen quer dazu).
     const maske = n.partMask || HOLE_MASKS[n.part] || 11;
-    const echt = this._q().meshes && this._fitMeshes
+    const echt = n.part !== 'windmill' && this._q().meshes && this._fitMeshes
       ? this._fitMeshes["hole-connector4_" + maske] : null;
     if (echt && n.partQuat && n.partQuat.length === 4) {
       const qh = new THREE.Quaternion(n.partQuat[0], n.partQuat[1], n.partQuat[2],
@@ -3443,8 +3718,8 @@ export class SceneManager {
     // "O--": ein Ring, der ueber den Stutzen der tragenden Kupplung greift, und
     // quer dazu ein eigener Stutzen, in dem das Rohr steckt.
     const ringLen = cs * 0.9;
-    const ringR = armR + 0.05 + PIN_RING_WALL;   // Aussenmass des Rings
-    const ring = new THREE.Mesh(this._cachedGeo(`pinRing${seg}`, () => {
+    const ringR = (n.part === 'windmill' ? g.tubeRadius + 0.05 : armR + 0.05) + PIN_RING_WALL;
+    const ring = new THREE.Mesh(this._cachedGeo(`pinRing${seg}:${ringR}`, () => {
       const s = new THREE.Shape();
       s.absarc(0, 0, ringR, 0, Math.PI * 2, false);
       const loch = new THREE.Path();
@@ -3459,7 +3734,7 @@ export class SceneManager {
     // Der Stutzen der Kupplung reicht von ihrer Wuerfelflaeche (2,5 cm neben
     // der Muendung) bis gut einen Zentimeter darueber hinaus -- dort sitzt der
     // Ring, also knapp um die Muendung herum.
-    ring.position.copy(at).addScaledVector(peg, 0.5);
+    ring.position.copy(at).addScaledVector(peg, n.part === 'windmill' ? 0 : 0.5);
     ring.userData = { kind: "node", id: n.id };
     this.buildGroup.add(ring);
     if (st !== "future") this.pickNodes.push(ring);
@@ -3599,7 +3874,31 @@ export class SceneManager {
     arm.raycast = () => {};
     group.add(arm);
     group.userData.arms.push([axis, arm]);
+    if (!this._tubeGuideSegments) this._tubeGuideSegments = [];
+    this._tubeGuideSegments.push({ start: origin.slice(),
+      end: origin.map((v, i) => v + dir.getComponent(i) * GUIDE.half), mesh: arm,
+      replace: mesh => { group.userData.arms.find(entry => entry[1] === arm)[1] = mesh; } });
     return group;
+  }
+
+  mergeTubeGuides() {
+    for (const merged of mergeTubeGuideSegments(this._tubeGuideSegments || [])) {
+      if (merged.sources.length < 2) continue;
+      const start = new THREE.Vector3(...merged.start), end = new THREE.Vector3(...merged.end);
+      const mesh = new THREE.Mesh(this._cachedGeo('mergedTubeGuide', () =>
+        new THREE.CylinderGeometry(GUIDE.r, GUIDE.r, 1, 6)), merged.sources[0].mesh.material);
+      mesh.position.copy(start).add(end).multiplyScalar(.5);
+      mesh.scale.y = start.distanceTo(end);
+      mesh.quaternion.setFromUnitVectors(UP, end.sub(start).normalize());
+      mesh.renderOrder = 998;
+      mesh.raycast = () => {};
+      this.handleGroup.add(mesh);
+      for (const source of merged.sources) {
+        source.mesh.removeFromParent();
+        source.replace?.(mesh);
+      }
+    }
+    this._tubeGuideSegments = [];
   }
 
   // 指到某个接头时，那个接点的三条线一起亮起来。
@@ -3814,13 +4113,28 @@ export class SceneManager {
   // opts.slideNameFor(slide) -> string|null : Beschriftung an der Rutsche/Dach.
   // assembly.transforms 只移动场景碎片，保存的模型位置保持不变。
   renderModel(model, selectedNodeId, opts = {}) {
+    const frameOnly = !!opts.frameOnly;
+    const viewChanged = !!this._frameOnly !== frameOnly;
+    if (viewChanged) {
+      this._finishMotion();
+      this._clearHoverOverlay();
+    }
+    this._frameOnly = frameOnly;
     this._renderModel = model;   // 有的配件要回头看模型（软包滚筒套在哪根管上）
+    if (opts.interactionMode) {
+      if (opts.interactionMode === 'select' || opts.interactionMode === 'delete') this._hoverPartMode = opts.interactionMode;
+      else this._clearHoverOverlay();
+    }
+    this.clearPanelPlacementPreview();
+    if (this._panelPlacementFlash && (!opts.panelPlacementMode || !model.panels.has(this._panelPlacementFlash.id))) this._clearPanelPlacementFlash();
+    this._panelPlacementGuides.setRails(model, opts.panelPlacementRails, opts.focusId);
     // 开着动效的时候旧零件先摘下来不释放：画完新的才知道哪些被删了，要给它们留影子。
     const vorher = this._motion ? this.buildGroup.children.slice() : null;
     if (vorher) for (const c of vorher) this.buildGroup.remove(c);
     else this._disposeGroup(this.buildGroup);
     this._disposeLabels();
     this.pickNodes = [];
+    this._connectorShapes = new Map();
     this.pickTubes = [];
     this.pickPanels = [];
     this.pickClamps = [];
@@ -3843,6 +4157,7 @@ export class SceneManager {
     // die Cursor-Auswahl waere das stoerend: dort waehlt man staendig etwas an.
     const selected = opts.selected && opts.selected.size ? opts.selected : null;
     const highlight = opts.highlight && opts.highlight.size ? opts.highlight : null;
+    this._solidSelectedParts = selected && !highlight ? opts.solidSelected : null;
     const focusId = opts.focusId != null ? opts.focusId : null;
     // Beides zugleich ist der Normalfall: etwas ist im Modell gewaehlt UND in
     // der Liste wird eine Zeile angeklickt. Dann gilt die ZEILE -- die Auswahl
@@ -3858,15 +4173,24 @@ export class SceneManager {
     const invalid = opts.invalid && opts.invalid.size ? opts.invalid : null;
     // 按零件上色（id -> 颜色）：共享方案里别人选中的零件、版本对照里增减的零件
     const tints = opts.tints && opts.tints.size ? opts.tints : null;
-    const matFor = (id, base) => {
+    const matFor = (id, base, keepOpaque = false) => {
       if (invalid && id != null && invalid.has(id)) return this._invalidMaterial(base);
-      if (focusId != null && id === focusId) return this._focusMaterial(base);
+      if (opts.reinforce && opts.suggest?.has(id)) return this._suggestMaterial(base);
+      if (!opts.panelPlacementRails && focusId != null && id === focusId) return this._focusMaterial(base);
       if (highlight && id != null && highlight.has(id)) {
         return focusId != null ? this._partnerMaterial(base) : this._selectedMaterial(base);
       }
+      const parentId = typeof id === 'string' ? splitHingeKey(id)?.nodeId : null;
+      if (selected && (selected.has(id) || parentId && selected.has(parentId))
+          && (opts.solidSelected?.has(id) || parentId && opts.solidSelected?.has(parentId))) {
+        return this._boxSelectedMaterial(base);
+      }
       if (marked) {
-        if (id != null && marked.has(id)) return this._selectedMaterial(base);
-        if (dimOthers) return this._dimmedMaterial(base);
+        if (id != null && marked.has(id)) {
+          if (!highlight && opts.preserveSelectionAppearance) return base;
+          return this._selectedMaterial(base);
+        }
+        if (dimOthers) return keepOpaque ? base : this._dimmedMaterial(base);
       }
       if (tints && id != null && tints.has(id)) {
         const color = tints.get(id);
@@ -3898,7 +4222,7 @@ export class SceneManager {
     const reinforce = opts.reinforce || false;
     // Kollisions-Modus: betroffene Rohre rot, alle anderen grau. Platten und
     // Netze bleiben aussen vor, damit die Ueberlagerungen sichtbar sind.
-    const hideFlat = reinforce;
+    const hideFlat = reinforce || frameOnly;
     const cs = geometry().connectorSize;
     // Echte Kupplungs-Arme (aus variant2 importiert, node.arms): kurze Stutzen
     // mit Arm-Durchmesser (~42 mm). Offene Arme ragen heraus; von Rohren belegte
@@ -3921,6 +4245,7 @@ export class SceneManager {
     // nicht die Sehne zum Gegenknoten -- sonst gilt ein belegter Arm faelschlich
     // als frei.
     const tubeDirsAt = new Map();
+    const c45CarrierNodes = new Set();
     const pushDir = (nodeId, vx, vy, vz, bow) => {
       const L = Math.hypot(vx, vy, vz);
       if (L < 1e-6) return;
@@ -3983,6 +4308,7 @@ export class SceneManager {
       pushDir(n.id, -n.stub[0], -n.stub[1], -n.stub[2], false);
     }
     for (const t of model.tubes.values()) {
+      if (t.link) continue;
       const na = model.nodes.get(t.a), nb = model.nodes.get(t.b);
       if (!na || !nb) continue;
       if (t.bow && t.bowCenter) {
@@ -4003,6 +4329,7 @@ export class SceneManager {
           const ax = m.indexOf(Math.max(m[0], m[1], m[2]));
           const o = [0, 0, 0]; o[ax] = Math.sign(d[ax]) || 1; return o; };
         const koerper = na.c45body ? na : nb.c45body ? nb : null;
+        if (koerper) c45CarrierNodes.add(koerper === na ? nb.id : na.id);
         const achse = koerper && koerper.c45axis;
         const ab = achse
           ? (koerper === nb ? achse.slice() : [-achse[0], -achse[1], -achse[2]])
@@ -4030,7 +4357,6 @@ export class SceneManager {
       || [...model.nodes.values()].some((n) => n.c45 || n.c45file || isHolePart(n.part) || isBoltPart(n.part));
     const braucht = [];
     if (model.nodes.size) braucht.push("connectors");
-    if ([...model.tubes.values()].some((t) => t.bow)) braucht.push("tubes");
     if (model.slides.size) braucht.push("slides");
     if (wantsFitMeshes) braucht.push("fittings");
     if (model.panels.size || (model.textiles && model.textiles.size)) braucht.push("surfaces");
@@ -4053,7 +4379,8 @@ export class SceneManager {
       return;
     }
     // Verstaerkungsprofile: die abgegriffenen Modelle liegen bei den Anbauteilen.
-    // Sie decken die genormten Laeufe (80 und 60 cm) ab; was uebrig bleibt --
+    // Alle drei Laengen verwenden dasselbe silberne Profil und denselben Querschnitt.
+    // Sie decken die genormten Laeufe (40, 60 und 80 cm) ab; was uebrig bleibt --
     // etwa die krummen Abstaende eines gedrehten Aufbaus -- behaelt den
     // gezeichneten Innenstab. `aluGedeckt` haelt fest, welche Rohre schon ein
     // Profil haben.
@@ -4072,14 +4399,14 @@ export class SceneManager {
 
     // Verstaerkungsprofile als ganze Laeufe. Sie liegen NEBEN dem Rohr, mit
     // Pfeilen darauf -- genau so zeigt sie die Herstellersoftware.
-    if (aluModelle && !reinforce) {
+    if (aluModelle && (!reinforce || opts.reinforcementPartId === ALUMINIUM_CONNECTOR)) {
       for (const lauf of reinforcementProfiles(model)) {
         const profilePosition = assemblyProfilePosition(asm, lauf);
         if (!profilePosition) continue;
         const zustand = lauf.tubes.map((id) => stateOf(id));
         if (zustand.every((z) => z === "future")) continue;
-        const rec = this._fitMeshes[
-          Math.abs(lauf.len - 80) < 1 ? "alu2_800" : Math.abs(lauf.len - 60) < 1 ? "alu2_600" : null];
+        const meshKey = 'alu2_800';
+        const rec = this._fitMeshes[meshKey];
         if (!rec) continue;
         for (const id of lauf.tubes) aluGedeckt.add(id);
         const ex = new THREE.Vector3(lauf.dir[0], lauf.dir[1], lauf.dir[2]).normalize();
@@ -4097,8 +4424,8 @@ export class SceneManager {
           : (asm && zustand.every((z) => z === "done")) ? this._assemblyDoneMaterial(this._rodMaterial())
           : this._rodMaterial();
         const mat = matFor(lauf.tubes.find((id) => marked && marked.has(id)) ?? null, grund);
-        this._batchAdd(this._meshGeometry("fit:" + (Math.abs(lauf.len - 80) < 1 ? "alu2_800" : "alu2_600"), rec),
-          mat, new THREE.Matrix4().makeBasis(ex, ey, ez)
+        this._batchAdd(this._meshGeometry('fit:' + meshKey, rec),
+          mat, new THREE.Matrix4().makeBasis(ex, ey, ez).scale(new THREE.Vector3(lauf.len / 80, 1, 1))
             .setPosition(new THREE.Vector3(...profilePosition)),
           // Ein Klick auf das Profil meint das Rohr darunter; `tubes` haelt den
           // ganzen Lauf fest, damit die Auswahl beide Rohre erwischt.
@@ -4113,6 +4440,12 @@ export class SceneManager {
       // Kupplung, die in der Datei steht, aber nichts haelt: die Hersteller-
       // software zeichnet sie nicht -- sonst schweben Wuerfel in der Luft.
       if (n.unused) continue;
+      // 轴承连接件的空安装位置只是锚点，接管或手动指定通型后才显示接头。
+      if (n.bearingOn && !n.preferType && !n.arms?.length && !n.c45
+          && model.degree(n.id) === 0) continue;
+      // 管端保留建模锚点和加管操作，单根管的自由末端不显示自动接头。
+      if (!n.preferType && !n.part && !n.c45 && !n.c45body && !n.c45file && !n.arms?.length
+          && (tubeDirsAt.get(n.id) || []).length === 1) continue;
       // Bezugspunkte fuer die Drehpunkt-Suche (_pointUnderCursor).
       this._nodePoints.push(new THREE.Vector3(n.x, n.y, n.z));
       let mat;
@@ -4133,10 +4466,13 @@ export class SceneManager {
       // Wo eine Radkappe sitzt, gibt es keine Kupplung mehr -- die Kappe
       // schliesst das Rohrende selbst ab. Der Flexikupplungs-Bolzen ersetzt sie
       // ebenfalls: er steckt selbst im Rohrende.
-      if (!n.c45body && !isHolePart(n.part) && !isBoltPart(n.part)
+      const connection = resolveNodeConnection(model, n);
+      // 空套筒和自由管端只保留逻辑锚点；独立45°件仍在下方按真实外形绘制。
+      const hasOrdinaryConnector = connection.types.some(type => type && type !== 'diagonal' && type !== 'end')
+        || n.preferType || n.part || n.bearingOn;
+      if (hasOrdinaryConnector && !n.c45body && !isHolePart(n.part) && !isBoltPart(n.part)
           && !(model.hasWheelCap && model.hasWheelCap(n))) {
         const pos = new THREE.Vector3(n.x, n.y, n.z);
-        const connection = resolveNodeConnection(model, n);
         const quat = connection.quat ? new THREE.Quaternion(...connection.quat).normalize()
           : connection.frame ? new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(...connection.frame.map(axis => new THREE.Vector3(...axis))))
           : new THREE.Quaternion();
@@ -4144,6 +4480,7 @@ export class SceneManager {
         // Offene Huelsen kommen aus variant2 (`n.arms`) bzw. dem gewaehlten
         // `preferType` -- nicht nur aus bereits steckenden Rohren.
         const dirs = (connection.renderDirs || connection.worldDirs).map(d => ({ d, bow: (tubeDirsAt.get(n.id) || []).some(entry => entry.bow && entry.d.every((value, axis) => Math.abs(value - d[axis]) < 0.01)) }));
+        this._connectorShapes.set(n.id, { arms: dirs.map(e => e.d.slice()), quat: quat.toArray() });
         const echt = wantMeshes ? this._connMeshFor(dirs, quat, connection.typeId) : null;
         if (echt) {
           this._batchAdd(echt.geo, matFor(n.id, mat),
@@ -4169,7 +4506,8 @@ export class SceneManager {
       // KARDINALEN Arm der Basiskupplung gesteckt, davon zweigt ein 45°-Arm ab,
       // der in die Tube greift.
       const fileC45 = hasStandaloneFileC45(model, n);
-      if ((n.c45 || fileC45) && st !== "future") {
+      // 有独立本体时由本体绘制一次；承载接头不再叠加旧版斜角外形和错误拾取身份。
+      if ((n.c45body || fileC45 || (n.c45 && !c45CarrierNodes.has(n.id))) && st !== "future") {
         // Im Aufbau bleicht der Adapter genau wie die uebrigen fertigen Teile
         // aus -- sonst steht die 45-Grad-Kupplung als einziges Stueck kraeftig
         // schwarz im schon Gebauten.
@@ -4334,27 +4672,29 @@ export class SceneManager {
           : (asm && st === "done") ? this._tubeMaterial(t.color)
           : this._tubeMaterial(t.color);
         const bowFinalMat = matFor(t.id, bowMat);
-        // Abgegriffenes Originalteil, wenn es passt: EIN Mesh, an beiden Enden
-        // geschlossen und mit dem geraden Vorlauf, in dem der Kupplungsarm steckt.
-        const echterBogen = wantMeshes ? this._bowMeshFor(va, vb, t.bowCenter) : null;
-        if (echterBogen) {
-          this._batchAdd(echterBogen.geo, bowFinalMat, echterBogen.matrix,
-            "tube", t.id, st !== "future" ? this.pickTubes : null);
-          continue;
-        }
+        // 弯管同样保留空心管口，旧网格的实心端面不用于管身。
         const bowMesh = new THREE.Mesh(
           new THREE.TubeGeometry(bowCurve, 24, tubeRadius, qual.bow, false),
           bowFinalMat
         );
+        bowMesh.geometry.setAttribute("color", new THREE.BufferAttribute(new Float32Array(bowMesh.geometry.getAttribute("position").count * 3).fill(1), 3));
         bowMesh.userData = { kind: "tube", id: t.id };
         bowMesh.castShadow = true;
         this.buildGroup.add(bowMesh);
         if (st !== "future") this.pickTubes.push(bowMesh);
 
-        // TubeGeometry ist ein offener Schlauch. Ohne Deckel sieht man in das
-        // Rohr hinein (die Rueckseiten werden weggeschnitten) -- es wirkt als
-        // blosse Flaeche, waehrend gerade Rohre als CylinderGeometry
-        // geschlossen sind. Also je Ende eine Scheibe, Normale nach aussen.
+        const innerGeo = new THREE.TubeGeometry(bowCurve, 24, Math.max(0.1, tubeRadius - 0.3), qual.bow, false);
+        const indices = innerGeo.index.array;
+        for (let i = 0; i < indices.length; i += 3) [indices[i], indices[i + 1]] = [indices[i + 1], indices[i]];
+        const normals = innerGeo.getAttribute("normal");
+        for (let i = 0; i < normals.array.length; i++) normals.array[i] *= -1;
+        innerGeo.setAttribute("color", new THREE.BufferAttribute(new Float32Array(normals.count * 3).fill(0.45), 3));
+        const innerMesh = new THREE.Mesh(innerGeo, bowFinalMat);
+        innerMesh.userData = { kind: "tube", id: t.id };
+        this.buildGroup.add(innerMesh);
+        if (st !== "future") this.pickTubes.push(innerMesh);
+
+        // 端面只画管壁截面，保留中间的孔。
         const capGeo = this._capGeometry(tubeRadius, qual.bow);
         for (const [u01, sign] of [[0, -1], [1, 1]]) {
           const cap = new THREE.Mesh(capGeo, bowFinalMat);
@@ -4382,11 +4722,11 @@ export class SceneManager {
       // 2,4 cm vor ihrer Kupplung.
       const drawLen = t.geom && !t.bow && t.geom.len
         ? Math.max(1, t.geom.len + (t.geom.pad || 0)) : Math.max(1, len - cs);
-      const isReinforceActive = reinforce && t.reinforced;
+      const isReinforceActive = reinforce && t.reinforced && opts.reinforcementPartId !== ALUMINIUM_CONNECTOR;
       const effectiveRadius = isReinforceActive ? tubeRadius * 1.08 : tubeRadius;
-      const geo = this._tubeGeometry(tubeRadius, drawLen, qual.tube);
+      const geo = this._tubeGeometry(tubeRadius, drawLen, qual.tube, true);
       const geo2 = isReinforceActive
-        ? this._tubeGeometry(effectiveRadius, drawLen, qual.tube)
+        ? this._tubeGeometry(effectiveRadius, drawLen, qual.tube, true)
         : geo;
       let mat = st === "future" ? this._ghostMaterial()
         : st === "current" ? this._tubeMaterial(t.color)
@@ -4396,7 +4736,7 @@ export class SceneManager {
         : (asm && st === "done") ? this._tubeMaterial(t.color)
         : this._tubeMaterial(t.color);
       if (t.tubeId?.startsWith('TA') && st !== 'future' && !(asm && st === 'done')) {
-        if (!this._materials.aluminiumTube) this._materials.aluminiumTube = new THREE.MeshStandardMaterial({ color: '#b9c0c5', metalness: 0.85, roughness: 0.27 });
+        if (!this._materials.aluminiumTube) this._materials.aluminiumTube = new THREE.MeshStandardMaterial({ color: '#b9c0c5', metalness: 0.85, roughness: 0.27, vertexColors: true });
         mat = this._materials.aluminiumTube;
       }
       const dir = vb.clone().sub(va).normalize();
@@ -4434,7 +4774,7 @@ export class SceneManager {
     }
 
     // Platten (flache Box in der Feld-Ebene) – im Verstaerken-/Kollisions-Modus ausgeblendet.
-    const thickness = geometry().panelThickness || 1.6;
+    const thickness = geometry().panelThickness;
     const middle = modelMiddle(model.nodes.values());
     for (const p of model.panels.values()) {
       if (hideFlat) continue;
@@ -4491,10 +4831,12 @@ export class SceneManager {
       const currentDefinition = getPanel(p.panelId) || {};
       const pdef = !p.appearanceVersion && Object.hasOwn(currentDefinition, 'legacyFeature') ? { ...currentDefinition, feature: currentDefinition.legacyFeature } : currentDefinition;
       if (p.appearanceVersion && PANEL_ACCESSORY_IDS.has(p.panelId)) {
+        // 单面功能板保持遮挡，避免从背面透出正面的抓点或图案。
+        const keepOpaque = opts.keepPanelFacesOpaque && ['climbing', 'clock', 'maze', 'magnet', 'felt', 'basketball', 'busy'].includes(pdef.feature);
         for (const mesh of panelAccessoryMeshes(this, model, p)) {
           mesh.updateMatrix();
           const material = st === 'future' ? this._ghostMaterial() : (asm && st === 'done') ? mat : mesh.material;
-          this._batchAdd(mesh.geometry, matFor(p.id, material), mesh.matrix, 'panel', p.id, this.pickPanels);
+          this._batchAdd(mesh.geometry, matFor(p.id, material, keepOpaque), mesh.matrix, 'panel', p.id, this.pickPanels);
         }
         continue;
       }
@@ -4508,7 +4850,7 @@ export class SceneManager {
           "panel", p.id, this.pickPanels);
         continue;
       }
-      const lift = (geometry().tubeRadius || 2.45) - thickness / 2;
+      const lift = (confirmedSpec(p.panelId)?.mountLayout ? geometry().tubeRadius : PANEL_OUTER_FACE) - thickness / 2;
       const sgn = (p.side || 1) < 0 ? -1 : 1;
       center.add(new THREE.Vector3(nrm[0], nrm[1], nrm[2]).multiplyScalar(lift * sgn));
       const geo = this._panelGeometry(p.panelId, u.length(), w.length(), thickness);
@@ -4630,17 +4972,15 @@ export class SceneManager {
       }
       const plain = st === "future" || (asm && st === "done");
       if (tx.variant === "rainbow") {
-        // 彩虹带：和布面一样是两头包在管子上的薄片，只是切成七色的细条并排，
-        // 条与条之间留一指宽的缝。每条 = 中间一片平布 + 两头各一个半圆包着管。
-        const n = Math.max(2, Math.round(u.length() / 6));
-        const gap = 1.2;
-        const bw = Math.max(1.5, u.length() / n - gap);
         const L = w.length();
-        const { sheet, wrap } = this._textileSheetGeos(bw, L);
-        for (let i = 0; i < n; i++) {
-          const pos = va.clone().addScaledVector(u, (i + 0.5) / n);
+        const radius = geometry().tubeRadius + 0.12;
+        for (const ribbon of rainbowRibbonLayout(u.length(), geometry().connectorSize)) {
+          const key = `${ribbon.width.toFixed(4)}:${L.toFixed(4)}:${radius.toFixed(4)}`;
+          const sheet = this._cachedGeo(`rainbow-sheet:${key}`, () => createRainbowRibbonSheet(ribbon.width, L, radius));
+          const wrap = this._cachedGeo(`rainbow-sleeve:${ribbon.width.toFixed(4)}:${radius.toFixed(4)}`, () => createRainbowRibbonSleeve(ribbon.width, radius));
+          const pos = va.clone().addScaledVector(xAxis, ribbon.center);
           const base = new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis).setPosition(pos);
-          const rm = plain ? mat : matFor(tx.id, this._feltMaterial(RAINBOW[i % RAINBOW.length]));
+          const rm = plain ? mat : matFor(tx.id, this._feltMaterial(ribbon.color));
           this._batchAdd(sheet, rm, base, "textile", tx.id, this.pickTextiles);
           this._batchAdd(wrap, rm, base, "textile", tx.id, this.pickTextiles);
           this._batchAdd(wrap, rm, base.clone().multiply(new THREE.Matrix4().makeTranslation(0, 0, L)), "textile", tx.id, this.pickTextiles);
@@ -4680,14 +5020,15 @@ export class SceneManager {
     // Anbauteile: Raeder, Rollen, Kappen, Netze, Rundwand, Dach, Sonderkupplungen.
     for (const f of (model.fittings ? model.fittings.values() : [])) {
       if (hideFlat && FLAT_FITTINGS.has(f.kind)) continue;
+      if (frameOnly && !FRAME_FITTINGS.has(f.kind)) continue;
       const st = stateOf(f.id);
       if (st === "future") continue;
       for (const mesh of this._fittingMeshes(f)) {
         const role = mesh.userData.role;
         mesh.userData = { kind: "fitting", id: f.id, role };
         const base = mesh.material;
-        // Wasser bleibt blau -- es ist kein Bauteil, Orange wuerde wie ein Kasten wirken.
-        mesh.material = role === "water" ? base
+        // 水面平时保持蓝色，多选或框选时随整件统一着橙色。
+        mesh.material = role === "water" && !this._solidSelectedParts?.has(f.id) ? base
           : matFor(f.id, (suggest && suggest.has(f.id)) ? this._suggestMaterial(base)
           : base);
         this.buildGroup.add(mesh);
@@ -4739,7 +5080,10 @@ export class SceneManager {
 
     // Beschriftung fuer Teile, die selbst keine tragen (Platten, Anbauteile,
     // Doppelrohrverbinder, Netze): nur fuer das eine gewaehlte Teil.
-    if (soloLabel) {
+    const hiddenSolo = frameOnly && soloLabel && (model.panels.has(soloLabel.id)
+      || model.textiles?.has(soloLabel.id) || model.slides.has(soloLabel.id)
+      || model.fittings?.has(soloLabel.id) && !FRAME_FITTINGS.has(model.fittings.get(soloLabel.id).kind));
+    if (soloLabel && !hiddenSolo) {
       const at = this._soloAnchor(model, soloLabel.id);
       if (at) {
         const sprite = this._makeLabelSprite(soloLabel.text, false, null);
@@ -4774,7 +5118,9 @@ export class SceneManager {
     // Zoom-Grenze richtet sich nach der Modellgroesse.
     this._applyZoomLimits(model);
 
-    if (vorher) this._motionAfterRender(vorher, opts);
+    if (vorher) this._motionAfterRender(vorher, viewChanged ? { ...opts, preview: true } : opts);
+    if (opts.preserveSelectionAppearance && selected && !highlight) this._outlineSelectedParts(selected, opts.profileSelection);
+    if (this._homeFramePending && this._homeFramePending === this._homeKey) this.frameHomeProduct();
 
     // Der Szenegraph ist neu -> Schattenkarte einmal nachziehen.
     this._shadowsDirty();
@@ -5182,6 +5528,7 @@ export class SceneManager {
     this.handleMeshes = [];
     // 十字是按坐标去重的，句柄清掉了这张表也得跟着清，否则下一轮画不出来
     if (this._guideAt) this._guideAt.clear();
+    this._tubeGuideSegments = [];
   }
 
   // `radius` waechst nur dort, wo ein Punkt schwerer zu treffen ist -- etwa der
@@ -5203,14 +5550,35 @@ export class SceneManager {
     const geo = isBox
       ? new THREE.BoxGeometry(size, size, size)
       : new THREE.SphereGeometry(radius, 16, 12);
-    const mat = this._handleMaterial(kind);
+    // 管上候选默认透明，指到对应管子时再显示；点击范围保持。
+    const tubeMount = data.bearingSupport || data.clampTube || data.fittingMount?.tubeId || data.ropeMount
+      || data.gymRingMount || data.accessoryTube || data.sleeveTube;
+    const mat = tubeMount ? this._arrowHitMaterial() : this._handleMaterial(kind);
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set(position[0], position[1], position[2]);
-    mesh.userData = Object.assign({ kind: "handle" }, data);
+    mesh.userData = Object.assign({ kind: "handle", tubeCandidateKind: tubeMount ? kind : null }, data);
     mesh.renderOrder = 999;
     this.handleGroup.add(mesh);
     this.handleMeshes.push(mesh);
     return mesh;
+  }
+
+  updateTubeCandidateHover(pointer) {
+    const candidates = this.handleMeshes.filter(mesh => mesh.userData.tubeCandidateKind);
+    if (!candidates.length) return;
+    const tubeId = pointer ? this.pickTube(pointer.x, pointer.y)?.data.id : null;
+    for (const mesh of candidates) {
+      const data = mesh.userData;
+      const candidateTube = data.bearingSupport || data.clampTube?.tubeId || data.fittingMount?.tubeId
+        || data.ropeMount?.tube || data.gymRingMount?.tube || data.accessoryTube || data.sleeveTube;
+      const active = tubeId != null && candidateTube === tubeId;
+      const mat = active ? this._handleMaterial(data.tubeCandidateKind) : this._arrowHitMaterial();
+      const scale = active ? 1.6 : 1;
+      if (mesh.material === mat && mesh.scale.x === scale) continue;
+      mesh.material = mat;
+      mesh.scale.setScalar(scale);
+      this._needsRender = true;
+    }
   }
 
   /**
@@ -5223,6 +5591,7 @@ export class SceneManager {
    * 点起来的手感跟以前一样。
    */
   _addArrowHandle(origin, dirArr, userData, kind) {
+    dirArr = userData.previewTarget ? userData.previewTarget.map((v, i) => v - origin[i]) : dirArr;
     const dir = new THREE.Vector3(dirArr[0], dirArr[1], dirArr[2]);
     if (dir.lengthSq() < 1e-8) dir.set(0, 1, 0);
     else dir.normalize();
@@ -5239,14 +5608,31 @@ export class SceneManager {
       guideAxis: this._guideAxisOf([dir.x, dir.y, dir.z]),
     }, userData);
 
-    this._addNodeGuide(origin, [dir.x, dir.y, dir.z]);
+    const ends = userData.previewEnds;
+    group.userData.guideSegment = ends || [origin.slice(), origin.map((value, i) => value + dir.getComponent(i) * GUIDE.half)];
+    const parallelMid = ends ? new THREE.Vector3(...ends[0]).add(new THREE.Vector3(...ends[1]))
+      .multiplyScalar(0.5).sub(group.position).dot(dir) : null;
+    const parallelSpan = ends ? new THREE.Vector3(...ends[0]).distanceTo(new THREE.Vector3(...ends[1])) : null;
+    if (ends) {
+      const guide = new THREE.Mesh(this._cachedGeo("parallelGuide", () =>
+        new THREE.CylinderGeometry(GUIDE.r, GUIDE.r, 1, 6)),
+        this._guideMaterial(group.userData.guideAxis, false));
+      guide.scale.y = parallelSpan;
+      guide.position.y = parallelMid;
+      guide.renderOrder = 998;
+      guide.raycast = () => {};
+      group.add(guide);
+      if (!this._tubeGuideSegments) this._tubeGuideSegments = [];
+      this._tubeGuideSegments.push({ start: ends[0], end: ends[1], mesh: guide });
+    } else this._addNodeGuide(origin, [dir.x, dir.y, dir.z]);
 
     // 指到这个方向时亮起来的那一条，从接点往外，比引导线略长也略粗
     const beam = new THREE.Mesh(
       this._guideBeamGeo(),
       this._guideMaterial(group.userData.guideAxis, true),
     );
-    beam.position.y = GUIDE.beamHalf / 2;
+    beam.position.y = ends ? parallelMid : GUIDE.beamHalf / 2;
+    if (ends) beam.scale.y = parallelSpan / GUIDE.beamHalf;
     beam.renderOrder = 1000;
     beam.visible = false;
     beam.raycast = () => {};
@@ -5254,9 +5640,10 @@ export class SceneManager {
     // 两个碰撞体现在一样长：静止和指上去的区别只在那条亮线，
     // 判定范围没有理由跟着变。长度跟引导线对齐，指到线的任何一段都算数。
     const hitStub = new THREE.Mesh(this._guideHitGeo(), this._arrowHitMaterial());
-    hitStub.position.y = GUIDE.hitLen / 2;
+    hitStub.position.y = ends ? parallelMid : GUIDE.hitLen / 2;
     const hitFull = new THREE.Mesh(this._guideHitGeo(), this._arrowHitMaterial());
-    hitFull.position.y = GUIDE.hitLen / 2;
+    hitFull.position.y = hitStub.position.y;
+    if (ends) hitStub.scale.y = hitFull.scale.y = parallelSpan / GUIDE.hitLen;
     const childData = Object.assign({ kind: "handle", arrowRoot: group }, userData);
     hitStub.userData = hitFull.userData = childData;
     group.userData.beamMesh = beam;
@@ -5308,8 +5695,9 @@ export class SceneManager {
   }
 
   _setTubePreview(group) {
-    const span = Number(group && group.userData && group.userData.previewSpan);
-    const dirArr = group && group.userData && group.userData.dir;
+    const target = group?.userData.previewTarget;
+    const span = target ? group.position.distanceTo(new THREE.Vector3(...target)) : Number(group?.userData.previewSpan);
+    const dirArr = target ? target.map((v, i) => v - group.position.getComponent(i)) : group?.userData.dir;
     if (!(span > 0) || !dirArr) {
       this._clearTubePreview();
       return;
@@ -5323,10 +5711,10 @@ export class SceneManager {
     const colorId = group.userData.previewColor;
     const hex = colorId ? this._look(colorId) : ARROW_TEAL;
     if (!this._tubePreview) {
-      const geo = new THREE.CylinderGeometry(r, r, 1, 14);
+      const geo = this._tubeGeometry(r, 1, 14, true);
       const mat = new THREE.MeshStandardMaterial({
-        transparent: true, opacity: 0.28, roughness: 0.48, metalness: 0.04,
-        depthWrite: false,
+        transparent: true, opacity: 0.5, roughness: 0.48, metalness: 0.04,
+        depthWrite: false, vertexColors: true,
       });
       this._tubePreview = new THREE.Mesh(geo, mat);
       this._tubePreview.renderOrder = 998;
@@ -5335,7 +5723,9 @@ export class SceneManager {
     }
     this._tubePreview.material.color.set(hex);
     this._tubePreview.scale.set(1, drawLen, 1);
-    const mid = new THREE.Vector3().copy(group.position).addScaledVector(dir, cs / 2 + drawLen / 2);
+    const ends = group.userData.previewEnds;
+    const mid = ends ? new THREE.Vector3(...ends[0]).add(new THREE.Vector3(...ends[1])).multiplyScalar(0.5)
+      : new THREE.Vector3().copy(group.position).addScaledVector(dir, cs / 2 + drawLen / 2);
     this._tubePreview.position.copy(mid);
     this._tubePreview.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
     this._tubePreview.visible = true;
@@ -5357,6 +5747,10 @@ export class SceneManager {
     if (!mesh) return;
     if (mesh.position.x === position[0] && mesh.position.y === position[1]
       && mesh.position.z === position[2]) return;
+    if (mesh.userData.guideSegment) {
+      const delta = position.map((value, i) => value - mesh.position.getComponent(i));
+      mesh.userData.guideSegment = mesh.userData.guideSegment.map(point => point.map((value, i) => value + delta[i]));
+    }
     mesh.position.set(position[0], position[1], position[2]);
     this._needsRender = true;
   }
@@ -5659,9 +6053,11 @@ export class SceneManager {
   cameraState() {
     if (!this.controls) return null;
     return {
+      sceneViewVersion: 1,
       pos: this.camera.position.toArray(),
       target: this.controls.target.toArray(),
       zoom: this.camera.zoom,
+      projection: this._projection,
     };
   }
 
@@ -5669,6 +6065,7 @@ export class SceneManager {
     this._camFly = null;
     this._needsRender = true;
     if (!st || !this.controls || !Array.isArray(st.pos) || !Array.isArray(st.target)) return false;
+    if (st.projection) this.setProjection(st.projection);
     this.camera.position.fromArray(st.pos);
     this.controls.target.fromArray(st.target);
     if (typeof st.zoom === "number" && st.zoom > 0) this.camera.zoom = st.zoom;
@@ -5722,7 +6119,7 @@ export class SceneManager {
       this._clipList = this._clipPlane ? [this._clipPlane] : [];
     }
     for (const key of Object.keys(this._materials)) this._clipMaterial(this._materials[key]);
-    for (const group of [this.buildGroup, this.handleGroup, this.labelGroup, this._hoverPartGroup]) {
+    for (const group of [this.buildGroup, this.handleGroup, this.labelGroup, this._hoverPartGroup, this._panelPlacementGuides?.group].filter(Boolean)) {
       group.traverse((o) => { if (o.material) this._clipMaterial(o.material); });
     }
   }
@@ -5749,10 +6146,13 @@ export class SceneManager {
     // 候选面叠在一起时不认最前面那块，认指针对着的那块（见 pickcell.js）
     const r = this.renderer.domElement.getBoundingClientRect();
     const toScreen = (pos) => {
-      const p = pos.clone().project(this.camera);
+      const p = (Array.isArray(pos) ? new THREE.Vector3(...pos) : pos.clone()).project(this.camera);
+      if (p.z < -1 || p.z > 1) return null;
       return [(p.x + 1) / 2 * r.width + r.left, (1 - p.y) / 2 * r.height + r.top];
     };
-    const hit = preferPanelCell(hits, clientX, clientY, toScreen);
+    const panelHit = preferPanelCell(hits, clientX, clientY, toScreen);
+    const hit = panelHit?.object.userData.panelCell ? panelHit
+      : preferGuideHandle(hits, clientX, clientY, toScreen);
     // Verdeckte Ankerpunkte gelten nicht: liegt ein Bauteil deutlich davor,
     // sieht man den Punkt nicht und darf dort auch nichts setzen -- sonst baut
     // man durch das Modell hindurch. HANDLE_CLEAR Zentimeter Spiel, weil viele
@@ -6004,7 +6404,8 @@ export class SceneManager {
         this._clearTubePreview();
       } else {
         const isArrow = !!root.userData.arrowRoot;
-        root.scale.setScalar(isArrow ? 1.12 : root.userData.panelDot ? 1.4 : 1.6);
+        if (root.userData.previewEnds) root.scale.setScalar(1);
+        else root.scale.setScalar(isArrow ? 1.12 : root.userData.panelDot ? 1.4 : 1.6);
         if (isArrow) {
           this._paintArrow(root, "focus");
           this._setTubePreview(root);
@@ -6026,14 +6427,21 @@ export class SceneManager {
     const id = pick && pick.data && pick.data.id != null ? pick.data.id : null;
     const extra = extraIds && extraIds.length ? extraIds : null;
     const extraKey = extra ? extra.join(",") : "";
-    if (id !== this._hoverPartId || extraKey !== this._hoverPartExtraKey) {
+    const kind = pick?.data?.kind || null;
+    const hinge = pick?.data?.hinge ?? null;
+    const profile = !!pick?.data?.tubes?.length;
+    const modeChanged = mode !== this._hoverPartMode;
+    this._hoverPartMode = mode || null;
+    if (id !== this._hoverPartId || extraKey !== this._hoverPartExtraKey || modeChanged || kind !== this._hoverPartKind || hinge !== this._hoverPartHinge || profile !== this._hoverPartProfile) {
       this._hoverPartId = id;
+      this._hoverPartKind = kind;
+      this._hoverPartHinge = hinge;
+      this._hoverPartProfile = profile;
       this._hoverPartExtra = extra;
       this._hoverPartExtraKey = extraKey;
       this._rebuildHoverOverlay(id, extra);
       this._needsRender = true;
     }
-    this._hoverPartMode = mode || null;
     if (mode === "delete" && id != null) {
       this.setCursor("delete-x");
       this._setDeleteX(true, clientX, clientY);
@@ -6047,12 +6455,15 @@ export class SceneManager {
   _clearHoverOverlay() {
     const g = this._hoverPartGroup;
     if (!g) return;
-    while (g.children.length) g.remove(g.children[0]);
+    this._clearHoverGeometry();
     if (this._hoverPartId != null) this._needsRender = true;
     this._hoverPartId = null;
     this._hoverPartExtra = null;
     this._hoverPartExtraKey = "";
     this._hoverPartMode = null;
+    this._hoverPartKind = null;
+    this._hoverPartHinge = null;
+    this._hoverPartProfile = false;
     this.container.classList.remove("qb-cursor-delete");
     this._setDeleteX(false);
   }
@@ -6060,13 +6471,23 @@ export class SceneManager {
   _rebuildHoverOverlay(id, extraIds) {
     const g = this._hoverPartGroup;
     if (!g) return;
-    while (g.children.length) g.remove(g.children[0]);
+    this._clearHoverGeometry();
     if (id == null) return;
     const ids = new Set([id, ...(extraIds || [])]);
+    const matches = data => {
+      if (!data || !ids.has(data.id)) return false;
+      if (this._hoverPartMode === 'select' && this._isSolidSelectedPart(data)) return false;
+      if (data.id !== id) return true;
+      if (this._hoverPartKind && data.kind !== this._hoverPartKind) return false;
+      if (data.kind === 'tube' && !!data.tubes?.length !== this._hoverPartProfile) return false;
+      return (data.hinge ?? null) === this._hoverPartHinge;
+    };
     const tmp = this._hoverMat;
     const add = (geo, mat, world) => {
       if (!geo || !mat) return;
-      const m = new THREE.Mesh(geo, this._hoverMaterial(mat));
+      const m = this._hoverPartMode === 'select'
+        ? this._partOutline(geo, false) : new THREE.Mesh(geo, this._hoverMaterial(mat));
+      if (!m) return;
       m.matrix.copy(world);
       m.matrixAutoUpdate = false;
       m.raycast = () => {};
@@ -6075,21 +6496,114 @@ export class SceneManager {
       m.renderOrder = 8;
       g.add(m);
     };
+    const pieces = [];
     this.buildGroup.traverse((o) => {
       if (o.isInstancedMesh) {
         const list = (o.userData && o.userData.instances) || [];
         for (let i = 0; i < list.length; i++) {
-          if (!list[i] || !ids.has(list[i].id)) continue;
+          if (!matches(list[i])) continue;
           o.getMatrixAt(i, tmp);
-          add(o.geometry, o.material, tmp.clone().premultiply(o.matrixWorld));
+          pieces.push({ geo: o.geometry, mat: o.material, world: tmp.clone().premultiply(o.matrixWorld) });
         }
         return;
       }
-      if (o.isMesh && o.userData && ids.has(o.userData.id) && o.userData.role !== "water") {
-        add(o.geometry, o.material, o.matrixWorld);
+      if (o.isMesh && matches(o.userData) && o.userData.role !== "water") {
+        pieces.push({ geo: o.geometry, mat: o.material, world: o.matrixWorld });
       }
     });
+    const minSize = this._hoverPartMode === 'select'
+      ? Math.max(0, ...pieces.map(p => this._partOutlineSize(p.geo, p.world))) * .1 : 0;
+    for (const piece of pieces) {
+      if (this._partOutlineSize(piece.geo, piece.world) >= minSize) add(piece.geo, piece.mat, piece.world);
+    }
     this._applyClip();
+  }
+
+  _clearHoverGeometry() {
+    const group = this._hoverPartGroup;
+    for (const child of [...group.children]) {
+      if (child.userData.partOutline) child.geometry.dispose();
+      group.remove(child);
+    }
+  }
+
+  // 选中和悬停只描绘实际几何的边缘，透明、纹理与功能件颜色保留。
+  _partOutline(geometry, selected) {
+    this._partOutlinePositions ||= new WeakMap();
+    const source = geometry.getAttribute('position'), index = geometry.index;
+    let cached = this._partOutlinePositions.get(geometry);
+    if (!cached || cached.source !== source || cached.index !== index ||
+        cached.sourceVersion !== source.version || cached.indexVersion !== index?.version) {
+      let edges = new THREE.EdgesGeometry(geometry, 35);
+      if (!edges.getAttribute('position').count) {
+        edges.dispose();
+        edges = new THREE.EdgesGeometry(geometry, 10);
+      }
+      cached = { source, index, sourceVersion: source.version, indexVersion: index?.version,
+        positions: edges.getAttribute('position').array };
+      edges.dispose();
+      this._partOutlinePositions.set(geometry, cached);
+    }
+    if (!cached.positions.length) return null;
+    // 只共享只读CPU边线；每条轮廓单独持有GPU资源，可沿用现有清理流程。
+    const outlineGeometry = new LineSegmentsGeometry().setPositions(cached.positions);
+    const key = selected ? 'part-outline-selected' : 'part-outline-hover';
+    const material = this._materials[key] ||= new LineMaterial({
+      color: selected ? '#f88929' : '#f2d28a', linewidth: selected ? 1.8 : 1.3,
+      transparent: true, opacity: selected ? .95 : .8, depthWrite: false,
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, toneMapped: false,
+    });
+    const line = new LineSegments2(outlineGeometry, material);
+    line.userData.partOutline = true;
+    line.raycast = () => {};
+    line.renderOrder = 8;
+    return line;
+  }
+
+  // 小凸点、螺丝等细节保留原貌，避免细碎描边遮住配件样式。
+  _partOutlineSize(geometry, world) {
+    if (!geometry.boundingBox) geometry.computeBoundingBox();
+    const size = geometry.boundingBox.getSize(new THREE.Vector3());
+    const scale = new THREE.Vector3().setFromMatrixScale(world);
+    return size.multiply(scale).length();
+  }
+
+  /** @param {Map<string, string>} selected
+   * @param {Set<string> | null} [profileSelection]
+   */
+  _outlineSelectedParts(selected, profileSelection = null) {
+    const parent = this.buildGroup;
+    parent.updateWorldMatrix(true, true);
+    const inverse = parent.matrixWorld.clone().invert();
+    for (const [partKey, rec] of this._indexParts(parent.children)) {
+      const pieces = [];
+      for (const piece of rec.pieces) {
+        const data = piece.index >= 0 ? piece.obj.userData.instances[piece.index] : piece.obj.userData;
+        const key = data.hinge != null ? hingeKey(rec.id, data.hinge) : rec.id;
+        const kind = data.hinge != null ? 'hinge' : partKey.split(':')[0];
+        if (!selected.has(key) || (selected instanceof Map && selected.get(key) !== kind)) continue;
+        if (this._isSolidSelectedPart(data)) continue;
+        if (kind === 'tube' && !!data.tubes?.length !== !!profileSelection) continue;
+        const world = this._pieceWorld(piece, new THREE.Matrix4()).premultiply(inverse);
+        pieces.push({ piece, key, world, size: this._partOutlineSize(piece.obj.geometry, world) });
+      }
+      const minSize = Math.max(0, ...pieces.map(p => p.size)) * .1;
+      for (const { piece, key, world, size } of pieces) {
+        if (size < minSize) continue;
+        const line = this._partOutline(piece.obj.geometry, true);
+        if (!line) continue;
+        world.decompose(line.position, line.quaternion, line.scale);
+        line.userData.partOutlineFor = key;
+        parent.add(line);
+        this._clipMaterial(line.material);
+      }
+    }
+  }
+
+  // 框选配件已经整件着橙色，选择及悬停不再叠加亮色轮廓。
+  _isSolidSelectedPart(data) {
+    return this._solidSelectedParts?.get(data.id) === data.kind ||
+      data.hinge != null && this._solidSelectedParts?.get(hingeKey(data.id, data.hinge)) === 'hinge';
   }
 
   // --- 动效 ----------------------------------------------------------------
@@ -6138,6 +6652,14 @@ export class SceneManager {
   /** 整座模型要换了（开文件、切标签）：下一次画按「载入」处理，不跟上一座比。 */
   markModelReplaced() {
     this._motionLoad = true;
+  }
+
+  finishPartMotion(id) {
+    for (const [key, motion] of this._appearing) {
+      if (key !== `node:${id}`) continue;
+      this._posePieces(motion.center, motion.pieces, 1, 0);
+      this._appearing.delete(key);
+    }
   }
 
   /** 把画出来的东西按零件归拢：key 是 kind:id，值是它的全部碎片（管身、端盖、实例格子）。 */
@@ -6353,9 +6875,11 @@ export class SceneManager {
   _poseAppear(a, now) {
     const ap = MOTION.appear;
     const k = a.t0 === null || a.t0 === Infinity ? 0 : Math.min(1, Math.max(0, (now - a.t0 - a.delay) / a.dur));
-    if (k >= 1) { this._posePieces(a.center, a.pieces, 1, 0); return true; }
+    if (k >= 1) { a.scale = 1; a.dy = 0; this._posePieces(a.center, a.pieces, 1, 0); return true; }
     const e = ap.ease(k);
-    this._posePieces(a.center, a.pieces, ap.from + (1 - ap.from) * e, ap.drop * (1 - e));
+    a.scale = ap.from + (1 - ap.from) * e;
+    a.dy = ap.drop * (1 - e);
+    this._posePieces(a.center, a.pieces, a.scale, a.dy);
     return false;
   }
 
@@ -6504,56 +7028,13 @@ export class SceneManager {
   }
 
   _makeGrassTexture(baseHex) {
-    const S = 256;
-    const cv = document.createElement("canvas");
-    cv.width = cv.height = S;
-    const ctx = cv.getContext("2d");
-    const base = baseHex || this._tune?.grass || "#7A9B6C";
-    ctx.fillStyle = base;
-    ctx.fillRect(0, 0, S, S);
-    let seed = 42;
-    const rng = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 0x100000000; };
-    const patches = [shadeHex(base, -14), shadeHex(base, 10), shadeHex(base, -22), shadeHex(base, 6)];
-    ctx.globalAlpha = 0.26;
-    for (let i = 0; i < 32; i++) {
-      const x = rng() * S, y = rng() * S, r = 28 + rng() * 56;
-      const g = ctx.createRadialGradient(x, y, 0, x, y, r);
-      g.addColorStop(0, patches[i % patches.length]);
-      g.addColorStop(1, hexRgba(shadeHex(base, -18), 0));
-      ctx.fillStyle = g;
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.globalAlpha = 0.1;
-    for (let i = 0; i < 380; i++) {
-      const x = rng() * S, y = rng() * S;
-      ctx.fillStyle = i % 2 ? shadeHex(base, 14) : shadeHex(base, -16);
-      ctx.fillRect(x, y, 1.4, 1.4);
-    }
-    ctx.globalAlpha = 1;
-    const tex = new THREE.CanvasTexture(cv);
-    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-    tex.repeat.set(GROUND_AREA / GRASS_TILE, GROUND_AREA / GRASS_TILE);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    tex.anisotropy = 4;
-    return tex;
+    return outdoor.grassTexture(baseHex || this._tune?.grass);
   }
 
   // 草地：灰绿底 + 淡颗粒。阴影仍落在地面上。
   _buildGrass(opts = {}) {
     const area = opts.area || GROUND_AREA;
-    const env = new THREE.Group();
-    env.name = "grass-env";
-
-    const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(area, area),
-      new THREE.MeshLambertMaterial({ map: this._makeGrassTexture() })
-    );
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.y = -GROUND_DROP - 0.4;
-    ground.receiveShadow = true;
-    env.add(ground);
+    const { group: env, ground } = outdoor.grass({ area, base: this._tune?.grass });
 
     this.scene.add(env);
     this._grassGround = ground;
@@ -6656,32 +7137,8 @@ export class SceneManager {
 
   // Gradient-Himmel: große Kugel (BackSide) mit GLSL-Verlauf Horizont → Zenit.
   _buildSky() {
-    const mat = new THREE.ShaderMaterial({
-      vertexShader: `
-        varying float vY;
-        void main() {
-          vY = normalize(position).y;
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        }`,
-      fragmentShader: `
-        uniform vec3 uHorizon;
-        uniform vec3 uZenith;
-        varying float vY;
-        void main() {
-          float t = clamp(vY * 2.5 + 0.10, 0.0, 1.0);
-          gl_FragColor = vec4(mix(uHorizon, uZenith, t * t), 1.0);
-        }`,
-      uniforms: {
-        uHorizon: { value: new THREE.Color(SCENE_SKY_HORIZON) },
-        uZenith:  { value: new THREE.Color(SCENE_SKY_ZENITH) },
-      },
-      side: THREE.BackSide,
-      depthWrite: false,
-      depthTest:  false,
-    });
-    this._skyMesh = new THREE.Mesh(new THREE.SphereGeometry(4800, 16, 10), mat);
-    this._skyMesh.renderOrder = -1;
-    this._skyMat = mat;
+    this._skyMesh = outdoor.sky();
+    this._skyMat = this._skyMesh.material;
     this.scene.add(this._skyMesh);
     // Hintergrundfarbe passend zum Himmel (Szene) bzw. zum Farbschema setzen --
     // sonst blitzt bis zum ersten setScene() die falsche Farbe auf.
@@ -6693,101 +7150,21 @@ export class SceneManager {
   // hinein; seit das Raster gewachsen ist, richten sie sich nach dessen Kante.
   // Geometrien und Materialien werden einmalig geteilt; per-Baum nur Transform.
   _buildTrees() {
-    const trunkMat  = new THREE.MeshLambertMaterial({ color: SCENE_TRUNK });
-    const crownMatA = new THREE.MeshLambertMaterial({ color: SCENE_CROWN_A });
-    const crownMatB = new THREE.MeshLambertMaterial({ color: SCENE_CROWN_B });
-    const crownMatC = new THREE.MeshLambertMaterial({ color: SCENE_CROWN_C });
-    const trunkGeo  = new THREE.CylinderGeometry(8, 13, 100, 7);
-    const crownGeoA = new THREE.SphereGeometry(120, 8, 6);
-    const crownGeoB = new THREE.SphereGeometry(100, 7, 5);
-    const crownGeoC = new THREE.SphereGeometry(85,  7, 5);
-
-    const group = new THREE.Group();
-    this._treeNodes = [];
-
-    // Deterministischer LCG-RNG (reproduzierbare Positionen je Session).
-    let seed = 137;
-    const rng = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 0x100000000; };
-
-    // Die Zahl richtet sich nach dem Ring: er ist groesser als die frueheren
-    // 620-780 cm, bei 60 Stueck stuenden sie vereinzelt in der Landschaft.
-    const rand = GROUND_AREA / 2 - 10;
-    for (let i = 0; i < 72; i++) {
-      const r = TREE_RING[0] + rng() * (TREE_RING[1] - TREE_RING[0]);
-      const θ = rng() * Math.PI * 2;
-      const tx = Math.cos(θ) * r, tz = Math.sin(θ) * r;
-      if (Math.abs(tx) > rand || Math.abs(tz) > rand) continue;
-
-      const sc = 0.65 + rng() * 0.7;
-      const ox2 = (rng() - 0.5) * 56, oz2 = (rng() - 0.5) * 56;
-      const ox3 = (rng() - 0.5) * 46, oz3 = (rng() - 0.5) * 46;
-
-      const tg = new THREE.Group();
-      tg.position.set(tx, 0, tz);
-      tg.scale.setScalar(sc);
-      tg.rotation.y = rng() * Math.PI * 2;
-
-      const trunk = new THREE.Mesh(trunkGeo, trunkMat);
-      trunk.position.y = 50; trunk.castShadow = true; tg.add(trunk);
-
-      const c1 = new THREE.Mesh(crownGeoA, crownMatA);
-      c1.position.set(0, 175, 0); c1.castShadow = true; tg.add(c1);
-
-      const c2 = new THREE.Mesh(crownGeoB, crownMatB);
-      c2.position.set(ox2, 210, oz2); c2.castShadow = true; tg.add(c2);
-
-      const c3 = new THREE.Mesh(crownGeoC, crownMatC);
-      c3.position.set(ox3, 195, oz3); c3.castShadow = true; tg.add(c3);
-
-      group.add(tg);
-      this._treeNodes.push({ group: tg, x: tx, z: tz });
-    }
-
+    const { group, nodes, materials } = outdoor.trees();
+    this._treeNodes = nodes;
     this.scene.add(group);
     this._treeGroup = group;
-    this._trunkMat = trunkMat;
-    this._crownMatA = crownMatA;
-    this._crownMatB = crownMatB;
-    this._crownMatC = crownMatC;
+    [this._trunkMat, this._crownMatA, this._crownMatB, this._crownMatC] = materials;
 
     this._buildBushes();
   }
 
   _buildBushes() {
-    const bushGeo = new THREE.SphereGeometry(30, 8, 6);
-    const bushMat = new THREE.MeshLambertMaterial({ color: SCENE_BUSH });
-
-    const group = new THREE.Group();
-    this._bushNodes = [];
-
-    let seed = 138;
-    const rng = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 0x100000000; };
-
-    for (let i = 0; i < 40; i++) {
-      const r = BUSH_RING[0] + rng() * (BUSH_RING[1] - BUSH_RING[0]);
-      const θ = rng() * Math.PI * 2;
-      const tx = Math.cos(θ) * r, tz = Math.sin(θ) * r;
-      if (Math.abs(tx) > GROUND_AREA / 2 - 10 || Math.abs(tz) > GROUND_AREA / 2 - 10) continue;
-
-      const sc = 0.5 + rng() * 0.5;
-
-      const tg = new THREE.Group();
-      tg.position.set(tx, 0, tz);
-      tg.scale.setScalar(sc);
-      tg.rotation.y = rng() * Math.PI * 2;
-
-      const bush = new THREE.Mesh(bushGeo, bushMat);
-      bush.position.y = 15;
-      bush.castShadow = true;
-      tg.add(bush);
-
-      group.add(tg);
-      this._bushNodes.push({ group: tg, x: tx, z: tz });
-    }
-
+    const { group, nodes, material } = outdoor.bushes();
+    this._bushNodes = nodes;
     this.scene.add(group);
     this._bushGroup = group;
-    this._bushMat = bushMat;
+    this._bushMat = material;
   }
 
   // Bäume ausblenden, die zu nah an einem Modellknoten stehen.
@@ -6858,10 +7235,18 @@ export class SceneManager {
     this._shadowsDirty();
     const v = !!on;
     this._sceneOn = v;
+    this._updateHomeDisplay();
     if (this._grassEnv)  this._grassEnv.visible  = v;
     if (this._skyMesh)   this._skyMesh.visible    = v;
     if (this._treeGroup) this._treeGroup.visible  = v;
     if (this._bushGroup) this._bushGroup.visible  = v; // Büsche: nur im Szene-Modus
+    this._setProductLighting(v);
+    this._applyBackground();
+    this._applyGrid();
+    this._applyHomeStyle();
+  }
+
+  _setProductLighting(v) {
     // Direktionales Licht: brennt AUCH im Normal-Modus, denn es modelliert die
     // Bauteile -- ohne es steht alles flach in einer Farbe da und Vorder- und
     // Rueckseite sind nicht auseinanderzuhalten. GEWORFENE Schatten gibt es
@@ -6880,8 +7265,6 @@ export class SceneManager {
       this._hemiLight.color.set(v ? 0xdef2ff : 0xffffff);
       this._hemiLight.groundColor.set(v ? this._lookHex(this._tune?.hemiGround || "#6A8258") : 0xc4a078);
     }
-    this._applyBackground();
-    this._applyGrid();
   }
 
   /**
@@ -6915,7 +7298,7 @@ export class SceneManager {
     const horizon = this._lookHex(this._tune?.skyHorizon || SCENE_SKY_HORIZON);
     const blank = this._lookHex(this._tune?.blank || BG_LIGHT);
     this.scene.background.set(
-      this._sceneOn ? horizon : (this._dark ? BG_DARK : blank));
+      this._homeStyleOn ? HOME_STYLE.background : (this._sceneOn ? horizon : (this._dark ? BG_DARK : blank)));
     this._needsRender = true;
   }
 
@@ -7027,6 +7410,7 @@ export class SceneManager {
     const zelle = this._gridCell || GRID_CELL;
     const grid = new THREE.GridHelper(GRID_SIZE, Math.round(GRID_SIZE / zelle), major, minor);
     grid.position.y = -GROUND_DROP;
+    grid.visible = !this._homeStyleOn;
     this.scene.add(grid);
     this._grid = grid;
     this._needsRender = true;
@@ -7215,6 +7599,9 @@ export class SceneManager {
    */
   snapshot(opts = {}) {
     this._finishMotion();
+    this.selectionTransformGizmo?.flushPreview();
+    const transformPreview=this.selectionTransformPreview;
+    transformPreview?.apply(true);
     const hideGrid = opts.hideGrid !== false;
     const hideLabels = opts.hideLabels !== false;
     const hideRoom = opts.hideRoom === true;
@@ -7235,19 +7622,32 @@ export class SceneManager {
     const versteckt = [
       hideGrid ? this._grid : null,
       this.handleGroup,
+      this.selectionTransformGizmo?.helper,
       hideLabels ? this.labelGroup : null,
       this._hoverPartGroup,
       hideRoom ? this._roomGroup : null,
+      hideRoom ? this._homeGroup : null,
     ].filter(Boolean).map((o) => [o, o.visible]);
+    const hiddenHome = hideRoom && this._homeStyleOn;
+    if (hiddenHome) { this._homeOutputHidden = true; this._applyHomeStyle(); this._shadowsDirty(); }
     for (const [o] of versteckt) o.visible = false;
     let url = null;
     try {
-      this.renderer.render(this.scene, this.camera);
-      url = mime === "image/jpeg"
+      this._renderMainScene();
+      if (opts.canvas) {
+        // 独立拷贝当前帧，供说明书直接合成，避免 PNG 编码后再解码。
+        const canvas = document.createElement('canvas');
+        canvas.width = this.renderer.domElement.width;
+        canvas.height = this.renderer.domElement.height;
+        canvas.getContext('2d').drawImage(this.renderer.domElement, 0, 0);
+        url = canvas;
+      } else url = mime === "image/jpeg"
         ? this.renderer.domElement.toDataURL(mime, quality ?? 0.82)
         : this.renderer.domElement.toDataURL(mime);
     } finally {
+      transformPreview?.apply();
       for (const [o, sichtbar] of versteckt) o.visible = sichtbar;
+      if (hiddenHome) { this._homeOutputHidden = false; this._applyHomeStyle(); this._shadowsDirty(); }
       if (resized) {
         this._viewSize = null;
         this.renderer.setPixelRatio(prevPR);
@@ -7518,17 +7918,24 @@ export class SceneManager {
   }
 
   _animate() {
-    if (this._disposed) return;
-    requestAnimationFrame(this._animate);
+    if (this._disposed || this._suspended) return;
+    this._animationFrame = requestAnimationFrame(this._animate);
     if (this._stepCameraAnimation()) this._needsRender = true;
     if (this._stepCameraFly()) this._needsRender = true;
     if (this._stepMotion()) this._needsRender = true;
+    if (this._panelPlacementFlash) {
+      const progress = (performance.now() - this._panelPlacementFlash.start) / 650;
+      if (progress >= 1) this._clearPanelPlacementFlash();
+      else this._panelPlacementFlash.line.material.opacity = 1 - progress;
+      this._needsRender = true;
+    }
     // controls.update() liefert true, solange das Damping noch nachlaeuft.
     if (this.controls.update()) this._needsRender = true;
     if (this._updateTreeCamera()) this._needsRender = true;
     if (!this._needsRender) return;
     this._needsRender = false;
-    this.renderer.render(this.scene, this.camera);
+    this._homeGroup?.userData.updateWalls(this.camera);
+    this._renderMainScene();
     this._renderViewCube();
   }
 }

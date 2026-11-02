@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ComponentType } from 'react'
+import './ui/manualProgress.css'
 import { LanguageProvider, useI18n } from './i18n'
 import { EngineProvider, useEngine } from './store/EngineContext'
 import CanvasHost from './ui/CanvasHost'
@@ -6,8 +7,10 @@ import TopToolbar from './ui/TopToolbar'
 import LeftStack from './ui/LeftStack'
 import RightDock from './ui/RightDock'
 import ProjectTabs from './ui/ProjectTabs'
+import EmbeddedEditorBridge from './ui/EmbeddedEditorBridge'
 import AssemblyBar from './ui/AssemblyBar'
-import AssemblyPreview from './ui/AssemblyPreview'
+import AssemblyNavigation from './ui/AssemblyNavigation'
+import { AssemblyStatus, useAssemblyStatus } from './ui/AssemblyStatus'
 import Onboarding from './ui/Onboarding'
 import ThumbCapture from './ui/ThumbCapture'
 import ErrorBoundary from './ui/ErrorBoundary'
@@ -17,7 +20,8 @@ import { PanelLayoutProvider } from './ui/panelLayout'
 import { UI_ESCAPE_EVENT } from './ui/events'
 import { DockProvider, useDock } from './ui/dock'
 import { usePresence } from './ui/motion'
-import { bootEntry, DELIVERY_EMBED, dropParam, fullBuilderUrl, VIEW_ONLY } from './entry'
+import { bootEntry, DELIVERY_EMBED, dropParam, fullBuilderUrl, VIEW_ONLY, EDITOR_EMBED, SINGLE_MODEL, RECOVERY_ONLY } from './entry'
+import DeviceDraftManager from './ui/DeviceDraftManager'
 import { SnapshotInfo } from './collab/ui/SnapshotInfo'
 import { syncProbe } from './sync/bootstrap'
 import { CollabProvider, useCollab } from './collab/CollabContext'
@@ -29,26 +33,39 @@ import CompareView from './collab/ui/CompareView'
 import BatchImport from './collab/ui/BatchImport'
 import RoomEditor from './collab/ui/RoomEditor'
 import CustomComponentsMenu, { CUSTOM_COMPONENTS_EVENT, type ComponentMenuPosition } from './ui/CustomComponentsMenu'
+import { NUMBER_TUBES } from './store/toolMemory'
+import Downloads, {DownloadContents,exportResource,hasInlineManualProgress} from './ui/Downloads'
+import {resourceFileDelivered,sendResourceMessage} from './resourceDownload'
+import {installResourceStyle} from '../public/model-resources.js'
+import {RESOURCE_MODE} from './entry'
+import Toast from './ui/Toast'
+import SaveConflictDialog from './ui/SaveConflictDialog'
 
-function Toast() {
-  const { toast: live, dismissToast } = useEngine()
-  const [toast, leaving] = usePresence(live)
+function DeferredAssemblyPreview() {
+  const api = useEngine(), { t } = useI18n()
+  const [Preview, setPreview] = useState<ComponentType | null>(null)
+  const [failed, setFailed] = useState(false)
+  const [attempt, setAttempt] = useState(0)
+  const open = !!api.manualPreview && api.exportManualConfirm
   useEffect(() => {
-    if (!live) return
-    // 警告和出错往往是一整句要读完的话，多留一会儿
-    const id = window.setTimeout(dismissToast, live.kind === 'ok' ? 2800 : 6000)
-    return () => window.clearTimeout(id)
-  }, [live, dismissToast])
-  if (!toast) return null
-  const tone = toast.kind === 'err' ? 'text-red-700' : toast.kind === 'warn' ? 'text-amber-700' : 'text-gray-100'
-  return (
-    // key 跟着消息走：连着两条提示时，第二条重新演一遍入场。
-    // 压在顶栏、右侧面板和下拉菜单上面：手机上右侧面板盖满画布，
-    // 在「文件」里点保存，提示要浮在面板上才看得见。确认框（z-75）仍在它上面。
-    <div key={toast.message} className={`m-toast qb-card fixed top-[9.5rem] left-1/2 -translate-x-1/2 w-max max-w-[calc(100vw-2rem)] text-center ${tone} text-sm font-medium px-4 py-2 z-[70] pointer-events-none ${leaving ? 'm-leave' : ''}`}>
-      {toast.message}
+    if (!open || Preview) return
+    let alive = true
+    setFailed(false)
+    void import('./ui/AssemblyPreview').then(module => { if (alive) setPreview(() => module.default) })
+      .catch(error => { console.error('[manual preview load]', error); if (alive) setFailed(true) })
+    return () => { alive = false }
+  }, [open, Preview, attempt])
+  if (Preview) return <Preview />
+  if (!open) return null
+  return <div className="m-backdrop fixed inset-0 z-[75] flex items-center justify-center bg-black/45 p-4" onClick={api.cancelExportManual}>
+    <div role="dialog" aria-modal="true" aria-labelledby="manual-preview-loading" className="m-modal qb-card p-5" onClick={event => event.stopPropagation()}>
+      <p id="manual-preview-loading" role={failed ? 'alert' : 'status'}>{t(failed ? 'manual.previewLoadFailed' : 'manual.preparing')}</p>
+      <div className="flex justify-end gap-2 mt-4">
+        <button autoFocus className="qb-btn qb-btn-ghost qb-btn-sm" onClick={api.cancelExportManual}>{t('confirm.cancel')}</button>
+        {failed && <button className="qb-btn qb-btn-sm" onClick={() => setAttempt(value => value + 1)}>{t('sync.retry')}</button>}
+      </div>
     </div>
-  )
+  </div>
 }
 
 function NameDialog() {
@@ -127,7 +144,11 @@ function AccountDialog() {
   if (!shown) return null
   const resume = shown.phase === 'resume'
   // 复制分享链接也要先有账号（链接指向存在账号下的方案页），说法跟导出文件分开
-  const k = shown.kind === 'link' ? '.link' : ''
+  const k = ['link','save'].includes(shown.kind) ? '.' + shown.kind : ''
+  let body = t(`account.body${k}`)
+  if (resume) body = shown.kind === 'save' ? t('account.resumeBody.save') : t('account.resumeBody', { what: t(`account.what.${shown.kind}`) })
+  let action = shown.kind === 'save' ? 'single.signIn' : 'account.go'
+  if (resume) action = `account.resumeGo${k}`
   return (
     <div
       className={`m-backdrop fixed inset-0 z-[75] flex items-center justify-center bg-black/45 p-4 ${leaving ? 'm-leave pointer-events-none' : ''}`}
@@ -142,11 +163,11 @@ function AccountDialog() {
       >
         <div id="account-dialog-title" className="text-base font-semibold">{t(resume ? `account.resumeTitle${k}` : `account.title${k}`)}</div>
         <p className="text-sm text-gray-300 leading-relaxed mt-2 mb-5">
-          {resume ? t('account.resumeBody', { what: t(`account.what.${shown.kind}`) }) : t(`account.body${k}`)}
+            {body}
         </p>
         <div className="flex justify-end gap-2">
           <button type="button" onClick={() => answerAccount(false)} className="qb-btn qb-btn-ghost qb-btn-sm">{t('confirm.cancel')}</button>
-          <button type="button" autoFocus onClick={() => answerAccount(true)} className="qb-btn qb-btn-sm">{t(resume ? `account.resumeGo${k}` : 'account.go')}</button>
+            <button type="button" autoFocus onClick={() => answerAccount(true)} className="qb-btn qb-btn-sm">{t(action)}</button>
         </div>
       </div>
     </div>
@@ -159,9 +180,9 @@ function ViewBar() {
   const { t } = useI18n()
   const totals = api.bom?.totals
   const hasParts = !!totals && (totals.tubes + totals.connectors + totals.panels + totals.other) > 0
+  const assemblyStatus = useAssemblyStatus(api.assembly)
   if (!hasParts) return null
   const n = api.assembly.max + 1
-  const step = 'h-8 px-3 rounded-full text-[13px] text-gray-100 hover:bg-teal-100 disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer disabled:cursor-default whitespace-nowrap'
   if (!api.assembly.active) {
     return (
       <div data-tour="assembly" className="m-asm qb-card fixed bottom-3 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 p-1.5 max-w-[calc(100vw-1rem)]">
@@ -169,14 +190,13 @@ function ViewBar() {
       </div>
     )
   }
+  if (assemblyStatus.visible) {
+    return (
+      <AssemblyStatus pending={api.assembly.pending} error={api.assembly.error} progress={api.assembly.progress} onWhole={() => api.setAssembly(false)} onRetry={() => api.setAssembly(true)} onStart={assemblyStatus.start} />
+    )
+  }
   return (
-    <div data-tour="assembly" className="m-asm qb-card fixed bottom-3 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1 p-1.5 max-w-[calc(100vw-1rem)] overflow-x-auto scrollbar-none">
-      {/* 嵌在手机上的方案页里只有三百来像素宽：上一步、下一步只留箭头，字在宽屏上才露出来 */}
-      <button disabled={api.assembly.step <= 0} onClick={() => api.stepAssembly(-1)} className={step} aria-label={t('assembly.prev')}>‹<span className="hidden sm:inline"> {t('assembly.prev')}</span></button>
-      <div className="px-1 text-[13.5px] font-bold qb-num whitespace-nowrap">{t('assembly.step', { k: api.assembly.step + 1, n })}</div>
-      <button disabled={api.assembly.step >= api.assembly.max} onClick={() => api.stepAssembly(1)} className={step} aria-label={t('assembly.next')}><span className="hidden sm:inline">{t('assembly.next')} </span>›</button>
-      <button onClick={() => api.setAssembly(false)} className={step}>{t('view.whole')}</button>
-    </div>
+    <AssemblyNavigation step={api.assembly.step} total={n} onStep={api.stepAssembly} onWhole={() => api.setAssembly(false)} />
   )
 }
 
@@ -184,18 +204,15 @@ function ViewBar() {
 function ViewShell() {
   const { t } = useI18n()
   const collab = useCollab()
-  const { ready, readOnly, setViewCubeEnabled } = useEngine()
+  const { readOnly } = useEngine()
   // 交付查看没有「在 Builder 里打开」；嵌在交付页里时连分步手册和视角方块也不画
   const delivery = collab.mode === 'delivery'
   const snapshot = collab.mode === 'snapshot'
   const snapshotEmbed = snapshot && VIEW_ONLY && window.top !== window
-  useEffect(() => {
-    if (ready && (DELIVERY_EMBED || snapshotEmbed)) setViewCubeEnabled(false)
-  }, [ready, setViewCubeEnabled, snapshotEmbed])
   return (
     <div className={`app-viewport w-screen flex bg-gray-950 overflow-hidden ${snapshot && !VIEW_ONLY ? 'cb-snapshot-shell' : ''}`} data-ui={DELIVERY_EMBED ? 'delivery-embed' : undefined}>
-      <CanvasHost />
-      {!delivery && !snapshot && <a href={fullBuilderUrl()} target="_top" className="qb-btn qb-btn-sm fixed top-3 left-3 z-40 no-underline">{t('view.open')} ↗</a>}
+      <CanvasHost hideViewCube={DELIVERY_EMBED || snapshotEmbed} />
+      {!delivery && !snapshot && !bootEntry().lockedView && <a href={fullBuilderUrl()} target="_top" style={{position:'fixed'}} className="qb-btn qb-btn-sm fixed top-3 left-3 z-40 no-underline">{t('view.open')} ↗</a>}
       {snapshot && !VIEW_ONLY && readOnly && !collab.error && <SnapshotInfo planId={bootEntry().plan!} versionId={Number(bootEntry().version)} />}
       {snapshot && collab.error && <p role="alert" className="cb-snapshot-error cb-action-error">{collab.error}</p>}
       {!DELIVERY_EMBED && !snapshotEmbed && <ViewBar />}
@@ -247,7 +264,7 @@ function DocOnEntry() {
       if (signedIn !== true) throw new Error('?doc=: sync server did not answer')
       // openDoc核对目标自身；完整同步轮次独立继续，不阻塞这座设计进入画布。
       if (!await openDoc(id)) return
-      dropParam('doc')
+      if (!SINGLE_MODEL) dropParam('doc')
       completeEntry()
     })().catch(report)
   }, [ready, openDoc, notify, completeEntry, loginUrl, report, t])
@@ -263,7 +280,7 @@ function NewOnEntry() {
   const { ready, newTab } = useEngine()
   const done = useRef(false)
   useEffect(() => {
-    if (!bootEntry().blank || !ready || done.current) return
+    if (SINGLE_MODEL || !bootEntry().blank || !ready || done.current) return
     done.current = true
     newTab()
     dropParam('new')
@@ -272,22 +289,34 @@ function NewOnEntry() {
 }
 
 function ManualProgress() {
-  const { exportingManual } = useEngine()
+  const { exportingManual, cancelManualExport } = useEngine()
   const { t } = useI18n()
-  if (!exportingManual) return null
+  const dialog=useRef<HTMLDialogElement>(null)
+  const visible=!!exportingManual&&!hasInlineManualProgress()&&!(RESOURCE_MODE&&parent!==window)
+  useEffect(()=>{if(visible&&!dialog.current?.open){installResourceStyle();dialog.current?.showModal()}if(!visible&&dialog.current?.open)dialog.current.close()},[visible])
+  if (!exportingManual||!visible) return null
+  const { page, total, phase } = exportingManual
+  const cancelling = phase === 'cancelling'
+  let status = t('manual.resources')
+  if (phase === 'prepare') status = t('manual.preparing')
+  if (total > 0) status = t('manual.progress', { k: Math.min(page + 1, total), n: total })
+  if (phase === 'save') status = t('manual.saving')
+  if (cancelling) status = t('manual.cancelling')
   return (
-    <div className="m-backdrop fixed inset-0 z-[80] bg-black/45 flex items-center justify-center">
-      <div className="m-modal qb-card px-6 py-4 text-gray-100 text-sm tabular-nums">
-        {t('manual.progress', { k: exportingManual.page, n: exportingManual.total })}
-      </div>
-    </div>
+    <dialog ref={dialog} className="mr-progress-dialog" aria-labelledby="manual-progress-title" onCancel={event=>{event.preventDefault();if(phase!=='save')cancelManualExport()}}>
+      <h2 id="manual-progress-title">{t('manual.coverTitle')}</h2>
+      <p role="status" aria-live="polite">{status}</p>
+      <progress aria-label={t('manual.coverTitle')} value={exportingManual.total>0?exportingManual.page:undefined} max={exportingManual.total||1}/>
+      <p>{t('manual.downloadHint')}</p>
+      <button type="button" autoFocus disabled={cancelling || phase === 'save'} onClick={cancelManualExport} className="qb-btn qb-btn-ghost qb-btn-sm">{t('confirm.cancel')}</button>
+    </dialog>
   )
 }
 
 function AppInner() {
   const api = useEngine()
   const collab = useCollab()
-  const { handleEsc } = useDock()
+  const { handleEsc, setPane, pane } = useDock()
   const [componentPosition, setComponentPosition] = useState<ComponentMenuPosition | null>(null)
   const pointer = useRef<ComponentMenuPosition | null>(null)
   const closeComponents = useCallback(() => setComponentPosition(null), [])
@@ -314,7 +343,11 @@ function AppInner() {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.isComposing) return
       const el = e.target as HTMLElement | null
+      if (el?.closest('[data-ui="scene-menu"], [data-ui="scene-trigger"]')) return
       const input = !!el?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')
+      // 手机顶栏菜单自行处理键盘与焦点，避免菜单操作触发画布快捷键。
+      if (el?.closest('[data-ui="mobile-topbar-dialog"]')) return
+      if (el?.closest('dialog[open]')) return
       if (componentPosition) {
         if (e.key === 'Escape') {
           e.preventDefault()
@@ -333,6 +366,11 @@ function AppInner() {
           api.cancelExportManual()
           return
         }
+        // 内层菜单、工具和抽屉先退出；画布空闲时才请父页面检查保存并关闭。
+        const innerOpen = !!document.querySelector('[role="dialog"], .m-backdrop')
+        const closeEditor = EDITOR_EMBED && !innerOpen && !pane && api.mode === 'select'
+          && !api.boxSelect && !api.pasting && !api.installationPreview && !collab.placingPin
+          && !api.accountAsk && !api.exportingManual && !api.engine()?.builder.busy()
         const focused = document.activeElement as HTMLElement | null
         if (focused && focused !== document.body && typeof focused.blur === 'function') focused.blur()
         window.dispatchEvent(new Event(UI_ESCAPE_EVENT))
@@ -343,6 +381,7 @@ function AppInner() {
         }
         api.setMode('select')
         handleEsc()
+        if (closeEditor) window.parent.postMessage({ type: 'xmf-model-editor:request-close' }, location.origin)
         return
       }
       // 输入控件和确认框占用键盘时，不触发画布操作。
@@ -363,15 +402,28 @@ function AppInner() {
       if (meta && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); api.redo(); return }
       if (meta && (e.key === 'c' || e.key === 'C')) { e.preventDefault(); api.copy(); return }
       if (meta && (e.key === 'v' || e.key === 'V')) { e.preventDefault(); api.paste(); return }
-      if (meta && (e.key === 's' || e.key === 'S')) { e.preventDefault(); void (e.shiftKey ? api.saveCurrentAs() : api.saveCurrent()); return }
+      if (meta && (e.key === 's' || e.key === 'S')) { e.preventDefault(); void (e.shiftKey&&!EDITOR_EMBED&&!SINGLE_MODEL ? api.saveCurrentAs() : api.saveCurrent()); return }
       if (meta && (e.key === 'a' || e.key === 'A')) { e.preventDefault(); api.selectAll(); return }
       if (meta && (e.key === 'g' || e.key === 'G')) { e.preventDefault(); e.shiftKey ? api.ungroup() : api.group(); return }
       if (meta) return
-      // 共享方案的成员：C 放一颗评论图钉
+      const toggleTool = e.code === 'Space' && !e.shiftKey
+      if (toggleTool || NUMBER_TUBES[e.key]) {
+        if (toggleTool && el?.closest('button, a, summary, [role="button"], [role="menuitem"]')) return
+        if (!api.ready || api.readOnly || api.pasting || api.engine()?.builder.busy()) return
+        e.preventDefault()
+        if (e.repeat) return
+        window.dispatchEvent(new Event(UI_ESCAPE_EVENT))
+        collab.setPlacingPin(false)
+        if (toggleTool) api.toggleLastTool()
+        else api.setTube(NUMBER_TUBES[e.key])
+        document.getElementById('canvas-host')?.focus({ preventScroll: true })
+        return
+      }
       if ((e.key === 'c' || e.key === 'C') && collab.mode === 'plan' && collab.role !== 'guest') {
         e.preventDefault()
         api.setMode('select')
         collab.setPinDraft(null)
+        if (!collab.placingPin) { setPane(null); collab.setActiveThread(null) }
         collab.setPlacingPin(!collab.placingPin)
         return
       }
@@ -404,6 +456,12 @@ function AppInner() {
           if (e.key === 'ArrowUp' || e.key === 'ArrowDown') api.nudgePasteY(e.key === 'ArrowUp' ? 1 : -1)
           return
         }
+        const builder = api.engine()?.builder
+        if (api.mode === 'select' && (e.key === 'ArrowLeft' || e.key === 'ArrowRight') && builder?.clampAdjustment()) {
+          builder.slideSelectedClampBy(e.key === 'ArrowRight' ? 5 : -5)
+          api.bump()
+          return
+        }
         const { axes, frontal } = api.cameraAxes()
         const neg = (v: number[]) => v.map(n => -n)
         const dir = e.key === 'ArrowUp' ? (frontal ? [0, 1, 0] : axes.forward)
@@ -415,10 +473,12 @@ function AppInner() {
         return
       }
       if (e.key === 'q' || e.key === 'Q') {
+        if (api.readOnly) return
         if (api.selectionCount || api.pasting) { e.preventDefault(); api.rotate(-1) }
         return
       }
       if (e.key === 'e' || e.key === 'E') {
+        if (api.readOnly) return
         if (api.selectionCount || api.pasting) { e.preventDefault(); api.rotate(1) }
         return
       }
@@ -435,22 +495,27 @@ function AppInner() {
         setComponentPosition({ ...(pointer.current || { x: window.innerWidth / 2, y: window.innerHeight / 2 }), held: true })
         return
       }
-      const TUBE_BY_KEY: Record<string, string> = { '1': 'T15', '2': 'T25', '3': 'T35' }
-      if (TUBE_BY_KEY[e.key]) { api.setTube(TUBE_BY_KEY[e.key]); return }
       if (e.key === 'd' || e.key === 'D') {
         e.preventDefault()
         api.setMode(api.mode === 'delete' ? 'select' : 'delete')
         return
       }
-      if (e.key === 'b' || e.key === 'B') api.setMode('add')
-      else if (e.key === 'p' || e.key === 'P') api.setMode('panel')
-      else if (e.key === 's' || e.key === 'S') api.setMode('select')
-      else if (e.key === 'r' || e.key === 'R') api.setMode('slide')
-      else if (e.key === 'v' || e.key === 'V') api.startReinforce()
+      if (e.key === 'b' || e.key === 'B') api.activateTool('tubes')
+      else if (e.key === 'p' || e.key === 'P') api.activateTool('panels')
+      else if (e.key === 's' || e.key === 'S') {
+        api.setMode('select')
+        document.getElementById('canvas-host')?.focus({ preventScroll: true })
+      }
+      else if (e.key === 'r' || e.key === 'R' || e.key === 'v' || e.key === 'V') {
+        if (!api.ready || api.readOnly || api.pasting || api.engine()?.builder.busy()) return
+        e.preventDefault()
+        if (e.key === 'r' || e.key === 'R') api.setMode('slide')
+        else api.startReinforce()
+      }
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [api, collab, handleEsc, componentPosition])
+  }, [api, collab, handleEsc, setPane, pane, componentPosition])
 
   // 共享方案里只能看的人没有颜色栏；访客连工具条也没有，评论者的工具条只剩「选择」「评论」
   const viewer = collab.mode === 'plan' && !collab.canEdit
@@ -469,11 +534,13 @@ function AppInner() {
       {collab.mode === 'plan' && collab.compare && <CompareView key={collab.session?.id} />}
       <JoinModal />
       <Toast />
-      <AssemblyPreview />
+      <Downloads />
+      <DeferredAssemblyPreview />
       <AccountDialog />
       <NameDialog />
+      <SaveConflictDialog />
       <ManualProgress />
-      {collab.mode === 'off' && !bootEntry().plan && !bootEntry().invite && !bootEntry().createShared && <Onboarding />}
+      <Onboarding autoOpen={!EDITOR_EMBED && collab.mode === 'off' && !bootEntry().plan && !bootEntry().invite && !bootEntry().createShared} />
       {collab.mode === 'plan' && <CollabCoach />}
       <ThumbCapture />
       <ImportOnEntry />
@@ -487,7 +554,7 @@ export default function App() {
   return (
     <LanguageProvider>
       <ErrorBoundary>
-        <EngineShell />
+        {RECOVERY_ONLY ? <DeviceDraftManager/> : <EngineShell />}
       </ErrorBoundary>
     </LanguageProvider>
   )
@@ -497,6 +564,7 @@ function EngineShell() {
   return (
     <EngineProvider>
       <CollabProvider>
+        <EmbeddedEditorBridge />
         <PanelLayoutProvider>
           <DockProvider>
             <Shell />
@@ -509,7 +577,28 @@ function EngineShell() {
 
 function Shell() {
   const collab = useCollab()
+  if(RESOURCE_MODE)return <ResourceShell />
   if (VIEW_ONLY || collab.mode === 'delivery' || collab.mode === 'snapshot') return <ViewShell />
   if (collab.mode === 'room') return <RoomShell />
   return <AppInner />
+}
+
+function ResourceShell(){
+  const api=useEngine(),{lang}=useI18n(),started=useRef(false)
+  const [exportFinished,setExportFinished]=useState(false)
+  const directManual=new URLSearchParams(location.search).get('resourceAction')==='manual'
+  const messages={zh:['正在读取已保存的造型…','请使用下方按钮重试下载。'],en:['Loading the saved model…','Use the buttons below to retry.'],de:['Gespeichertes Modell wird geladen…','Mit den Schaltflächen unten erneut versuchen.']}
+  useEffect(()=>{
+    if(!api.ready||!api.entryReady||started.current)return
+    started.current=true
+    const action=new URLSearchParams(location.search).get('resourceAction')
+    if(action)void exportResource(api,action).then(()=>{if(!resourceFileDelivered())sendResourceMessage({type:'xmf-resource:result',status:'failed'})}).catch(error=>{api.notify(String(error),'err');sendResourceMessage({type:'xmf-resource:result',status:'failed',message:String(error)})}).finally(()=>setExportFinished(true))
+  },[api])
+  useEffect(()=>{if(api.exportingManual)sendResourceMessage({type:'xmf-resource:progress',progress:api.exportingManual})},[api.exportingManual])
+  useEffect(()=>{if(api.error)sendResourceMessage({type:'xmf-resource:result',status:'failed',message:api.error})},[api.error])
+  return <div className="app-viewport" style={{display:'flex',flexDirection:'column',overflow:'auto',background:'#fffaf5'}}>
+    <div style={{position:'fixed',left:-10000,top:0,width:1200,height:900,display:'flex',pointerEvents:'none'}} aria-hidden="true"><CanvasHost hideViewCube/></div>
+    <div style={{padding:20}}>{api.ready&&api.entryReady&&(!directManual||exportFinished)?<DownloadContents/>:<p role="status">{api.error||api.toast?.message||messages[lang][0]}</p>}</div>
+    <AccountDialog/><ManualProgress/><Toast/>
+  </div>
 }

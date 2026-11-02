@@ -7,6 +7,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { publicResources } from './scripts/publicResources'
 import { publicAssetFallback } from './scripts/publicAssetFallback'
+import { startupResources } from './scripts/startupResources'
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url))
 let opsTelemetryEnabled = false
@@ -41,7 +42,38 @@ function readBody(req: import('node:http').IncomingMessage, limit = 2_000_000) {
 
 export default defineConfig({
   plugins: [
+    {
+      name: 'shared-home-visuals',
+      buildStart() {
+        this.emitFile({ type: 'chunk', fileName: 'home/outdoor.js', id: path.join(rootDir, 'src/engine/outdoor.js'), preserveSignature: 'strict' })
+        this.emitFile({ type: 'chunk', fileName: 'home/thumbnail.js', id: path.join(rootDir, 'src/home/thumbnail.js'), preserveSignature: 'strict' })
+        this.emitFile({ type: 'chunk', fileName: 'home/model-cover.js', id: path.join(rootDir, 'src/store/modelCover.ts'), preserveSignature: 'strict' })
+      },
+      generateBundle() {
+        this.emitFile({ type: 'asset', fileName: 'home/visuals.js', source: fs.readFileSync(path.join(rootDir, 'src/home/visuals.js'), 'utf8') })
+      },
+      configureServer(server) {
+        // 该公共模块同时供源码和静态页面引用；带 ?import 的请求需原样提供给浏览器。
+        server.middlewares.use('/disclosure-motion.js', (_req, res) => {
+          res.setHeader('Content-Type', 'text/javascript')
+          res.end(fs.readFileSync(path.join(rootDir, 'public/disclosure-motion.js'), 'utf8'))
+        })
+        server.middlewares.use('/home/visuals.js', (_req, res) => {
+          res.setHeader('Content-Type', 'text/javascript')
+          res.end(fs.readFileSync(path.join(rootDir, 'src/home/visuals.js'), 'utf8'))
+        })
+        server.middlewares.use('/home/outdoor.js', (_req, res) => {
+          res.setHeader('Content-Type', 'text/javascript')
+          res.end('export {createOutdoorVisuals, OUTDOOR_AREA} from "/src/engine/outdoor.js";')
+        })
+        server.middlewares.use('/home/thumbnail.js', (_req, res) => {
+          res.setHeader('Content-Type', 'text/javascript')
+          res.end('export * from "/src/home/thumbnail.js";')
+        })
+      },
+    },
     publicResources(rootDir),
+    startupResources(),
     publicAssetFallback(rootDir),
     react(),
     tailwindcss(),
@@ -103,7 +135,7 @@ export default defineConfig({
       },
       transformIndexHtml(html: string) {
         if (!opsTelemetryEnabled) return html
-        return html.replace('</head>', '<script defer data-ops-telemetry src="/app/ops-client.js?v=fc8d761a9d"></script></head>')
+        return html.replace('</head>', '<script defer data-ops-telemetry src="/app/ops-client.js?v=e00a073706"></script></head>')
       },
     },
     VitePWA({
@@ -132,6 +164,17 @@ export default defineConfig({
   ],
   server: {
     host: '0.0.0.0',
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('/node_modules/three/')) return 'three'
+          if (/\/node_modules\/(?:react|react-dom|scheduler)\//.test(id)) return 'react'
+          if (/\/node_modules\/(?:yjs|y-indexeddb|y-protocols|y-websocket|lib0)\//.test(id)) return 'sync'
+        },
+      },
+    },
   },
   worker: {
     format: 'es',

@@ -133,7 +133,7 @@ export default function ComponentConfiguration({ choices, selectedKeys, busy, lo
   return <div className="cc-configuration cc-search-direct" data-dragging={!!drag?.active} data-editing={editing !== null}>
     <header className="cc-header"><span className="cc-eyebrow">{s.eyebrow}</span><h2>{s.title}</h2><p>{s.hint}</p></header>
     {(error || loading) && <div className={`cc-message ${error ? 'cc-message-error' : ''}`} role={error ? 'alert' : 'status'}><span>{error || s.loading}</span>{loadFailed && <button type="button" onClick={onRetry} disabled={busy}>{s.retry}</button>}</div>}
-    <div className="cc-body" data-library={expanded}>
+    <div key={String(expanded)} className="cc-body m-swap" data-library={expanded}>
       {expanded ? <section className="cc-selection-editor"><button type="button" className="cc-library-back" onClick={() => setExpanded(false)}><ArrowLeft size={15} />{s.libraryBack}</button><div className="cc-selection-content">{selectionEditor}</div></section> : <>
       <section className="cc-wheel-editor" aria-label={s.title}>
         <div className="cc-mini-ring" ref={ringRef}>

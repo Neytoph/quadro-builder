@@ -3,7 +3,7 @@ import { useI18n } from '../i18n'
 import type { CSSProperties } from 'react'
 import { FoldHeader } from './panelLayout'
 import { Collapse } from './MotionBits'
-import { customComponentStrings } from './customComponentStrings'
+import { NUMBER_TUBES } from '../store/toolMemory'
 
 type Row = { chord: string; action: string }
 
@@ -15,8 +15,8 @@ function rowsFor(
 ): Row[] {
   if (pasting) {
     return [
-      { chord: '↑ ↓', action: t('keys.lift') },
       { chord: 'Q / E', action: t('keys.rotate') },
+      { chord: '↑ ↓', action: t('keys.lift') },
       { chord: 'M / ⇧M', action: t('keys.mirror') },
       { chord: t('keys.click'), action: t('keys.drop') },
       { chord: 'Esc', action: t('keys.escCancel') },
@@ -33,12 +33,12 @@ function rowsFor(
     case 'delete':
       return [
         { chord: t('keys.click'), action: t('keys.clickDelete') },
-        { chord: 'Esc / D / S', action: t('keys.escSelect') },
+        { chord: 'Esc / D', action: t('keys.escSelect') },
         { chord: t('keys.chord.undo'), action: t('keys.undo') },
       ]
     case 'add':
       return [
-        { chord: '1 – 3', action: t('keys.tubeLen') },
+        { chord: Object.keys(NUMBER_TUBES).join(' / '), action: t('keys.tubeLen') },
         { chord: '↑ ↓ ← →', action: t('keys.buildDir') },
         { chord: 'Esc', action: t('keys.escSelect') },
         { chord: 'D', action: t('keys.deleteMode') },
@@ -68,6 +68,7 @@ function rowsFor(
     default:
       return [
         { chord: t('keys.chord.addSelect'), action: t('keys.addSelect') },
+        { chord: t('keys.chord.boxSelect'), action: t('keys.boxSelect') },
         { chord: t('keys.chord.block'), action: t('keys.block') },
         { chord: t('keys.chord.selectAll'), action: t('keys.selectAll') },
         { chord: t('keys.chord.copyPaste'), action: t('keys.copyPaste') },
@@ -112,13 +113,15 @@ function Kbd({ text }: { text: string }) {
 
 export default function ShortcutHint({ open, onToggle }: { open: boolean; onToggle: () => void }) {
   const api = useEngine()
-  const { t, lang } = useI18n()
+  const { t } = useI18n()
   const mode = api.pasting ? 'paste' : api.mode
   const titleKey = api.pasting
     ? 'lib.placing'
     : (MODE_TITLE[api.placingConnector ? 'fitting' : api.mode] || 'tool.select')
   const rows = rowsFor(t, api.mode, api.pasting, !!api.placingConnector)
-  if (!api.readOnly) rows.push({ chord: lang === 'zh' ? '按住 4' : lang === 'de' ? '4 halten' : 'Hold 4', action: customComponentStrings[lang].title })
+  if (!api.readOnly && !api.pasting) {
+    rows.unshift({ chord: t('keys.space'), action: t('keys.toggleTool') })
+  }
   const cameraLines = t('hint.camera').split('\n').filter(Boolean)
 
   return (
@@ -143,7 +146,7 @@ export default function ShortcutHint({ open, onToggle }: { open: boolean; onTogg
         {/* 换了工具，这一组快捷键整组换掉，一行行重新进来 */}
         <div key={mode + (api.placingConnector ? ':conn' : '')} className="m-rows flex flex-col gap-1">
           {rows.map((row, i) => (
-            <div key={row.chord + row.action} className="flex items-start gap-2" style={{ '--i': i } as CSSProperties}>
+            <div key={row.chord + row.action} className="flex flex-wrap items-start gap-x-2 gap-y-0.5" style={{ '--i': i } as CSSProperties}>
               <Kbd text={row.chord} />
               <span className="text-[11px] text-gray-300 leading-snug pt-px">{row.action}</span>
             </div>

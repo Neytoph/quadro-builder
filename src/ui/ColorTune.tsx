@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from 'react'
 import { applyTuneJson, DEFAULT_GRADE, DEFAULT_TUNE, gradeHex, loadTune, mergeTune, normHex, saveTune } from '../engine/colorTune.js'
 import { useEngine } from '../store/EngineContext'
-import { CORNER_BOTTOM, NARROW_MAX, PANEL_GAP, TAB_BAR_H, TOOLBAR_H, VIEW_CUBE_MARGIN, VIEW_CUBE_PX, usePanelLayout } from './panelLayout'
+import { CORNER_BOTTOM, NARROW_MAX, PANEL_GAP, projectBarHeight, TOOLBAR_H, VIEW_CUBE_MARGIN, VIEW_CUBE_PX, usePanelLayout } from './panelLayout'
 import { useDock } from './dock'
 
 type Tab = 'scene' | 'frame' | 'grade'
@@ -236,7 +236,7 @@ export default function ColorTune() {
         type="button"
         onClick={() => setOpen(true)}
         className="fixed z-40 px-3 h-9 rounded-full bg-amber-700/95 text-white text-[13px] shadow-lg border border-amber-400/40 cursor-pointer"
-        style={{ right: rightOffset, top: narrow ? TAB_BAR_H + TOOLBAR_H + PANEL_GAP : TAB_BAR_H + PANEL_GAP }}
+        style={{ right: rightOffset, top: projectBarHeight(vw) + (narrow ? TOOLBAR_H : 0) + PANEL_GAP }}
       >
         调色
       </button>
@@ -249,7 +249,7 @@ export default function ColorTune() {
       className="fixed z-40 flex flex-col min-h-0 overflow-hidden bg-gray-950/92 backdrop-blur border border-amber-800/50 rounded-2xl shadow-xl text-gray-200"
       style={{
         right: rightOffset,
-        top: narrow ? TAB_BAR_H + TOOLBAR_H + PANEL_GAP : TAB_BAR_H + PANEL_GAP,
+        top: projectBarHeight(vw) + (narrow ? TOOLBAR_H : 0) + PANEL_GAP,
         width: 300,
         maxHeight: narrow
           ? 'min(70vh, 560px)'
@@ -391,7 +391,7 @@ export default function ColorTune() {
             <button
               type="button"
               onClick={() => commit({ ...tune, grade: { ...DEFAULT_GRADE } })}
-              className="mt-2 w-full h-8 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-200 text-[12px] cursor-pointer"
+              className="qb-btn qb-btn-ghost qb-btn-sm mt-2 w-full"
             >
               滤镜归零
             </button>
@@ -427,7 +427,7 @@ export default function ColorTune() {
           <button
             type="button"
             onClick={() => void copyJson()}
-            className="flex-1 h-8 rounded-lg bg-amber-700 hover:bg-amber-600 text-white text-[12px] cursor-pointer"
+            className="qb-btn qb-btn-sm flex-1"
           >
             {copied ? '已复制' : '复制'}
           </button>
@@ -435,7 +435,7 @@ export default function ColorTune() {
             type="button"
             disabled={comparing}
             onClick={() => applyDraft(jsonDraft)}
-            className="flex-1 h-8 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-200 text-[12px] cursor-pointer disabled:opacity-40"
+            className="qb-btn qb-btn-ghost qb-btn-sm flex-1"
           >
             套上
           </button>
@@ -450,7 +450,7 @@ export default function ColorTune() {
                 api.notify('读不了剪贴板，请粘贴到框里', 'warn')
               }
             }}
-            className="h-8 px-2.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-200 text-[12px] cursor-pointer disabled:opacity-40"
+            className="qb-btn qb-btn-ghost qb-btn-sm"
           >
             粘贴
           </button>
@@ -458,7 +458,7 @@ export default function ColorTune() {
             type="button"
             disabled={comparing}
             onClick={() => commit(structuredClone(DEFAULT_TUNE))}
-            className="h-8 px-2.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-200 text-[12px] cursor-pointer disabled:opacity-40"
+            className="qb-btn qb-btn-ghost qb-btn-sm"
           >
             重置
           </button>

@@ -5,6 +5,7 @@ import { BuildModel } from './model.js'
 import { parseQDF } from './qdfimport.js'
 import { getLang } from './i18n.js'
 import { computeAssemblyPlan as computeRawAssemblyPlan, assemblyState } from './assemblyPlan.js'
+import { framePanelIds, panelSupportTubes, reconcileFrameModulePanels } from './assemblyOperations.js'
 
 vi.setConfig({ testTimeout: 120000 })
 const fixturePlans = new Map<string, any>()
@@ -30,6 +31,72 @@ describe('本层框架连续展示与真实下套', () => {
   it('记录C0179本轮计划，保留原始比较快照', () => {
     const model = load('qdf/C0179.qdf'), plan = computeAssemblyPlan(model)
     records.push({ file: 'C0179', steps: plan.steps.map(stepRecord), frameModules: plan.frameModules, canExport: plan.canExport, diagnostics: plan.diagnostics })
+  })
+
+  it('板面随整组支撑管下套，完成态回到支撑框架上', () => {
+    const model = load('qdf/C0179.qdf'), plan = computeAssemblyPlan(model)
+    const index = plan.steps.findIndex((step: any) => step.action.layer && step.panelIds.includes('p395'))
+    expect(index).toBeGreaterThanOrEqual(0)
+    const step = plan.steps[index], module = step.action.modules.find((item: any) => item.partIds.includes('p395'))
+    expect(module, JSON.stringify(step.action.modules)).toBeTruthy()
+    expect(module.partIds).toEqual(expect.arrayContaining(['t232', 't233', 't234', 't235']))
+    const moving = assemblyState(plan, index, { action: true }), complete = assemblyState(plan, index)
+    expect(moving.transforms.get('p395')).toEqual(module.translation)
+    expect(complete.transforms.has('p395')).toBe(false)
+
+    const carried: string[] = []
+    for (const [stepIndex, layer] of plan.steps.entries()) for (const frame of layer.action.modules || []) {
+      const frameTubes = new Set(frame.partIds.filter((id: string) => model.tubes.has(id)))
+      for (const panelId of layer.panelIds || []) {
+        const supports = layer.panelSupports?.[panelId] || []
+        if (!supports.length || !supports.every((id: string) => frameTubes.has(id))) continue
+        expect(frame.partIds).toContain(panelId)
+        expect(assemblyState(plan, stepIndex, { action: true }).transforms.get(panelId)).toEqual(frame.translation)
+        carried.push(panelId)
+      }
+    }
+    expect(new Set(carried).size).toBeGreaterThan(1)
+  })
+
+  it('区域清单缺少板件时仍根据全部支撑管归入可移动框架', () => {
+    const model = load('qdf/C0179.qdf'), panel = model.panels.get('p395')
+    const panelOnlyModel = Object.create(model)
+    panelOnlyModel.panels = new Map([[panel.id, panel]])
+    expect(framePanelIds(panelOnlyModel, ['t232', 't233', 't234', 't235'])).toEqual(['p395'])
+
+    const module = { id: 'frame-test', tubeIds: ['t232', 't233', 't234', 't235'], panelIds: [], partIds: ['n45', 't232', 't233', 't234', 't235'], installStepId: 'step-10' }
+    const step = { id: 'step-10', panelIds: ['p395'], action: { modules: [{ id: module.id, partIds: [...module.partIds] }], inPlacePartIds: ['p395'] } }
+    reconcileFrameModulePanels(panelOnlyModel, [module], [step])
+    expect(module.partIds).toContain('p395')
+    expect(step.action.modules[0].partIds).toContain('p395')
+    expect(step.action.inPlacePartIds).not.toContain('p395')
+  })
+
+  it('面板支撑检测处理反向管段，并在局部支撑移动时隐藏未随动面板', () => {
+    const model = load('qdf/C0179.qdf'), plan = computeAssemblyPlan(model)
+    expect(panelSupportTubes(model, model.panels.get('p407'))).toEqual(expect.arrayContaining(['t279', 't281', 't164', 't280']))
+    expect(panelSupportTubes(model, model.panels.get('p407'))).not.toContain('t186')
+    expect(panelSupportTubes(model, model.panels.get('p407'))).not.toContain('t377')
+    expect(panelSupportTubes(model, model.panels.get('p398'))).toEqual(expect.arrayContaining(['t222', 't242', 't241', 't243']))
+
+    for (const [index, step] of plan.steps.entries()) {
+      if (!step.action?.layer) continue
+      const modules = step.action.modules || [], movingTubes = new Set(modules.flatMap((module: any) => module.partIds.filter((id: string) => model.tubes.has(id))))
+      const carried = new Set(modules.flatMap((module: any) => module.partIds.filter((id: string) => model.panels.has(id))))
+      const state = assemblyState(plan, index, { action: true })
+      for (const panelId of step.panelIds) {
+        const supports = panelSupportTubes(model, model.panels.get(panelId))
+        if (carried.has(panelId)) {
+          const module = modules.find((item: any) => item.partIds.includes(panelId))
+          expect(state.transforms.get(panelId)).toEqual(module.translation)
+          continue
+        }
+        if (supports.some((id: string) => movingTubes.has(id))) {
+          expect(step.action.inPlacePartIds).toContain(panelId)
+          expect(state.visible.has(panelId)).toBe(false)
+        }
+      }
+    }
   })
 
   it('C0179的20/80/120cm各合并为一层，39根横管和顶接头真实下套且立柱不移动', () => {

@@ -1,11 +1,15 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import {EDITOR_EMBED} from '../entry'
 
 const KEY_V1 = 'quadro.ui.widths.v1'
 const KEY_V2 = 'quadro.ui.layout.v2'
-const KEY = 'quadro.ui.layout.v3'
+const PREVIOUS_KEY = EDITOR_EMBED ? 'quadro.ui.model-editor.layout.v1' : 'quadro.ui.layout.v3'
+const KEY = EDITOR_EMBED ? 'quadro.ui.model-editor.layout.v2' : 'quadro.ui.layout.v4'
 export const PANEL_GAP = 12
-export const TAB_BAR_H = 44
+export const TAB_BAR_H = 60
 export const NARROW_MAX = 767
+export const MOBILE_TAB_BAR_H = 60
+export function projectBarHeight(vw: number) { return vw <= NARROW_MAX ? MOBILE_TAB_BAR_H : TAB_BAR_H }
 export const TOP_MIN = TAB_BAR_H + PANEL_GAP
 export const TOOLBAR_H = 56
 /** 工具条真实高度：内边距 + h-12 按钮 + 描边。和左侧 40px 方块对中位线时用这个。 */
@@ -19,13 +23,13 @@ const RIGHT_MIN = 280
 const RIGHT_MAX = 448
 export const HEIGHT_MIN = 180
 
-/** 草地 / 框住 / 导出：固定小方块，贴在左栏右侧画布角。 */
+/** 场景 / 框住 / 导出 / 框架：固定小方块，贴在左栏右侧画布角。 */
 export const CORNER_TILE = 40
 export const VIEW_CUBE_PX = 80
 export const VIEW_CUBE_MARGIN = 22
 export const SCENE_TOGGLE_PX = CORNER_TILE
 export const SCENE_CLUSTER_GAP = 8
-export const SCENE_CLUSTER_TILES = 3
+export const SCENE_CLUSTER_TILES = 4
 export const SCENE_CLUSTER_W = CORNER_TILE * SCENE_CLUSTER_TILES + SCENE_CLUSTER_GAP * (SCENE_CLUSTER_TILES - 1)
 export const CORNER_BOTTOM = 16
 export const CORNER_BOTTOM_NARROW = 72
@@ -90,9 +94,9 @@ function readBox(raw: unknown, side: Side, vh: number, fallbackW: number): Panel
 
 type StoredLayout = { left?: unknown; right?: unknown; leftColor?: boolean; leftKeys?: boolean }
 
-function flagsOf(raw: StoredLayout | null) {
+function flagsOf(raw: StoredLayout | null, currentVersion: boolean) {
   return {
-    leftColor: raw?.leftColor !== false,
+    leftColor: currentVersion && raw?.leftColor === true,
     leftKeys: raw?.leftKeys !== false,
   }
 }
@@ -103,17 +107,20 @@ function load(vh: number): { left: PanelBox; right: PanelBox; leftColor: boolean
     return {
       left: { width: LEFT_DEFAULT, top: TOP_MIN, height: h },
       right: { width: RIGHT_DEFAULT, top: TOP_MIN, height: h },
-      leftColor: true,
+      leftColor: false,
       leftKeys: true,
     }
   }
   try {
-    const raw = JSON.parse(localStorage.getItem(KEY) || localStorage.getItem(KEY_V2) || '') as StoredLayout
+    const current = localStorage.getItem(KEY)
+    const previous = localStorage.getItem(PREVIOUS_KEY)
+    if (EDITOR_EMBED && !current && !previous) return { ...empty(), leftKeys: false }
+    const raw = JSON.parse(current || previous || localStorage.getItem(KEY_V2) || '') as StoredLayout
     if (raw && (raw.left || raw.right)) {
       return {
         left: readBox(raw.left, 'left', vh, LEFT_DEFAULT),
         right: readBox(raw.right, 'right', vh, RIGHT_DEFAULT),
-        ...flagsOf(raw),
+        ...flagsOf(raw, !!current),
       }
     }
   } catch { /* fall through */ }
@@ -123,7 +130,7 @@ function load(vh: number): { left: PanelBox; right: PanelBox; leftColor: boolean
     return {
       left: clampBox({ width: Number(v1.left) || LEFT_DEFAULT, top: TOP_MIN, height: h }, 'left', vh),
       right: clampBox({ width: Number(v1.right) || RIGHT_DEFAULT, top: TOP_MIN, height: h }, 'right', vh),
-      leftColor: true,
+      leftColor: false,
       leftKeys: true,
     }
   } catch {
@@ -146,8 +153,7 @@ export function canvasInset(box: PanelBox) {
 }
 
 export function leftColumnWidth(box: PanelBox, vw: number) {
-  // Keep the three scene buttons beside the capsules, with a gap on both
-  // viewport edges and between the two columns. Do not persist this shrink.
+  // 窄屏每行最多四个按钮，室内区域开关另起一行。
   if (vw <= NARROW_MAX) return Math.min(box.width, Math.max(0, vw - PANEL_GAP * 3 - SCENE_CLUSTER_W))
   return box.width
 }
@@ -165,7 +171,7 @@ export function leftStackDrop(left: PanelBox, vw: number, toolbarW: number) {
 
 /** 桌面：工具条垂直中线对齐「颜色」旁那一行；窄屏贴在标签栏下。不跟三个按钮的下落位置走。 */
 export function toolbarTop(left: PanelBox, vw: number) {
-  if (vw <= NARROW_MAX) return TOP_MIN
+  if (vw <= NARROW_MAX) return projectBarHeight(vw) + PANEL_GAP
   const sceneTop = left.top + LEFT_MOVE_HANDLE_H + LEFT_STACK_GAP
   return Math.round(sceneTop + SCENE_TOGGLE_PX / 2 - TOOLBAR_CHROME_H / 2)
 }
@@ -173,7 +179,8 @@ export function toolbarTop(left: PanelBox, vw: number) {
 /** 居中工具条会碰到三个按钮或左栏时，按钮改到工具栏下面，工具条保持原宽。 */
 export function sceneButtonsDrop(left: PanelBox, vw: number, toolbarW: number) {
   if (leftStackDrop(left, vw, toolbarW)) return true
-  const clusterW = SCENE_TOGGLE_PX * SCENE_CLUSTER_TILES + SCENE_CLUSTER_GAP * (SCENE_CLUSTER_TILES - 1)
+  const tiles = SCENE_CLUSTER_TILES + (vw > NARROW_MAX ? 1 : 0)
+  const clusterW = SCENE_TOGGLE_PX * tiles + SCENE_CLUSTER_GAP * (tiles - 1)
   const sceneLeft = Math.min(
     canvasInset(left),
     Math.max(PANEL_GAP, vw - clusterW - PANEL_GAP),
@@ -189,7 +196,8 @@ export function sceneButtonsDrop(left: PanelBox, vw: number, toolbarW: number) {
 export function canvasCorner(left: PanelBox, vw: number, extras: { right?: PanelBox; dockOpen?: boolean; toolbarW?: number } = {}) {
   const narrow = vw <= NARROW_MAX
   const tile = SCENE_TOGGLE_PX
-  const clusterW = tile * SCENE_CLUSTER_TILES + SCENE_CLUSTER_GAP * (SCENE_CLUSTER_TILES - 1)
+  const tiles = SCENE_CLUSTER_TILES + (narrow ? 0 : 1)
+  const clusterW = tile * tiles + SCENE_CLUSTER_GAP * (tiles - 1)
   const bottom = narrow ? CORNER_BOTTOM_NARROW : CORNER_BOTTOM
   const sceneLeft = Math.min(
     canvasInset(left),

@@ -4,9 +4,12 @@ import { parseOfficialId } from '../data/official'
 import { useDock } from './dock'
 import { canvasCorner, usePanelLayout } from './panelLayout'
 import { SESSIONLESS } from '../entry'
+import { useMobileControls } from './useMobileControls'
+import ModelOpening from './ModelOpening'
 
-export default function CanvasHost() {
-  const { hostRef, ready, error, openLibraryId, setViewCubePad } = useEngine()
+export default function CanvasHost({ hideViewCube = false }: { hideViewCube?: boolean }) {
+  const { hostRef, ready, error, opening, openLibraryId, setViewCubePad, setViewCubeEnabled } = useEngine()
+  const mobile = useMobileControls()
   const { left, right, vw } = usePanelLayout()
   const { pane } = useDock()
 
@@ -14,6 +17,10 @@ export default function CanvasHost() {
     if (ready) window.dispatchEvent(new Event('qh:builder:ready'))
     if (error) window.dispatchEvent(new Event('qh:builder:error'))
   }, [ready, error])
+
+  useEffect(() => {
+    if (ready) setViewCubeEnabled(!mobile && !hideViewCube)
+  }, [ready, mobile, hideViewCube, setViewCubeEnabled])
 
   useEffect(() => {
     if (!ready) return
@@ -48,9 +55,7 @@ export default function CanvasHost() {
       onDrop={onDrop}
     >
       <div id="canvas-host" ref={hostRef} className="m-canvas absolute inset-0" data-ready={ready} tabIndex={0} />
-      {!ready && !error && (
-        <div className="absolute inset-0 flex items-center justify-center text-gray-400 text-sm">Loading…</div>
-      )}
+      {!error && (!ready || opening) && <ModelOpening phase={opening?.phase || 'prepare'} name={opening?.name} />}
       {error && (
         <div className="absolute inset-0 flex items-center justify-center text-red-300 text-sm px-6 text-center">{error}</div>
       )}

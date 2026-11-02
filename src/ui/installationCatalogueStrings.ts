@@ -1,6 +1,7 @@
 export const installationCatalogueStrings = {
   zh: {
     '扎带固定': '扎带固定',
+    all: '全部',
     '管上或轴承': '管上 / 轴承',
     newBadge: '新', newComponent: '新组件',
     source: '配件来源', official: 'QUADRO', extended: '国产', methods: '全部安装方法', empty: '没有符合的组件',
@@ -9,6 +10,7 @@ export const installationCatalogueStrings = {
   },
   en: {
     '扎带固定': 'Cable ties',
+    all: 'All',
     '管上或轴承': 'Tube or bearing',
     newBadge: 'New', newComponent: 'New component',
     source: 'Component source', official: 'QUADRO', extended: 'Domestic', methods: 'All mounting methods', empty: 'No matching components',
@@ -17,6 +19,7 @@ export const installationCatalogueStrings = {
   },
   de: {
     '扎带固定': 'Kabelbinder',
+    all: 'Alle',
     '管上或轴承': 'Rohr oder Radlager',
     newBadge: 'Neu', newComponent: 'Neues Bauteil',
     source: 'Bauteilherkunft', official: 'QUADRO', extended: 'Inländisch', methods: 'Alle Montagearten', empty: 'Keine passenden Bauteile',

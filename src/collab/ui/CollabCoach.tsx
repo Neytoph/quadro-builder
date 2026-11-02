@@ -6,6 +6,7 @@ import { NARROW_MAX, usePanelLayout } from '../../ui/panelLayout'
 import { CoachFrame, useCoachMeasure } from '../../ui/CoachFrame'
 import { useCollab } from '../CollabContext'
 import { coachKind, coachSeen, coachSteps, markCoachSeen, type CoachKind } from '../coach'
+import { useEngine } from '../../store/EngineContext'
 
 /**
  * 第一次进共享方案的提示气泡：点零件写意见、留言区、版本对照。样子和做法同 builder 自带的引导，
@@ -13,8 +14,9 @@ import { coachKind, coachSeen, coachSteps, markCoachSeen, type CoachKind } from 
  */
 export default function CollabCoach() {
   const collab = useCollab()
+  const { toast } = useEngine()
   const plan = collab.plan
-  const ready = collab.enabled && collab.mode === 'plan' && !!plan && !collab.compare && !collab.coachBlocked && !collab.joinAsk && !collab.inviteError && !collab.inviteOpenId && !collab.error
+  const ready = toast?.kind !== 'saved' && collab.enabled && collab.mode === 'plan' && !!plan && !collab.compare && !collab.coachBlocked && !collab.joinAsk && !collab.inviteError && !collab.inviteOpenId && !collab.error
   const kind = ready && plan ? coachKind(plan) : null
   // 看过以后重新渲染一次，让 coachSeen 读到新值
   const [, setSeenRev] = useState(0)

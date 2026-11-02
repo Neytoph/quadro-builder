@@ -18,6 +18,22 @@ const good = () => new Response(content, { headers: { 'Content-Type': 'applicati
 const request = () => new Request(origin + path)
 
 describe('exact public resource routing', () => {
+  it('uses COS for exact public bytes and immediately returns to the original origin on a missing object', async () => {
+    const cosRelease: AssetRelease = { ...release, mode: 'public-cos-fallback',
+      ipv6Origin: 'https://assets.cos.example' }
+    expect(matchPublicAsset(request(), origin, cosRelease)).toEqual(asset)
+    expect(matchPublicAsset(new Request(origin + '/quadro/designs'), origin, cosRelease)).toBeNull()
+    const calls: Request[] = []
+    const result = await fetchPublicAsset(request(), asset, cosRelease, async input => {
+      const req = input as Request
+      calls.push(req)
+      return req.url.startsWith(cosRelease.ipv6Origin) ? new Response('missing', { status: 404 }) : good()
+    })
+    expect(calls.map(call => call.url)).toEqual([cosRelease.ipv6Origin + path, origin + path])
+    expect(calls[0].credentials).toBe('omit')
+    expect(calls[0].referrerPolicy).toBe('origin')
+    expect(await result.text()).toBe(new TextDecoder().decode(content))
+  })
   it('admits only exact release GETs, including a worker URL, and never changes private requests', () => {
     expect(matchPublicAsset(request(), origin, release)).toEqual(asset)
     const worker = request()

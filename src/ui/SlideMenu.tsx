@@ -19,6 +19,11 @@ const FAMILIES = [
   { name: 'slide_type_end', part: 'slide_end', official: 'slide-end2', domestic: [] },
 ]
 
+export const SLIDE_CARDS = FAMILIES.flatMap(family => [
+  { id: family.official, size: '', family: family.name, image: family.part, origin: 'official' as const },
+  ...family.domestic.map(part => ({ ...part, family: family.name, image: family.part, origin: 'extended' as const })),
+])
+
 const SOURCE_COUNTS = {
   official: FAMILIES.length,
   extended: FAMILIES.reduce((count, family) => count + Math.max(1, family.domestic.length), 0),

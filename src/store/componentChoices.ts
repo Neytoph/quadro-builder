@@ -4,9 +4,10 @@ import { labelOf } from '../names'
 import { ACC_CAT_ICON, CONN_CAT_ICON, TOOL_ICON, partIcon, tubeIcon } from '../ui/icons'
 import { MODULE_GROUPS, presetThumbPath } from '../data/presets'
 import { builderComponents } from './builderComponents'
+import { reinforcements } from '../engine/catalog.js'
 
 type EngineApi = ReturnType<typeof useEngine>
-type PartAction = { kind: 'panel' | 'tube' | 'slide' | 'clamp' | 'connector' | 'fitting' | 'pool' | 'c45' | 'module'; id: string; partId?: string }
+type PartAction = { kind: 'panel' | 'tube' | 'slide' | 'clamp' | 'connector' | 'fitting' | 'pool' | 'c45' | 'module' | 'reinforce'; id: string; partId?: string }
 export type ComponentChoice = {
   key: string
   label: string
@@ -37,7 +38,8 @@ export function componentChoices(api: EngineApi, saved: CustomComponent[], t: (k
     else if (part.id === 'diagonal') action = { kind: 'c45', id: part.id }
     else if (part.id === 'double_tube' || part.id === 'tube_clamp') action = { kind: 'clamp', id: part.id }
     else if (part.id === 'bearing') action = { kind: 'fitting', id: 'bearing-clamp' }
-    else if (['hole_1', 'hole_2', 'hole_t', 'flexi_bolt', 'flexi_hinge', 'flexi'].includes(part.id)) action = { kind: 'fitting', id: part.id === 'flexi' ? 'flexi_bolt' : part.id }
+    else if (part.id === 'windmill') action = { kind: 'fitting', id: 'windmill-clamp' }
+    else if (['hole_1', 'hole_2', 'hole_t', 'flexi_bolt', 'flexi_hinge', 'flexi'].includes(part.id)) action = { kind: 'fitting', id: part.id }
     if (action) choices.push({ key: `connector:${part.id}`, label: labelOf(part.id, part.name), group: t('tool.connections'), partId: part.id, icon: CONN_CAT_ICON[part.id] || CONN_CAT_ICON['6way'], action })
   }
   for (const part of api.catalog.accessories) {
@@ -55,6 +57,8 @@ export function componentChoices(api: EngineApi, saved: CustomComponent[], t: (k
     const length = 'length_cm' in part && typeof part.length_cm === 'number' ? part.length_cm : undefined
     choices.push({ key: `tube:${part.id}`, label: labelOf(part.id, part.name), group: t('tool.tubes'), partId: part.id, icon: tubeIcon(part.id, length), action: { kind: 'tube', id: part.id } })
   }
+  for (const part of reinforcements()) choices.push({ key: `reinforce:${part.id}`, label: labelOf(part.id, part.name), group: t('tool.reinforce'), partId: part.id,
+    icon: TOOL_ICON.reinforce, action: { kind: 'reinforce', id: part.id } })
   for (const part of builderComponents()) {
     const key = `${part.placement === 'panel' ? 'panel' : 'accessory'}:${part.id}`
     const choice: ComponentChoice = { key, label: labelOf(part.id, part.name), group: t(part.placement === 'panel' ? 'tool.panels' : 'tool.accessories'), partId: part.id,
@@ -86,6 +90,7 @@ export function activateComponent(choice: ComponentChoice, api: EngineApi): bool
     case 'fitting': api.setFitting(action.id, action.partId); break
     case 'pool': api.startPool(action.id); break
     case 'c45': api.startC45(); break
+    case 'reinforce': api.startReinforce(action.id); break
     case 'module': api.placeModule(action.id); break
   }
   return true

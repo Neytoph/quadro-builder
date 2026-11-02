@@ -24,7 +24,6 @@ export function bomSections(bom: BomView, t: T): BomSection[] {
     { title: t('bom.textiles'), rows: bom.textiles },
     { title: t('bom.fittings'), rows: bom.fittings },
     { title: t('bom.reinforcements'), rows: bom.reinforcements },
-    { title: t('bom.screws'), rows: bom.screws },
   ].filter(s => s.rows.length)
 }
 
@@ -46,9 +45,9 @@ function colorWord(color?: string | null) {
   return colorLabel(color)
 }
 
-function csvCell(v: string | number) {
+export function csvCell(v: string | number) {
   const s = String(v ?? '')
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
 }
 
 export interface BomExportInput {

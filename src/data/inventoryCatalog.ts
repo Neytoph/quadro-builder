@@ -1,9 +1,9 @@
 import {
-  accessories, allConnectors, allTubes, panels, reinforcements, screws,
+  accessories, allConnectors, allTubes, panels, reinforcements,
 } from '../engine-api'
 import type { Inventory } from '../store/EngineContext'
 
-export type InvSection = 'tubes' | 'connectors' | 'panels' | 'slides' | 'wheels' | 'textiles' | 'fittings' | 'reinforcements' | 'screws'
+export type InvSection = 'tubes' | 'connectors' | 'panels' | 'slides' | 'wheels' | 'textiles' | 'fittings' | 'reinforcements'
 export type InvGroup = keyof Inventory
 
 export type InvCatalogItem = {
@@ -58,12 +58,11 @@ export function inventoryCatalog(): InvCatalogItem[] {
     add(accSection(p.id), 'fittings', p.id)
   }
   for (const p of (reinforcements() as Cat[])) add('reinforcements', 'reinforcements', p.id)
-  for (const p of (screws() as Cat[])) add('screws', 'screws', p.id)
   return rows
 }
 
 export const INV_SECTIONS: InvSection[] = [
-  'tubes', 'connectors', 'panels', 'slides', 'wheels', 'textiles', 'fittings', 'reinforcements', 'screws',
+  'tubes', 'connectors', 'panels', 'slides', 'wheels', 'textiles', 'fittings', 'reinforcements',
 ]
 
 export const INV_SECTION_TITLE: Record<InvSection, string> = {
@@ -75,5 +74,4 @@ export const INV_SECTION_TITLE: Record<InvSection, string> = {
   textiles: 'bom.textiles',
   fittings: 'bom.fittings',
   reinforcements: 'bom.reinforcements',
-  screws: 'bom.screws',
 }

@@ -1,28 +1,57 @@
 // Bau-Interaktion: Auswahl, Anbau ueber Richtungs-Handles, Loeschen.
 
 import { DIRECTIONS, DIAGONAL_DIRECTIONS, DIR_ALIGN_TOL, ARM_ALIGN_TOL, CLAMP_LINK_DIST, C45_SLEEVE_LEN, C45_ARM_LEN, CONN_TYPE_MASK } from "./config.js";
+import { c45CollisionContext } from './c45Placement.js';
+import { withPlacementPass, placementMemo, railLineScope } from './incrementalPlacement.js';
+import { Vector3 } from "three";
+import { ALUMINIUM_CONNECTOR, reinforcementGuide, aluminiumConnectorTargets } from './reinforcement.js';
 import { buildableTubes, geometry, getTube, spacingFor, getPanel, defaultPanel, diagonalTubeId, slideKindLabel, slideKindName, isCurvedTube, gridSpacing, partName, partForFitting, getPartById, getConnector, poolLinerFor, reinforcementPart, textilePart } from "./catalog.js";
 import { CLASSIC_COLOR_IDS, officialColorId } from "./colors.js";
+import { colorPreviewModel, normalizeColor } from './customColors.js';
 import { connectorLabelInfo } from "./buildplan.js";
 import { computeAssemblyPlan, assemblyState } from "./assemblyPlan.js";
-import { assemblyMeshes, ensureAssemblyMeshes } from "./assemblyNativeMesh.js";
-import { infeasibleConnectors, inferConnectorType } from "./bom.js";
-import { t } from "./i18n.js";
+import { infeasibleConnectors, inferConnectorType, resolveNodeConnection } from "./bom.js";
+import { getLang, t } from "./i18n.js";
 import { round2, panelNormal, modelMiddle, xAxisOf, yAxisOf, zAxisOf, quatFromBasis } from "./util.js";
 import { TUBE_FITTINGS, POOL_KINDS, isHolePart, holeArmDirs, holeClampDirsAt, HOLE_MASKS,
-  BOLT_PART, HINGE_PART, isBoltPart, boltArmDirs, boltDepth, hingeDir, hingeKey, splitHingeKey,
-  POOL_SETS, ARM_FITTINGS, armFittingDirsAt, fixedFittingColor, fixedTubeColor, slopeArmDirsAt, SLIDE_PARTS, SLIDE_SPECS } from "./model.js";
+  BOLT_PART, HINGE_PART, isBoltPart, boltArmDirs, boltAxis, boltDepth, hingeDir, hingeKey, splitHingeKey,
+  POOL_SETS, ARM_FITTINGS, armFittingDirsAt, fixedFittingColor, fixedTubeColor, slopeArmDirsAt, SLIDE_PARTS, SLIDE_SPECS, ROTATABLE_FITTINGS } from "./model.js";
 import { CONNECTOR_ARM_BITS } from "./qdfimport.js";
 import { ACCESSORY_IDS, PANEL_ACCESSORY_IDS, componentFrame } from './accessoryPack.js';
-import { confirmedSpec } from './componentPack.js';
+import { confirmedSpec, usesCustomClimbingColor } from './componentPack.js';
+import { supportsPanelFixing, panelRailScrewAxis, curvePoint } from './confirmedComponentModel.js';
+import { insetPanelProbes } from './insetPanelMounts.js';
+import { installationReason, installationFacingNotice } from './installationReason.js';
+import { panelInstallationFacing } from './panelInstallationFacing.js';
+import { gymRingSupport } from './gymRingSupport.js';
+import { selectionBounds, connectedTransformSelection, incompleteRigidSelection } from './selectionTransform.js';
+import { SelectionTransformSession } from './selectionTransformSession.js';
+import { SelectionTransformGizmo } from './selectionTransformGizmo.js';
+import { SelectionTransformPreview } from './selectionTransformPreview.js';
+import { selectionTransformStrings } from '../ui/selectionTransformStrings';
 import { pickStepAnchor, stepCandidates, stepCandidatesFromSelection, stepNeighbor } from "./stepAnchor.js";
 import { carouselBearingAtRotor, carouselBearingForPick } from './carouselBearingModel.js';
 import { CarouselRotationGesture } from './carouselRotationGesture.js';
+import { BearingConnectionController } from './bearingConnectionController.js';
+import { assemblyMeshes, ensureAssemblyMeshes } from './assemblyNativeMesh.js';
+import { PanelMountQueue } from './panelMountQueue.js';
+
+export function confirmedFittingHandlePosition(model, mount) {
+  const spec = confirmedSpec(mount.kind || mount.partId);
+  if (spec?.mountType === 'curved-frame') {
+    const a = curvePoint(model, mount.a, 0.5), b = curvePoint(model, mount.b, 0.5);
+    if (a && b) return a.map((value, i) => (value + b[i]) / 2);
+  }
+  if (spec?.feature !== 'sector') return mount.pos;
+  const frame = componentFrame(model, mount);
+  if (!frame) return mount.pos;
+  return frame.pos.map((value, i) => value + (frame.axes[0][i] + frame.axes[1][i]) * spec.width * 0.35);
+}
 
 // Kupplungen, die auf einem Rohr sitzen statt im Raster: QDF-Art -> Katalogteil.
 // Teile, die sich um ein Rohr klemmen lassen. Die Lochzapfenkupplung gehört
 // NICHT dazu -- sie umschließt kein Rohr (siehe PLACEABLE_FITTINGS).
-const TUBE_CLAMP_PARTS = { "bearing-clamp": "bearing" };
+const TUBE_CLAMP_PARTS = { "bearing-clamp": "bearing", "windmill-clamp": "windmill" };
 // Dachtuecher: sie liegen auf einem Giebel-Gerippe (siehe model.roofMounts).
 const ROOF_KINDS = new Set(["roof2", "roof-large2"]);
 
@@ -68,6 +97,7 @@ export const DEFAULT_MOVE_STEP = 20;
 
 export class Builder {
   constructor(scene, model, { onChange, onPreview } = {}) {
+    this._disposed = false;
     this.scene = scene;
     this.model = model;
     this.onChange = onChange || (() => {});
@@ -90,6 +120,7 @@ export class Builder {
     // "select" (Cursor: vorhandenes auswaehlen) | "delete" (Klick loescht)
     // | "add" | "panel" | "slide" | "clamp" | "fitting" | "reinforce" | "assembly"
     this.mode = "select";
+    this.frameOnly = false;
     this.tubeId = geometry().defaultTube;
     this.panelId = defaultPanel();
     this.fittingKind = "multi-wheel2";   // gewaehltes Anbauteil (QDF-Art)
@@ -98,11 +129,13 @@ export class Builder {
     // Platten-Modus: erstes angeklicktes Tragrohr + Stelle entlang davon.
     this.panelRail = null;
     this.installationPreview = null;
-    this.insetScrewAxis='vertical';
+    this.insetScrewAxis='auto';
     this._installationPart = null;
+    this._installationFacingConflict = null;
     // Verstaerken-Modus: erstes angeklicktes 35er-Rohr, das noch seinen Partner
     // sucht (ein Profil deckt immer 80 cm).
     this.reinforceRail = null;
+    this.reinforcementPartId = 'reinforce80';
     this.color = RANDOM_COLOR;
     // Schrittweite beim Verschieben (Pfeiltasten, Ziehen, Einfuegen).
     this.moveStep = DEFAULT_MOVE_STEP;
@@ -116,8 +149,15 @@ export class Builder {
     this.highlight = null;   // reine Sicht-Hervorhebung (Bestandsliste)
 
     this.buildPlan = { levels: [], steps: [] };
+    this.assemblyPending = false;
+    this.assemblyError = false;
+    this.assemblyProgress = 0;
+    this._assemblyWorker = null;
+    this._assemblyRequest = 0;
+    this._assemblyRequestedKey = null;
+    this._assemblyPlanKey = null;
     this.assemblyStep = 0;
-    this.assemblyOrder = "y+";   // Aufbaurichtung, siehe buildplan.BUILD_ORDERS
+    this.assemblyOrder = "y+";   // 拼装固定从下往上。
     this.manualLabels = false;   // 说明书导出：显示当前步所有接头/管标注
 
     // 编辑记录（src/collab/history.ts）：每次编辑的前后两份 JSON 交给它写进
@@ -129,6 +169,7 @@ export class Builder {
     this.readOnly = false;
     // 选择模式里再点选中的面板、排着等执行的翻面（见 _queueSelectFlip）
     this._selectFlip = null;
+    this._rotationDirections = new Map();
     // 外壳借模型去截缩略图、封面：这段时间模型里放的是别的东西
     this.held = false;
     // 按零件上色（id -> 颜色）：共享方案里别人选中的零件
@@ -136,26 +177,59 @@ export class Builder {
 
     this._down = null;
     this._clampDrag = null;
-    this._clampSlide = null;
-    this._clampDragKandidat = null;
-    this._clampSlideKandidat = null;
+    this._hingeDrag = null;
     this._panning = false;
     this._boxing = false;
+    this.boxSelect = false;
+    this._boxSelected = new Map();
     this._paste = null;              // Kopie, die gerade am Zeiger haengt
     this._lastPointer = null;        // letzte Zeigerstelle (fuer Strg+V)
+    this._tubeHoverPointer = null;
+    this.transformMode='translate';
+    this.transformSnap=false;
+    this.transformError=null;
+    this.transformGizmo=new SelectionTransformGizmo(this);
+    this.scene.selectionTransformGizmo=this.transformGizmo;
     this._attach();
     // Wird der Renderer ersetzt (Kantenglaettung), haengt das alte Canvas nicht
     // mehr im DOM -- die Zeiger-Listener muessen ans neue.
-    this.scene.onRendererReplaced = () => this._attach();
+    this.scene.onRendererReplaced = () => {this.transformGizmo.bindCanvas();this._attach();};
     this.refresh();
   }
 
   // --- Undo ---------------------------------------------------------------
+  dispose() {
+    this._disposed = true;
+    this._eventAbort?.abort();
+    this._abortGesture();
+    clearTimeout(this._panelFlipTimer);
+    this._cancelSelectFlip();
+    this._clearLongPress();
+    this.scene.hideSelectBox();
+    this.scene.setCursor('default');
+    this._assemblyRequest++;
+    this._assemblyWorker?.terminate();
+    this._assemblyWorker = null;
+    this._panelMountQueue?.dispose();
+    this._panelMountQueue = null;
+    this.history?.onChange(() => {});
+    this.history?.onExternal(() => {});
+    this.history = null;
+    this.transformGizmo?.dispose();
+    this.scene.selectionTransformGizmo = null;
+    this.scene.onRendererReplaced = () => {};
+    this.onChange = this.onPreview = this.onHistoryChange = this.onNotice = () => {};
+  }
   /**
    * 接上一座造型的编辑记录。文档被别处改了（撤销、重做、别人的修改、本机数据库
    * 读出来的内容）时从文档重新读出整座；拖动或粘贴进行中就等它收尾。
    */
   setHistory(history) {
+    if(this.history!==history)this.bearingConnection?.cancel();
+    if(this.history!==history){this.transformGizmo?.cancel();this.cancelSelectionTransform(false);this.transformRotation=null;}
+    this._colorPreview = null;
+    if (this.history !== history) this._cancelHingeDrag();
+    if (this.history !== history) this._rotationDirections = new Map();
     if (this.history && this.history !== history) {
       this.history.onChange(() => {});
       this.history.onExternal(() => {});
@@ -172,7 +246,7 @@ export class Builder {
    * 中间状态。
    */
   busy() {
-    return !!(this.held || this._paste || this._drag || this._clampDrag || this._clampSlide || this._carouselDrag);
+    return !!(this.held || this._paste || this._clampDrag || this._hingeDrag || this._selectionTransform || this._carouselDrag);
   }
 
   _externalChange() {
@@ -183,6 +257,11 @@ export class Builder {
 
   /** 从文档读出来的整座造型换进模型，选择里已经不存在的零件去掉。 */
   applyExternal(json) {
+    this.bearingConnection?.cancel();
+    this.cancelSelectionTransform(false);
+    this.transformRotation=null;
+    this._cancelClampDrag();
+    this._colorPreview = null;
     const res = this.model.loadJSON(json);
     if (!res.ok) throw new Error(`Yjs document does not load: ${res.reason}`);
     if (this.selectedNodeId && !this.model.nodes.has(this.selectedNodeId)) {
@@ -196,7 +275,13 @@ export class Builder {
 
   setReadOnly(on) {
     if (on && (this._carouselDrag || this._carouselCandidate)) this._abortGesture();
+    if(on)this.bearingConnection?.cancel();
+    if(on){this.transformGizmo?.cancel();this.cancelSelectionTransform(false);}
+    if (on) this._cancelClampDrag();
+    if (on) this._colorPreview = null;
+    if (on) this._cancelHingeDrag();
     this.readOnly = !!on;
+    this.transformGizmo?.sync();
     if (this.readOnly && this.mode !== "select" && this.mode !== "assembly") this.setMode("select");
   }
 
@@ -211,6 +296,7 @@ export class Builder {
   // Fuehrt eine Modell-Aenderung aus und gibt sie an die Bearbeitungshistorie
   // weiter (nur wenn sich wirklich etwas geaendert hat).
   recordHistory(mutateFn) {
+    this._colorPreview = null;
     const before = JSON.stringify(this.model.toJSON());
     const ret = mutateFn();
     const after = JSON.stringify(this.model.toJSON());
@@ -227,7 +313,10 @@ export class Builder {
    */
   clearMarks() {
     if (this._carouselDrag || this._carouselCandidate) { this._abortGesture(); return true; }
+    if(this.bearingConnection?.selected){this.bearingConnection.cancel();this.refresh();return true;}
+    if(this._selectionTransform){this.transformGizmo?.cancel();this.cancelSelectionTransform();return true;}
     if (this.installationPreview) { this.cancelInstallation(); return true; }
+    if (this._hingeDrag) { this._cancelHingeDrag(); return true; }
     const had = this.selection.size > 0 || !!this.highlight || !!this.panelRail ||
       !!this.reinforceRail || (this.mode !== "select" && !!this.selectedNodeId);
     if (!had) return false;
@@ -268,6 +357,15 @@ export class Builder {
   // --- oeffentliche Steuerung --------------------------------------------
   setMode(mode) {
     if (this._carouselDrag || this._carouselCandidate) this._abortGesture();
+    if (mode !== 'panel') this._panelMountQueue?.cancel();
+    this.bearingConnection?.cancel();
+    this.transformGizmo?.cancel();
+    this.cancelSelectionTransform(false);
+    this._cancelClampDrag();
+    if (this._down?.box) this._abortGesture();
+    this.boxSelect = false;
+    this._colorPreview = null;
+    this._cancelHingeDrag();
     this._ropeFirst = null;
     this._installationPart = null; this.installationPreview = null;
     this.scene.clearInstallationPreview?.();
@@ -281,7 +379,15 @@ export class Builder {
       const from = stepCandidatesFromSelection(this.model, this.selection);
       if (from.length) this.stepFrom = from;
     }
+    if (mode !== "assembly" && this.mode === "assembly") {
+      this._assemblyRequest++;
+      this._assemblyRequestedKey = null;
+      this.assemblyPending = false;
+      this.assemblyError = false;
+      this.assemblyProgress = 0;
+    }
     this.mode = mode;
+    if (mode === 'panel') this._loadPanelGeometry();
     if (this.panelRail) { this.panelRail = null; this.highlight = null; }
     if (this.reinforceRail) { this.reinforceRail = null; this.highlight = null; }
     // Im Cursor-Modus gibt es keine Bau-Kupplung: sonst blieben Ankerpunkte
@@ -294,6 +400,16 @@ export class Builder {
     this.scene.setCursor("default");
     this.refresh();
     if (mode === "slide" || mode === "fitting") this._hintPlaceMode();
+  }
+
+  setBoxSelect(on) {
+    this.cancelPaste();
+    this.setMode("select");
+    this.boxSelect = !!on;
+    this.scene.setHover(null);
+    this.scene.setHoverPart(null);
+    this.scene.setCursor(on ? "crosshair" : "default");
+    this.refresh();
   }
 
   /** 选了配件却没有绿面/绿点时，立刻说清：没有可挂的位置。 */
@@ -331,11 +447,35 @@ export class Builder {
       return;
     }
     if (this.mode !== "fitting") return;
+    if (this.fittingKind === 'rope') {
+      if (this._countFittingPlaces() < 2) this.onNotice(installationReason(this.model, {reason:'missing_support'}), 'info');
+      return;
+    }
+    const confirmedId = this.fittingPart || this.fittingKind;
+    if (confirmedSpec(confirmedId)?.placement === 'fitting') {
+      const mounts = this._confirmedFittingMounts?.id === confirmedId
+        ? this._confirmedFittingMounts.mounts : this.model.confirmedMounts(confirmedId);
+      if (!mounts.some(mount => mount.valid)) this.onNotice(installationReason(this.model, mounts.find(mount => mount.reason) || { reason: 'missing_support' }), 'info');
+      return;
+    }
+    if (this.fittingKind === "flexi" || this.fittingKind === BOLT_PART) {
+      if (!this.model.boltMounts(geometry().connectorSize).length) {
+        this.onNotice(t("notice_flexi_no_end"), "info");
+      }
+      return;
+    }
+    if (this.fittingKind === HINGE_PART) {
+      if (!this.model.hingeMounts(geometry().connectorSize).length) {
+        const hasBolt = [...this.model.nodes.values()].some(n => isBoltPart(n.part));
+        this.onNotice(t(hasBolt ? "notice_flexi_full" : "notice_flexi_no_bolt"), "info");
+      }
+      return;
+    }
     if (ACCESSORY_IDS.has(this.fittingKind)) {
       if (!this.model.accessoryMounts(this.fittingKind).length) {
         const diagnostics = [...this.model.tubes.keys()].map(id => this.model.accessoryDiagnostics(this.fittingKind, id));
         const result = diagnostics.find(d => !['straight_tube', 'horizontal_tube', 'tube_short'].includes(d.reason)) || diagnostics.find(d => d.reason !== 'straight_tube') || { reason: 'straight_tube' };
-        this.onNotice(t('accessory_reason_' + result.reason), 'info');
+        this.onNotice(installationReason(this.model, result), 'info');
       }
       return;
     }
@@ -358,7 +498,7 @@ export class Builder {
       return;
     }
     if (RAIL_FITTINGS.has(this.fittingKind)
-      && !this.model.railFittingMounts(this.fittingKind, this._railSize()).length) {
+      && !this.model.railFittingMounts(this.fittingKind, this._railSize(), this._isRainbowTextile()).length) {
       this.onNotice(t(this._railSize() ? "notice_short_textile_no_cell" : "notice_textile_no_cell"), "info");
       return;
     }
@@ -379,13 +519,15 @@ export class Builder {
   /** Wieviele Stellen das gewaehlte Anbauteil jetzt hat -- wie _buildFittingHandles. */
   _countFittingPlaces() {
     const kind = this.fittingKind;
+    if (kind === 'rope') return this._tubeMidpoints().length;
+    if (confirmedSpec(this.fittingPart || kind)?.placement === 'fitting') return this.model.confirmedMounts(this.fittingPart || kind).filter(mount => mount.valid).length;
     if (ACCESSORY_IDS.has(kind)) return this.model.accessoryMounts(kind).length;
     const cs = geometry().connectorSize;
-    if (RAIL_FITTINGS.has(kind)) return this.model.railFittingMounts(kind, this._railSize()).length;
+    if (RAIL_FITTINGS.has(kind)) return this.model.railFittingMounts(kind, this._railSize(), this._isRainbowTextile()).length;
     if (ROOF_KINDS.has(kind)) return this.model.roofMounts(kind).length;
     if (kind === "textil-round2") return this.model.fittingMounts(kind).length;
     if (HOLE_MASKS[kind]) return this.model.holeArmMounts(cs).length;
-    if (kind === BOLT_PART) return this.model.boltMounts(cs).length;
+    if (kind === "flexi" || kind === BOLT_PART) return this.model.boltMounts(cs).length;
     if (kind === HINGE_PART) return this.model.hingeMounts(cs).length;
     if (TUBE_CLAMP_PARTS[kind]) {
       let n = 0;
@@ -393,6 +535,7 @@ export class Builder {
         if (!t.arm && !t.link && !t.bow) n++;
       }
       if (kind === "bearing-clamp") n += this.model.bearingArmMounts(cs).length;
+      if (kind === "windmill-clamp") n += this.model.windmillBearingMounts().length;
       return n;
     }
     return this.model.fittingMounts(kind, cs).length
@@ -426,9 +569,28 @@ export class Builder {
       this.onNotice(t("notice_connector_no_node"), "warn");
     }
   }
-  setPanel(panelId) { this._ropeFirst = null; this._installationPart = null; this.installationPreview = null; this.scene.clearInstallationPreview?.(); this.panelId = panelId; if (this.mode === "panel") this.refresh(); }
+  setPanel(panelId, { refresh = true } = {}) {
+    this._ropeFirst = null; this._installationPart = null; this.installationPreview = null;
+    this.scene.clearInstallationPreview?.();
+    if (this.panelRail) { this.panelRail = null; this.highlight = null; }
+    this.panelId = panelId;
+    this._loadPanelGeometry();
+    if (refresh && this.mode === "panel") this.refresh();
+  }
+  _loadPanelGeometry() {
+    this._panelMountQueue?.retry();
+    if (this._disposed || !['panel_40x40', 'panel_40x20'].includes(this.panelId) || assemblyMeshes() || this._panelGeometryLoading) return;
+    this._panelGeometryLoading = ensureAssemblyMeshes().then(() => {
+      this._panelGeometryLoading = null;
+      if (!this._disposed && this.mode === 'panel') this.refresh();
+    }, error => {
+      this._panelGeometryLoading = null;
+      console.error('Panel geometry loading failed', error);
+      if (!this._disposed && this.mode === 'panel') this.onNotice(t('notice_panel_geometry_failed'), 'warn');
+    });
+  }
   setInsetScrewAxis(axis) {
-    if(!['vertical','horizontal'].includes(axis) || this.readOnly)return false;
+    if(!['auto','vertical','horizontal'].includes(axis) || this.readOnly)return false;
     this.insetScrewAxis=axis;this._installationPart=null;this.installationPreview=null;
     this.scene.clearInstallationPreview?.();this._clearPanelRail();this.refresh();return true;
   }
@@ -440,9 +602,10 @@ export class Builder {
     return true;
   }
 
-  setClampPart(id) { this.clampPart = id; if (this.mode === "clamp") this.refresh(); }
+  setClampPart(id, { refresh = true } = {}) { this.clampPart = id; if (refresh && this.mode === "clamp") this.refresh(); }
 
-  setFitting(kind, partId = null) {
+  setFitting(kind, partId = null, { refresh = true } = {}) {
+    this.bearingConnection?.cancel();
     this._installationPart = null; this.installationPreview = null; this.scene.clearInstallationPreview?.();
     const confirmed = confirmedSpec(partId || kind);
     this.fittingKind = confirmed?.placement === 'fitting' ? confirmed.kind || confirmed.id : kind === 'wheel' ? 'multi-wheel2' : kind;
@@ -450,8 +613,8 @@ export class Builder {
     this.fittingPart = partId;
     this._ropeFirst = null;
     this.poolLinerId = null;
-    this._clearPanelRail();          // Rohr-Auswahl gilt nur fuer das Netz
-    if (this.mode === "fitting") this.refresh();
+    if (this.panelRail) { this.panelRail = null; this.highlight = null; }
+    if (refresh && this.mode === "fitting") this.refresh();
   }
 
   /**
@@ -475,8 +638,33 @@ export class Builder {
   // Farbe der Toolbar. Im Cursor-Modus faerbt sie ausserdem die aktuelle
   // Auswahl um -- im Platzier-Modus gilt sie nur fuer NEUE Teile.
   setColor(colorId) {
+    this._colorPreview = null;
     this.color = colorId;
     if (this.mode === "select" && this.selection.size) this.colorSelection(colorId);
+  }
+
+  beginColorPreview() {
+    if (this.readOnly || this.busy() || this.mode === 'assembly') return false;
+    this._runSelectFlip();
+    this._colorPreview = { hex: null, selection: this.mode === 'select' ? new Map(this.selection) : new Map() };
+    return true;
+  }
+
+  previewColor(value) {
+    const hex = normalizeColor(value);
+    if (!hex || !this._colorPreview || this.readOnly) return false;
+    this._colorPreview.hex = hex;
+    this.refresh();
+    return true;
+  }
+
+  finishColorPreview(value = null) {
+    if (!this._colorPreview) return false;
+    this._colorPreview = null;
+    const hex = normalizeColor(value);
+    if (hex && !this.readOnly) this.setColor(hex);
+    this.refresh();
+    return !!hex && !this.readOnly;
   }
 
   /**
@@ -518,20 +706,20 @@ export class Builder {
         if (t.arm || t.link) continue;
         if (fixedTubeColor(t.tubeId)) continue;
         const next = pick();
-        if (t.color !== next) { t.color = next; changed++; }
+        if (this.model.setColorOf('tube', t.id, next)) changed++;
       }
-      for (const map of [this.model.panels, this.model.textiles, this.model.slides]) {
+      for (const [kind, map] of [['panel', this.model.panels], ['textile', this.model.textiles], ['slide', this.model.slides]]) {
         for (const el of map.values()) {
-          if (el.appearanceVersion === 2 && confirmedSpec(el.panelId || el.partId || el.kind)?.fixedColor) continue;
+          if (el.appearanceVersion === 2 && confirmedSpec(el.panelId || el.partId || el.kind)?.fixedColor && !usesCustomClimbingColor(el)) continue;
           const next = pick();
-          if (el.color !== next) { el.color = next; changed++; }
+          if (this.model.setColorOf(kind, el.id, next)) changed++;
         }
       }
       for (const f of this.model.fittings.values()) {
-        if (f.appearanceVersion === 2 && confirmedSpec(f.partId || f.kind)?.fixedColor) continue;
+        if (f.appearanceVersion === 2 && confirmedSpec(f.partId || f.kind)?.fixedColor && !usesCustomClimbingColor(f)) continue;
         if (fixedFittingColor(f.kind)) continue;
         const next = pick();
-        if (f.color !== next) { f.color = next; changed++; }
+        if (this.model.setColorOf('fitting', f.id, next)) changed++;
       }
     });
     if (changed) this.onNotice(t("notice_color_changed"));
@@ -597,17 +785,21 @@ export class Builder {
   // 选择模式里再点一下就翻面的，只有单独选着的这块面板（或者只选着它所在的那一组）。
   // 选着好几件时点其中一块，先变成只选它，再点才翻。
   _panelFlipsOnClick(id) {
+    return this._partTurnsOnClick(id);
+  }
+
+  _partTurnsOnClick(id) {
     if (this.readOnly || !this.selection.has(id)) return false;
     const gid = this.model.groupOf(id);
     const members = gid ? this.model.groups.get(gid) : new Set([id]);
     return this.selection.size === members.size && [...this.selection.keys()].every((x) => members.has(x));
   }
 
-  // 翻面等过选整块的时间窗口再执行：这段时间里在同一处再点一下是选整块，不能先翻了。
-  _queueSelectFlip(id, e) {
+  // 翻面或旋转等双击窗口过后执行，双击选整块时取消待执行操作。
+  _queueSelectFlip(id, e, action = "panel", point = null) {
     this._cancelSelectFlip();
     const timer = setTimeout(() => this._runSelectFlip(), SELECT_BLOCK_MS);
-    this._selectFlip = { id, x: e.clientX, y: e.clientY, timer };
+    this._selectFlip = { id, x: e.clientX, y: e.clientY, timer, action, point };
   }
 
   _cancelSelectFlip() {
@@ -621,10 +813,35 @@ export class Builder {
     const f = this._selectFlip;
     if (!f) return;
     this._cancelSelectFlip();
+    if (f.action === "clamp") {
+      if (this.readOnly || !this.selection.has(f.id) || this._selectedClampDriver() !== f.id) return;
+      let turned = false;
+      this.recordHistory(() => { turned = this._rotateClampWithFallback(f.id); });
+      if (!turned) this.onNotice(t("notice_fitting_fixed"), "warn");
+      this.refresh();
+      return;
+    }
+    if (!this._partTurnsOnClick(f.id)) return;
+    this._adjustPlacedPart(f.id, f.action, f.point);
+  }
+
+  _flipPanel(id) {
+    const part = this.model.panels.get(id) || this.model.textiles.get(id);
+    if (this.readOnly || !part) return false;
+    if (part.appearanceVersion && part.panelId === 'panel_40x40_pocket') {
+      this.onNotice(t('notice_panel_flip_pocket'), 'warn');
+      return false;
+    }
+    const diagnostic = this.model.panelFlipDiagnostics(id);
+    if (!diagnostic.valid) {
+      this.onNotice(diagnostic.reason === 'ground_clearance' ? t('notice_panel_flip_ground') : t('notice_panel_flip_blocked', installationReason(this.model, diagnostic)), 'warn');
+      return false;
+    }
     let side = null;
-    this.recordHistory(() => { side = this.model.flipPanelSide(f.id); });
-    if (side != null) this.onNotice(t(side < 0 ? "notice_panel_below" : "notice_panel_above"), "info");
-    this.refresh();
+    this.recordHistory(() => { side = this.model.flipPanelSide(id); });
+    if (side === null) return false;
+    this.onNotice(t('notice_panel_flipped'), 'info');
+    return true;
   }
 
   _selectConnectedFromPick(pick, add) {
@@ -665,12 +882,127 @@ export class Builder {
   }
 
   // --- Verschieben --------------------------------------------------------
+  selectionTransformState() {
+    if(this.mode!=='select' || this.readOnly || this._paste || this.selection.size<2)return null;
+    if(this.clampAdjustment())return null;
+    const bounds=this._selectionTransform?.visualPreview?.bounds || selectionBounds(this._selectionTransform?.model || this.model,this.selection);
+    if(!bounds)return null;
+    const key=[...this.selection.keys()].sort().join(',');
+    const rotation=this.transformRotation?.key===key ? this.transformRotation : null;
+    return {key,rotation,mode:this.transformMode || 'translate',snap:!!this.transformSnap,
+      position:[bounds.center[0],bounds.height,bounds.center[2]].map(round2),busy:!!this._selectionTransform,error:this.transformError};
+  }
+
+  setSelectionRotationReadout(axis,degrees=0,notify=true) {
+    if(axis!==null && (!['X','Y','Z','free'].includes(axis) || !Number.isFinite(degrees)))return false;
+    const revision=(this._transformRotationRevision || 0)+1;
+    this._transformRotationRevision=revision;
+    this.transformRotation=axis===null ? null : {axis,degrees:round2(degrees),revision,key:[...this.selection.keys()].sort().join(',')};
+    if(notify)this.onPreview();
+    return true;
+  }
+
+  selectTransformBlock() {
+    if(this.busy() || this.readOnly)return;
+    this._cancelSelectFlip();
+    this.selection=connectedTransformSelection(this.model,this.selection);
+    this.refresh();
+  }
+
+  setSelectionTransformMode(mode) {
+    if(!['translate','rotate'].includes(mode) || this.readOnly)return;
+    this.transformGizmo?.cancel();this.cancelSelectionTransform(false);
+    this._cancelSelectFlip();this.transformMode=mode;this.transformError=null;this.refresh();
+  }
+
+  beginSelectionTransform({visualPreview=false}={}) {
+    if(this.readOnly || this.mode!=='select' || this.selection.size<2 || this.busy() || !selectionBounds(this.model,this.selection))return false;
+    if(this.clampAdjustment())return false;
+    this._cancelSelectFlip();this.transformError=null;
+    const rotationBefore=this.selectionTransformState().rotation;
+    this._selectionTransform=new SelectionTransformSession(this);
+    this._selectionTransform.rotationBefore=rotationBefore;
+    if(visualPreview){
+      if(incompleteRigidSelection(this.model,this._selectionTransform.bounds.targets)){
+        this._selectionTransform=null;this.transformError=this._transformReason('accessory_mounts');this.onPreview();return false;
+      }
+      this._selectionTransform.visualPreview=new SelectionTransformPreview(this.scene,this.model,this._selectionTransform.bounds);
+      this._transformPreviewNotify=performance.now();this.onPreview();
+    }else this._selectionTransform.preview();
+    return true;
+  }
+
+  previewSelectionTransform(value) {
+    const session=this._selectionTransform;
+    if(!session)return false;
+    if(session.visualPreview){
+      const valid=session.visualPreview.update(value);
+      this.transformError=valid ? null : this._transformReason(session.visualPreview.reason);
+      const now=performance.now();
+      if(now-this._transformPreviewNotify>=66){this._transformPreviewNotify=now;this.onPreview();}
+      return valid;
+    }
+    const valid=session.preview(value);
+    this.transformError=valid ? null : this._transformReason(session.reason);
+    this.refresh();return valid;
+  }
+
+  _transformReason(reason) {
+    const s=selectionTransformStrings[getLang()];
+    if(reason==='accessory_mounts')return s.incomplete;
+    if(reason==='empty')return s.number;
+    if(reason==='accessory_space')return installationReason(this.model,{reason:'component_space'});
+    if(['ground','collision','connector'].includes(reason))return t(`notice_move_${reason}`);
+    return s.invalid;
+  }
+
+  finishSelectionTransform() {
+    const session=this._selectionTransform;
+    if(!session)return false;
+    const visual=!!session.visualPreview;
+    if(session.visualPreview){
+      const preview=session.visualPreview;
+      if(preview.reason==='empty'){session.valid=false;session.reason='empty';}
+      else session.preview(preview.value);
+      this.transformError=session.valid ? null : this._transformReason(session.reason);
+      preview.dispose();session.visualPreview=null;
+    }
+    const ok=session.commit();this._selectionTransform=null;
+    if(!ok && visual)this.setSelectionRotationReadout(session.rotationBefore?.axis || null,session.rotationBefore?.degrees || 0,false);
+    if(!ok && !this.transformError)this.transformError=selectionTransformStrings[getLang()].changed;
+    this.refresh();return ok;
+  }
+
+  cancelSelectionTransform(refresh=true) {
+    if(!this._selectionTransform)return false;
+    const before=this._selectionTransform.rotationBefore;
+    this._selectionTransform.visualPreview?.dispose();
+    this._selectionTransform=null;this.transformError=null;
+    this.setSelectionRotationReadout(before?.axis || null,before?.degrees || 0,false);
+    if(refresh)this.refresh();return true;
+  }
+
+  setSelectionPosition(position) {
+    const bounds=selectionBounds(this.model,this.selection);
+    if(!bounds || !Array.isArray(position) || position.length!==3 || !position.every(Number.isFinite) || !this.beginSelectionTransform())return false;
+    this.previewSelectionTransform({translation:[position[0]-bounds.center[0],Math.max(0,position[1])-bounds.height,position[2]-bounds.center[2]]});
+    return this.finishSelectionTransform();
+  }
+
+  rotateSelectionAxis(axis,degrees) {
+    if(!['X','Y','Z'].includes(axis) || !Number.isFinite(degrees) || !this.beginSelectionTransform())return false;
+    this.previewSelectionTransform({axis:['X','Y','Z'].map(key=>key===axis ? 1 : 0),angle:degrees*Math.PI/180});
+    const ok=this.finishSelectionTransform();
+    if(ok)this.setSelectionRotationReadout(axis,degrees,false);
+    return ok;
+  }
+
   /**
    * Auswahl um einen Rasterschritt in Richtung dir verschieben (Pfeiltasten).
    * dir ist ein Einheitsvektor auf einer Achse.
    */
   moveSelectionBy(dir, step = this.moveStep) {
-    if (this.mode !== "select" || !this.selection.size) return false;
+    if (this.readOnly || this.mode !== "select" || !this.selection.size) return false;
     const driver = this._selectedClampDriver();
     if (driver) {
       const c = this.model.clamps.get(driver);
@@ -685,6 +1017,7 @@ export class Builder {
         return true;
       }
     }
+    if(this.selection.size<2)return false;
     const before = JSON.stringify(this.model.toJSON());
     const res = this._move(dir[0] * step, dir[1] * step, dir[2] * step);
     if (!res.ok) { this.onNotice(t("notice_move_" + res.reason), "warn"); return false; }
@@ -699,35 +1032,198 @@ export class Builder {
    * Regel wie bei den Pfeiltasten: geht es nicht, bleibt alles, wie es war.
    */
   rotateSelectionBy(steps = 1) {
-    if (this._drag) return false;         // laufender Zug hat seinen eigenen Stand
     if (this._paste) return this._rotatePaste(steps);
     if (this.mode !== "select" || !this.selection.size) return false;
+    if (this.selection.size === 1) {
+      const [id, kind] = [...this.selection][0];
+      const node = kind === "node" ? this.model.nodes.get(id) : null;
+      // 斜角件绕已连接的一侧调整，避免整体选区旋转拆开管子。
+      const c45 = node && (node.c45body ? node : this._c45BodyAt(id));
+      if (c45) { this._cancelSelectFlip(); return this._turnC45(c45.id, steps); }
+      if (node && !node.part && !node.c45body && !node.bearingOn && !node.stub) return this._rotateConnector(node, steps);
+    }
     const driver = this._selectedClampDriver();
     if (driver) {
       let ok = false;
-      this.recordHistory(() => { ok = this.model.rotateClamp(driver, steps * Math.PI / 2); });
+      this.recordHistory(() => { ok = this._rotateClampWithFallback(driver, steps * Math.PI / 2); });
       if (!ok) { this.onNotice(t("notice_fitting_fixed"), "warn"); return false; }
       this.refresh();
       return true;
     }
     // 单选一根弯管：绕它接着的那头转 90 度，和放置时点它转是同一个动作。
     const bow = this._selectedLoneBow();
-    if (bow) {
-      const pivot = this._bowPivotFor(bow);
-      if (!pivot) { this.onNotice(t("notice_bow_attached"), "warn"); return false; }
-      let res;
-      this.recordHistory(() => { res = this.model.rotateBow(bow.id, steps, { pivot }); });
-      if (res && res.ground) { this.onNotice(t("notice_ground"), "warn"); return false; }
-      if (res && res.duplicate) { this.onNotice(t("notice_bow_blocked"), "warn"); return false; }
-      this.refresh();
-      return !!(res && res.node);
-    }
+    if (bow) return this._turnBow(bow, steps);
+    if(this.selection.size<2)return false;
     const before = JSON.stringify(this.model.toJSON());
-    const res = this.model.rotateSelection(this.selection, steps,
-      { merge: true, validate: infeasibleConnectors, grid: SNAP_STEP });
+    const options = { merge: true, validate: infeasibleConnectors, grid: SNAP_STEP };
+    const key = `selection:${[...this.selection.keys()].sort().join(",")}`;
+    const res = this._rotateWithDirection(key, steps,
+      (direction) => this.model.rotateSelection(this.selection, direction, options),
+      (result) => result.ok, (result) => result.reason === "collision");
     if (!res.ok) { this.onNotice(t("notice_rotate_" + res.reason), "warn"); return false; }
     this._afterMove(before, res);
     return true;
+  }
+
+  // 同一零件沿当前方向继续转；受阻后换向并记住，直到再次受阻或主动指定相反方向。
+  _rotateWithDirection(key, amount, rotate, succeeded = (result) => result === true,
+      blocked = () => true) {
+    if (!amount) return rotate(amount);
+    const requested = Math.sign(amount);
+    const previous = this._rotationDirections.get(key);
+    let direction = previous?.requested === requested ? previous.direction : requested;
+    let result = rotate(Math.abs(amount) * direction);
+    if (!succeeded(result) && blocked(result)) {
+      direction = -direction;
+      result = rotate(Math.abs(amount) * direction);
+    }
+    this._rotationDirections.set(key, { requested, direction });
+    return result;
+  }
+
+  // 点击和快捷键共用夹子的方向；拖动仍跟随指针。
+  _rotateClampWithFallback(id, radians = Math.PI / 4) {
+    return this._rotateWithDirection(`clamp:${id}`, radians,
+      (direction) => this.model.rotateClamp(id, direction));
+  }
+
+  _clickRotationKind(id, kind) {
+    if (kind === 'node' || kind === 'fitting') {
+      const ref = this._nodeJointRef(id);
+      if (ref) return ref.kind;
+    }
+    if (kind === "tube" && this.model.tubes.get(id)?.bow) return "bow";
+    if (kind === "panel" && this.model.panels.has(id)) return "panel";
+    if (kind === "clamp" && this.model.clamps.has(id)) return "clamp";
+    if (kind === "fitting") {
+      if (confirmedSpec(this.model.fittings.get(id)?.kind)?.feature === 'sector') return "fitting";
+      if (this.model.fittings.get(id)?.kind === "multi-wheel2") return "fitting";
+      if (ROTATABLE_FITTINGS.has(this.model.fittings.get(id)?.kind)) return "fitting";
+      if (POOL_KINDS.has(this.model.fittings.get(id)?.kind)) return "pool";
+      if (this._bearingNodeFor(id)) return "bearing";
+    }
+    if (kind === "node") {
+      const n = this.model.nodes.get(id);
+      if (!n) return null;
+      if (n.c45body || this._c45BodyAt(id)) return "c45";
+      if (isHolePart(n.part)) return "hole";
+      if (n.bearingOn || (n.clampOn && n.stub)) return "bearing";
+      if (!n.part && !n.stub && CONN_TYPE_MASK[inferConnectorType(this.model, n)]) return "connector";
+    }
+    return null;
+  }
+
+  selectedPartAdjustment() {
+    if (this.readOnly || this.mode !== "select" || this.selection.size !== 1) return null;
+    const [id, kind] = [...this.selection][0];
+    const flexi = this.flexiTarget();
+    if (flexi) return flexi.hinge === null ? "bolt" : "hinge";
+    if (kind === "slide" && this.model.slides.get(id)?.kind === "curved-slide-domestic80") return "curve";
+    return this._clickRotationKind(id, kind);
+  }
+
+  _bearingNodeFor(id) {
+    const node = this.model.nodes.get(id);
+    if (node && (node.bearingOn || node.clampOn)) return node;
+    return [...this.model.nodes.values()].find(n => n.bearingOn === id) || null;
+  }
+
+  turnSelectedPanel() {
+    if (this.selectedPartAdjustment() !== "panel") return false;
+    const [id] = [...this.selection][0];
+    this._cancelSelectFlip();
+    return this._adjustPlacedPart(id, "panelTurn");
+  }
+
+  adjustSelectedPart() {
+    if(this.readOnly || this.busy())return false;
+    const action=this.selectedPartAdjustment();
+    if(!action || ['bolt','hinge'].includes(action))return false;
+    const [id]=this.selection.keys();
+    this._cancelSelectFlip();
+    if(action==='curve')return this._flipDomesticCurve(id);
+    return this._adjustPlacedPart(id,action);
+  }
+
+  /** 安装工具与选择模式共用调整路径，限制、反馈和撤销记录一致。 */
+  _adjustPlacedPart(id, action, point = null) {
+    if (this.readOnly) return false;
+    if (action === "panel") {
+      const result = this._flipPanel(id);
+      this.refresh();
+      return result;
+    }
+    if (action === "hinge") {
+      const ref = splitHingeKey(id);
+      return ref ? this.turnFlexiHinge(ref.index) : false;
+    }
+    if (action === "bow") return this._turnBow(this.model.tubes.get(id), 1, point);
+    if (action === "c45") {
+      const node = this.model.nodes.get(id);
+      const body = node?.c45body ? node : this._c45BodyAt(id);
+      return body ? this._turnC45(body.id) : false;
+    }
+    if (action === "connector") {
+      const node = this.model.nodes.get(id);
+      return node ? this._rotateConnector(node, 1) : false;
+    }
+    let result = false;
+    this.recordHistory(() => {
+      if (action === "panelTurn") result = this.model.turnPanel(id);
+      else if (action === "hole") {
+        const ref = this._nodeJointRef(id);
+        result = this.model.turnHoleClamp(ref?.nodeId || id);
+      }
+      else if (action === "fitting") result = this.model.rotateFitting(id);
+      else if (action === "clamp") result = this._rotateClampWithFallback(id);
+      else if (action === "pool") {
+        const pool = this.model.fittings.get(id);
+        if (pool && POOL_KINDS.has(pool.kind)) { pool.balls = !pool.balls; result = true; }
+      }
+      else if (action === "bearing" || action === "tubeClamp") {
+        const node = this._bearingNodeFor(id);
+        if (node) result = node.clampOn
+          ? this.model.rotateTubeClamp(node.id, geometry().connectorSize)
+          : this.model.turnBearingMouth(node.id);
+      }
+    });
+    if (action === "panelTurn" && result) this.onNotice(t("notice_panel_turned"), "info");
+    else if (action === "pool" && result) this.onNotice(t(this.model.fittings.get(id).balls ? "notice_balls_in" : "notice_balls_out"));
+    else if (!result) this.onNotice(t("notice_fitting_fixed"), "warn");
+    this.refresh();
+    return !!result;
+  }
+  _turnBow(bow, steps = 1, point = null) {
+    if (this.readOnly || !bow?.bow) return false;
+    const pivot = this._bowPivotFor(bow, point);
+    if (!pivot) return false;
+    let res;
+    this.recordHistory(() => {
+      res = this._rotateWithDirection(`bow:${bow.id}:${pivot}`, steps,
+        (direction) => this.model.rotateBow(bow.id, direction, { pivot, reverseOnBlock: false,
+          tubeRadius: geometry().tubeRadius, connectorSize: geometry().connectorSize }),
+        (result) => !!result?.node, (result) => !!(result?.ground || result?.duplicate || result?.blocked));
+    });
+    if (res?.ground) this.onNotice(t("notice_ground"), "warn");
+    else if (res?.duplicate || res?.blocked) this.onNotice(t("notice_bow_blocked"), "warn");
+    else if (res?.node) this.onNotice(t(res.detached ? "notice_bow_detached" : "notice_bow_turned"));
+    this.refresh();
+    return !!res?.node;
+  }
+
+  _turnC45(id, steps = 1) {
+    if (this.readOnly || !Number.isInteger(steps) || !steps || !this.model.nodes.get(id)?.c45body) return false;
+    const sleeve = this._c45HasTube(id);
+    let ok = false;
+    this.recordHistory(() => {
+      ok = this._rotateWithDirection(`c45:${id}`, steps, (direction) => sleeve
+        ? this.model.rotateC45Sleeve(id, direction)
+        : this.model.rotateC45(id, direction));
+    });
+    const blockedNotice = sleeve ? "notice_c45_has_tube" : "notice_c45_no_turn";
+    this.onNotice(t(ok ? "notice_c45_turned" : blockedNotice), ok ? "ok" : "warn");
+    this.refresh();
+    return ok;
   }
 
   /** 选中的正好是一根弯管（没有别的）就给它，否则 null。 */
@@ -740,16 +1236,27 @@ export class Builder {
   }
 
   /**
-   * 弯管绕哪一头转：另一头得空着——只有这根管，接头上也没装配件。
-   * 两头都接着东西就转不了（返回 null）；两头都空着就绕 a 头。
+   * 有自由端时固定另一端；两端都连接时点击靠近要转动的端点。
    */
-  _bowPivotFor(tube) {
+  _bowPivotForFree(tube) {
     const a = this.model.nodes.get(tube.a), b = this.model.nodes.get(tube.b);
     if (!a || !b) return null;
-    const free = (n) => this.model.degree(n.id) === 1 && !n.part && !n.bearingOn && !n.c45body;
-    if (free(b)) return tube.a;
-    if (free(a)) return tube.b;
+    const free = (n) => this.model.degree(n.id) === 1 && !n.part && !n.bearingOn && !n.c45body && !n.clampOn && !n.stub && !n.preferType
+      && ![...this.model.fittings.values()].some((f) => Math.hypot(f.x - n.x, f.y - n.y, f.z - n.z) < 2);
+    const aFree = free(a), bFree = free(b);
+    if (bFree && !aFree) return tube.a;
+    if (aFree && !bFree) return tube.b;
     return null;
+  }
+
+  _bowPivotFor(tube, point = null) {
+    const a = this.model.nodes.get(tube.a), b = this.model.nodes.get(tube.b);
+    if (!a || !b) return null;
+    const freePivot = this._bowPivotForFree(tube);
+    if (freePivot) return freePivot;
+    if (!point) return tube.a;
+    const distance = (n) => Math.hypot(n.x - point.x, n.y - point.y, n.z - point.z);
+    return distance(a) <= distance(b) ? tube.b : tube.a;
   }
 
   /** Die Kopie am Zeiger dreht sich an Ort und Stelle mit. */
@@ -766,7 +1273,6 @@ export class Builder {
 
   /** 选中部分沿世界轴 x 或 z 翻转；挂在指针上的副本就地翻。 */
   mirrorSelectionBy(axis = "x") {
-    if (this._drag) return false;
     if (this._paste) return this._mirrorPaste(axis);
     if (this.mode !== "select" || !this.selection.size) return false;
     const before = JSON.stringify(this.model.toJSON());
@@ -864,8 +1370,8 @@ export class Builder {
     if (linerId === "balls") {
       if (!this._pools().length) { this.onNotice(t("notice_balls_none"), "info"); return false; }
       this.cancelPaste();
+      this.setFitting('balls', null, { refresh: false });
       this.poolLinerId = "balls";
-      this.fittingKind = "balls";
       this.setMode("fitting");
       this.onNotice(t("notice_balls_pick"), "info");
       return "mount";
@@ -876,7 +1382,8 @@ export class Builder {
     const mounts = this.model.poolLinerMounts(spec);
     if (mounts.length) {
       this.cancelPaste();
-      this.fittingKind = spec.kind;
+      this.setFitting(spec.kind, null, { refresh: false });
+      this.poolLinerId = linerId;
       this.setMode("fitting");
       this.onNotice(t("notice_pool_pick_frame"), "info");
       return "mount";
@@ -900,12 +1407,12 @@ export class Builder {
     return frag ? this.startPaste(frag) : false;
   }
 
-  /** Katalog-Rohr zu einem Kupplungsabstand (Spannweite = Rohr + Kupplung). */
+  /** 泳池框架按连接件间距选普通管（间距 = 管长 + 连接件）。 */
   _tubeIdForSpan(span, cs) {
     const gesucht = span - cs;
     let best = null, bestD = Infinity;
     for (const tb of buildableTubes()) {
-      if (tb.length_cm == null || tb.shape === "curved") continue;
+      if (tb.length_cm == null || tb.shape === "curved" || tb.material === "aluminium") continue;
       const d = Math.abs(tb.length_cm - gesucht);
       if (d < bestD) { bestD = d; best = tb; }
     }
@@ -1047,7 +1554,7 @@ export class Builder {
   _troubleWith(sel, collidedBefore) {
     const tg = this.model.moveTargets(sel);
     const schlecht = new Set();
-    const invalidComponentsBefore = this._paste?.invalidComponentsBefore || this._drag?.invalidComponentsBefore || new Set();
+    const invalidComponentsBefore = this._paste?.invalidComponentsBefore || new Set();
     for (const id of this.model._invalidComponents()) if (!invalidComponentsBefore.has(id)) schlecht.add(id);
     for (const id of this.model.collisions({
       only: this.model.tubesAt(tg.nodes),
@@ -1122,7 +1629,7 @@ export class Builder {
       { merge: true, validate: infeasibleConnectors, snapDist: this._snapRadius() });
   }
 
-  // Gemeinsamer Abschluss von Tasten- und Zieh-Verschiebung.
+  // 按键移动后的选择、历史和画面更新。
   _afterMove(beforeJson, res) {
     // Zusammengelegte Kupplungen gibt es nicht mehr -> aus der Auswahl nehmen.
     this._pruneSelection();
@@ -1169,14 +1676,33 @@ export class Builder {
   /**
    * 还能和 railId 配成一块的对面管：只留中间还有空段的。`at` 给了（第一根管上点的
    * 位置），就只看板会落的那一段；没给，任意一段空着就算。已经有板 / 布的地方不再亮。
+   * @param {string} railId
+   * @param {number|null} at
+   * @param {boolean} lattice
    */
   _freePartners(railId, at = null, lattice = this.mode === "fitting" && RAIL_FITTINGS.has(this.fittingKind)) {
+    const radius=lattice?(this._isRainbowTextile()?Infinity:this._railSize()?.gap||160):Math.max(...(this._panelDims()||[80]));
+    const scope=railLineScope(this.model,railId,radius+8);
+    delete scope.groups;
+    return placementMemo(this.model,'free-partners:'+JSON.stringify([railId,at,lattice,this.panelId,this.fittingKind,this.fittingPart]),scope,
+      ()=>this._computeFreePartners(railId,at,lattice));
+  }
+
+  _computeFreePartners(railId, at, lattice) {
     const kind = lattice ? this.fittingKind : null;
     let partners;
     if (lattice) partners = this._railPartners(railId);
     else {
       const dims = this._panelDims();
       partners = dims ? this.model.panelPartners(railId, dims) : [];
+      const rail=this.model._rail(railId);
+      if(dims && rail && supportsPanelFixing(this.panelId)){
+        const sizes=dims[0]===dims[1]?[dims]:[dims,[dims[1],dims[0]]];
+        for(const [width,height] of sizes)for(const probe of insetPanelProbes(this.model,width,height,{deduplicate:false,onlyRailId:railId})){
+          if(probe.a!==railId || at!=null && (at<probe.t0-.35 || at>probe.t0+probe.len+.35))continue;
+          if(!partners.some(p=>p.id===probe.b && Math.abs(p.lo-probe.t0)<.01 && p.len===probe.len))partners.push({id:probe.b,gap:width,len:probe.len,lo:probe.t0,hi:probe.t0+probe.len});
+        }
+      }
     }
     return partners.filter((p) => {
       if (at != null) {
@@ -1204,128 +1730,39 @@ export class Builder {
     return ids.size ? ids : null;
   }
 
-  /** Laesst sich an dieser Stelle ein Ziehen der Auswahl beginnen? */
-  _isMoveHandle(id) {
-    return !this.readOnly && this.mode === "select" && this.selection.size > 0 && this.selection.has(id);
+  _pickPanelPlacement(x, y) {
+    const rail = this._panelGuideIds?.size && this.scene.pickAmong(x, y, this._panelGuideIds);
+    if (rail) return rail;
+    const pick = this.scene.pickForDelete(x, y);
+    return pick?.data.kind === "slide" ? (this.scene.pickTube(x, y) || pick) : pick;
   }
 
-  _beginMoveDrag(e, pick) {
-    if (this.model._incompleteComponentMove(this.model.moveTargets(this.selection))) {
-      this.onNotice(t('notice_move_accessory_mounts'), 'warn'); return;
-    }
-    const origin = pick.point.clone();
-    this._drag = {
-      origin,
-      // Zustand vor dem Ziehen: der ganze Zug wird EIN Undo-Schritt.
-      before: JSON.stringify(this.model.toJSON()),
-      applied: [0, 0, 0],
-      // Letzte Lage, an der die Auswahl wirklich passt -- dorthin faellt sie
-      // zurueck, wenn losgelassen wird, waehrend es rot ist.
-      lastValid: [0, 0, 0],
-      gridWant: [0, 0, 0],
-      // Was vorher schon uebereinander lag, zaehlt nicht als neue Kollision.
-      collidedBefore: this.model.collisions(),
-      invalidComponentsBefore: this.model._invalidComponents(),
-      invalid: null,
-      result: null,
-      axes: this.scene.dragAxes(),
-    };
-    // Die Verbindungen zum stehenden Rest gleich trennen: ein Rohr, von dem nur
-    // ein Ende mitwandert, kann nicht mitwandern (Rohre haben feste Laengen).
-    // Ohne das zogen sich die angrenzenden Rohre waehrend des Ziehens in die
-    // Laenge und sprangen erst beim Loslassen zurueck. Der echte Zug rechnet
-    // beim Loslassen ohnehin vom Ausgangsstand aus neu.
-    this.model.detachSelection(this.selection);
-    this.scene.setCursor("grabbing");
-    this.refresh();
-  }
-
-  _updateMoveDrag(e) {
-    const d = this._drag;
-    const p = this.scene.dragPlanePoint(e.clientX, e.clientY, d.origin);
-    if (!p) return;
-    const off = p.sub(d.origin);
-    const { u, v } = d.axes;
-    // Zeiger-Versatz auf die beiden Schiebe-Achsen projizieren und je Achse
-    // auf das Raster runden.
-    const schritt = this.moveStep;
-    const su = Math.round((off.x * u[0] + off.y * u[1] + off.z * u[2]) / schritt) * schritt;
-    const sv = Math.round((off.x * v[0] + off.y * v[1] + off.z * v[2]) / schritt) * schritt;
-    const want = [
-      u[0] * su + v[0] * sv,
-      u[1] * su + v[1] * sv,
-      u[2] * su + v[2] * sv,
-    ];
-    const a = d.applied;
-    if (d.gridWant && want[0] === d.gridWant[0] && want[1] === d.gridWant[1] && want[2] === d.gridWant[2]) return;
-    d.gridWant = want.slice();
-    // Klemm-Kupplung: sie kann ihr Rohr nicht verlassen -- der Zeiger wird auf
-    // die Rohrachse projiziert, statt frei im Raster zu schieben.
-    const clamp = this._draggedClamp();
-    if (clamp) {
-      this.model.loadJSON(JSON.parse(d.before));
-      const target = [d.origin.x + want[0], d.origin.y + want[1], d.origin.z + want[2]];
-      if (this.model.slideTubeClamp(clamp, target, geometry().connectorSize)) {
-        d.applied = want;
-        d.result = { merged: 0, detached: 0 };
-      }
-      // Die Klemme gleitet auf ihrem Rohr statt im Raster zu wandern -- beim
-      // Loslassen steht das Modell deshalb schon richtig und darf nicht noch
-      // einmal ueber _move() geschoben werden.
-      d.slid = true;
-      this.refresh();
+  _showPanelPlacementHover(pick) {
+    if (this._installationPart || pick?.data.kind !== 'tube' || !this._panelGuideIds?.has(pick.data.id)) {
+      this._panelHoverKey = null;
+      this.scene.clearPanelPlacementPreview?.();
       return;
     }
-    // Die Vorschau VERSCHIEBT nur -- sie trennt nichts, legt nichts zusammen
-    // und prueft keine Kupplungen. Das faellt einmal beim Loslassen an. Frueher
-    // wurde je Rasterschritt das ganze Modell neu geladen und ein vollstaendiger
-    // Zug gerechnet; bei grossen Modellen ruckelte das Ziehen dadurch.
-    this.model.translateSelection(this.selection, want[0] - a[0], want[1] - a[1], want[2] - a[2]);
-    const extra = this.model.snapOffsetFor(this.model.moveTargets(this.selection).nodes, this._snapRadius());
-    if (extra[0] || extra[1] || extra[2]) {
-      this.model.translateSelection(this.selection, extra[0], extra[1], extra[2]);
-      want[0] += extra[0]; want[1] += extra[1]; want[2] += extra[2];
+    const first = this.panelRail?.id || pick.data.id;
+    const at = this.panelRail?.at ?? this._alongTube(first, pick.point);
+    const partners = this._freePartners(first, at);
+    const partner = this.panelRail && pick.data.id !== first ? partners.find(p => p.id === pick.data.id) : partners[0];
+    if (!partner) { this.scene.clearPanelPlacementPreview?.(); this._panelHoverKey = null; return; }
+    const sec = this.model.panelSection(partner, at);
+    const key = [this.panelId, first, partner.id, sec.t0, sec.len, pick.data.id].join(':');
+    if (key === this._panelHoverKey) return;
+    this._panelHoverKey = key;
+    let part = null;
+    if (PANEL_ACCESSORY_IDS.has(this.panelId)) {
+      const probe = { a: first, b: partner.id, t0: sec.t0, len: sec.len, panelId: this.panelId,
+        color: this.color === RANDOM_COLOR ? 'blue' : this.color, side: 1 };
+      if (supportsPanelFixing(this.panelId)) probe.params = { screwAxis: panelRailScrewAxis(this.model, probe, confirmedSpec(this.panelId) ? undefined : componentFrame(this.model, probe)) };
+      if (this.panelId !== 'panel_40x40_pocket') probe.side = this._panelSideFromCorners(this.model.panelCorners(probe));
+      part = this.model.panelPlacementDiagnostics(probe);
     }
-    d.applied = want;
-    d.invalid = this._troubleWith(this.selection, d.collidedBefore);
-    if (!d.invalid) d.lastValid = want.slice();
-    this.refresh();
+    this.scene.showPanelPlacementPreview?.(this.model, part, pick.data.id);
   }
 
-  // Ist genau EINE Klemm-Kupplung ausgewaehlt? Dann bestimmt ihr Rohr den Weg.
-  _draggedClamp() {
-    if (this.selection.size !== 1) return null;
-    const [id, kind] = [...this.selection][0];
-    if (kind !== "node") return null;
-    const n = this.model.nodes.get(id);
-    return n && n.clampOn ? id : null;
-  }
-
-  _endMoveDrag() {
-    const d = this._drag;
-    this._drag = null;
-    this.scene.setCursor("default");
-    if (!d) return;
-    // Die gleitende Klemm-Kupplung ist schon an ihrem Platz.
-    if (d.slid) { this._afterMove(d.before, d.result || { merged: 0, detached: 0 }); return; }
-    // Beim Loslassen zaehlt die letzte Lage, an der es passt: ueber einer
-    // belegten Stelle rutscht die Auswahl dorthin zurueck.
-    const ziel = d.invalid ? d.lastValid : d.applied;
-    if (d.invalid) this.onNotice(t("notice_move_collision"), "warn");
-    // Die Vorschau hat nur verschoben -- jetzt der echte Zug von der
-    // Ausgangslage aus, mit Trennen, Zusammenlegen und Kupplungs-Pruefung.
-    this.model.loadJSON(JSON.parse(d.before));
-    if (!ziel[0] && !ziel[1] && !ziel[2]) { this.refresh(); return; }
-    const res = this._move(ziel[0], ziel[1], ziel[2]);
-    if (!res.ok) {
-      // Das faellt nur auf, was die Vorschau nicht sehen kann (etwa eine
-      // Kupplung, die es beim Zusammenlegen nicht gibt).
-      this.onNotice(t("notice_move_" + res.reason), "warn");
-      this.refresh();
-      return;
-    }
-    this._afterMove(d.before, res);
-  }
 
   // Anbauteil loeschen -- Laufrolle und ihr Adapter gehoeren zusammen und gehen
   // gemeinsam, egal welches der beiden ausgewaehlt war.
@@ -1386,13 +1823,7 @@ export class Builder {
       }
       for (const [id, kind] of entries) {
         if (kind !== "node") continue;
-        // Eine Winkelkupplung haelt zwei Enden zusammen, die fuer sich
-        // weiterbestehen: sie kommt heraus, die Rohre bleiben und tragen
-        // wieder Dummy-Kupplungen (`removeC45`). Erst danach die gewoehnliche
-        // Loeschung, die auch die Rohre mitnimmt.
-        const n = this.model.nodes.get(id);
-        if (n && n.c45body && this.model.removeC45(id)) continue;
-        this.model.removeNode(id);
+        this.model.removeConnector(id);
       }
       for (const [id] of entries) nachbarn.delete(id);
       this.model.removeEmptyNodes(nachbarn);
@@ -1410,6 +1841,18 @@ export class Builder {
    * Zaehler starten wieder bei 1) -- _pruneSelection findet das nicht.
    */
   modelReplaced() {
+    this.bearingConnection?.cancel();
+    this.transformRotation=null;
+    this.boxSelect = false;
+    this._boxSelected?.clear();
+    this._colorPreview = null;
+    if (this._hingeDrag) {
+      this._hingeDrag = null;
+      this._down = null;
+      this._pointerId = null;
+      this.scene.setCursor("default");
+      this.scene.endOrbit();
+    }
     // 模型换入前结束旧模型的预览与手势，避免取消操作把旧快照写进新标签页。
     this._cancelSelectFlip();
     this._abortGesture();
@@ -1446,7 +1889,7 @@ export class Builder {
     if (s.clampPart) this.clampPart = s.clampPart;
     if (s.slideKind) this.slideKind = s.slideKind;
     if (s.color) this.color = s.color;
-    if (s.assemblyOrder) this.assemblyOrder = s.assemblyOrder;
+    this.assemblyOrder = "y+";
     this.assemblyStep = s.assemblyStep || 0;
     this.selection.clear();
     this.selectedNodeId = null;
@@ -1463,6 +1906,7 @@ export class Builder {
    * loeschbar oder umfaerbbar, und es gilt in jedem Modus.
    */
   setHighlight(ids) {
+    if (!ids?.size && !this.highlight) return;
     this.highlight = ids && ids.size ? ids : null;
     this.refresh();
   }
@@ -1483,6 +1927,11 @@ export class Builder {
       fitting: this.model.fittings,
     };
     for (const [id, kind] of [...this.selection]) {
+      if (kind === 'hinge') {
+        const ref = splitHingeKey(id), node = ref && this.model.nodes.get(ref.nodeId);
+        if (!node || !isBoltPart(node.part) || ref.index < 0 || ref.index >= (node.hinges || []).length) this.selection.delete(id);
+        continue;
+      }
       const map = maps[kind];
       if (!map || !map.has(id)) this.selection.delete(id);
     }
@@ -1501,31 +1950,71 @@ export class Builder {
   // --- Aufbaumodus -------------------------------------------------------
   // Aufbauplan (neu) berechnen und beim aktuellen Schritt bleiben (geklemmt).
   enterAssembly() {
-    if (!assemblyMeshes()) {
-      if (this._meshesPending) return;
-      this._meshesPending = true;
-      void ensureAssemblyMeshes().then(() => {
-        this._meshesPending = false;
-        if (this.mode !== "assembly") return;
-        this.enterAssembly();
-        this.refresh();
-      }).catch((error) => {
-        this._meshesPending = false;
-        console.warn("[assembly]", error);
-      });
+    const model = this.model.toJSON();
+    const planKey = `${this.assemblyOrder}|${getLang()}|${JSON.stringify(model)}`;
+    if (planKey === this._assemblyPlanKey) {
+      this.assemblyPending = false;
+      this.assemblyError = false;
+      this.assemblyProgress = 100;
+      this.assemblyStep = Math.min(this.assemblyStep, Math.max(0, this.buildPlan.steps.length - 1));
       return;
     }
-    this.buildPlan = computeAssemblyPlan(this.model, this.model.assemblyConfig || {}, this.assemblyOrder);
-    const max = Math.max(0, this.buildPlan.steps.length - 1);
-    this.assemblyStep = Math.min(this.assemblyStep, max);
+    if (this.assemblyPending && planKey === this._assemblyRequestedKey) return;
+    const requestId = ++this._assemblyRequest;
+    this._assemblyRequestedKey = planKey;
+    this.assemblyPending = true;
+    this.assemblyError = false;
+    this.assemblyProgress = 0;
+    this.buildPlan = { levels: [], steps: [] };
+    try {
+      if (!this._assemblyWorker) {
+        const worker = new Worker(new URL('./assemblyPlan.worker.js', import.meta.url), { type: 'module' });
+        worker.addEventListener('message', event => this._receiveAssemblyPlan(event.data));
+        worker.addEventListener('error', event => this._failAssemblyPlan(this._assemblyRequest, event.message || 'worker error'));
+        this._assemblyWorker = worker;
+      }
+      this._assemblyWorker.postMessage({ type: 'compute', requestId, model, config: this.model.assemblyConfig || {}, order: this.assemblyOrder, lang: getLang() });
+    } catch (error) {
+      this._failAssemblyPlan(requestId, error?.message || error);
+    }
   }
 
-  // Aufbaurichtung wechseln: Plan neu rechnen und beim ersten Schritt beginnen.
-  setAssemblyOrder(order) {
-    if (this.assemblyOrder === order) return;
-    this.assemblyOrder = order;
-    this.assemblyStep = 0;
-    if (this.mode === "assembly") { this.enterAssembly(); this.refresh(); }
+  _receiveAssemblyPlan(message) {
+    if (message?.requestId !== this._assemblyRequest || this.mode !== 'assembly') return;
+    if (!this.assemblyPending) return;
+    if (message.type === 'progress') {
+      if (Number.isFinite(message.progress) && message.progress > this.assemblyProgress && message.progress < 100) {
+        this.assemblyProgress = message.progress;
+        this.onChange();
+      }
+      return;
+    }
+    const planKey = this._assemblyRequestedKey;
+    this._assemblyRequestedKey = null;
+    this.assemblyPending = false;
+    if (message.type !== 'result') {
+      this.assemblyError = true;
+      console.warn('[assembly]', message.error || 'plan worker failed');
+      this.refresh();
+      return;
+    }
+    this.buildPlan = message.plan;
+    this._assemblyPlanKey = planKey;
+    this.assemblyError = false;
+    this.assemblyProgress = 100;
+    this.assemblyStep = Math.min(this.assemblyStep, Math.max(0, this.buildPlan.steps.length - 1));
+    this.refresh();
+  }
+
+  _failAssemblyPlan(requestId, reason) {
+    if (requestId !== this._assemblyRequest) return;
+    this._assemblyWorker?.terminate();
+    this._assemblyWorker = null;
+    this._assemblyRequestedKey = null;
+    this.assemblyPending = false;
+    this.assemblyError = true;
+    console.warn('[assembly]', reason);
+    this.refresh();
   }
 
   assemblyCount() { return this.buildPlan.steps.length; }
@@ -1573,7 +2062,7 @@ export class Builder {
     let res;
     this.recordHistory(() => {
       res = isCurvedTube(this.tubeId)
-        ? this.model.extendBow(node.id, dirVec, this._bowNormal(dirVec, node), this.tubeId, this.colorFor("tube", node.id), gridSpacing())
+        ? this.model.extendBow(node.id, dirVec, this._bowNormal(dirVec, node), this.tubeId, this.colorFor("tube", node.id), tube.radius_cm || gridSpacing())
         : this.model.extend(
             node.id, dirVec, this.tubeId, this.colorFor("tube", node.id), tube.length_cm, spacingFor(tube.length_cm)
           );
@@ -1609,9 +2098,14 @@ export class Builder {
         ? [Math.sign(f[0]) || 1, 0, 0]
         : [0, 0, Math.sign(f[2]) || -1];
     }
-    if (node && this.model.bowBelowGround(node, dirVec, normal, gridSpacing())) {
+    const radius = getTube(this.tubeId)?.radius_cm || gridSpacing();
+    if (node) {
+      const closing = this.model.closingBowNormal(node.id, dirVec, radius, normal);
+      if (closing) return closing;
+    }
+    if (node && this.model.bowBelowGround(node, dirVec, normal, radius)) {
       const opposite = normal.map((value) => -value);
-      if (!this.model.bowBelowGround(node, dirVec, opposite, gridSpacing())) return opposite;
+      if (!this.model.bowBelowGround(node, dirVec, opposite, radius)) return opposite;
     }
     return normal;
   }
@@ -1727,11 +2221,22 @@ export class Builder {
   }
 
   refresh() {
-    // 拖动、粘贴期间攒下的外部修改：操作收尾以后的第一次刷新读进来
-    if (this._externalPending && !this.busy()) {
-      this._externalPending = false;
+    if(this._externalPending && !this.busy()){
+      this._externalPending=false;
       this.applyExternal(this.history.toJSON());
       return;
+    }
+    return withPlacementPass(this.model,()=>this._refreshPlacementPass());
+  }
+
+  _refreshPlacementPass() {
+    this.bearingConnection?.validate();
+    if(this._selectionTransform?.visualPreview){this.scene.requestRender();this.onPreview();return;}
+    const transformKey=[...this.selection.keys()].sort().join(',');
+    if(transformKey!==this._transformSelectionKey){this._transformSelectionKey=transformKey;this.transformError=null;this.transformRotation=null;}
+    // 框选着色仅跟随仍被选中的同一种零件，取消选择后恢复原材质。
+    for (const [id, kind] of this._boxSelected || []) {
+      if (this.selection.get(id) !== kind) this._boxSelected.delete(id);
     }
     const assembly =this.mode === "assembly" && this.buildPlan.steps.length
       ? this._assemblyVisibility() : null;
@@ -1755,38 +2260,57 @@ export class Builder {
     const labelIds = this.manualLabels ? null : (labelAn != null ? new Set([labelAn]) : null);
     const soloLabel = soloId != null
       ? { id: labelAn, text: profil != null
-        ? (reinforcementPart() ? partName(reinforcementPart()) : null)
+        ? partName(getPartById(this.model.tubes.get(profil)?.reinforcement?.partId || 'reinforce80'))
         : this._partLabel(soloId, this.selection.get(soloId)) } : null;
-    // Vorschlaege, welche Rohre ein Verstaerkungsprofil gebrauchen koennten --
-    // sichtbar genau dann, wenn man verstaerkt.
-    const suggest = this.mode === "reinforce" ? this.model.reinforcementSuggestions() : null;
+    // Only mark paths that accept the currently selected reinforcement size.
+    const suggest = this.mode === "reinforce"
+      ? reinforcementGuide(this.model, this.reinforcementPartId, this.reinforceRail).installable : null;
     const reinforce = this.mode === "reinforce";
     // Kollisions-Modus: immer ein Set (auch leeres), damit die Szene den Modus
     // erkennt und die uebrigen Rohre grau zeichnet.
     const selected = (this.mode === "select" || this.mode === "assembly") && this.selection.size
       ? this.selection : null;
-    // An einer belegten Stelle werden die betroffenen Teile rot gezeichnet --
-    // beim Einfuegen die ganze Kopie, beim Ziehen die gezogene Auswahl.
-    const invalid = this._paste && !this._paste.valid && this._paste.sel
+    // 粘贴位置有冲突时，将整份副本标红。
+    let invalid = this._paste && !this._paste.valid && this._paste.sel
       ? new Set(this._paste.sel.keys())
-      : (this._drag && this._drag.invalid ? new Set(this.selection.keys()) : null);
-    // 面板 / 布件两步点选的第一步：还没选第一根管时，能当第一根的管先亮出来，
-    // 其余零件退后；选了第一根，照旧只亮它（琥珀）和能配的对面管（绿）。
+      : null;
+    if(this._selectionTransform && !this._selectionTransform.valid)invalid=new Set(this.selection.keys());
+    // 安装引导独立绘制，已安装零件保留自身材质。清单高亮仍沿原来的弱化逻辑。
     const firstRails = this._firstRailCandidates();
-    this.scene.renderModel(this.model, this.selectedNodeId,
-      { labelFor, slideNameFor, labelIds, soloId, soloLabel, assembly, suggest, reinforce,
-        selected, highlight: this.highlight || firstRails, invalid, tints: this.tints,
-        focusId: this.panelRail ? this.panelRail.id : null,
-        preview: !!(this._paste || this._drag || this._clampDrag || this._clampSlide || this._carouselDrag) });
+    const panelPlacement = this.mode === 'panel' && (!this.highlight || this.panelRail);
+    this._panelGuideIds = panelPlacement ? this.highlight || firstRails : null;
+    this._panelHoverKey = null;
+    let displayModel=this._selectionTransform?.model || this.model;
+    if(this._colorPreview?.hex)displayModel=colorPreviewModel(this.model,this._colorPreview.selection,this._colorPreview.hex);
+    this.scene.renderModel(displayModel, this.selectedNodeId,
+      { labelFor, slideNameFor, labelIds, soloId, soloLabel, assembly, suggest, reinforce, frameOnly: this.frameOnly, reinforcementPartId: this.reinforcementPartId,
+        selected: this._colorPreview ? null : selected,
+        preserveSelectionAppearance: this.mode === 'select',
+        solidSelected: this.mode==='select' && selected?.size>1 && !this.highlight ? selected : this._boxSelected,
+        interactionMode: this.mode,
+        profileSelection: this._profilGewaehlt() ? this._profilAuswahl : null,
+        highlight: this._colorPreview || panelPlacement ? null : this.highlight || firstRails, invalid, tints: this.tints,
+        panelPlacementRails: this._colorPreview ? null : this._panelGuideIds,
+        panelPlacementMode: this.mode === 'panel',
+        focusId: this.panelRail ? this.panelRail.id : this.reinforceRail,
+        keepPanelFacesOpaque: this.mode === 'panel',
+        preview: !!(this._paste || this._clampDrag || this._hingeDrag || this._colorPreview || this._selectionTransform || this._carouselDrag) });
+    this.transformGizmo?.sync();
     this._buildHandles();
+    if (this._tubeHoverPointer) this._trackTubeHandles(this._tubeHoverPointer.x, this._tubeHoverPointer.y);
+    this.scene.updateTubeCandidateHover?.(this._tubeHoverPointer);
+    if (this.mode === 'panel' && this.panelRail && this.inputType === 'touch') {
+      this._showPanelPlacementHover({ data: { kind: 'tube', id: this.panelRail.id } });
+    }
     if (this._installationPart) this.scene.showInstallationPreview(this.model, this._installationPart, this.installationPreview.valid);
+    if(this.bearingConnection?.selected&&this.bearingConnection.preview)this.scene.showBearingConnectionPreview(this.bearingConnection.preview);
     this.scene.requestRender();
     // Waehrend einer Vorschau (Ziehen, Kopie am Zeiger) bleibt die Oberflaeche
     // aussen vor: Stueckliste und Sitzung rechnen sonst bei jedem Rasterschritt
     // mit, obwohl der Stand noch gar nicht gilt. Beim Absetzen wird ohnehin neu
     // gezeichnet -- dann laeuft es einmal. Nur die Knoepfe, die vom Zustand
     // abhaengen (Drehen), werden nachgezogen.
-    if (!this._paste && !this._drag && !this._clampDrag && !this._clampSlide && !this._carouselDrag) this.onChange();
+    if (!this._paste && !this._clampDrag && !this._hingeDrag && !this._colorPreview && !this._selectionTransform && !this._carouselDrag) this.onChange();
     else this.onPreview();
   }
 
@@ -1803,13 +2327,35 @@ export class Builder {
     if (this.highlight && !this.panelRail && !this.reinforceRail) return;
     // Im Platten-Modus klickt man zwei Rohre an -- keine Flaechen-Handles.
     if (this.mode === "panel") {
-      if (PANEL_ACCESSORY_IDS.has(this.panelId)) for (const mount of this.model.panelAccessoryMounts(this.panelId,{screwAxis:this.insetScrewAxis||'vertical'})) this.scene.addHandle(mount.pos, { panelAccessoryMount: mount }, 'place');
+      if (!this.panelRail && PANEL_ACCESSORY_IDS.has(this.panelId)) {
+        const options = { screwAxis: this.insetScrewAxis || 'auto', oppositeRetainers: true };
+        let mounts;
+        if (typeof Worker === 'function') {
+          this._panelMountQueue ??= new PanelMountQueue(() => {
+            if (this._disposed || this.mode !== 'panel' || this.panelRail || this.busy()) return;
+            this._buildHandles();
+            this.scene.requestRender();
+          }, error => {
+            console.error('Panel mount computation failed', error);
+            if (!this._disposed && this.mode === 'panel') this.onNotice(t('notice_panel_geometry_failed'), 'warn');
+          });
+          mounts = withPlacementPass(this.model,()=>this._panelMountQueue.get(this.model.toJSON(), this.panelId, options, this.model)) || [];
+        } else mounts = this.model.panelAccessoryMounts(this.panelId, options);
+        for (const mount of mounts) this.scene.addHandle(mount.pos, { panelAccessoryMount: mount }, 'place');
+      }
       return;
     }
     if (this.mode === "slide") { this._buildSlideHandles(); return; }
     if (this.mode === "clamp") { this._buildClampHandles(); return; }
     if (this.mode === "c45") { this._buildC45Handles(); return; }
     if (this.mode === "fitting") { this._buildFittingHandles(); return; }
+    if (this.mode === 'reinforce' && this.reinforcementPartId === ALUMINIUM_CONNECTOR) {
+      for (const mount of this.model.aluminiumConnectorMounts()) {
+        const node = this.model.nodes.get(mount.nodeId);
+        this.scene.addHandle([node.x, node.y, node.z], { aluminiumConnectorMount: mount, placeNode: true }, 'place');
+      }
+      return;
+    }
     if (this.mode !== "add") return;
     if (this.placeConnectorId) { this._buildConnectorPlaceHandles(); return; }
 
@@ -1819,6 +2365,7 @@ export class Builder {
     }
     // Freie Oeffnung eines Doppelrohrverbinders/einer Rohrklammer: dort gehoert
     // ein GERADES Rohr hinein -- mit einem Bogenrohr in der Hand nicht.
+    const openings = new Set();
     if (!isCurvedTube(this.tubeId)) {
       for (const c of this.model.clamps.values()) {
         if (!c.dir || !c.off) continue;
@@ -1826,12 +2373,24 @@ export class Builder {
         // eine volle Lochweite daneben.
         const center = [c.x + c.off[0], c.y + c.off[1], c.z + c.off[2]];
         if (this._openingOccupied(center, c.dir)) continue;
-        this.scene.addHandle(center, { clampOpening: true, center, dir: c.dir, clampId: c.id }, "dir");
+        const tube = getTube(this.tubeId);
+        if (!tube) continue;
+        const span = spacingFor(tube.length_cm);
+        const placement = this._secondTubePlacement(center, c.dir, c.id);
+        if (!placement) continue;
+        const { p1, p2 } = placement;
+        const key = [p1, p2].map(p => p.map(v => Math.round(v * 100)).join(',')).sort().join('/');
+        if (openings.has(key)) continue;
+        openings.add(key);
+        this.scene.addHandle(center, { clampOpening: true, center, dir: c.dir, clampId: c.id,
+          previewEnds: [p1, p2], previewSpan: span, previewColor: this.colorFor("tube"),
+          arrowCompact: true }, "dir");
       }
       // Dasselbe fuer das noch leere Maul einer Lagerkupplung: der Punkt liegt
       // GENAU auf der Achse, auf der das Rohr durchlaeuft.
       for (const o of this.model.bearingOpenings()) {
         if (this._openingOccupied(o.pos, o.dir)) continue;
+        if (!this._secondTubePlacement(o.pos, o.dir)) continue;
         this.scene.addHandle(o.pos,
           { clampOpening: true, center: o.pos, dir: o.dir, bearingNode: o.nodeId }, "dir");
       }
@@ -1843,7 +2402,9 @@ export class Builder {
       // einer Rad- oder Rohrkappe: dort steckt die Kappe ANSTELLE der Kupplung,
       // ihre Punkte wuerden ins Leere zeigen.
       .filter((n) => !n.unused && !(this.model.hasWheelCap && this.model.hasWheelCap(n)));
-    for (const node of nodes) this._addBuildHandles(node);
+    const context = this.model.tubeExtensionContext();
+    for (const node of nodes) this._addBuildHandles(node, context);
+    this.scene.mergeTubeGuides?.();
   }
 
   /** 在现有接头上高亮空插座：点上去换成所选通型，不在空气中长新节点。 */
@@ -1875,16 +2436,15 @@ export class Builder {
     return n;
   }
 
-  /** 真实管子占用的世界轴 bit；斜管无法套普通通型。 */
+  /** 管子及45°套筒占用的世界轴 bit；斜管无法直接套普通通型。 */
   _worldOccupiedBits(node) {
     let bits = carouselBearingAtRotor(this.model, node.id) ? 0x08 : 0;
     for (const t of this.model.tubes.values()) {
-      if (t.arm || t.link) continue;
+      if (t.link) continue;
       const other = t.a === node.id ? this.model.nodes.get(t.b)
         : t.b === node.id ? this.model.nodes.get(t.a) : null;
       if (!other) continue;
-      const dx = other.x - node.x, dy = other.y - node.y, dz = other.z - node.z;
-      const bit = this._axisBit(dx, dy, dz);
+      const bit = this._axisBit(...this.model._tubeDirAt(t, node, other));
       if (!bit) return null;
       bits |= bit;
     }
@@ -1919,6 +2479,59 @@ export class Builder {
       }
     }
     return out;
+  }
+
+  // 单个普通接头只换插口方向，管子、节点和已有连接都保持原位。
+  _rotateConnector(node, steps) {
+    if (this.readOnly || !Number.isInteger(steps)) return false;
+    const connection = resolveNodeConnection(this.model, node);
+    const typeId = node.preferType || connection.type;
+    const mask = CONN_TYPE_MASK[typeId];
+    if (!mask || !steps) return false;
+    const current = node.quat || (connection.frame ? quatFromBasis(...connection.frame) : [0, 0, 0, 1]);
+    const currentAxes = [xAxisOf(current), yAxisOf(current), zAxisOf(current)];
+    const cardinal = currentAxes.every((axis) => Math.max(...axis.map(Math.abs)) > 0.999);
+    const frame = cardinal ? [0, 0, 0, 1] : current;
+    const axes = [xAxisOf(frame), yAxisOf(frame), zAxisOf(frame)];
+    const local = (d) => axes.map((axis) => axis.reduce((sum, v, i) => sum + v * d[i], 0));
+    let occupied = 0;
+    // 复用真实端口解析，包括弯管切线、附件和文件中的45°套筒。
+    for (const dir of connection.worldDirs) {
+      const bit = this._axisBit(...local(dir));
+      if (!bit) { this.onNotice(t("notice_rotate_connector"), "warn"); return false; }
+      occupied |= bit;
+    }
+    const orients = this._connectorOrients(mask, occupied);
+    if (!orients.length) { this.onNotice(t("notice_rotate_connector"), "warn"); return false; }
+    const armMask = (q) => {
+      const basis = [xAxisOf(q), yAxisOf(q), zAxisOf(q)];
+      let bits = 0;
+      for (const [bit, d] of CONNECTOR_ARM_BITS) {
+        if (!(mask & bit)) continue;
+        const v = basis[d[0] ? 0 : d[1] ? 1 : 2];
+        const sign = d[0] || d[1] || d[2];
+        bits |= this._axisBit(...v.map((value) => value * sign));
+      }
+      return bits;
+    };
+    const currentLocal = cardinal ? current : [0, 0, 0, 1];
+    const index = orients.findIndex((q) => armMask(q) === armMask(currentLocal));
+    const next = orients[((Math.max(0, index) + steps) % orients.length + orients.length) % orients.length];
+    if (orients.length === 1 && index === 0) {
+      this.scene?.finishPartMotion?.(node.id);
+      this.refresh();
+      return true;
+    }
+    const world = (v) => [0, 1, 2].map((i) => axes.reduce((sum, axis, j) => sum + axis[i] * v[j], 0));
+    this.recordHistory(() => {
+      node.preferType = typeId;
+      node.quat = quatFromBasis(world(xAxisOf(next)), world(yAxisOf(next)), world(zAxisOf(next)));
+      delete node.arms;
+      delete node.armDirs;
+    });
+    this.scene?.finishPartMotion?.(node.id);
+    this.refresh();
+    return true;
   }
 
   _nodeAcceptsConnector(node, typeId) {
@@ -2006,7 +2619,7 @@ export class Builder {
     return (node.armDirs && node.armDirs.length) ? node.armDirs : null;
   }
 
-  _addBuildHandles(node) {
+  _addBuildHandles(node, context) {
     // Gedrehte Kupplung: ihre eigenen Arm-Richtungen verwenden, sie ist bereits
     // korrekt ausgerichtet.
     const armDirs = this._armDirsOf(node);
@@ -2051,6 +2664,20 @@ export class Builder {
       // Punkt auch dann noch an, wenn das Rohr schon steckt.
       if (c45Dir && this._armOccupied(node, d.vec)) continue;
       if (this._targetBelowGround(node, d.vec)) continue;
+      let previewTarget;
+      if (!isCurvedTube(this.tubeId)) {
+        const selected = isSlope || c45Dir ? this._diagonalTube() : tube;
+        if (!selected) continue;
+        const plan = this.model.planTubeExtension(node.id, d.vec, spacingFor(selected.length_cm),
+          { connectorSize: geometry().connectorSize, context });
+        if (!plan?.target) continue;
+        previewTarget = [plan.target.x, plan.target.y, plan.target.z];
+      } else {
+        const normal = this._bowNormal(d.vec, node), radius = tube.radius_cm || gridSpacing();
+        const end = [node.x, node.y, node.z].map((v, i) => v + radius * (d.vec[i] + normal[i]));
+        const existing = this.model.findNodeNear(...end);
+        if (existing && (!this.model.canExtendFrom(existing, normal.map(v => -v)) || this._armOccupied(existing, normal.map(v => -v)))) continue;
+      }
       const isCardDir = Math.max(Math.abs(d.vec[0]), Math.abs(d.vec[1]), Math.abs(d.vec[2])) > DIR_ALIGN_TOL;
       // Pfeile wachsen aus der Kupplung heraus (wie designer), nicht als
       // schwebende Kugel auf `gap`. Die Richtung bleibt die des freien Arms.
@@ -2060,6 +2687,7 @@ export class Builder {
           nodeId: node.id, dir: d.vec, dirName: d.name, slope: isSlope || !!c45Dir,
           arrowCompact: true,
           previewSpan,
+          previewTarget,
           previewColor,
         },
         ((useDiag || c45Dir) && !isCardDir) ? "diag" : "dir"
@@ -2069,7 +2697,7 @@ export class Builder {
 
   _targetBelowGround(node, vec) {
     if (isCurvedTube(this.tubeId))
-      return this.model.bowBelowGround(node, vec, this._bowNormal(vec, node), gridSpacing());
+      return this.model.bowBelowGround(node, vec, this._bowNormal(vec, node), getTube(this.tubeId)?.radius_cm || gridSpacing());
     if (vec[1] >= 0) return false;
     const tube = getTube(this.tubeId);
     const span = spacingFor(tube ? tube.length_cm : 35);
@@ -2200,6 +2828,7 @@ export class Builder {
    * gesetzte Kupplung dreht sie um 90 Grad weiter.
    */
   _buildC45Handles() {
+    const collisionContext = c45CollisionContext(this.model);
     // Die Punkte sitzen dort, WO die Winkelkupplung ansetzt: an jedem freien
     // Arm einer Kupplung, gruen wie die uebrigen Bau-Punkte. In welche Schraege
     // sie dann zeigt, entscheidet der erste passende Wert -- weiterdrehen laesst
@@ -2212,7 +2841,10 @@ export class Builder {
       : [...this.model.nodes.values()];
     for (const node of nodes) {
       if (node.unused || node.c45body || node.part) continue;
-      for (const m of this._c45MountsFor(node)) {
+      const tubeDir = this.model.c45TubeDir(node);
+      // 裸管口直接插入45°件；先装普通接头后才提供其外侧插臂，避免同心安装点混淆。
+      const bareEnd = tubeDir && !node.preferType && !node.arms?.length;
+      for (const m of bareEnd ? [] : this._c45MountsFor(node, collisionContext)) {
         this.scene.addHandle(
           [node.x, node.y, node.z],
           { c45mount: true, nodeId: node.id, axis: m.axis, dir: m.dir, arrowDir: m.axis }, "dir");
@@ -2221,14 +2853,15 @@ export class Builder {
       // Dummy-Kupplung (ein Rohr, sonst nichts) sitzt der Punkt deshalb MITTIG
       // auf ihr. Gesetzt tritt die Winkelkupplung an ihre Stelle, und am
       // anderen Ende der Huelse entsteht eine neue Dummy-Kupplung.
-      const achsen = this.model.c45SleeveAxes(this.model.c45TubeDir(node));
-      if (achsen.length) {
+      const achsen = this.model.c45SleeveAxes(tubeDir);
+      const sleeveAxis = achsen.find(axis => !this.model.c45OnTubeCollision(node.id, axis, C45_SLEEVE_LEN, C45_ARM_LEN));
+      if (sleeveAxis) {
         // Er sitzt MITTEN auf der Dummy-Kupplung und ist etwas groesser: die
         // Punkte weiter aussen setzen die Winkelkupplung auf einen Stutzen,
         // dieser eine steckt sie ins Rohr. Auf der Rohrachse weiter aussen
         // waere er nicht zu unterscheiden -- dort sitzt schon der Stutzen-Punkt.
         this.scene.addHandle([node.x, node.y, node.z],
-          { c45mount: true, inTube: true, nodeId: node.id, axis: achsen[0] }, "dir", 3.6);
+          { c45mount: true, inTube: true, nodeId: node.id, axis: sleeveAxis }, "dir", 3.6);
       }
     }
   }
@@ -2293,7 +2926,7 @@ export class Builder {
    * ein Arm bekommt, entscheidet die erste freie, moeglichst nach oben; die
    * uebrigen erreicht man durch Weiterdrehen.
    */
-  _c45MountsFor(node) {
+  _c45MountsFor(node, collisionContext) {
     const { ex, ey, ez } = this._nodeFrame(node);
     const nachWelt = (v) => [
       ex[0] * v[0] + ey[0] * v[1] + ez[0] * v[2],
@@ -2315,6 +2948,7 @@ export class Builder {
         // Schraege schon belegt? Geometrisch pruefen -- Namen aus
         // `_occupiedDirs` gelten nur fuer die ungedrehte Kupplung.
         if (this._armOccupied(node, dir)) continue;
+        if (this.model.c45AdapterCollision(node.id, axis, dir, C45_SLEEVE_LEN, C45_ARM_LEN, collisionContext)) continue;
         if (!beste || (dir[1] > 0.3 && !(beste.dir[1] > 0.3))) beste = { axis, dir };
       }
       if (beste) out.push(beste);
@@ -2354,6 +2988,7 @@ export class Builder {
             C45_SLEEVE_LEN, C45_ARM_LEN);
       });
       if (res && res.ground) this.onNotice(t("notice_ground"), "warn");
+      else if (res && res.collision) this.onNotice(t("notice_collision"), "warn");
       else if (res && res.body) this.onNotice(t("notice_placed", partName(getConnector("diagonal"))));
       this.refresh();
       return;
@@ -2364,22 +2999,7 @@ export class Builder {
     // der sie steckt (Huelse und Arm gehoeren beiden) -- beides dreht sie.
     const body = node && (node.c45body ? node : this._c45BodyAt(node.id));
     if (body) {
-      // Steckt sie IM Rohr, dreht sich die Huelsenseite: die Dummy-Kupplung
-      // wandert um die Rohrachse, das Rohr bleibt stehen.
-      if (this._c45HasTube(body.id)) {
-        let gedreht = false;
-        this.recordHistory(() => { gedreht = this.model.rotateC45Sleeve(body.id); });
-        // Sonst bleibt sie stehen: mitzudrehen hiesse, das halbe Modell
-        // mitzuziehen -- dafuer gibt es das Drehen der Auswahl.
-        this.onNotice(gedreht ? t("notice_c45_turned") : t("notice_c45_has_tube"),
-          gedreht ? "ok" : "warn");
-        if (gedreht) this.refresh();
-        return;
-      }
-      let ok = false;
-      this.recordHistory(() => { ok = this.model.rotateC45(body.id); });
-      this.onNotice(ok ? t("notice_c45_turned") : t("notice_c45_no_turn"), ok ? "ok" : "warn");
-      this.refresh();
+      this._turnC45(body.id);
       return;
     }
     // Klick auf eine Kupplung ohne Winkelkupplung waehlt sie: danach zeigt nur
@@ -2398,11 +3018,22 @@ export class Builder {
   // Anbauteile: an jeder Montagestelle des gewaehlten Teils ein Ankerpunkt.
   // Wo dasselbe Teil schon steckt, wird keiner gezeigt -- gestapelt wird nicht.
   _buildFittingHandles() {
+    if(this.fittingKind==='bearing-clamp'&&this._bearingController().selected){this.bearingConnection.buildHandles();return;}
     // Merkt sich, an welchen Kupplungen das gewaehlte Teil sitzen darf -- der
     // Zeiger zeigt dort eine Hand, auch wenn er den Ankerpunkt knapp verfehlt.
     this._fittingMountNodes = new Set();
+    this._confirmedFittingMounts = null;
+    if (this.fittingKind === 'rope') { this._buildRopeHandles(); return; }
+    if (this.fittingKind === 'gym_rings') { this._buildGymRingHandles(); return; }
     if (confirmedSpec(this.fittingPart || this.fittingKind)?.placement === 'fitting') {
-      for (const mount of this.model.confirmedMounts(this.fittingPart || this.fittingKind)) if (mount.mounts.length) this.scene.addHandle(mount.pos, { confirmedComponent: mount, placeNode: true }, 'place');
+      const id = this.fittingPart || this.fittingKind, sector=confirmedSpec(id)?.feature==='sector';
+      const opposite=sector ? this.model.confirmedMounts(id,{sectorFacing:-1}) : [];
+      const oppositeByRails=new Map(opposite.map(mount=>[`${mount.a}|${mount.b}`,mount]));
+      const camera=sector ? this.scene.cameraPosition() : null;
+      const mounts = this.model.confirmedMounts(id).map(mount => sector ? panelInstallationFacing(this.model,mount,camera,oppositeByRails.get(`${mount.a}|${mount.b}`)).part : mount);
+      // 提示紧接本次 refresh 使用同一批诊断；下一次 refresh 会重新读取模型。
+      this._confirmedFittingMounts = { id, mounts };
+      for (const mount of mounts) if (mount.mounts.length && (!sector || mount.valid)) this.scene.addHandle(confirmedFittingHandlePosition(this.model,mount), { confirmedComponent: mount, placeNode: true }, 'place');
       return;
     }
     if (ACCESSORY_IDS.has(this.fittingKind)) {
@@ -2460,10 +3091,10 @@ export class Builder {
     }
     // Flexikupplung: der Bolzen kommt auf ein freies Rohrende (er ersetzt die
     // Dummy-Kupplung), das Scharnier auf das mittlere Segment eines Bolzens.
-    if (this.fittingKind === BOLT_PART || this.fittingKind === HINGE_PART) {
+    if (this.fittingKind === "flexi" || this.fittingKind === BOLT_PART || this.fittingKind === HINGE_PART) {
       const sel0 = this.selectedNodeId;
       const cs = geometry().connectorSize;
-      const stellen = this.fittingKind === BOLT_PART
+      const stellen = this.fittingKind !== HINGE_PART
         ? this.model.boltMounts(cs).map((m) => ({ m, pos: m.handle || m.pos, art: "boltMount" }))
         : this.model.hingeMounts(cs).map((m) => ({ m, pos: m.pos, art: "hingeMount" }));
       for (const s of stellen) {
@@ -2511,6 +3142,11 @@ export class Builder {
     // Klemm-Kupplungen (Lochzapfen-, Lagerkupplung) klemmen an einer beliebigen
     // Stelle -- ein Punkt je Rohr zeigt, welche Rohre in Frage kommen.
     if (TUBE_CLAMP_PARTS[this.fittingKind]) {
+      if (this.fittingKind === 'windmill-clamp') {
+        for (const mount of this.model.windmillBearingMounts()) {
+          this.scene.addHandle(mount.pos, { windmillBearing: mount }, 'dir');
+        }
+      }
       for (const m of this._tubeMidpoints(sel, amKnoten)) {
         const mesh = this.scene.addHandle(m.pos, { clampTube: m }, "dir");
         this._tubeHandles.set(m.tubeId, { mesh, art: "clamp", ruhe: m });
@@ -2523,6 +3159,7 @@ export class Builder {
         for (const m of this.model.bearingArmMounts(cs)) {
           this.scene.addHandle(m.handle || m.pos, { bearingArm: m }, "dir");
         }
+        this._bearingController().buildHandles();
       }
     }
   }
@@ -2535,6 +3172,7 @@ export class Builder {
    * wieder auf seiner Ruhelage in der Mitte.
    */
   _trackTubeHandles(x, y) {
+    if (this.fittingKind === 'gym_rings' && this.mode === 'fitting') { this._trackGymRingHandles(x,y); return; }
     if (!this._tubeHandles.size) return;
     const tp = this.scene.pickTube ? this.scene.pickTube(x, y) : null;
     const unterZeiger = tp && tp.point ? tp.data.id : null;
@@ -2543,26 +3181,144 @@ export class Builder {
       if (tubeId !== unterZeiger) {
         this.scene.moveHandle(e.mesh, e.ruhe.pos);
         this.scene.setHandleVisible(e.mesh, true);
-        if (e.art === "fitting") e.mesh.userData.fittingMount = e.ruhe;
+        if (e.art === 'rope') e.mesh.userData.ropeMount = e.ruhe;
+        else if (e.art === "fitting") e.mesh.userData.fittingMount = e.ruhe;
         else e.mesh.userData.clampTube = e.ruhe;
         continue;
       }
       const punkt = [tp.point.x, tp.point.y, tp.point.z];
-      const m = e.art === "fitting"
-        ? this.model.tubeFittingMount(tubeId, punkt, this.fittingKind, cs)
-        : e.art === "clamp"
-          ? this.model.tubeClampMount(tubeId, punkt, TUBE_CLAMP_PARTS[this.fittingKind], cs)
-          : { pos: punkt };            // Doppelrohrverbinder/Rohrklammer: ueberall
+      let m;
+      if (e.art === 'rope') m = this._ropeMountAt(tubeId, tp.point);
+      else if (e.art === 'fitting') m = this.model.tubeFittingMount(tubeId, punkt, this.fittingKind, cs);
+      else if (e.art === 'clamp') m = this.model.tubeClampMount(tubeId, punkt, TUBE_CLAMP_PARTS[this.fittingKind], cs);
+      else m = { pos: punkt }; // Doppelrohrverbinder/Rohrklammer: ueberall
       if (!m) { this.scene.setHandleVisible(e.mesh, false); continue; }
       this.scene.setHandleVisible(e.mesh, true);
       // Der Punkt laeuft MITTIG im Rohr mit: nur die Stelle entlang des Rohrs
       // wandert, nicht die Seite. Fuer den Klick zaehlt trotzdem der echte
       // Trefferpunkt -- aus ihm ergibt sich, wohin der Anschluss zeigt.
-      const aufAchse = e.art === "fitting" ? m.pos : (this.model.tubeAxisPoint(tubeId, punkt) || punkt);
+      const aufAchse = e.art === 'rope' || e.art === "fitting" ? m.pos : (this.model.tubeAxisPoint(tubeId, punkt) || punkt);
       this.scene.moveHandle(e.mesh, aufAchse);
-      if (e.art === "fitting") e.mesh.userData.fittingMount = m;
+      if (e.art === 'rope') e.mesh.userData.ropeMount = m;
+      else if (e.art === "fitting") e.mesh.userData.fittingMount = m;
       else e.mesh.userData.clampTube = { tubeId, pos: punkt, tracked: true };
     }
+  }
+
+  // 绳结与8字件共用沿管跟随的定位点；已选第一端保留方形标记。
+  _buildRopeHandles() {
+    this._ropeHoverKey = null;
+    this.scene.clearInstallationPreview?.();
+    const first = this._ropeFirst, rail = first && this.model._rail(first.tube);
+    if (first && !rail) { this._ropeFirst = null; this.installationPreview = null; }
+    if (rail) this.scene.addHandle(rail.p0.map((v, i) => v + rail.dir[i] * rail.len * first.t), { ropeFirst: true, placeNode:true }, 'place');
+    for (const midpoint of this._tubeMidpoints()) {
+      if (midpoint.tubeId === this._ropeFirst?.tube) continue;
+      const mount = this._ropeMountAt(midpoint.tubeId, {x:midpoint.pos[0],y:midpoint.pos[1],z:midpoint.pos[2]});
+      if (!mount) continue;
+      const mesh = this.scene.addHandle(mount.pos, { ropeMount: mount }, 'dir', 3.2);
+      this._tubeHandles.set(midpoint.tubeId, {mesh, art:'rope', ruhe:mount});
+    }
+  }
+
+  _ropeMountAt(tubeId, point) {
+    const rail = this.model._rail(tubeId);
+    if (!rail || !point) return null;
+    const t = Math.max(0.05, Math.min(0.95, this._alongTube(tubeId, point) / rail.len));
+    return {tube:tubeId, t, pos:rail.p0.map((v, i) => v + rail.dir[i] * rail.len * t)};
+  }
+
+  _ropePointerMount(x, y) {
+    const handle = this.scene.pickHandle(x, y);
+    if (handle?.data?.ropeFirst) return {handle, mount:null};
+    if (handle?.data?.ropeMount) return {handle, mount:handle.data.ropeMount};
+    const pick = this.scene.pickTube(x, y);
+    return {pick, mount:pick && this._ropeMountAt(pick.data.id, pick.point)};
+  }
+
+  _showRopeHover(mount) {
+    const first = this._ropeFirst;
+    const key = first && mount && first.tube !== mount.tube ? `${first.tube}:${first.t}:${mount.tube}:${mount.t}` : '';
+    if (key === this._ropeHoverKey) return;
+    this._ropeHoverKey = key;
+    if (!key) { this.scene.clearInstallationPreview?.(); return; }
+    const probe = this.model.ropeDiagnostics(first, {tube:mount.tube,t:mount.t});
+    this.scene.showInstallationPreview(this.model, probe, probe.valid);
+  }
+
+  _clickRope(e) {
+    if (this.readOnly) return;
+    // 触屏没有悬停，点击时也按同一投影更新定位点。
+    this._trackTubeHandles(e.clientX, e.clientY);
+    const {handle, mount} = this._ropePointerMount(e.clientX, e.clientY);
+    if (handle?.data?.ropeFirst) { this.cancelInstallation(); return; }
+    if (!mount) return;
+    const endpoint = {tube:mount.tube, t:mount.t};
+    if (!this._ropeFirst || this._ropeFirst.tube === endpoint.tube) {
+      this._ropeFirst = endpoint;
+      this.installationPreview = {kind:'fitting',partId:'rope',mountCount:1,supportCount:1,valid:false,reason:t('notice_rope_second'),canFlip:false,assumption:'frame-grid-unmeasured'};
+      this.scene.clearInstallationPreview?.();
+      this.onNotice(t('notice_rope_second'), 'info');
+      this.refresh();
+      return;
+    }
+    const probe = this.model.ropeDiagnostics(this._ropeFirst, endpoint);
+    if (!probe.valid) {
+      this.onNotice(installationReason(this.model, probe), 'warn');
+      this.scene.showInstallationPreview(this.model, probe, false);
+      return;
+    }
+    this._ropeFirst = null;
+    this._previewInstallation(probe, 'rope');
+  }
+
+  _buildGymRingHandles() {
+    this._gymRingHandles = [];
+    this._gymRingHoverKey = null;
+    this.scene.clearInstallationPreview?.();
+    const seen = new Set();
+    for (const tube of this.model.tubes.values()) {
+      if (seen.has(tube.id)) continue;
+      const support = gymRingSupport(this.model,tube.id);
+      if (!support) continue;
+      for (const segment of support.segments) seen.add(segment.id);
+      if (!support.ranges.length) continue;
+      const mount = this.model.accessoryDiagnostics('gym_rings',tube.id);
+      if (!mount.mounts.length) continue;
+      const mesh = this.scene.addHandle([mount.x,mount.y,mount.z],{gymRingMount:mount},'dir',3.2);
+      this._gymRingHandles.push({mesh,ruhe:mount,tubeIds:new Set(support.segments.map(segment=>segment.id))});
+    }
+  }
+
+  _trackGymRingHandles(x,y) {
+    let pick = this.scene.pickTube(x,y);
+    if (!pick) {
+      const node = this.scene.pickForDelete(x,y);
+      if (node?.data.kind === 'node') {
+        const tubeId = this.model.incidentTubeIds(node.data.id).find(id=>this._gymRingHandles.some(entry=>entry.tubeIds.has(id)));
+        if (tubeId) pick={...node,data:{kind:'tube',id:tubeId}};
+      }
+    }
+    for (const entry of this._gymRingHandles) {
+      const onTube = pick?.point && entry.tubeIds.has(pick.data.id);
+      const position = onTube ? [pick.point.x,pick.point.y,pick.point.z] : null;
+      const mount = onTube ? this.model.accessoryDiagnostics('gym_rings',pick.data.id,{position}) : entry.ruhe;
+      if (!mount.mounts.length) {this.scene.setHandleVisible(entry.mesh,false);continue;}
+      this.scene.setHandleVisible(entry.mesh,true);
+      this.scene.moveHandle(entry.mesh,[mount.x,mount.y,mount.z]);
+      entry.mesh.userData.gymRingMount=mount;
+    }
+  }
+
+  _gymRingPointerMount(x,y) {
+    this._trackGymRingHandles(x,y);
+    const handle = this.scene.pickHandle(x,y);
+    if (handle?.data?.gymRingMount) return {handle,mount:handle.data.gymRingMount};
+    const pick = this.scene.pickTube(x,y) || this.scene.pickForDelete(x,y);
+    const entry = pick && this._gymRingHandles.find(item=>item.tubeIds.has(pick.data.id) || pick.data.kind==='node' && [...item.tubeIds].some(id=>{
+      const tube=this.model.tubes.get(id);return tube.a===pick.data.id || tube.b===pick.data.id;
+    }));
+    return {pick,mount:entry?.mesh.userData.gymRingMount};
   }
 
   /** Mitte jedes echten Rohrs -- Vorschlagspunkte fuer Teile, die dort klemmen. */
@@ -2644,7 +3400,8 @@ export class Builder {
     p = [p[0] - u[0] * pa, p[1] - u[1] * pa, p[2] - u[2] * pa];
     const pl = Math.hypot(...p) || 1; p = [p[0] / pl, p[1] / pl, p[2] / pl];
     const card = this._cardinalPerp(p, u);
-    const off = [card[0] * cs, card[1] * cs, card[2] * cs];
+    const off = this.model.alignedClampOff(tubeId,
+      [card[0] * cs, card[1] * cs, card[2] * cs], ax);
     // Der Punkt liegt auf der Achse des UMSCHLOSSENEN Rohrs, nicht zwischen
     // beiden Loechern -- genau wie in den Herstellerdateien (Test.qdf: das Rohr
     // laeuft auf der Y-Achse, die clamp2-Zeile steht auf 0/340/0). Das
@@ -2663,16 +3420,41 @@ export class Builder {
   // Zweite, parallele Tube in die leere Oeffnung setzen. Im Doppelrohrverbinder
   // richtet sie sich nach dem gehaltenen Rohr aus (Regel: model.secondTubeEnds);
   // im Maul einer Lagerkupplung liegt sie mittig.
-  _placeSecondTube(center, dir, bearingNode = null, clampId = null) {
+  _secondTubePlacement(center, dir, clampId = null) {
     const tube = getTube(this.tubeId);
-    if (!tube) return;
+    if (!tube) return null;
     const span = spacingFor(tube.length_cm);
     const { p1, p2 } = clampId
       ? this.model.secondTubeEnds(clampId, span, { step: SNAP_STEP, cs: geometry().connectorSize })
       : this.model.centeredTubeEnds(center, dir, span, SNAP_STEP);
+    const [a, b] = [p1, p2].map(p => ({ x: p[0], y: p[1], z: p[2] }));
+    if (this.model.isBelowGround(a.y) || this.model.isBelowGround(b.y) || this.model.tubeCollision(a, b)) return null;
+    const axis = p2.map((v, i) => (v - p1[i]) / span);
+    for (const [point, incoming] of [[p1, axis], [p2, axis.map(v => -v)]]) {
+      const node = this.model.findNodeNear(...point);
+      if (node && (!this.model.canExtendFrom(node, incoming) || this._armOccupied(node, incoming))) return null;
+    }
+    return { p1, p2, span };
+  }
+
+  _placeSecondTube(center, dir, bearingNode = null, clampId = null) {
+    const tube = getTube(this.tubeId);
+    if (!tube) return;
+    const placement = this._secondTubePlacement(center, dir, clampId);
+    if (!placement) { this.onNotice(t('notice_collision'), 'warn'); return; }
+    const { p1, p2 } = placement;
     this.recordHistory(() => {
       const n1 = this.model.addNode(round2(p1[0]), round2(p1[1]), round2(p1[2]));
       const n2 = this.model.addNode(round2(p2[0]), round2(p2[1]), round2(p2[2]));
+      // 第二根管的插口朝向跟随夹子，先转夹子再加管时也能沿斜面继续搭。
+      const clamp = clampId && this.model.clamps.get(clampId);
+      if (clamp) {
+        const ex = new Vector3(...clamp.dir).normalize();
+        const ey = new Vector3(...clamp.off).normalize();
+        const ez = new Vector3().crossVectors(ex, ey).normalize();
+        const quat = quatFromBasis(ex.toArray(), ey.toArray(), ez.toArray());
+        for (const node of [n1, n2]) if (!node.quat && this.model.degree(node.id) === 0) node.quat = quat.slice();
+      }
       const tb = this.model.addTube(n1.id, n2.id, tube.id, this.colorFor("tube"), tube.length_cm);
       // Rohr im Maul einer Lagerkupplung: Teil und Rohr gehoeren jetzt zusammen.
       if (bearingNode && tb) this.model.noteBearingTube(bearingNode, tb.id);
@@ -2695,6 +3477,9 @@ export class Builder {
   // --- Events -------------------------------------------------------------
   _attach() {
     const el = this.scene.renderer.domElement;
+    this._eventAbort?.abort();
+    this._eventAbort = new AbortController();
+    const listen = (type, handler, options = {}) => el.addEventListener(type, handler, { ...options, signal: this._eventAbort.signal });
     // Ein Zug gehoert genau EINEM Zeiger. Kommt ein zweiter Finger dazu, ist
     // das eine Zwei-Finger-Geste (Zoomen/Schieben) -- die uebernimmt
     // OrbitControls, der eigene Zug wird abgebrochen. Ohne diese Buchhaltung
@@ -2706,20 +3491,21 @@ export class Builder {
     // Sie hat zwei Lippen mit je zwei Schrauben -- die Drehung entscheidet, an
     // welchem Rohrpaar sie verschraubt wird. Das Kontextmenue bleibt sonst aus,
     // wie ueberall auf der Zeichenflaeche.
-    el.addEventListener("contextmenu", (e) => {
+    listen("contextmenu", (e) => {
       e.preventDefault();
       clearTimeout(this._panelFlipTimer);
       this._panelFlipTimer = null;
       if (this.mode !== "panel") return;
-      const pick = this.scene.pickForDelete(e.clientX, e.clientY);
+      const pick = this._pickPanelPlacement(e.clientX, e.clientY);
       if (!pick || pick.data.kind !== "panel") return;
       let ok = false;
       this.recordHistory(() => { ok = this.model.turnPanel(pick.data.id); });
       if (ok) this.onNotice(t("notice_panel_turned"), "info");
+      else this.onNotice(t("notice_panel_turn_unavailable"), "info");
       this.refresh();
     });
     // Doppelklick tut dasselbe -- auf dem Touchpad ist er der bequemere Weg.
-    el.addEventListener("dblclick", (e) => {
+    listen("dblclick", (e) => {
       // Der erste Klick hat einen Seitenwechsel vorgemerkt; der gilt nicht mehr.
       clearTimeout(this._panelFlipTimer);
       this._panelFlipTimer = null;
@@ -2730,15 +3516,16 @@ export class Builder {
         return;
       }
       if (this.mode !== "panel") return;
-      const pick = this.scene.pickForDelete(e.clientX, e.clientY);
+      const pick = this._pickPanelPlacement(e.clientX, e.clientY);
       if (!pick || pick.data.kind !== "panel") return;
       let ok = false;
       this.recordHistory(() => { ok = this.model.turnPanel(pick.data.id); });
       if (ok) this.onNotice(t("notice_panel_turned"), "info");
+      else this.onNotice(t("notice_panel_turn_unavailable"), "info");
       this.refresh();
     });
 
-    el.addEventListener("pointerdown", (e) => {
+    const onPointerDown = (e) => {
       const art = (e.pointerType === "touch" || e.pointerType === "pen") ? "touch" : "mouse";
       if (art !== this.inputType) { this.inputType = art; this.onInputTypeChange(); }
       if (this._pointerId !== null) { this._abortGesture(); return; }
@@ -2752,9 +3539,10 @@ export class Builder {
       this._pointerId = e.pointerId;
       this._down = {
         x: e.clientX, y: e.clientY,
+        button: e.button,
         add: e.ctrlKey || e.metaKey || e.shiftKey,
-        // Rechteck nur mit Strg/Cmd -- ohne bleibt es beim Drehen wie gewohnt.
-        box: this.mode === "select" && (e.ctrlKey || e.metaKey),
+        box: this.mode === "select" && !this._paste &&
+          (e.button === 1 || (e.button === 0 && !e.altKey && (this.boxSelect || e.ctrlKey || e.metaKey))),
       };
       this._boxing = false;
       this._last = { x: e.clientX, y: e.clientY };
@@ -2769,11 +3557,7 @@ export class Builder {
       // Zeiger festhalten: sonst geht das pointerup verloren, wenn man beim
       // Aufziehen ueber den Rand des Canvas hinauszieht.
       if (el.setPointerCapture) { try { el.setPointerCapture(e.pointerId); } catch { /* egal */ } }
-      // Ziehen der Auswahl geht dem Drehen vor: setzt der Zug auf einem BEREITS
-      // ausgewaehlten Teil auf, wird verschoben statt gedreht. Auf allem
-      // anderen bleibt es beim Drehen -- so verliert man die Kamerasteuerung
-      // nicht, nur weil etwas markiert ist.
-      this._drag = null;
+      // 选择状态只影响点击；拖动零件所在位置仍然旋转视角。
       // Haengt eine Kopie am Zeiger, gehoert die linke Taste ihr: gezogen wird
       // gedreht, ein echter Klick setzt ab (siehe _onUp).
       if (this._paste) {
@@ -2781,15 +3565,11 @@ export class Builder {
         return;
       }
       this._clampDrag = null;
-      this._clampSlide = null;
-      this._clampDragKandidat = null;
-      this._clampSlideKandidat = null;
       if (e.button === 0 && this.mode === "clamp") {
         const pick = this.scene.pickClamp(e.clientX, e.clientY)
           || this.scene.pickBuild(e.clientX, e.clientY);
         if (pick && pick.data.kind === "clamp" && this._beginClampDrag(pick.data.id)) return;
       }
-      this._dragKandidat = null;
       this._carouselCandidate = null;
       if (e.button === 0 && !this.readOnly && !this._down.add && !e.altKey
           && (this.mode === 'select' || (this.mode === 'fitting' && this.fittingKind === 'carousel_bearing'))) {
@@ -2800,34 +3580,24 @@ export class Builder {
           return;
         }
       }
-      if (e.button === 0 && !this._down.box && this.mode === "select") {
-        const pick = this._pickSelect(e.clientX, e.clientY);
-        if (pick && pick.data.kind === "clamp") {
-          if (this.selection.has(pick.data.id) && this._beginClampDrag(pick.data.id)) return;
-          this._clampDragKandidat = pick;
-        } else {
-          const slideId = pick && this._slideDriverForPick(pick);
-          if (slideId) {
-            if (this._selectedClampDriver() && this._beginClampSlide(slideId)) return;
-            this._clampSlideKandidat = slideId;
-          } else if (pick && this.selection.size && this._isMoveHandle(pick.data.id)) {
-            if (e.pointerType === "touch") {
-              // Mit dem Finger entscheidet erst die BEWEGUNG, ob geschoben wird --
-              // sonst kaeme das Halten auf einem gewaehlten Teil nie an, weil der
-              // Zug schon begonnen haette.
-              this._dragKandidat = { e, pick };
-            } else if (pick.data.kind === "panel"
-                || (pick.data.kind === "slide" && this.model.slides.get(pick.data.id)?.kind === "curved-slide-domestic80")) {
-              // 面板翻面 / 国产弯滑梯换向：先保留单击，挪过点击范围才开始拖。
-              // 不先转视角，免得开始拖之前画面跟着晃
-              this._dragKandidat = { e, pick };
-              return;
-            } else {
-              this._beginMoveDrag(e, pick);
-              return;
-            }
+      if (e.button === 0 && !this._down.box && !this.readOnly && !this._down.add && !e.altKey && !this._paste
+          && (this.mode === "select" || (this.mode === "fitting" && ["flexi", BOLT_PART, HINGE_PART].includes(this.fittingKind)))) {
+        const hit = this.scene.pickForDelete(e.clientX, e.clientY);
+        if (hit?.data.kind === "node" && hit.data.hinge != null) {
+          const key = hingeKey(hit.data.id, hit.data.hinge);
+          const selected = this.mode === "fitting" || (this.selection.size === 1 && this.selection.get(key) === "hinge");
+          if (selected) {
+            this._beginHingeDrag(hit.data.id, hit.data.hinge, e);
+            return;
           }
         }
+      }
+      if (e.button === 0 && !this._down.box && this.mode === "select" && !this._down.add && !e.altKey) {
+        const pick = this._pickSelect(e.clientX, e.clientY, false);
+        const adjustment = this.clampAdjustment();
+        const driver = adjustment?.mode === 'slide' ? this._flapDriverForPick(pick) : this._rotationDriverForPick(pick);
+        const key = this._rotationPickKey(pick);
+        if (driver && this.selection.has(key) && this._beginClampDrag(driver)) return;
       }
       // ⌥ + Ziehen: quer verschieben -- am Mac-Trackpad die Alternative zur
       // mittleren / rechten Taste.
@@ -2841,25 +3611,45 @@ export class Builder {
       // Touch im Cursor-Modus: das Halten vorbereiten.
       this._clearLongPress();
       if (e.button === 0 && e.pointerType === "touch" && this.mode === "select"
-          && !this._paste && !this._drag && !this._down.box) {
+          && !this._paste && !this._down.box) {
         const px = e.clientX, py = e.clientY;
         this._longPress = setTimeout(() => this._fireLongPress(px, py), LONG_PRESS_MS);
       }
-    });
+    };
+    // OrbitControls 先注册了中键缩放；在捕获阶段接管框选，避免相机同时移动。
+    listen("pointerdown", (e) => {
+      if (e.button !== 1 || this.mode !== "select" || this._paste) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      onPointerDown(e);
+    }, { capture: true });
+    listen("pointerdown", onPointerDown);
     // Zeiger, die nicht zum laufenden Zug gehoeren, bleiben aussen vor.
     const fremd = (e) => this._pointerId !== null && e.pointerId !== this._pointerId;
-    el.addEventListener("pointermove", (e) => { if (!fremd(e)) this._onMove(e); });
-    el.addEventListener("pointerup", (e) => {
+    listen("pointermove", (e) => { if (!fremd(e)) this._onMove(e); });
+    listen('pointerleave', (e) => {
+      this._tubeHoverPointer = null;
+      this.scene.updateTubeCandidateHover?.(null);
+      if (e.pointerType === 'touch') return;
+      this._panelHoverKey = null;
+      this.scene.clearPanelPlacementPreview?.();
+      if (this.mode === 'fitting' && this.fittingKind === 'rope') this._showRopeHover(null);
+      if (this.mode === 'fitting' && this.fittingKind === 'gym_rings') {
+        this._gymRingHoverKey = null;
+        this.scene.clearInstallationPreview?.();
+      }
+    });
+    listen("pointerup", (e) => {
       if (fremd(e)) return;
       this._pointerId = null;
       this._onUp(e);
     });
     // Abgebrochene Zeiger (Geste vom System uebernommen, Finger verlassen den
     // Bildschirm) hinterlassen sonst einen halb offenen Zug.
-    el.addEventListener("pointercancel", (e) => { if (!fremd(e)) this._abortGesture(); });
+    listen("pointercancel", (e) => { if (!fremd(e)) this._abortGesture(); });
     // Mac-Trackpad: Zwei-Finger-Wisch ist ein Wheel-Event, kein Touch.
     // Ohne Zusatztaste bleibt es beim Zoomen; ⇧ oder ⌥ macht daraus Querverschieben.
-    el.addEventListener("wheel", (e) => {
+    listen("wheel", (e) => {
       if (!(e.shiftKey || e.altKey)) return;
       e.preventDefault();
       e.stopPropagation();
@@ -2880,7 +3670,6 @@ export class Builder {
    */
   _fireLongPress(x, y) {
     this._longPress = null;
-    this._dragKandidat = null;      // gehalten statt geschoben
     if (!this._down || this.mode !== "select") return;
     this._longDone = true;            // das folgende pointerup ist kein Klick
     this.scene.endOrbit();            // ab jetzt dreht der Finger nicht mehr
@@ -2923,11 +3712,9 @@ export class Builder {
       this.scene.setCursor('default');
       this.refresh();
     }
+    this._cancelHingeDrag();
     this._clearLongPress();
     this._longDone = false;
-    this._dragKandidat = null;
-    this._clampDragKandidat = null;
-    this._clampSlideKandidat = null;
     this._pointerId = null;
     this.cancelPaste();
     this._down = null;
@@ -2937,23 +3724,9 @@ export class Builder {
       this._boxing = false;
       this.scene.hideSelectBox();
     }
-    if (this._drag) {
-      const d = this._drag;
-      this._drag = null;
-      this.model.loadJSON(JSON.parse(d.before));
-      this.scene.setCursor("default");
-      this.refresh();
-    }
     if (this._clampDrag) {
       const d = this._clampDrag;
       this._clampDrag = null;
-      this.model.loadJSON(JSON.parse(d.before));
-      this.scene.setCursor("default");
-      this.refresh();
-    }
-    if (this._clampSlide) {
-      const d = this._clampSlide;
-      this._clampSlide = null;
       this.model.loadJSON(JSON.parse(d.before));
       this.scene.setCursor("default");
       this.refresh();
@@ -2970,6 +3743,7 @@ export class Builder {
   _onMove(e) {
     // Zeigerstelle merken -- Strg+V setzt die Kopie dorthin.
     this._lastPointer = { x: e.clientX, y: e.clientY };
+    this._tubeHoverPointer = this._lastPointer;
     // Wer den Finger bewegt, will nicht halten -- er dreht die Ansicht.
     if (this._longPress && this._down
         && Math.hypot(e.clientX - this._down.x, e.clientY - this._down.y) > CLICK_TOLERANCE) {
@@ -2993,7 +3767,7 @@ export class Builder {
     }
     // Ansichtswuerfel zuerst: solange der Zeiger darueber steht, gilt nichts
     // anderes -- er liegt als Bedienelement ueber der Szene.
-    if (!(e.buttons & 1)) {
+    if (!(e.buttons & 1) && !this._down?.box) {
       const cell = this.scene.pickViewCube(e.clientX, e.clientY);
       this.scene.setViewCubeHover(cell);
       if (cell) {
@@ -3017,9 +3791,6 @@ export class Builder {
       this._updatePaste(e);
       return;
     }
-    // Cursor-Modus: mit gedrueckter linker Taste ziehen zieht ein Auswahl-
-    // Rechteck auf, statt zu drehen (das liegt dort auf der rechten Taste).
-    // Finger auf einem gewaehlten Teil, jetzt bewegt: der Zug beginnt hier.
     if (this._carouselCandidate && (e.buttons & 1) && this._down
         && Math.hypot(e.clientX - this._down.x, e.clientY - this._down.y) > CLICK_TOLERANCE) {
       const c = this._carouselCandidate;
@@ -3035,40 +3806,8 @@ export class Builder {
       this.refresh();
       return;
     }
-    if (this._dragKandidat && (e.buttons & 1) && this._down
-        && Math.hypot(e.clientX - this._down.x, e.clientY - this._down.y) > CLICK_TOLERANCE) {
-      const kandidat = this._dragKandidat;
-      this._dragKandidat = null;
-      this._clearLongPress();
-      this.scene.endOrbit();
-      this._beginMoveDrag(kandidat.e, kandidat.pick);
-      this._updateMoveDrag(e);
-      return;
-    }
-    if (this._clampDragKandidat && (e.buttons & 1) && this._down
-        && Math.hypot(e.clientX - this._down.x, e.clientY - this._down.y) > CLICK_TOLERANCE) {
-      const pick = this._clampDragKandidat;
-      this._clampDragKandidat = null;
-      this._clearLongPress();
-      this.scene.endOrbit();
-      this._selectClampCohort(pick.data.id, false);
-      if (this._beginClampDrag(pick.data.id)) this._updateClampDrag(e);
-      return;
-    }
-    if (this._clampSlideKandidat && (e.buttons & 1) && this._down
-        && Math.hypot(e.clientX - this._down.x, e.clientY - this._down.y) > CLICK_TOLERANCE) {
-      const id = this._clampSlideKandidat;
-      this._clampSlideKandidat = null;
-      this._clearLongPress();
-      this.scene.endOrbit();
-      this._selectClampCohort(id, false);
-      if (this._beginClampSlide(id)) this._updateClampSlide(e);
-      return;
-    }
-    // Auswahl wird gerade geschoben.
-    if (this._drag && (e.buttons & 1)) { this._updateMoveDrag(e); return; }
+    if (this._hingeDrag && (e.buttons & 1)) { this._updateHingeDrag(e); return; }
     if (this._clampDrag && (e.buttons & 1)) { this._updateClampDrag(e); return; }
-    if (this._clampSlide && (e.buttons & 1)) { this._updateClampSlide(e); return; }
     if (this._panning && (e.buttons & 1)) {
       const dx = e.clientX - this._last.x, dy = e.clientY - this._last.y;
       this._last = { x: e.clientX, y: e.clientY };
@@ -3077,12 +3816,14 @@ export class Builder {
     }
     // Linke Taste gedrueckt und kein Rechteck: um den Zeigerpunkt drehen.
     if (this._down && !this._down.box && (e.buttons & 1) && this.scene.orbiting) {
+      this._panelHoverKey = null;
+      this.scene.clearPanelPlacementPreview?.();
       const dx = e.clientX - this._last.x, dy = e.clientY - this._last.y;
       this._last = { x: e.clientX, y: e.clientY };
       if (dx || dy) this.scene.orbitBy(dx, dy);
       return;
     }
-    if (this._down && this._down.box && (e.buttons & 1)) {
+    if (this._down && this._down.box && (e.buttons & (this._down.button === 1 ? 4 : 1))) {
       if (this._boxing ||
           Math.hypot(e.clientX - this._down.x, e.clientY - this._down.y) > CLICK_TOLERANCE) {
         this._boxing = true;
@@ -3103,9 +3844,13 @@ export class Builder {
     let obj = null;
     let arrowFocus;
     if (this.mode === "select" || this.mode === "delete") {
-      // Cursor- und Loesch-Modus: alles Platzierte ist treffbar, Rutschen
-      // eingeschlossen. Im Loesch-Modus wird der Klick zum Loeschen.
-      obj = this.scene.pickForDelete(x, y)?.object || null;
+      if (this.mode === "select" && this.boxSelect) {
+        this.scene.setHover(null);
+        this.scene.setHoverPart(null);
+        this.scene.setCursor("crosshair");
+        return;
+      }
+      // 选择和删除的命中在下方统一处理，避免同一次悬停重复拾取全模型。
     } else if (this.mode === "add") {
       if (this.placeConnectorId) {
         const h = this.scene.pickHandle(x, y);
@@ -3137,8 +3882,16 @@ export class Builder {
       // Hand nur, wo die gewaehlte Platte auch hinkann: auf einem Tragrohr mit
       // passendem Gegenrohr, danach auf dem gewaehlten Rohr (Abwahl) und den
       // hervorgehobenen Gegenrohren. Eine liegende Platte laesst sich umlegen.
-      const p = (this.panelRail && this.highlight && this.scene.pickAmong(x, y, this.highlight))
-        || this.scene.pickForDelete(x, y);
+      const mount = !this.panelRail ? this.scene.pickHandle(x, y) : null;
+      const p = mount?.data?.panelAccessoryMount ? null : this._pickPanelPlacement(x, y);
+      if (mount?.data?.panelAccessoryMount) {
+        const key = `mount:${this.panelId}:${mount.data.panelAccessoryMount.pos.join(',')}`;
+        if (key !== this._panelHoverKey && !this._installationPart) {
+          this._panelHoverKey = key;
+          this.scene.showPanelPlacementPreview?.(this.model, mount.data.panelAccessoryMount, null);
+        }
+        obj = mount.object;
+      } else this._showPanelPlacementHover(p);
       const kind = p && p.data.kind;
       if (kind === "panel") obj = this.panelRail ? null : p.object;
       else if (kind === "tube") obj = this._railUsable(p.data.id) ? p.object : null;
@@ -3148,6 +3901,22 @@ export class Builder {
         const pick = this.scene.pickForDelete(x, y);
         if (pick?.data.kind === "slide" && this.model.slides.get(pick.data.id)?.kind === "curved-slide-domestic80") obj = pick.object;
       }
+    } else if (this.mode === 'fitting' && this.fittingKind === 'gym_rings') {
+      const {handle:h,pick,mount} = this._gymRingPointerMount(x,y);
+      const key=mount ? `${mount.tube}:${mount.x}:${mount.y}:${mount.z}` : '';
+      if (key!==this._gymRingHoverKey) {
+        this._gymRingHoverKey=key;
+        if (mount) this.scene.showInstallationPreview(this.model,mount,mount.valid);
+        else this.scene.clearInstallationPreview?.();
+      }
+      obj=h?.object || (mount ? pick?.object : null);
+    } else if (this.mode === 'fitting' && this.fittingKind === 'bearing-clamp' && this._bearingController().selected) {
+      obj=this.bearingConnection.hover(e);
+    } else if (this.mode === 'fitting' && this.fittingKind === 'rope') {
+      this._trackTubeHandles(x, y);
+      const {handle:h, pick, mount} = this._ropePointerMount(x, y);
+      this._showRopeHover(mount);
+      obj = h?.object || (mount ? pick?.object : null);
     } else if (this.mode === "fitting" && POOL_KINDS.has(this.fittingKind)) {
       obj = handle();
     } else if (this.mode === "fitting" && RAIL_FITTINGS.has(this.fittingKind)) {
@@ -3221,31 +3990,31 @@ export class Builder {
     } else if (this.mode === "reinforce") {
       // Sucht das erste Rohr noch seinen Partner, zeigt die Hand nur auf den
       // hervorgehobenen Gegenstuecken.
+      const connector = this.reinforcementPartId === ALUMINIUM_CONNECTOR;
+      const h = connector ? this.scene.pickHandle(x, y) : null;
       const p = (this.reinforceRail && this.highlight && this.scene.pickAmong(x, y, this.highlight))
-        || build(["tube"]);
-      obj = p && p.data.kind === "tube" && this._reinforceUsable(p.data.id) ? p.object : null;
+        || build(connector ? ['tube', 'node', 'fitting'] : ['tube']);
+      const removable = connector && p?.data.kind === 'fitting' && this.model.fittings.get(p.data.id)?.kind === 'alu-connector2';
+      if (h?.data.aluminiumConnectorMount) obj = h.object;
+      else obj = p && (removable || this._reinforceUsable(p.data.id)) ? p.object : null;
     } else if (this.mode === "assembly") {
       // Nur ansehen -- aber die Hand zeigt, dass sich ein Teil nachschlagen laesst.
       obj = this.scene.pickForDelete(x, y)?.object || null;
     }
     if (this.mode === "select" || this.mode === "delete") {
       const raw = this.mode === "select"
-        ? this._pickSelect(x, y)
+        ? this._pickSelect(x, y, false)
         : this.scene.pickForDelete(x, y);
-      const p = this.mode === "delete" ? this._resolveDeletePick(raw, x, y) : raw;
+      const p = raw;
       this.scene.setHover(null);
       this.scene.setHoverPart(p, this.mode, x, y, this._deleteHoverExtras(p));
-      if (this.mode === "select" && p) {
-        if (p.data.kind === "clamp" && this.selection.has(p.data.id)) this.scene.setCursor("grab");
-        else if (this._slideDriverForPick(p)
-            && (this._selectedClampDriver() || this.selection.has(p.data.id))) {
-          this.scene.setCursor("move");
-        } else if (this.selection.size && this._isMoveHandle(p.data.id)) this.scene.setCursor("move");
-      }
+      if (this.mode === "select" && p && this.selection.has(this._rotationPickKey(p)) && this._rotationDriverForPick(p))
+        this.scene.setCursor("grab");
       return;
     }
     this.scene.setHoverPart(null);
     this.scene.setHover(obj, this.mode === "add" && !this.placeConnectorId ? arrowFocus : undefined);
+    this.scene.updateTubeCandidateHover?.(this._tubeHoverPointer);
   }
 
   _onUp(e) {
@@ -3262,13 +4031,11 @@ export class Builder {
     if (this._panning) {
       this._panning = false;
       this._down = null;
-      this._dragKandidat = null;
       this.scene.endPan();
       return;
     }
     const d = this._down;
     this._down = null;
-    this._dragKandidat = null;
     this._clearLongPress();
     const gehalten = this._longDone;
     this._longDone = false;
@@ -3281,8 +4048,6 @@ export class Builder {
       }
       return;
     }
-    // Verschieben abschliessen: hier faellt der eine Undo-Schritt an und hier
-    // werden deckungsgleiche Kupplungen zusammengelegt.
     this._carouselCandidate = null;
     if (this._carouselDrag) {
       const gesture = this._carouselDrag;
@@ -3293,11 +4058,8 @@ export class Builder {
       this.refresh();
       return;
     }
-    if (this._drag) { this._endMoveDrag(); return; }
+    if (this._hingeDrag) { this._endHingeDrag(e); return; }
     if (this._clampDrag) { this._endClampDrag(e); return; }
-    if (this._clampSlide) { this._endClampSlide(); return; }
-    this._clampDragKandidat = null;
-    this._clampSlideKandidat = null;
     if (!d) { this.scene.endOrbit(); return; }
     // endOrbit() fuehrt den Drehpunkt nach und ruft controls.update() -- das
     // kann die Kamera minimal versetzen. Deshalb ERST den Klick auswerten,
@@ -3306,10 +4068,16 @@ export class Builder {
     if (this._boxing) {
       this._boxing = false;
       this.scene.hideSelectBox();
-      // Das Rechteck ergaenzt immer: mehrere Zuege lassen sich so zu einer
-      // Auswahl zusammensetzen. Aufgehoben wird sie per Klick ins Leere.
       const found = this.scene.pickInRect(d.x, d.y, e.clientX, e.clientY);
-      for (const [id, kind] of found) this.selection.set(id, kind);
+      if (!d.add) this.selection.clear();
+      this._boxSelected ||= new Map();
+      for (const [id, kind] of found) {
+        this.selection.set(id, kind);
+        this._boxSelected.set(id, kind);
+      }
+      this._profilAuswahl = null;
+      this.highlight = null;
+      this.onHighlightCleared();
       finish();
       this.refresh();
       return;
@@ -3370,19 +4138,34 @@ export class Builder {
     this.refresh();
   }
 
-  /**
-   * Klick auf ein Rohr schiebt ein Holz-Profil ein oder zieht es heraus. Zu
-   * kaufen gibt es nur die 80-cm-Laenge: sie fuellt entweder ein 75er-Rohr oder
-   * zwei 35er in einer Linie. Beim 35er wartet der zweite Klick auf das
-   * Partnerrohr -- die moeglichen sind so lange hervorgehoben (wie bei der
-   * Platte).
-   */
+  /** 选择规格后沿连续直管安装，已有铝管可再次点击取出。 */
   _clickReinforce(e) {
-    // Ist das erste Rohr gewaehlt, zaehlen zuerst die hervorgehobenen Partner --
-    // auch wenn ein anderes Teil davor liegt.
+    if (this.readOnly) return;
     const pick = (this.reinforceRail && this.highlight
       && this.scene.pickAmong(e.clientX, e.clientY, this.highlight))
       || this.scene.pickBuild(e.clientX, e.clientY);
+    if (this.reinforcementPartId === ALUMINIUM_CONNECTOR) {
+      const handle = this.scene.pickHandle(e.clientX, e.clientY);
+      if (handle?.data.aluminiumConnectorMount) {
+        this.recordHistory(() => this.model.addAluminiumConnector(handle.data.aluminiumConnectorMount));
+        this.onNotice(t('notice_alu_connector_added')); this.refresh(); return;
+      }
+      const fitting = pick?.data.kind === 'fitting' && this.model.fittings.get(pick.data.id);
+      if (fitting?.kind === 'alu-connector2') {
+        this.recordHistory(() => this.model.removeFitting(fitting.id));
+        this.onNotice(t('notice_alu_connector_removed'));
+        this.refresh(); return;
+      }
+      const mounts = this.model.aluminiumConnectorMounts().filter(mount =>
+        pick && aluminiumConnectorTargets(this.model, mount).includes(pick.data.id));
+      if (!mounts.length) { this.onNotice(t('notice_alu_connector_no_mount'), 'warn'); return; }
+      mounts.sort((a, b) => {
+        const distance = mount => { const node = this.model.nodes.get(mount.nodeId); return Math.hypot(node.x - pick.point.x, node.y - pick.point.y, node.z - pick.point.z); };
+        return distance(a) - distance(b);
+      });
+      this.recordHistory(() => this.model.addAluminiumConnector(mounts[0]));
+      this.onNotice(t('notice_alu_connector_added')); this.refresh(); return;
+    }
     if (!pick || pick.data.kind !== "tube") { this._clearReinforceRail(); return; }
     const tube = this.model.tubes.get(pick.data.id);
     if (!tube) { this._clearReinforceRail(); return; }
@@ -3391,10 +4174,10 @@ export class Builder {
     if (this.reinforceRail) {
       const erste = this.reinforceRail;
       if (tube.id === erste) { this._clearReinforceRail(); return; }
-      const partner = this.model.reinforcePartners(erste).some((o) => o.id === tube.id);
-      if (!partner) { this.onNotice(t("notice_reinforce_no_fit"), "warn"); return; }
-      this.recordHistory(() => { this.model.addReinforcement([erste, tube.id]); });
-      this._clearReinforceRail();
+      const path = this.model.reinforcementPaths(erste, this.reinforcementPartId).find(path => path.tubeIds.includes(tube.id));
+      if (!path) { this.onNotice(t("notice_reinforce_no_fit"), "warn"); return; }
+      this.recordHistory(() => { this.model.addReinforcement(path.tubeIds, this.reinforcementPartId); });
+      this._clearReinforceRail({ refresh: false });
       this.onNotice(t("notice_reinforce_added"));
       this.refresh();
       return;
@@ -3407,20 +4190,18 @@ export class Builder {
       this.refresh();
       return;
     }
-    // Ein 75er nimmt das Profil allein auf.
-    if (this.model.takesReinforcementAlone(tube)) {
-      this.recordHistory(() => { this.model.addReinforcement([tube.id]); });
+    const paths = this.model.reinforcementPaths(tube.id, this.reinforcementPartId);
+    const alone = paths.find(path => path.tubeIds.length === 1);
+    if (alone) {
+      this.recordHistory(() => { this.model.addReinforcement(alone.tubeIds, this.reinforcementPartId); });
       this.onNotice(t("notice_reinforce_added"));
       this.refresh();
       return;
     }
-    // Ein 35er braucht ein zweites in derselben Linie.
-    if (this.model.takesReinforcementPaired(tube)) {
-      const partner = this.model.reinforcePartners(tube.id);
-      if (!partner.length) { this.onNotice(t("notice_reinforce_no_partner"), "warn"); return; }
+    if (paths.length) {
       this.reinforceRail = tube.id;
-      this.highlight = new Set(partner.map((o) => o.id));
-      this.onNotice(t("notice_reinforce_pick_second", partner.length), "info");
+      this.highlight = new Set(paths.flatMap(path => path.tubeIds).filter(id => id !== tube.id));
+      this.onNotice(t("notice_reinforce_pick_second", this.highlight.size), "info");
       this.refresh();
       return;
     }
@@ -3429,31 +4210,27 @@ export class Builder {
 
   /** Laesst sich an diesem Rohr gerade ein Profil setzen oder herausziehen? */
   _reinforceUsable(id) {
+    if (this.reinforcementPartId === ALUMINIUM_CONNECTOR) return this.model.aluminiumConnectorMounts().some(mount => aluminiumConnectorTargets(this.model, mount).includes(id));
     const tube = this.model.tubes.get(id);
     if (!tube || tube.arm || tube.link || tube.bow) return false;
     if (this.reinforceRail) return this.highlight ? this.highlight.has(id) : false;
     if (tube.reinforced) return true;
-    if (this.model.takesReinforcementAlone(tube)) return true;
-    return this.model.takesReinforcementPaired(tube)
-      && this.model.reinforcePartners(id).length > 0;
+    return this.model.reinforcementPaths(id, this.reinforcementPartId).length > 0;
   }
 
-  _clearReinforceRail() {
+  _clearReinforceRail({ refresh = true } = {}) {
     if (!this.reinforceRail && !this.highlight) return;
     this.reinforceRail = null;
     this.highlight = null;
-    this.refresh();
+    if (refresh) this.refresh();
   }
 
   // Klick auf ein Rohr setzt einen Doppelrohrverbinder oder eine Rohrklammer an
   // den Treffpunkt; ein Klick auf eine bestehende dreht sie weiter. Ziehen um
   // das Rohr stellt einen beliebigen Winkel ein. Das Rohr in ihre freie
   // Oeffnung kommt im BAU-Modus dazu, nicht hier.
-  // Im Auswahl-Modus gilt dasselbe Drehen, sobald die Klemme gewaehlt ist;
-  // Schwestern mit zweiter Tube kommen in die Auswahl und drehen mit.
-  // Die zweite Tube laesst sich entlang der ersten schieben und snappt an sie.
 
-  _pickSelect(x, y) {
+  _pickSelect(x, y, cycle = true) {
     const clampHit = this.scene.pickClamp(x, y);
     const hits = this.scene.pickAllForDelete ? this.scene.pickAllForDelete(x, y) : [];
     let allHit = hits.length ? hits[0] : this.scene.pickForDelete(x, y);
@@ -3461,7 +4238,8 @@ export class Builder {
     // （见 _clickSelectRaw），不往里选。快的两下还是选整块，不冲突。
     const last = this._selectClick;
     const cur = this.selection.size === 1 ? [...this.selection][0] : null;
-    if (hits.length > 1 && cur && cur[1] !== "panel" && this.model.slides.get(cur[0])?.kind !== "curved-slide-domestic80" && last
+    // 悬停和拖动起点保持前方命中；松手确认单击后才穿透到后面的零件。
+    if (cycle && hits.length > 1 && cur && cur[1] !== "panel" && !this._clickRotationKind(cur[0], cur[1]) && this.model.slides.get(cur[0])?.kind !== "curved-slide-domestic80" && last
         && Math.hypot(x - last.x, y - last.y) < CLICK_TOLERANCE
         && performance.now() - last.t >= SELECT_BLOCK_MS) {
       const idx = hits.findIndex((h) => h.data && h.data.id === cur[0]);
@@ -3499,55 +4277,123 @@ export class Builder {
     this.refresh();
   }
 
-  _selectedClampDriver() {
-    let driver = null;
-    for (const [id, kind] of this.selection) {
-      if (kind === "clamp") { driver = id; break; }
-    }
-    if (!driver) {
-      for (const [id, kind] of this.selection) {
-        if (kind !== "tube") continue;
-        for (const c of this.model.clamps.values()) {
-          const t = this.model._clampSecondTube(c);
-          if (t && t.id === id) { driver = c.id; break; }
-        }
-        if (driver) break;
-      }
-    }
-    if (!driver) return null;
-    const c = this.model.clamps.get(driver);
-    if (!c) return null;
-    const flap = this.model._clampFlap(c);
-    const panelOk = (id, kind) => {
-      if (kind !== "panel" && kind !== "textile") return false;
+  _clampMovesPart(c, flap, id, kind) {
+    if (kind === "clamp") return flap.clampIds.has(id);
+    if (kind === "tube") return flap.second.has(id);
+    if (kind === "panel" || kind === "textile") {
       const p = (kind === "panel" ? this.model.panels : this.model.textiles).get(id);
       return !!(p && (flap.second.has(p.a) || flap.second.has(p.b)));
-    };
-    for (const [id, kind] of this.selection) {
-      if (kind === "clamp" && flap.clampIds.has(id)) continue;
-      if (kind === "tube" && flap.second.has(id)) continue;
-      if (panelOk(id, kind)) continue;
-      return null;
     }
-    return driver;
+    // 与 rotateClamp 共用活动节点范围，固定的第一根管和其端点不进入。
+    if (!flap.nodes) flap.nodes = this.model._flapNodeAxes(c, flap);
+    if (kind === "node") return flap.nodes.has(id);
+    let part;
+    if (kind === "fitting") part = this.model.fittings.get(id);
+    if (kind === "slide") part = this.model.slides.get(id);
+    return !!(part && this.model.clampPartAxis(flap, flap.nodes, part));
+  }
+
+  _selectedClampDriver() {
+    if (!this.selection.size) return null;
+    const candidates = [...this.model.clamps.values()].filter(c => c.dir && c.off);
+    // 有嵌套夹子时，先使用选中的夹子或直接夹着所选管的关节。
+    candidates.sort((a, b) => {
+      const priority = c => {
+        if (this.selection.has(c.id)) return 0;
+        if (this.selection.has(this.model._clampSecondTube(c)?.id)) return 1;
+        return 2;
+      };
+      return priority(a) - priority(b);
+    });
+    for (const c of candidates) {
+      const flap = this.model._clampFlap(c);
+      if ([...this.selection].every(([id, kind]) => this._clampMovesPart(c, flap, id, kind))) return c.id;
+    }
+    return null;
   }
 
   _flapDriverForPick(pick) {
     if (!pick || !this.selection.size) return null;
-    const kind = pick.data.kind;
-    const id = pick.data.id;
-    for (const [cid, k] of this.selection) {
-      if (k !== "clamp") continue;
-      const c = this.model.clamps.get(cid);
-      if (!c) continue;
-      const flap = this.model._clampFlap(c);
-      if (kind === "tube" && flap.second.has(id)) return cid;
-      if (kind === "panel" || kind === "textile") {
-        const p = (kind === "panel" ? this.model.panels : this.model.textiles).get(id);
-        if (p && (flap.second.has(p.a) || flap.second.has(p.b))) return cid;
+    const driver = this._selectedClampDriver();
+    const c = driver && this.model.clamps.get(driver);
+    return c && this._clampMovesPart(c, this.model._clampFlap(c), pick.data.id, pick.data.kind) ? driver : null;
+  }
+
+  clampAdjustment() {
+    if (this.readOnly || this.mode !== 'select' || this.boxSelect || this._paste) return null;
+    const id = this._selectedClampDriver();
+    const c = id && this.model.clamps.get(id);
+    if (!c || !this.model._clampSecondTube(c)) return null;
+    return { id, mode: this._clampAdjustment?.id === id ? this._clampAdjustment.mode : 'rotate' };
+  }
+
+  setClampAdjustmentMode(mode) {
+    const target = this.clampAdjustment();
+    if (!target || !['rotate', 'slide'].includes(mode) || this.busy()) return false;
+    this._cancelSelectFlip();
+    this._clampAdjustment = { id: target.id, mode };
+    this.refresh();
+    return true;
+  }
+
+  slideSelectedClampBy(cm) {
+    const target = this.clampAdjustment();
+    if (!target || this.busy() || !Number.isFinite(cm)) return false;
+    const before = JSON.stringify(this.model.toJSON());
+    const ok = this.model.slideClampFlap(target.id, cm);
+    if (ok) this._afterMove(before, { merged: 0, detached: 0 });
+    if (!ok) this.onNotice(t('notice_clamp_slide_limit'), 'warn');
+    return ok;
+  }
+
+  _rotationPickKey(pick) {
+    return Number.isInteger(pick?.data.hinge) ? hingeKey(pick.data.id, pick.data.hinge) : pick?.data.id;
+  }
+
+  _nodeJointRef(id) {
+    const n = this.model.nodes.get(id) || [...this.model.nodes.values()].find(n => n.bearingOn === id);
+    if (n?.clampOn && n.stub) return { kind: 'tubeClamp', nodeId: n.id };
+    if (n && isHolePart(n.part) && n.partQuat) return { kind: 'hole', nodeId: n.id };
+    if (n?.bearingOn && !n.clampOn) return { kind: 'bearing', nodeId: n.id };
+    return null;
+  }
+
+  _rotationDriverForPick(pick) {
+    if (!pick || !this.selection.size) return null;
+    const refs = [];
+    for (const n of this.model.nodes.values()) {
+      const ref = this._nodeJointRef(n.id);
+      if (ref) refs.push(ref);
+      for (let index = 0; index < (n.hinges || []).length; index++) refs.push({ kind: 'hinge', nodeId: n.id, index });
+    }
+    const keyOf = ref => ref.kind === 'hinge' ? hingeKey(ref.nodeId, ref.index) : ref.nodeId;
+    const candidates = [];
+    for (const ref of refs) {
+      const j = this.model.rotationJoint(ref, geometry().connectorSize);
+      const kind = Number.isInteger(pick.data.hinge) ? 'hinge' : pick.data.kind;
+      if (j && [...this.selection].every(([id, kind]) => this.model.jointMovesPart(j, id, kind))
+          && this.model.jointMovesPart(j, this._rotationPickKey(pick), kind)) {
+        const selectedJoint = this.selection.has(keyOf(ref)) || this.selection.has(this.model.nodes.get(ref.nodeId)?.bearingOn);
+        const directTube = [...this.selection].some(([id, kind]) => {
+          const t = kind === 'tube' && this.model.tubes.get(id);
+          return t && (t.a === ref.nodeId || t.b === ref.nodeId);
+        });
+        let rank = 2;
+        if (selectedJoint) rank = 0;
+        else if (directTube) rank = 1;
+        candidates.push({ driver: ref, rank, size: j.nodes.size });
       }
     }
-    return null;
+    const clampId = this._flapDriverForPick(pick);
+    if (clampId) {
+      const c = this.model.clamps.get(clampId), flap = this.model._clampFlap(c);
+      let rank = 2;
+      if (this.selection.has(clampId)) rank = 0;
+      else if (this.selection.has(this.model._clampSecondTube(c)?.id)) rank = 1;
+      candidates.push({ driver: clampId, rank, size: flap.second.size * 2 });
+    }
+    candidates.sort((a, b) => a.rank - b.rank || a.size - b.size);
+    return candidates[0]?.driver || null;
   }
 
   /** Zweite Tube / Klappen-Platte: die Klemme, entlang deren Rohr sich das schiebt. */
@@ -3574,20 +4420,162 @@ export class Builder {
     return null;
   }
 
+  _hingePointerAngle(e, origin, axis, node, minRadius = 0.4) {
+    const hit = this.scene.pointOnPlane(e.clientX, e.clientY, origin, axis);
+    if (!hit) return null;
+    const radial = [hit.x - origin[0], hit.y - origin[1], hit.z - origin[2]];
+    const zero = hingeDir(node, 0), quarter = hingeDir(node, 90);
+    const x = radial.reduce((sum, v, i) => sum + v * zero[i], 0);
+    const y = radial.reduce((sum, v, i) => sum + v * quarter[i], 0);
+    if (Math.hypot(x, y) < minRadius) return null;
+    return Math.atan2(y, x) * 180 / Math.PI;
+  }
+
+  _beginHingeDrag(nodeId, index, e) {
+    const node = this.model.nodes.get(nodeId);
+    if (this.readOnly || !isBoltPart(node?.part) || !node.hinges
+        || !Number.isInteger(index) || index < 0 || index >= node.hinges.length) return false;
+    const origin = [node.x, node.y, node.z], axis = boltAxis(node);
+    const pointer = this._hingePointerAngle(e, origin, axis, node, geometry().connectorSize / 2);
+    // 侧面视角或点击轴心附近时沿屏幕切线拖动，避免很小的位移导致角度跳变。
+    let tangent = null;
+    if (pointer === null) {
+      const dir = hingeDir(node, node.hinges[index]);
+      const turn = [dir[1] * axis[2] - dir[2] * axis[1], dir[2] * axis[0] - dir[0] * axis[2], dir[0] * axis[1] - dir[1] * axis[0]];
+      const tip = this.scene.screenPoint(origin.map((v, i) => v + dir[i] * geometry().connectorSize));
+      const next = this.scene.screenPoint(origin.map((v, i) => v + (dir[i] + turn[i]) * geometry().connectorSize));
+      tangent = next.map((v, i) => v - tip[i]);
+      if (Math.hypot(...tangent) < 3) tangent = [60, 0];
+    }
+    this._cancelSelectFlip();
+    this.scene.endOrbit();
+    this._hingeDrag = { nodeId, index, before: JSON.stringify(this.model.toJSON()),
+      origin, axis, start: node.hinges[index], pointer, tangent, x: e.clientX, y: e.clientY, delta: 0, moved: false,
+      lastValid: JSON.stringify(this.model.toJSON()) };
+    return true;
+  }
+
+  _updateHingeDrag(e) {
+    const drag = this._hingeDrag;
+    if (!drag) return;
+    if (this.readOnly) { this._cancelHingeDrag(); return; }
+    if (!drag.moved && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) <= CLICK_TOLERANCE) return;
+    drag.moved = true;
+    this._clearLongPress();
+    this.scene.setCursor("grabbing");
+    let node = this.model.nodes.get(drag.nodeId);
+    if (!node?.hinges || drag.index >= node.hinges.length) { this._cancelHingeDrag(); return; }
+    if (drag.tangent) {
+      const [x, y] = drag.tangent;
+      drag.delta += ((e.clientX - drag.x) * x + (e.clientY - drag.y) * y) / (x * x + y * y) * 180 / Math.PI;
+      drag.x = e.clientX; drag.y = e.clientY;
+    } else {
+      const pointer = this._hingePointerAngle(e, drag.origin, drag.axis, node);
+      if (pointer === null) return;
+      drag.delta += ((pointer - drag.pointer + 540) % 360) - 180;
+      drag.pointer = pointer;
+    }
+    this.model.loadJSON(JSON.parse(drag.before));
+    const ok = this.model.rotateHingeBy(drag.nodeId, drag.index, drag.delta);
+    if (ok) {
+      drag.lastValid = JSON.stringify(this.model.toJSON());
+      drag.failure = null;
+    } else {
+      const reason = this.model.hingeRotationFailure || "connected";
+      this.model.loadJSON(JSON.parse(drag.lastValid));
+      if (drag.failure !== reason) this.onNotice(t("notice_flexi_rotate_" + reason), "warn");
+      drag.failure = reason;
+    }
+    node = this.model.nodes.get(drag.nodeId);
+    const requested = ((drag.start + drag.delta) % 360 + 360) % 360;
+    const actual = node.hinges[drag.index];
+    if (Math.abs(((actual - requested + 540) % 360) - 180) > 1e-3) {
+      let delta = ((actual - drag.start) % 360 + 360) % 360;
+      if (delta > 180 || (delta === 180 && drag.delta < 0)) delta -= 360;
+      drag.delta = delta;
+    }
+    this.refresh();
+  }
+
+  _endHingeDrag(e) {
+    if (this._hingeDrag?.moved) this._updateHingeDrag(e);
+    const drag = this._hingeDrag;
+    this._hingeDrag = null;
+    this.scene.setCursor("default");
+    this.scene.endOrbit();
+    if (!drag) return;
+    if (!drag.moved) {
+      if (this.mode === "select") this._clickSelectRaw(e);
+      else this._clickFlexi(e);
+      return;
+    }
+    this._selectClick = null;
+    this._pushHistory(drag.before);
+    this.refresh();
+  }
+
+  _cancelHingeDrag() {
+    const drag = this._hingeDrag;
+    if (!drag) return false;
+    this._hingeDrag = null;
+    this.model.loadJSON(JSON.parse(drag.before));
+    this.scene.setCursor("default");
+    this.scene.endOrbit();
+    this.refresh();
+    return true;
+  }
+
   _beginClampDrag(id) {
     if (this.readOnly) return false;
-    const c = this.model.clamps.get(id);
-    if (!c || !c.dir || !c.off) return false;
+    const adjustment = this.clampAdjustment();
+    if (adjustment?.id === id && adjustment.mode === 'slide') return this._beginClampSlide(id);
+    const joint = typeof id === 'object' ? this.model.rotationJoint(id, geometry().connectorSize) : null;
+    const c = joint || this.model.clamps.get(id);
+    if (!c || !(joint || c.dir && c.off)) return false;
     this._clampDrag = {
       id,
+      joint: joint ? id : null,
       before: JSON.stringify(this.model.toJSON()),
-      origin: [c.x, c.y, c.z],
-      axis: c.dir.slice(),
-      startOff: c.off.slice(),
+      origin: joint ? joint.origin.slice() : [c.x, c.y, c.z],
+      axis: (joint ? joint.axis : c.dir).slice(),
+      startOff: (joint ? joint.dir : c.off).slice(),
+      angle: 0,
+      appliedAngle: 0,
       moved: false,
     };
+    const d = this._clampDrag;
+    if (this._down) {
+      d.pointer = { ...this._down };
+      d.pointerDir = this._clampPointerDir(this._down.x, this._down.y, d);
+      if (!d.pointerDir) {
+        d.screenTangent = this._clampScreenTangent(d);
+      }
+    }
     this.scene.setCursor("grabbing");
     return true;
+  }
+
+  _clampPointerDir(x, y, d) {
+    const hit = this.scene.pointOnPlane(x, y, d.origin, d.axis);
+    if (!hit) return null;
+    const u = new Vector3(...d.axis).normalize();
+    const q = new Vector3(hit.x, hit.y, hit.z).sub(new Vector3(...d.origin));
+    q.addScaledVector(u, -q.dot(u));
+    return q.length() >= 0.4 ? q.normalize() : null;
+  }
+
+  _clampScreenTangent(d) {
+    const axis = new Vector3(...d.axis).normalize();
+    const radial = new Vector3(...d.startOff).normalize().applyAxisAngle(axis, d.appliedAngle).multiplyScalar(10);
+    const origin = new Vector3(...d.origin);
+    const points = this.scene.projectWorld([-0.005, 0.005].map(angle =>
+      radial.clone().applyAxisAngle(axis, angle).add(origin).toArray()));
+    if (points.some(point => !point)) return null;
+    const rect = this.scene.renderer.domElement.getBoundingClientRect();
+    const dx = (points[1].u - points[0].u) * rect.width;
+    const dy = (points[1].v - points[0].v) * rect.height;
+    const length = Math.hypot(dx, dy);
+    return length > 1e-3 ? [dx / length, dy / length] : null;
   }
 
   _snapDirAroundAxis(dir, u, stepRad) {
@@ -3610,26 +4598,48 @@ export class Builder {
   _updateClampDrag(e) {
     const d = this._clampDrag;
     if (!d || !this._down) return;
+    if (d.motion === 'slide') { this._updateClampSlide(e); return; }
     if (!d.moved && Math.hypot(e.clientX - this._down.x, e.clientY - this._down.y) <= CLICK_TOLERANCE) return;
     d.moved = true;
-    const hit = this.scene.pointOnPlane(e.clientX, e.clientY, d.origin, d.axis);
-    if (!hit) return;
     const u = d.axis;
     const ul = Math.hypot(u[0], u[1], u[2]) || 1;
     const ux = u[0] / ul, uy = u[1] / ul, uz = u[2] / ul;
-    let q = [hit.x - d.origin[0], hit.y - d.origin[1], hit.z - d.origin[2]];
-    const along = q[0] * ux + q[1] * uy + q[2] * uz;
-    q = [q[0] - ux * along, q[1] - uy * along, q[2] - uz * along];
-    const ql = Math.hypot(q[0], q[1], q[2]);
-    if (ql < 0.4) return;
-    q = [q[0] / ql, q[1] / ql, q[2] / ql];
+    const axis = new Vector3(ux, uy, uz);
+    if (d.pointerDir) {
+      const pointer = this._clampPointerDir(e.clientX, e.clientY, d);
+      if (!pointer) return;
+      d.angle += Math.atan2(axis.dot(new Vector3().crossVectors(d.pointerDir, pointer)), d.pointerDir.dot(pointer));
+      d.pointerDir = pointer;
+    } else {
+      // 侧视时用活动侧的实际旋转切线确定方向，轴向或视角改变也保持跟手。
+      const dx = e.clientX - d.pointer.x, dy = e.clientY - d.pointer.y;
+      d.pointer = { x: e.clientX, y: e.clientY };
+      if (!d.screenTangent) return;
+      d.angle += (dx * d.screenTangent[0] + dy * d.screenTangent[1]) * Math.PI / 180;
+    }
+    let q = new Vector3(...d.startOff).normalize().applyAxisAngle(axis, d.angle).toArray();
     if (e.shiftKey) q = this._snapDirAroundAxis(q, [ux, uy, uz], Math.PI / 12);
     this.model.loadJSON(JSON.parse(d.before));
-    const ok = this.model.setClampOffDir(d.id, q);
-    if (!ok && d.lastDir) this.model.setClampOffDir(d.id, d.lastDir);
-    else if (ok) d.lastDir = q;
+    const apply = dir => {
+      if (new Vector3(...d.startOff).normalize().distanceTo(new Vector3(...dir).normalize()) < 1e-8) return true;
+      if (!d.joint) return this.model.setClampOffDir(d.id, dir);
+      const from = new Vector3(...d.startOff).normalize(), to = new Vector3(...dir).normalize();
+      const radians = Math.atan2(axis.dot(new Vector3().crossVectors(from, to)), from.dot(to));
+      return this.model.rotateJoint(d.joint, radians, geometry().connectorSize);
+    };
+    const ok = apply(q);
+    if (!ok && d.lastDir) apply(d.lastDir);
+    if (ok) {
+      d.lastDir = q;
+      const from = new Vector3(...d.startOff).normalize(), to = new Vector3(...q).normalize();
+      d.appliedAngle = Math.atan2(axis.dot(new Vector3().crossVectors(from, to)), from.dot(to));
+    } else {
+      // 丢弃越界位移，下一次回拖直接从最后有效姿态开始。
+      d.angle = d.appliedAngle;
+    }
     this.refresh();
-    const c = this.model.clamps.get(d.id);
+    if (!ok) { this.onNotice(t('notice_joint_limit'), 'warn'); return; }
+    const c = d.joint ? { off: d.lastDir || d.startOff } : this.model.clamps.get(d.id);
     if (c && c.off && d.startOff) {
       const a = d.startOff, b = c.off;
       const al = Math.hypot(...a) || 1, bl = Math.hypot(...b) || 1;
@@ -3651,8 +4661,12 @@ export class Builder {
     this.scene.endOrbit();
     if (!d) return;
     if (!d.moved) {
+      // 沿管平移只接管拖动，面板上的原地点击仍按选择模式翻面。
+      if (d.motion === 'slide' && (this.mode !== 'select'
+          || this._pickSelect(e.clientX, e.clientY)?.data.kind !== 'panel')) return;
+      if (this.mode === "select") { this._clickSelect(e); return; }
       let turned = false;
-      this.recordHistory(() => { turned = this.model.rotateClamp(d.id); });
+      this.recordHistory(() => { turned = this._rotateClampWithFallback(d.id); });
       if (!turned) this.onNotice(t("notice_fitting_fixed"), "warn");
       this.refresh();
       return;
@@ -3661,60 +4675,60 @@ export class Builder {
     this.refresh();
   }
 
+  _cancelClampDrag() {
+    const d = this._clampDrag;
+    if (!d) return;
+    this._clampDrag = null;
+    this.model.loadJSON(JSON.parse(d.before));
+    this.scene.setCursor('default');
+    this.scene.endOrbit();
+    this.refresh();
+  }
+
   _beginClampSlide(id) {
-    if (this.readOnly) return false;
     const c = this.model.clamps.get(id);
-    if (!c || !c.dir) return false;
-    const group = this.model.clampCohort(id);
-    if (!group.tubes.size) return false;
-    const tb = this.model.tubes.get([...group.tubes][0]);
-    const n0 = tb && this.model.nodes.get(tb.a);
-    this._clampSlide = {
-      id,
-      before: JSON.stringify(this.model.toJSON()),
-      origin: [c.x, c.y, c.z],
-      axis: c.dir.slice(),
-      mark: n0 ? [n0.id, n0.x, n0.y, n0.z] : null,
-      moved: false,
-    };
-    this.scene.setCursor("grabbing");
+    if (this.readOnly || !c?.dir || !this._down) return false;
+    const tube = this.model._clampSecondTube(c);
+    if (!tube) return false;
+    const origin = [c.x, c.y, c.z], axis = new Vector3(...c.dir).normalize().toArray();
+    const points = this.scene.projectWorld([origin, origin.map((v, i) => v + axis[i] * 10)]);
+    if (!points[0] || !points[1]) {
+      this.onNotice(t('notice_clamp_slide_view'), 'info');
+      return false;
+    }
+    const rect = this.scene.renderer.domElement.getBoundingClientRect();
+    const screenAxis = [(points[1].u - points[0].u) * rect.width, (points[1].v - points[0].v) * rect.height];
+    if (Math.hypot(...screenAxis) < 1) {
+      this.onNotice(t('notice_clamp_slide_view'), 'info');
+      return false;
+    }
+    const n = this.model.nodes.get(tube.a);
+    this._clampDrag = { id, motion: 'slide', before: JSON.stringify(this.model.toJSON()),
+      origin, axis, screenAxis, mark: [n.id, n.x, n.y, n.z], moved: false, lastDelta: 0 };
+    this.scene.setCursor('grabbing');
     return true;
   }
 
   _updateClampSlide(e) {
-    const d = this._clampSlide;
+    const d = this._clampDrag;
     if (!d || !this._down) return;
-    if (!d.moved && Math.hypot(e.clientX - this._down.x, e.clientY - this._down.y) <= CLICK_TOLERANCE) return;
+    const dx = e.clientX - this._down.x, dy = e.clientY - this._down.y;
+    if (!d.moved && Math.hypot(dx, dy) <= CLICK_TOLERANCE) return;
     d.moved = true;
-    const hit = this.scene.dragPlanePoint(e.clientX, e.clientY, d.origin);
-    if (!hit) return;
-    const u = d.axis;
-    const ul = Math.hypot(u[0], u[1], u[2]) || 1;
-    const ux = u[0] / ul, uy = u[1] / ul, uz = u[2] / ul;
-    let delta = (hit.x - d.origin[0]) * ux + (hit.y - d.origin[1]) * uy + (hit.z - d.origin[2]) * uz;
-    delta = Math.round(delta / SNAP_STEP) * SNAP_STEP;
+    // 按转轴在屏幕上的投影计算相对抓取点的位移，竖管和斜视角也能沿轴滑动。
+    const [sx, sy] = d.screenAxis;
+    const delta = (dx * sx + dy * sy) / (sx * sx + sy * sy) * 10;
     this.model.loadJSON(JSON.parse(d.before));
-    this.model.slideClampFlap(d.id, delta, { snapDist: this._snapRadius() });
+    const ok = delta === 0 || this.model.slideClampFlap(d.id, delta);
+    if (ok) d.lastDelta = delta;
+    else if (d.lastDelta) this.model.slideClampFlap(d.id, d.lastDelta);
     this.refresh();
-    let along = 0;
-    if (d.mark) {
-      const n = this.model.nodes.get(d.mark[0]);
-      if (n) {
-        along = Math.round((n.x - d.mark[1]) * ux + (n.y - d.mark[2]) * uy + (n.z - d.mark[3]) * uz);
-      }
-    }
-    this.onNotice(t("notice_clamp_slide", along), "info");
+    if (!ok) { this.onNotice(t('notice_clamp_slide_limit'), 'warn'); return; }
+    const n = this.model.nodes.get(d.mark[0]);
+    const along = n ? Math.round(d.axis.reduce((sum, v, i) => sum + v * ([n.x, n.y, n.z][i] - d.mark[i + 1]), 0) * 10) / 10 : 0;
+    this.onNotice(t('notice_clamp_slide', along), 'info');
   }
 
-  _endClampSlide() {
-    const d = this._clampSlide;
-    this._clampSlide = null;
-    this.scene.setCursor("default");
-    this.scene.endOrbit();
-    if (!d || !d.moved) return;
-    this._pushHistory(d.before);
-    this.refresh();
-  }
 
   _clickClamp(e) {
     const h = this.scene.pickHandle(e.clientX, e.clientY);
@@ -3735,7 +4749,7 @@ export class Builder {
       // Erneuter Klick DREHT ihn um 45 Grad weiter -- geloescht wird im
       // Auswahl-Modus, wie bei allen anderen Teilen auch.
       let turned = false;
-      this.recordHistory(() => { turned = this.model.rotateClamp(pick.data.id); });
+      this.recordHistory(() => { turned = this._rotateClampWithFallback(pick.data.id); });
       if (!turned) this.onNotice(t("notice_fitting_fixed"), "warn");
       this.refresh();
       return;
@@ -3862,9 +4876,7 @@ export class Builder {
     const h = this.scene.pickHandle(e.clientX, e.clientY);
     const f = h && h.data && h.data.poolBalls ? this.model.fittings.get(h.data.poolBalls) : null;
     if (!f) { this.onNotice(t("notice_balls_pick"), "info"); return; }
-    this.recordHistory(() => { f.balls = !f.balls; });
-    this.onNotice(t(f.balls ? "notice_balls_in" : "notice_balls_out"));
-    this.refresh();
+    this._adjustPlacedPart(f.id, "pool");
   }
 
   _clickSleeve(e) {
@@ -3898,15 +4910,12 @@ export class Builder {
   }
 
   _clickFitting(e) {
-    if (this.fittingKind === 'rope') {
-      const pick = this.scene.pickForDelete(e.clientX, e.clientY);
-      if (pick?.data?.kind !== 'tube') return;
-      const rail = this.model._rail(pick.data.id); if (!rail) return;
-      const at = this._alongTube(pick.data.id, pick.point);
-      const endpoint = { tube: pick.data.id, t: Math.max(0.05, Math.min(0.95, at / rail.len)) };
-      if (!this._ropeFirst) { this._ropeFirst = endpoint; this.installationPreview = { kind:'fitting',partId:'rope',mountCount:1,supportCount:1,valid:false,reason:t('notice_rope_second'),canFlip:false,assumption:'frame-grid-unmeasured' };this.onNotice(t('notice_rope_second'), 'info'); this.refresh(); return; }
-      const first = this._ropeFirst; this._ropeFirst = null;
-      this._previewInstallation(this.model.ropeDiagnostics(first, endpoint), 'rope'); return;
+    if (this.fittingKind === 'rope') { this._clickRope(e); return; }
+    if (this.fittingKind === 'gym_rings') {
+      if (this.readOnly) return;
+      const {mount}=this._gymRingPointerMount(e.clientX,e.clientY);
+      if (mount) this._previewInstallation(mount,'gym_rings');
+      return;
     }
     if (confirmedSpec(this.fittingPart || this.fittingKind)?.placement === 'fitting') {
       const h = this.scene.pickHandle(e.clientX, e.clientY);
@@ -3929,7 +4938,7 @@ export class Builder {
     if (POOL_KINDS.has(this.fittingKind)) { this._clickPoolLiner(e); return; }
     if (RAIL_FITTINGS.has(this.fittingKind)) { this._clickLattice(e); return; }
     if (HOLE_MASKS[this.fittingKind]) { this._clickHoleClamp(e); return; }
-    if (this.fittingKind === BOLT_PART || this.fittingKind === HINGE_PART) { this._clickFlexi(e); return; }
+    if (this.fittingKind === "flexi" || this.fittingKind === BOLT_PART || this.fittingKind === HINGE_PART) { this._clickFlexi(e); return; }
     if (TUBE_CLAMP_PARTS[this.fittingKind]) { this._clickTubeClamp(e); return; }
     if (TUBE_FITTINGS[this.fittingKind]) { this._clickTubeFitting(e); return; }
     const h = this.scene.pickHandle(e.clientX, e.clientY);
@@ -3965,10 +4974,7 @@ export class Builder {
       if (this.model.fittings.get(p.data.id)?.kind === 'carousel_bearing') return;
       // Klick auf ein gesetztes Teil DREHT es weiter (wie beim Bogenrohr) --
       // geloescht wird im Auswahl-Modus. Teile ohne Wahlmoeglichkeit bleiben.
-      let turned = false;
-      this.recordHistory(() => { turned = this.model.rotateFitting(p.data.id); });
-      if (!turned) this.onNotice(t("notice_fitting_fixed"), "warn");
-      this.refresh();
+      this._adjustPlacedPart(p.data.id, "fitting");
       return;
     }
     this._pickFittingNode(p);
@@ -4013,10 +5019,7 @@ export class Builder {
     if (pick && pick.data.kind === "fitting"
         && this.model.fittings.get(pick.data.id)?.kind === this.fittingKind) {
       if (this.fittingKind === 'carousel_bearing') return;
-      let turned = false;
-      this.recordHistory(() => { turned = this.model.rotateFitting(pick.data.id); });
-      if (!turned) this.onNotice(t("notice_fitting_fixed"), "warn");
-      this.refresh();
+      this._adjustPlacedPart(pick.data.id, "fitting");
       return;
     }
     // Fremdes Anbauteil im Weg (Arretierung ueber dem Radlager): die Stelle
@@ -4083,7 +5086,11 @@ export class Builder {
   _railPartners(railId) {
     return this.fittingKind === "bag2"
       ? this.model.bagPartners(railId)
-      : this.model.latticePartners(railId, 1.5, this._railSize());   // Netz und Textil: gleiche Regel
+      : this.model.latticePartners(railId, 1.5, this._railSize(), this._isRainbowTextile());
+  }
+
+  _isRainbowTextile() {
+    return this.fittingKind === "textil2" && getPartById(this.fittingPart)?.variant === "rainbow";
   }
 
   /** Gewaehltes Tuch fester Groesse: { along, gap } aus dem Katalog, sonst null. */
@@ -4117,10 +5124,7 @@ export class Builder {
     if (pick && pick.data.kind === "node") {
       const n = this.model.nodes.get(pick.data.id);
       if (n && isHolePart(n.part)) {
-        let gedreht = false;
-        this.recordHistory(() => { gedreht = this.model.turnHoleClamp(n.id); });
-        if (!gedreht) this.onNotice(t("notice_fitting_fixed"), "warn");
-        this.refresh();
+        this._adjustPlacedPart(n.id, "hole");
         return;
       }
     }
@@ -4132,15 +5136,23 @@ export class Builder {
    * die Dummy-Kupplung, das SCHARNIER auf das mittlere Segment eines Bolzens
    * (hoechstens zwei). Ein Klick auf ein gesetztes Scharnier dreht es um 45
    * Grad um die Bolzenachse weiter -- die Stellung des zweiten Scharniers wird
-   * dabei uebersprungen, und ein Arm mit Rohr bleibt stehen.
+   * dabei uebersprungen, und angeschlossene Teile drehen mit.
    */
   _clickFlexi(e) {
     const cs = geometry().connectorSize;
     const h = this.scene.pickHandle(e.clientX, e.clientY);
     if (h && h.data && h.data.boltMount) {
       let gesetzt = null;
-      this.recordHistory(() => { gesetzt = this.model.addBolt(h.data.boltMount.nodeId, cs); });
-      if (gesetzt) this._notePlaced(gesetzt.id, "node");
+      this.recordHistory(() => {
+        gesetzt = this.fittingKind === "flexi"
+          ? this.model.addFlexiJoint(h.data.boltMount.nodeId, cs)
+          : this.model.addBolt(h.data.boltMount.nodeId, cs);
+      });
+      if (gesetzt) {
+        this.selectedNodeId = gesetzt.id;
+        if (this.fittingKind === "flexi") this.onNotice(t("notice_flexi_installed"));
+        else this._notePlaced(gesetzt.id, "node");
+      }
       else this.onNotice(t("notice_fitting_exists"), "warn");
       this.refresh();
       return;
@@ -4148,7 +5160,10 @@ export class Builder {
     if (h && h.data && h.data.hingeMount) {
       let gesetzt = null;
       this.recordHistory(() => { gesetzt = this.model.addHinge(h.data.hingeMount.nodeId); });
-      if (gesetzt) this._notePlaced(gesetzt.id, "node");
+      if (gesetzt) {
+        this.selectedNodeId = gesetzt.id;
+        this._notePlaced(hingeKey(gesetzt.id, gesetzt.hinges.length - 1), "hinge");
+      }
       else this.onNotice(t("notice_fitting_exists"), "warn");
       this.refresh();
       return;
@@ -4159,27 +5174,87 @@ export class Builder {
     if (pick && pick.data.kind === "node" && pick.data.hinge != null) {
       const n = this.model.nodes.get(pick.data.id);
       if (n && isBoltPart(n.part)) {
-        let gedreht = false;
-        this.recordHistory(() => { gedreht = this.model.turnHinge(n.id, pick.data.hinge); });
-        if (!gedreht) this.onNotice(t("notice_fitting_fixed"), "warn");
-        this.refresh();
+        this.selectedNodeId = n.id;
+        this.turnFlexiHinge(pick.data.hinge);
         return;
       }
     }
-    // Klick auf den BOLZEN: er rutscht ein Segment tiefer ins Rohr und beim
-    // naechsten Klick wieder heraus.
+    // 点栓只选择安装位置；插入深度通过引导中的明确按钮调整。
     if (pick && pick.data.kind === "node" && pick.data.hinge == null) {
       const n = this.model.nodes.get(pick.data.id);
       if (n && isBoltPart(n.part)) {
-        let ok = false;
-        this.recordHistory(() => { ok = this.model.turnBoltDepth(n.id); });
-        if (ok) this.onNotice(t("notice_bolt_depth", boltDepth(n)));
-        else this.onNotice(t("notice_bolt_has_tube"), "warn");
-        this.refresh();
+        this.selectedNodeId = n.id;
+        if (this.fittingKind === HINGE_PART) {
+          this.addFlexiHinge();
+        } else this.refresh();
         return;
       }
     }
     this._pickFittingNode(pick);
+  }
+
+  /** 选择模式和安装模式共用当前柔性零件，多选时不猜测操作对象。 */
+  flexiTarget() {
+    let nodeId = this.selectedNodeId, hinge = null;
+    if (this.mode === "select") {
+      if (this.selection.size !== 1) return null;
+      const [id, kind] = [...this.selection][0];
+      if (kind === "hinge") {
+        const key = splitHingeKey(id);
+        if (!key) return null;
+        nodeId = key.nodeId;
+        hinge = key.index;
+      } else if (kind === "node") nodeId = id;
+      else return null;
+    } else if (this.mode !== "fitting" || !["flexi", BOLT_PART, HINGE_PART].includes(this.fittingKind)) return null;
+    const node = this.model.nodes.get(nodeId);
+    if (!isBoltPart(node?.part)) return null;
+    if (hinge !== null && (hinge < 0 || hinge >= (node.hinges || []).length)) return null;
+    return { nodeId, hinge };
+  }
+
+  addFlexiHinge() {
+    const target = this.flexiTarget();
+    if (this.readOnly || !target) return false;
+    let added = null;
+    this.recordHistory(() => { added = this.model.addHinge(target.nodeId); });
+    if (added) this._notePlaced(hingeKey(added.id, added.hinges.length - 1), "hinge");
+    else this.onNotice(t("notice_flexi_full"), "info");
+    this.refresh();
+    return !!added;
+  }
+
+  turnFlexiHinge(index = null) {
+    const target = this.flexiTarget();
+    if (this.readOnly || !target) return false;
+    const hinge = index ?? target.hinge;
+    if (hinge === null || hinge < 0 || hinge >= (this.model.nodes.get(target.nodeId).hinges || []).length) return false;
+    let turned = false;
+    this.recordHistory(() => { turned = this.model.turnHinge(target.nodeId, hinge); });
+    if (!turned) this.onNotice(t("notice_flexi_rotate_" + (this.model.hingeRotationFailure || "connected")), "warn");
+    this.refresh();
+    return turned;
+  }
+
+  connectFlexiTube() {
+    const target = this.flexiTarget();
+    if (this.readOnly || !target) return false;
+    this.setMode("add");
+    this.selectedNodeId = target.nodeId;
+    this.stepFrom = [target.nodeId];
+    this.refresh();
+    return true;
+  }
+
+  setFlexiDepth() {
+    const target = this.flexiTarget();
+    if (this.readOnly || !target) return false;
+    const n = this.model.nodes.get(target.nodeId);
+    let ok = false;
+    this.recordHistory(() => { ok = this.model.turnBoltDepth(n.id); });
+    this.onNotice(t(ok ? "notice_bolt_depth" : "notice_bolt_has_tube", boltDepth(n)), ok ? "info" : "warn");
+    this.refresh();
+    return ok;
   }
 
   /**
@@ -4188,8 +5263,17 @@ export class Builder {
    * Ein Klick auf eine gesetzte Kupplung nimmt sie weg.
    */
   _clickTubeClamp(e) {
+    if(this.fittingKind==='bearing-clamp'&&this._bearingController().click(e))return;
     const part = TUBE_CLAMP_PARTS[this.fittingKind];
     const h = this.scene.pickHandle(e.clientX, e.clientY);
+    if (part === 'windmill' && h?.data?.windmillBearing) {
+      let added = null;
+      this.recordHistory(() => { added = this.model.addWindmillAtBearing(h.data.windmillBearing.bearingId); });
+      if (added) this._notePlaced(added.id, 'node');
+      else this.onNotice(t('notice_fitting_exists'), 'warn');
+      this.refresh();
+      return;
+    }
     if (h && h.data && h.data.bearingArm) {
       const m = h.data.bearingArm;
       let f = null;
@@ -4212,24 +5296,26 @@ export class Builder {
     }
     const pick = this.scene.pickForDelete(e.clientX, e.clientY);
     if (!pick) { this._pickFittingNode(null); return; }
+    if (pick.data.kind === "fitting" && this._bearingNodeFor(pick.data.id)) {
+      this._adjustPlacedPart(pick.data.id, "bearing");
+      return;
+    }
     if (pick.data.kind === "node") {
       const n = this.model.nodes.get(pick.data.id);
       // Lagerkupplung ohne Rohr: das MAUL dreht weiter, nicht das Teil um ein
       // Rohr -- damit laesst sich waehlen, wo das Rohr spaeter durchlaeuft.
       if (n && n.bearingOn && !n.clampOn) {
-        let turned = false;
-        this.recordHistory(() => { turned = this.model.turnBearingMouth(n.id); });
-        if (!turned) this.onNotice(t("notice_fitting_fixed"), "warn");
-        this.refresh();
+        this._adjustPlacedPart(n.id, "bearing");
         return;
       }
       if (n && n.clampOn) {
         // Weiterdrehen statt loeschen: der Anschluss rueckt um 90 Grad um das
         // Rohr weiter, das Eingesteckte dreht mit.
-        let turned = false;
-        this.recordHistory(() => { turned = this.model.rotateTubeClamp(n.id, geometry().connectorSize); });
-        if (!turned) this.onNotice(t("notice_fitting_fixed"), "warn");
-        this.refresh();
+        this._adjustPlacedPart(n.id, "bearing");
+        return;
+      }
+      if (n?.part === 'windmill') {
+        this._adjustPlacedPart(n.id, 'hole');
         return;
       }
     }
@@ -4265,6 +5351,8 @@ export class Builder {
    * Freier Arm einer Kupplung, der dem Klickpunkt am naechsten liegt. Belegt
    * sind Richtungen, in denen schon ein Rohr steckt.
    */
+  _bearingController(){return this.bearingConnection||(this.bearingConnection=new BearingConnectionController(this));}
+
   _freeArmTowards(node, point) {
     const belegt = [];
     for (const tb of this.model.tubes.values()) {
@@ -4449,16 +5537,12 @@ export class Builder {
    * Klicks. Ein Klick auf eine liegende Platte legt sie auf die andere Seite.
    */
   _clickPanel(e) {
-    if (PANEL_ACCESSORY_IDS.has(this.panelId)) {
+    if (!this.panelRail && PANEL_ACCESSORY_IDS.has(this.panelId)) {
       const handle = this.scene.pickHandle(e.clientX, e.clientY);
       if (handle?.data?.panelAccessoryMount) { this._previewInstallation(handle.data.panelAccessoryMount, this.panelId); return; }
     }
-    // Ist ein Tragrohr gewaehlt, zaehlen zuerst die hervorgehobenen Gegenrohre --
-    // auch wenn ein anderes Teil davor liegt. Sie scheinen ohnehin durch die
-    // zurueckgeblendeten Teile hindurch.
-    const pick = (this.panelRail && this.highlight
-      && this.scene.pickAmong(e.clientX, e.clientY, this.highlight))
-      || this.scene.pickForDelete(e.clientX, e.clientY);
+    // 第一根与第二根候选管均优先响应，前方板面不会截走安装点击。
+    const pick = this._pickPanelPlacement(e.clientX, e.clientY);
     if (!pick) { this._clearPanelRail(); return; }
 
     if (pick.data.kind === "panel" && !this.panelRail) {
@@ -4469,9 +5553,7 @@ export class Builder {
       clearTimeout(this._panelFlipTimer);
       this._panelFlipTimer = setTimeout(() => {
         this._panelFlipTimer = null;
-        let side = null;
-        this.recordHistory(() => { side = this.model.flipPanelSide(id); });
-        if (side != null) this.onNotice(t(side < 0 ? "notice_panel_below" : "notice_panel_above"), "info");
+        this._flipPanel(id);
         this.refresh();
       }, PANEL_DBLCLICK_MS);
       return;
@@ -4503,14 +5585,16 @@ export class Builder {
     this.highlight = new Set([pick.data.id, ...partners.map((c) => c.id)]);
     this.onNotice(t("notice_panel_pick_second", partners.length), "info");
     this.refresh();
+    this._showPanelPlacementHover(pick);
   }
 
   _placePanelOnRails(aId, bId, t0, len) {
     if (PANEL_ACCESSORY_IDS.has(this.panelId)) {
-      const probe = { a: aId, b: bId, t0, len, panelId: this.panelId, color: this.colorFor('panel'), side: 1,params:{screwAxis:this.insetScrewAxis||'vertical'} };
+      const probe = { a: aId, b: bId, t0, len, panelId: this.panelId, color: this.colorFor('panel'), side: 1 };
+      if(supportsPanelFixing(this.panelId))probe.params={screwAxis:panelRailScrewAxis(this.model,probe,confirmedSpec(this.panelId)?undefined:componentFrame(this.model,probe))};
       if (this.panelId !== 'panel_40x40_pocket') probe.side = this._panelSideFromCorners(this.model.panelCorners(probe));
       this.panelRail = null; this.highlight = null;
-      this._previewInstallation(this.model.panelAccessoryDiagnostics(probe), this.panelId);
+      this._previewInstallation(this.model.panelPlacementDiagnostics(probe), this.panelId);
       return null;
     }
     let added = null;
@@ -4522,20 +5606,19 @@ export class Builder {
     this.panelRail = null;
     this.highlight = null;
     this.refresh();
+    if (added) this.scene.flashPlacedPanel?.(this.model, added.id);
     return added;
   }
 
   _previewInstallation(part, partId) {
     if (this.readOnly) return;
-    if (!part.kind && part.mounts?.length && part.panelId === 'panel_40x40_busy') {
-      const frame=componentFrame(this.model,part),cam=this.scene.cameraPosition();
-      const towardCamera=frame && frame.axes[2].reduce((sum,v,i)=>sum+v*(cam[i]-frame.pos[i]),0);
-      if(towardCamera<0)part=this.model.panelAccessoryDiagnostics({...part,side:-(part.side||1)});
-    }
+    const facing = panelInstallationFacing(this.model, part, this.scene.cameraPosition());
+    part = facing.part;
+    this._installationFacingConflict = facing.conflict;
     this.scene.clearInstallationPreview?.();
     this._installationPart = part.mounts?.length ? part : null;
     this.installationPreview = { kind: part.kind ? 'fitting' : 'panel', partId, mountCount: part.mounts?.length || 0, supportCount: part.supportTubes?.length || 0, assumption: part.params?.assumption || 'frame-grid-unmeasured',
-      valid: part.valid, reason: part.reason ? t('accessory_reason_' + part.reason) : null, canFlip: partId === 'steering_wheel' && !!part.mounts?.length };
+      valid: part.valid, reason: installationReason(this.model, part), canFlip: partId === 'steering_wheel' && !!part.mounts?.length };
     if (!part.valid) this.onNotice(this.installationPreview.reason, 'warn');
     if(part.valid)return this.confirmInstallation();
     this.refresh();
@@ -4544,25 +5627,37 @@ export class Builder {
   confirmInstallation() {
     const part = this._installationPart;
     if (!part || this.readOnly) return false;
-    const fresh = part.appearanceVersion === 2 ? this.model.confirmedDiagnostics(part) : part.kind ? this.model.accessoryDiagnostics(part.kind, part.tube, { facing: part.facing }) : this.model.panelAccessoryDiagnostics(part);
+    const position = part.kind==='gym_rings' ? [part.x,part.y,part.z] : undefined;
+    const nativePanel = part.nativeGeometry && ['panel_40x40', 'panel_40x20'].includes(part.panelId);
+    let fresh;
+    if (nativePanel) fresh = this.model.panelPlacementDiagnostics(part);
+    else if (part.appearanceVersion === 2) fresh = this.model.confirmedDiagnostics(part);
+    else if (part.kind) fresh = this.model.accessoryDiagnostics(part.kind, part.tube, { facing: part.facing, position });
+    else fresh = this.model.panelAccessoryDiagnostics(part);
     if (!fresh) { this.cancelInstallation(); return false; }
     if (!fresh.valid) { this._previewInstallation(fresh, part.kind || part.panelId); return false; }
     let added;
     this.recordHistory(() => {
-      added = part.appearanceVersion === 2 ? this.model.addConfirmedComponent(fresh, this.colorFor('panel')) : part.kind ? this.model.addAccessory(part.kind, part.tube, this.colorFor('panel'), { facing: part.facing })
-        : this.model.addPanelAccessory(fresh,part.color || this.colorFor('panel'));
+      if (nativePanel) added = this.model.addNativePanel(fresh, this.colorFor('panel'), { nativeGeometry: true });
+      else if (part.appearanceVersion === 2) added = this.model.addConfirmedComponent(fresh, this.colorFor('panel'));
+      else if (part.kind) added = this.model.addAccessory(part.kind, fresh.tube, this.colorFor('panel'), { facing: part.facing, position });
+      else added = this.model.addPanelAccessory(fresh, part.color || this.colorFor('panel'));
     });
     if (!added) return false;
+    const facingConflict = this._installationFacingConflict;
+    this._installationFacingConflict = null;
     this._installationPart = null; this.installationPreview = null;
     this.scene.clearInstallationPreview();
     this._notePlaced(added.id, part.kind ? 'fitting' : 'panel');
-    this.onNotice(t('notice_accessory_added'), 'ok');
+    this.onNotice(facingConflict ? installationFacingNotice(this.model, facingConflict) : t('notice_accessory_added'), facingConflict ? 'info' : 'ok');
     this.refresh();
+    if (!part.kind) this.scene.flashPlacedPanel?.(this.model, added.id);
     return true;
   }
 
   cancelInstallation() {
     this._ropeFirst = null;
+    this._installationFacingConflict = null;
     this._installationPart = null; this.installationPreview = null;
     this.scene.clearInstallationPreview?.(); this.refresh();
   }
@@ -4576,6 +5671,22 @@ export class Builder {
 
   canFlipSelectedAccessory() {
     return !this.readOnly && this.selection.size > 0 && [...this.selection.entries()].every(([id, kind]) => kind === 'fitting' && this.model.fittings.get(id)?.kind === 'steering_wheel');
+  }
+
+  selectedPanelFixing() {
+    if(this.mode!=='select' || this.selection.size!==1)return null;
+    const [id,kind]=[...this.selection][0],part=this.model.panels.get(id);
+    if(kind!=='panel' || !part || !supportsPanelFixing(part.panelId))return null;
+    return {partId:part.panelId,axis:part.params?.screwAxis || null};
+  }
+
+  setSelectedPanelFixing(axis) {
+    if(this.readOnly || !this.selectedPanelFixing())return false;
+    const id=[...this.selection.keys()][0],candidate=this.model.panelFixingDiagnostics(id,axis);
+    if(!candidate.valid){this.onNotice(installationReason(this.model,candidate),'warn');return false;}
+    if(this.model.panels.get(id).params?.screwAxis===axis)return true;
+    this.recordHistory(()=>this.model.setPanelFixing(id,axis));
+    this.refresh();return true;
   }
 
   flipSelectedAccessory() {
@@ -4622,7 +5733,8 @@ export class Builder {
           return;
         }
         let ok = false;
-        this.recordHistory(() => { ok = this._applyConnectorType(node, typeId); });
+        if (node.preferType === typeId) ok = this._adjustPlacedPart(node.id, "connector");
+        else this.recordHistory(() => { ok = this._applyConnectorType(node, typeId); });
         if (!ok) { this.onNotice(t("notice_connector_no_fit"), "warn"); return; }
         this.selectedNodeId = node.id;
         const def = getConnector(typeId);
@@ -4647,15 +5759,7 @@ export class Builder {
     const front = this.scene.pickBuild(e.clientX, e.clientY);
     const bow = front && front.data.kind === "tube" ? this.model.tubes.get(front.data.id) : null;
     if (bow && bow.bow && (!h || front.distance < h.distance)) {
-      // 另一头接着东西就不转：转了弯管会从那个接头上脱开。
-      const pivot = this._bowPivotFor(bow);
-      if (!pivot) { this.onNotice(t("notice_bow_attached"), "warn"); return; }
-      let res;
-      this.recordHistory(() => { res = this.model.rotateBow(bow.id, 1, { pivot }); });
-      if (res && res.ground) this.onNotice(t("notice_ground"), "warn");
-      else if (res && res.duplicate) this.onNotice(t("notice_bow_blocked"));
-      else if (res && res.node) this.onNotice(t("notice_bow_turned"));
-      this.refresh();
+      this._turnBow(bow, 1, front.point);
       return;
     }
     if (h) {
@@ -4676,7 +5780,7 @@ export class Builder {
         const tube = getTube(this.tubeId);
         this.recordHistory(() => {
           res = this.model.extendBow(h.data.nodeId, h.data.dir, this._bowNormal(h.data.dir, this.model.nodes.get(h.data.nodeId)),
-            tube.id, this.colorFor("tube", h.data.nodeId), gridSpacing());
+            tube.id, this.colorFor("tube", h.data.nodeId), tube.radius_cm || gridSpacing());
         });
       } else if (h.data.slope) {
         // Schräg-Konnektor (schon 45-Grad gedreht): Diagonalrohr weiterbauen,
@@ -4726,82 +5830,21 @@ export class Builder {
   }
 
   /**
-   * Loesch-Modus: Klick auf ein Teil nimmt genau dieses heraus. Verstaerkungs-
-   * profil und Scharnier gelten wie in der Auswahl -- ein Profil ist der ganze
-   * Lauf, nicht nur das eine Rohr. Klick ins Leere tut nichts.
+   * 点击零件删除，连接件按剩余接口自动匹配并清理空节点。
+   * 加固条与铰链仍按独立零件处理，点击空白不操作。
    */
   _clickDelete(e) {
-    const pick = this._resolveDeletePick(this.scene.pickForDelete(e.clientX, e.clientY), e.clientX, e.clientY);
+    const pick = this.scene.pickForDelete(e.clientX, e.clientY);
     if (!pick) return;
     this._fillSelectionFromPick(pick);
     this.deleteSelection();
-  }
-
-  /**
-   * 删接头会带走相连的管子。接头常被管子或面板挡住，射线先打在它们上——
-   * 落在接头范围内时仍按接头算，预览和点击才一致。
-   */
-  _resolveDeletePick(pick, clientX, clientY) {
-    if (!pick) return pick;
-    if (pick.data.kind === "node") return pick;
-    const cs = geometry().connectorSize;
-    if ((pick.data.kind === "panel" || pick.data.kind === "textile") && clientX != null) {
-      const corners = this._surfaceCornerNodes(pick.data.id);
-      const near = this.scene.closestOnRay(corners, clientX, clientY, cs * 0.75);
-      if (near) return { ...pick, data: { kind: "node", id: near.id } };
-    }
-    if (!pick.point) return pick;
-    const pt = pick.point;
-    const ball = this._nodeNearPoint(pt, cs * 1.2);
-    if (ball) return { ...pick, data: { kind: "node", id: ball.id } };
-    if (pick.data.kind !== "tube") return pick;
-    const t = this.model.tubes.get(pick.data.id);
-    if (!t || t.arm || t.link) return pick;
-    const a = this.model.nodes.get(t.a);
-    const b = this.model.nodes.get(t.b);
-    if (!a || !b) return pick;
-    const span = Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z) || 1;
-    const along = ((pt.x - a.x) * (b.x - a.x) + (pt.y - a.y) * (b.y - a.y) + (pt.z - a.z) * (b.z - a.z)) / span;
-    const zone = cs * 1.55;
-    let n = null;
-    if (along <= zone && !a.c45body) n = a;
-    else if (along >= span - zone && !b.c45body) n = b;
-    return n ? { ...pick, data: { kind: "node", id: n.id } } : pick;
-  }
-
-  _surfaceCornerNodes(partId) {
-    const part = this.model.panels.get(partId) || this.model.textiles.get(partId);
-    if (!part) return [];
-    const ids = new Set();
-    if (part.nodes) for (const id of part.nodes) ids.add(id);
-    for (const tid of [part.a, part.b]) {
-      const t = this.model.tubes.get(tid);
-      if (t) { ids.add(t.a); ids.add(t.b); }
-    }
-    const out = [];
-    for (const id of ids) {
-      const n = this.model.nodes.get(id);
-      if (n && !n.c45body && !n.unused) out.push(n);
-    }
-    return out;
-  }
-
-  _nodeNearPoint(pt, reach) {
-    let best = null, bestD = reach;
-    for (const n of this.model.nodes.values()) {
-      if (n.c45body || n.unused) continue;
-      const d = Math.hypot(pt.x - n.x, pt.y - n.y, pt.z - n.z);
-      if (d < bestD) { bestD = d; best = n; }
-    }
-    return best;
   }
 
   /** 删除模式下：指到接头时，把会一起删掉的管子也标出来。 */
   _deleteHoverExtras(pick) {
     if (this.mode !== "delete" || !pick || pick.data.kind !== "node") return null;
     if (pick.data.hinge != null) return null;
-    const n = this.model.nodes.get(pick.data.id);
-    if (!n || n.c45body) return null;
+    if (!this.model.isAutomaticConnector(pick.data.id)) return null;
     const ids = this.model.incidentTubeIds(pick.data.id);
     return ids.length ? ids : null;
   }
@@ -4853,6 +5896,11 @@ export class Builder {
     }
     const { kind, id } = pick.data;
     if (kind === "clamp") {
+      if (!add && this.selection.has(id) && this._selectedClampDriver() === id) {
+        this._selectClick = null;
+        this._queueSelectFlip(id, e, "clamp");
+        return;
+      }
       if (this._isBlockClick(e, id)) {
         this._selectConnectedFromPick(pick, add);
         return;
@@ -4866,7 +5914,18 @@ export class Builder {
         this._selectConnectedFromPick(pick, add);
         return;
       }
-      this._selectClampCohort(slideOwner, add);
+      if (kind === "panel" && !add && this._panelFlipsOnClick(id)) {
+        this._queueSelectFlip(id, e);
+        return;
+      }
+      // 点到活动侧零件只选本件，关节仍由所选零件推导，拖动时带动连接结构。
+      const selected = this.selection.has(id);
+      const only = this.selection.size === 1 && selected;
+      if (!add) this.selection.clear();
+      if (add && selected) this.selection.delete(id);
+      else if (!only || add || kind !== "tube") this.selection.set(id, kind);
+      this._profilAuswahl = null;
+      this.refresh();
       return;
     }
     // Ein Scharnier der Flexikupplung ist ein eigenes Teil, obwohl es am
@@ -4877,11 +5936,12 @@ export class Builder {
         this._selectConnectedFromPick(pick, add);
         return;
       }
+      if (!add && this._partTurnsOnClick(key)) { this._queueSelectFlip(key, e, 'hinge'); return; }
       if (add) {
         if (this.selection.has(key)) this.selection.delete(key);
         else this.selection.set(key, "hinge");
       } else if (this.selection.size === 1 && this.selection.has(key)) {
-        this.selection.clear();
+        this.turnFlexiHinge(pick.data.hinge);
       } else {
         this.selection.clear();
         this.selection.set(key, "hinge");
@@ -4899,6 +5959,12 @@ export class Builder {
     // and bends selected with their group. Other parts keep block selection.
     if (kind === "slide" && !add && this._curveFlipsOnClick(id) && this._flipDomesticCurve(id)) {
       this._selectClick = null;
+      return;
+    }
+    const rotation = this._clickRotationKind(id, kind);
+    if (rotation && rotation !== "panel" && !add && this._partTurnsOnClick(id)) {
+      this._selectClick = null;
+      this._queueSelectFlip(id, e, rotation, pick.point);
       return;
     }
     if (this._isBlockClick(e, ids[0])) {
@@ -4928,6 +5994,9 @@ export class Builder {
     } else {
       this.selection.clear();
       for (const [x, k] of kinds) this.selection.set(x, k);
+    }
+    if (!add && kind === "tube" && this.model.tubes.get(id)?.bow && !this._bowPivotForFree(this.model.tubes.get(id))) {
+      this.onNotice(t("notice_bow_choose_pivot"), "info");
     }
     this.refresh();
   }

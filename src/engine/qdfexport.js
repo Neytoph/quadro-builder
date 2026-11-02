@@ -22,13 +22,15 @@
 // Bewusst ohne Three.js und DOM -- wie qdfimport.js in Node testbar.
 
 import { geometry, getPanel, getTube } from "./catalog.js";
-import { ACCESSORY_PACK } from './accessoryPack.js';
+import { ACCESSORY_PACK, componentFrame } from './accessoryPack.js';
 import { confirmedSpec, confirmedColor } from './componentPack.js';
 import { QDF_FEATURE_KEYS } from './qdfFeatures.js';
 import { QDF_FITTING_KINDS, QDF_SLIDE_KINDS } from './qdfimport.js';
 import { officialColorId } from "./colors.js";
-import { panelNormal, modelMiddle } from "./util.js";
+import { panelNormal, modelMiddle, quatFromBasis } from "./util.js";
+import { c45FrameFor } from './c45Pose.js';
 import { isHolePart, HOLE_MASKS, BLACK_FITTINGS, isBoltPart, boltAxis, boltDepth, hingeDir, fixedFittingColor } from "./model.js";
+import { connectorFrameOf, connectorsForNode, resolveNodeConnection } from './bom.js';
 
 const NON_QDF_ACCESSORY_IDS = new Set(ACCESSORY_PACK.map(part => part.id));
 
@@ -306,7 +308,7 @@ function panelMat(color, variant) {
  */
 export function reinforcementProfiles(model) {
   const nodeOf = (id) => model.nodes.get(id);
-  const list = [...model.tubes.values()].filter((t) => t.reinforced && !t.arm && !t.link
+  const list = [...model.tubes.values()].filter((t) => t.reinforced && !t.reinforcement && !t.arm && !t.link
     && nodeOf(t.a) && nodeOf(t.b));
   const abstand = (a, b) => Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
   const richtung = (a, b) => { const l = abstand(a, b) || 1;
@@ -339,6 +341,23 @@ export function reinforcementProfiles(model) {
     const a = nodeOf(t.a), b = nodeOf(t.b);
     out.push({ from: [a.x, a.y, a.z], dir: richtung(a, b),
       len: Math.min(80, abstand(a, b)), tubes: [t.id] });
+  }
+  const explicit = new Map();
+  for (const tube of model.tubes.values()) if (tube.reinforced && tube.reinforcement) {
+    const key = tube.reinforcement.group;
+    if (!explicit.has(key)) explicit.set(key, []);
+    explicit.get(key).push(tube);
+  }
+  for (const tubes of explicit.values()) {
+    const points = tubes.flatMap(tube => [nodeOf(tube.a), nodeOf(tube.b)]);
+    if (points.some(point => !point)) continue;
+    let dir = richtung(points[0], points[1]);
+    const dominant = dir.findIndex(value => Math.abs(value) === Math.max(...dir.map(Math.abs)));
+    if (dir[dominant] < 0) dir = dir.map(value => -value);
+    points.sort((a, b) => (a.x - b.x) * dir[0] + (a.y - b.y) * dir[1] + (a.z - b.z) * dir[2]);
+    const first = points[0], last = points.at(-1);
+    out.push({ from: [first.x, first.y, first.z], dir, len: abstand(first, last),
+      tubes: tubes.map(tube => tube.id), partId: tubes[0].reinforcement.partId });
   }
   return out;
 }
@@ -407,6 +426,8 @@ export function buildQDF(model, opts = {}) {
   // Der Adapterkoerper einer 45-Grad-Winkelkupplung ist kein eigenes Teil: er
   // steckt auf der Eck-Kupplung, die dafuer als connector45_2 geschrieben wird.
   for (const n of model.nodes.values()) {
+    if (!n.part && !n.c45 && !n.c45body && !n.c45file && !n.preferType && !n.arms?.length
+        && !connectorsForNode(model, n).length) continue;
     // Adapter-Koerper sind keine eigene Kupplung -- ausser am freien Ende einer
     // Schraege, wo die Datei eine connector3 fuehrt (ownConnector).
     if (n.c45body && !n.ownConnector) continue;
@@ -480,15 +501,19 @@ export function buildQDF(model, opts = {}) {
     // Eine gedrehte Kupplung (aus dem Import) behaelt ihre Lage. Die Arm-Maske
     // zaehlt die LOKALEN Wuerfelachsen -- bei einer gedrehten Kupplung sind das
     // nicht die Weltachsen, sonst bekaeme sie gar keine Arme zugeordnet.
-    const quat = n.quat && n.quat.length === 4
-      ? [n.quat[3], n.quat[0], n.quat[1], n.quat[2]]      // Three (x,y,z,w) -> Datei (w,x,y,z)
-      : null;
+    let quat = null;
+    if (n.quat && n.quat.length === 4) {
+      quat = [n.quat[3], n.quat[0], n.quat[1], n.quat[2]]; // Three (x,y,z,w) -> Datei (w,x,y,z)
+    } else {
+      const frame = connectorFrameOf(model, n);
+      if (frame) quat = quatFromAxes(...frame);
+    }
     const toLocal = (d) => (quat ? rotateByQuat(conjugate(quat), d) : d);
 
     let mask = 0;
     let carriesAdapter = false;
-    // Vorhandene Stutzen aus dem Import (inklusive offener Arme ohne Rohr).
-    for (const a of n.arms || []) {
+    // 手动通型与文件中的空插口采用和画面、料表一致的真实方向。
+    for (const a of resolveNodeConnection(model, n).renderDirs) {
       const l = toLocal(a);
       for (const [bit, v] of ARM_BITS) if (dot(l, v) > 0.9) mask |= bit;
     }
@@ -548,10 +573,22 @@ export function buildQDF(model, opts = {}) {
     // verschiedene Quaternionen. Kam sie aus einer Datei, geht sie unveraendert
     // wieder hinaus; sonst bleibt es bei der Wuerfel-Lage.
     if (c45) {
-      const q45 = n.c45quat && n.c45quat.length === 4
+      const bodies = [...model.tubes.values()].filter(t => t.arm && (t.a === n.id || t.b === n.id))
+        .map(t => node(t.a === n.id ? t.b : t.a)).filter(body => body?.c45body);
+      if (bodies.length) {
+        for (const body of bodies) {
+          const frame = c45FrameFor(model, n, body);
+          if (!frame) throw new Error('45°件缺少有效安装姿态');
+          const quat45 = quatFromBasis(...frame);
+          const q45 = encodeQuat([quat45[3], ...quat45.slice(0, 3)]);
+          lines.push(`connector45_2{${CONNECTOR_MAT}, ${tuple(q45, n.x, n.y, n.z)}, 1, 0, 0}`);
+        }
+      } else {
+        const q45 = n.c45quat && n.c45quat.length === 4
         ? encodeQuat([n.c45quat[3], n.c45quat[0], n.c45quat[1], n.c45quat[2]])
         : q;
-      lines.push(`connector45_2{${CONNECTOR_MAT}, ${tuple(q45, n.x, n.y, n.z)}, 1, 0, 0}`);
+        lines.push(`connector45_2{${CONNECTOR_MAT}, ${tuple(q45, n.x, n.y, n.z)}, 1, 0, 0}`);
+      }
     }
     stats.connectors++;
   }
@@ -636,7 +673,7 @@ export function buildQDF(model, opts = {}) {
   //   * Die Plattenmitte liegt exakt in der Kupplungsebene (2603 von 2604
   //     Platten, Versatz 0). Auf welcher Seite der Rohre das Teil liegt, sagt
   //     die Normale -- siehe canonicalNormal.
-  const rectLine = (name, corners, matNum, dims, side, turned = false) => {
+  const rectLine = (name, corners, matNum, dims, side, turned = false, normal = null) => {
     if (!corners) return null;
     const [A, B, C, D] = corners.map((c) => ({ x: c[0], y: c[1], z: c[2] }));
     const e1 = dirOf(A, B), e2 = dirOf(A, D);
@@ -652,7 +689,7 @@ export function buildQDF(model, opts = {}) {
     // Normale nicht aus der Ecken-Reihenfolge ableiten (die ist beliebig und
     // liess die Platte mal oben, mal unten erscheinen), sondern eindeutig
     // festlegen und mit der gespeicherten Seite multiplizieren.
-    const n = panelNormal(e1, e2, [cx, cy, cz], middle).map((v) => v * (side < 0 ? -1 : 1));
+    const n = normal || panelNormal(e1, e2, [cx, cy, cz], middle).map((v) => v * (side < 0 ? -1 : 1));
     // Rechtshaendiges Dreibein zur gewaehlten Normalen. Die lokale X-Achse sagt,
     // wo die LIPPEN der Platte liegen: laengs der Tragrohre (e1) oder quer dazu
     // (e2). Genau daran erkennt auch die Herstellersoftware eine gedrehte
@@ -685,7 +722,7 @@ export function buildQDF(model, opts = {}) {
     }
     // Eingelesene Platte: sie liegt da, wo die Datei sie hinschreibt. Auf
     // Schraegen weicht die aus dem Rohrpaar gerechnete Mitte um bis zu 1,2 cm ab.
-    if (p.geom && p.geom.p && p.geom.quat) {
+    if (p.geom && p.geom.p && p.geom.quat && !p.params?.screwAxis) {
       const g = p.geom;
       // Reihenfolge wie in der Datei: `w` ist das ERSTE Mass (lokale Y-Achse),
       // `h` das zweite -- so hat der Import sie gelesen. Andersherum kam jede
@@ -695,8 +732,10 @@ export function buildQDF(model, opts = {}) {
       continue;
     }
     const def = getPanel(p.panelId);
+    const rail=model._rail(p.a),fixing=p.params?.screwAxis && model._rail(p.mounts?.[0]?.tube);
+    const turned=fixing && rail ? Math.abs(fixing.dir.reduce((sum,v,i)=>sum+v*rail.dir[i],0))<.999 : !!p.turned;
     const line = rectLine("panel2", model.panelCorners(p), panelMat(color, lochplatte(p)),
-      def ? [def.w, def.h] : null, p.side, !!p.turned);
+      def ? [def.w, def.h] : null, p.side, turned, p.params?.screwAxis ? componentFrame(model,p)?.axes[2] : null);
     if (line) { lines.push(line); stats.panels++; }
   }
   for (const x of (model.textiles ? model.textiles.values() : [])) {
@@ -781,7 +820,9 @@ export function buildQDF(model, opts = {}) {
       const ex = rotateByQuat([f.quat[3], f.quat[0], f.quat[1], f.quat[2]], [1, 0, 0]);
       fx -= ex[0] * 20; fy -= ex[1] * 20; fz -= ex[2] * 20;
     }
-    if (f.kind === "lattice2" && f.w != null && f.h != null) {
+    if (f.kind === 'alu-connector2') {
+      lines.push(`alu-connector2{${ALU_MAT}, ${tuple(q, fx, fy, fz)}, 1, ${mm(f.w || 40)}, 0., 0}`);
+    } else if (f.kind === "lattice2" && f.w != null && f.h != null) {
       lines.push(`lattice2{${mat}, ${tuple(q, fx, fy, fz)}, 1, ${mm(f.w)}, 0., ${mm(f.h)}, 0., 0}`);
     } else if (f.kind === "hole-connector4") {
       const mask = f.mask || 0;

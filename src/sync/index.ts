@@ -11,6 +11,9 @@ import { docs, storage, partsOfData } from '../engine-api'
 import { cachedStats, rememberStats } from '../designStats'
 import { ENGINE_VERSION } from '../engine/publicResources.js'
 import { createStatsQueue } from './statsQueue'
+import { slotLocked } from './slotAccess'
+import { withAccountWriteLock } from './writeLock'
+import { withRequestDeadline } from './requestDeadline'
 import { forgetOrigin, originOf } from './origin'
 import type {
   DesignParts, DocRecord, PullResponse, PushResponse, RemoteDoc, RemoteInventory,
@@ -71,13 +74,14 @@ export function createSync(opts: SyncOptions = {}) {
   const emit = (e: SyncEvent) => { try { onEvent?.(e) } catch { /* 回调自己的错不该拖垮同步 */ } }
 
   async function call<T>(path: string, init?: RequestInit): Promise<T> {
+    return withRequestDeadline(init?.signal || controller.signal, async signal => {
     active()
     if (!accountId || storage.getAccountScope() !== `user:${accountId}`) throw new Error('sync requires a verified account')
     const res = await fetchImpl(`${baseUrl}${path}`, {
       ...init,
       credentials: 'include',           // 会话 cookie 由网关下发
-      signal: init?.signal || controller.signal,
-      headers: { 'Content-Type': 'application/json', ...(init?.headers || {}), 'X-Builder-User-ID': accountId },
+      signal,
+      headers: { 'Content-Type': 'application/json', 'X-Builder-Entry': 'sync', ...(init?.headers || {}), 'X-Builder-User-ID': accountId },
     })
     active()
     if (res.status === 401 || (res.status === 409 && res.headers.get('X-Builder-User-ID') !== accountId)) {
@@ -101,6 +105,7 @@ export function createSync(opts: SyncOptions = {}) {
     const result = res.status === 204 ? (undefined as T) : ((await res.json()) as T)
     active()
     return result
+    })
   }
 
   /** 冲突不丢数据：本地版本另存一份，再接受服务端版本。 */
@@ -220,7 +225,7 @@ export function createSync(opts: SyncOptions = {}) {
    */
   async function push(): Promise<void> {
     const all = (await docs.allRecords()) as DocRecord[]
-    const queue = all.filter((d) => d.dirty)
+    const queue = all.filter((d) => d.dirty && !slotLocked(d.id))
     const queued = new Set(queue.map(doc => doc.id))
     for (const doc of queue) {
       active()
@@ -267,7 +272,7 @@ export function createSync(opts: SyncOptions = {}) {
               ...(doc.cover ? { cover: doc.cover } : {}),
             }),
           })
-          if (!Number.isSafeInteger(response.rev) || response.rev <= doc.rev) throw new Error('invalid save receipt')
+          if (!Number.isSafeInteger(response.rev) || response.rev < doc.rev || response.rev === doc.rev && (!doc.saveId || response.saveId !== doc.saveId)) throw new Error('invalid save receipt')
           if (response.saveId && response.saveId !== doc.saveId) throw new Error('save receipt mismatch')
           await docs.markDocSynced(doc.id, response.rev, stamp, response.coverApplied === false ? undefined : doc.cover, doc.saveId, doc.rev, stats ? null : statsTask(doc, response.rev))
           if (!response.originError) forgetOrigin(doc.id)
@@ -308,7 +313,8 @@ export function createSync(opts: SyncOptions = {}) {
     active()
     if (!Number.isSafeInteger(rev) || rev < since || !Array.isArray(items)
       || items.some(item => !item.id || !Number.isSafeInteger(item.rev) || item.rev > rev || item.rev <= since)) throw new Error('invalid models pull snapshot')
-    const n = await docs.applyRemoteBatch(items, rev)
+    // 锁定记录不替换本地模型或未提交草稿；续租后由新修订重新拉取。
+    const n = await docs.applyRemoteBatch(items.filter(item=>!item.locked), rev)
     active()
     emit({ type: 'pulled', count: n, rev })
   }
@@ -385,7 +391,7 @@ export function createSync(opts: SyncOptions = {}) {
       const identity = await response.json() as { userId?: string }
       active()
       if (identity.userId !== accountId) { stop(); onIdentityChange?.(); return }
-      try { await push() }
+      try { await withAccountWriteLock(accountId!, async () => { active(); await push() }, controller.signal) }
       catch (error) {
         if (!(error instanceof QuotaError)) throw error
         // 配额阻止上传时仍能安全拉取；整轮保留失败状态。

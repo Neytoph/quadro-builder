@@ -1,9 +1,12 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { readComponentAppearance } from './componentAppearance.js';
 import { ParametricGeometry } from 'three/examples/jsm/geometries/ParametricGeometry.js';
 import { accessorySpec, componentFrame, mountPoint } from './accessoryPack.js';
 import { confirmedComponentMeshes } from './confirmedComponentMeshes.js';
 import { insetScrewMeshes } from './insetPanelMeshes.js';
+import { hasInsetScrews, INSET_PANEL_EDGE_INSET } from './insetPanelMounts.js';
+import { geometry } from './catalog.js';
 
 const PALETTE = { blue: '#238fe4', yellow: '#ffd33c', cream: '#eee5d0', orange: '#f88929', green: '#48af63', red: '#eb4641', dark: '#363a3f', metal: '#b8bec2', rope: '#cdbc96', cloth: '#d8c8a9' };
 
@@ -50,6 +53,17 @@ function steeringMeshes(scene, model, fitting) {
   cuffs(f, 8);
   box('steering-base', [10.5, 7.2, 2.4], 'dark', [0, 0, 3.2], 1.2);
   disc('steering-shaft', 1.45, 5.6, 'dark', [0, 0, 6.2]);
+  const appearance = readComponentAppearance(fitting);
+  if (appearance?.variant === 'four_spoke') {
+    add('steering-four-spoke-wheel', () => new THREE.TorusGeometry(10.65, 1.35, 18, 80), 'plastic', appearance.color, [0, 0, 9.4]);
+    for (let i = 0; i < 4; i++) {
+      const angle = i * Math.PI / 2;
+      const rotation = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), angle - Math.PI / 2);
+      box(`steering-four-spoke:${i}`, [2.4, 9.8, 1.7], appearance.color, [Math.cos(angle) * 5, Math.sin(angle) * 5, 9.4], 0.85, rotation);
+    }
+    disc('steering-four-spoke-hub', 2.6, 2.2, appearance.color, [0, 0, 9.7]);
+    return f.result;
+  }
   add('steering-wheel', () => new THREE.TorusGeometry(10.65, 1.35, 18, 80), 'plastic', 'blue', [0, 0, 9.4]);
   for (let i = 0; i < 3; i++) {
     const a = i * Math.PI * 2 / 3 + Math.PI / 2;
@@ -76,8 +90,10 @@ function busyMeshes(scene, model, panel) {
   const frame = componentFrame(model, panel);
   if (!frame) return [];
   const f = meshFactory(scene, frame), { box, disc, add } = f;
-  box('busy-green-outline', [35.4, 35.4, 1.8], 'green', [0, 0, 0], 2.3);
-  box('busy-cream-board', [33.4, 33.4, 1.6], 'cream', [0, 0, 0.45], 1.8);
+  const thickness=geometry().panelThickness,center=1.25-thickness/2;
+  const inset=hasInsetScrews(panel),width=inset?40-2*INSET_PANEL_EDGE_INSET:35.4;
+  box('busy-green-outline', [width, width, thickness], 'green', [0, 0, center], 2.3);
+  box('busy-cream-board', [width-2, width-2, thickness], 'cream', [0, 0, center+0.01], 1.8);
   add('busy-blue-gear', () => gearGeometry(6.5, 12), 'plastic', 'blue', [-7.5, 7, 1.3]);
   add('busy-yellow-gear', () => gearGeometry(4.5, 10), 'plastic', 'yellow', [3.3, 7, 1.3]);
   disc('busy-gear-center-big', 1.1, 0.7, 'metal', [-7.5, 7, 3.2], 'metal');
@@ -92,6 +108,7 @@ function busyMeshes(scene, model, panel) {
   disc('busy-crank-pivot', 0.6, 0.45, 'metal', [8, -8.2, 4.3], 'metal');
   disc('busy-crank-tip', 0.45, 0.45, 'metal', [10.5, -11.3, 4.3], 'metal');
   for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4; box(`busy-disc-mark:${i}`, [0.32, 0.8, 0.16], '#066caf', [8 + Math.sin(a) * 3.1, -8.2 + Math.cos(a) * 3.1, 3.1], 0.12, new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -a)); }
+  if(inset)for(const mesh of f.result)mesh.position.addScaledVector(new THREE.Vector3(...frame.axes[2]),-center);
   return [...f.result,...insetScrewMeshes(scene,model,panel,frame)];
 }
 
@@ -178,7 +195,9 @@ export function accessoryMeshes(scene, model, fitting, color) {
     add(`line:${radius}:${length.toFixed(3)}`, () => new THREE.CylinderGeometry(radius, radius, length, 10), mat,
       p.clone().add(q).multiplyScalar(0.5), new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize()));
   };
-  const origin = new THREE.Vector3((a.x + b.x) / 2, a.y, (a.z + b.z) / 2);
+  const origin = fitting.appearanceVersion
+    ? new THREE.Vector3(fitting.x,fitting.y,fitting.z)
+    : new THREE.Vector3((a.x + b.x) / 2, a.y, (a.z + b.z) / 2);
   const x = new THREE.Vector3(b.x - a.x, 0, b.z - a.z).normalize();
   const up = new THREE.Vector3(0, 1, 0), z = x.clone().cross(up);
   const rotation = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, up, z));

@@ -1,5 +1,17 @@
-export const INSET_MOUNT_LAYOUT='opposite-transparent-screws';
-export const INSET_PANEL_IDS=new Set(['acrylic_panel_40x40','acrylic_panel_40x20','acrylic_panel_40x60','acrylic_hole_panel_40x40','acrylic_platform_40x40','panel_40x40_capsule','panel_40x40_grid','panel_40x40_busy']);
+import {geometry} from './catalog.js';
+import { placementMemo, railLineScope } from './incrementalPlacement.js';
+import {INSET_PANEL_IDS, INSET_MOUNT_LAYOUT} from './insetPanelSpec.js';
+export {INSET_PANEL_IDS, INSET_MOUNT_LAYOUT} from './insetPanelSpec.js';
+
+// 保存键兼容已有模型；当前固定件为管内侧的米白色卡槽螺丝。
+export const INSET_PANEL_EDGE_INSET=2.8;
+export function insetClipParts() {
+  const gap=geometry().panelThickness+.04,flange=.4;
+  return [
+    {name:'shaft',shape:'cylinder',pos:[2,0,0],half:[.7,.48,.48]},
+    ...[-1,1].map(side=>({name:side<0?'jaw-back':'jaw-front',shape:'box',pos:[3.4,0,side*(gap+flange)/2],half:[.75,.6,flange/2]})),
+  ];
+}
 const sub=(a,b)=>a.map((v,i)=>v-b[i]);
 const dot=(a,b)=>a.reduce((n,v,i)=>n+v*b[i],0);
 const at=(frame,p)=>frame.pos.map((v,i)=>v+frame.axes.reduce((n,a,k)=>n+a[i]*p[k],0));
@@ -7,10 +19,29 @@ const local=(frame,p)=>frame.axes.map(a=>dot(sub(p,frame.pos),a));
 
 export function hasInsetScrews(part) {return INSET_PANEL_IDS.has(part.panelId) && part.params?.mountLayout===INSET_MOUNT_LAYOUT;}
 
-// 仅内嵌安装使用连续对边探针；每根短管都仍是实际模型管件。
-export function insetPanelProbes(model,width,height) {
+// 连续边管用于查找矩形候选，固定边可由一根或多根相接的直管组成。
+export function insetPanelProbes(model,width,height,{deduplicate=true,segmentedOnly=false,onlyRailId=null}={}) {
+  const ids=onlyRailId?[onlyRailId]:[...model.tubes.keys()],seen=new Set(),out=[];
+  for(const id of ids){
+    const probes=placementMemo(model,'inset-rail:'+JSON.stringify([width,height,segmentedOnly,id]),railLineScope(model,id,width+2),
+      ()=>computeInsetPanelProbes(model,width,height,{deduplicate:false,segmentedOnly,onlyRailId:id}));
+    for(const probe of probes){
+      if(deduplicate){
+        const rail=model._rail(probe.a),partner=model._rail(probe.b),delta=sub(partner.p0,rail.p0),along=dot(delta,rail.dir),across=delta.map((v,i)=>v-along*rail.dir[i]);
+        const start=rail.p0.map((v,i)=>v+rail.dir[i]*probe.t0),end=start.map((v,i)=>v+rail.dir[i]*height);
+        const key=[start,end,start.map((v,i)=>v+across[i]),end.map((v,i)=>v+across[i])].map(p=>p.map(v=>v.toFixed(2)).join(',')).sort().join('|');
+        if(seen.has(key))continue;seen.add(key);
+      }
+      out.push(probe);
+    }
+  }
+  return out;
+}
+function computeInsetPanelProbes(model,width,height,{deduplicate,segmentedOnly,onlyRailId}) {
   const rails=[...model.tubes.values()].flatMap(t=>{const rail=model._rail(t.id);return rail?[{...rail,id:t.id}]:[];}),out=[],seen=new Set();
   for(const rail of rails){
+    if(onlyRailId && rail.id!==onlyRailId)continue;
+    if(segmentedOnly && rail.len>=height-.35)continue;
     const starts=new Set(),intervals=[];
     for(const span of rails){
       if(Math.abs(dot(span.dir,rail.dir))<.999)continue;
@@ -32,7 +63,7 @@ export function insetPanelProbes(model,width,height) {
       for(const t0 of complete){
         const start=rail.p0.map((v,i)=>v+rail.dir[i]*t0),end=start.map((v,i)=>v+rail.dir[i]*height);
         const key=[start,end,start.map((v,i)=>v+across[i]),end.map((v,i)=>v+across[i])].map(p=>p.map(v=>v.toFixed(2)).join(',')).sort().join('|');
-        if(seen.has(key))continue;seen.add(key);out.push({a:rail.id,b:partner.id,t0,len:height});
+        if(deduplicate&&seen.has(key))continue;seen.add(key);out.push({a:rail.id,b:partner.id,t0,len:height});
       }
     }
   }
@@ -78,7 +109,8 @@ export function insetPanelReference(model,frame,width,height,supports,{screwAxis
   const a=supports.mounts[0].tube,b=supports.mounts[2].tube,rail=model._rail(a);
   const horizontal=screwAxis==='horizontal',direction=dot(rail.dir,frame.axes[horizontal?0:1])>=0?1:-1;
   const start=at(frame,horizontal?[-direction*width/2,-height/2,0]:[-width/2,-direction*height/2,0]);
-  return {a,b,t0:dot(sub(start,rail.p0),rail.dir),len:horizontal?width:height};
+  const t0=dot(sub(start,rail.p0),rail.dir);
+  return {a,b,t0:Math.abs(t0)<1e-8?0:t0,len:horizontal?width:height};
 }
 
 // 框边与内嵌板的接合属于既有框架空间，固定引用仅记录实际螺丝承载管。
@@ -98,11 +130,11 @@ export function insetScrewPose(model,frame,mount) {
 }
 
 export function insetScrewVolumes(model,part,frame) {
-  const lower=part.panelId==='panel_40x40_busy' ? .9 : 1.95,out=[];
+  const out=[];
   for(const mount of part.mounts || []){
     const pose=insetScrewPose(model,frame,mount);if(!pose)continue;
-    const {position,inward,tangent}=pose,front=(lower+3.25)/2;
-    out.push({pos:at(frame,position.map((v,i)=>v+inward[i]*1.2+(i===2?front:0))),axes:[inward,tangent,[0,0,1]].map(axis=>frame.axes[0].map((_,i)=>frame.axes.reduce((n,a,k)=>n+a[i]*axis[k],0))),half:[2,.95,(3.25-lower)/2]});
+    const {position,inward,tangent}=pose,axes=[inward,tangent,[0,0,1]].map(axis=>frame.axes[0].map((_,i)=>frame.axes.reduce((n,a,k)=>n+a[i]*axis[k],0)));
+    for(const clip of insetClipParts())out.push({pos:at(frame,position.map((v,i)=>v+inward[i]*clip.pos[0]+tangent[i]*clip.pos[1]+(i===2?clip.pos[2]:0))),axes,half:clip.half});
   }
   return out;
 }

@@ -6,6 +6,7 @@ import { componentMountsValid, componentFrame, confirmedDiagnostics, ACCESSORY_I
 import { partEnvelope } from './assemblyCollision.js';
 import { nativeAccessorySupport, normalizedAssemblyQuaternion } from './assemblyAccessoryMethods.js';
 import { createCoreChannels } from './assemblyCoreChannels.js';
+import { REINFORCEMENT_SPECS } from './reinforcement.js';
 import { isOriginalComponent, componentInstallCopy, componentPartId } from './accessoryInfo.js';
 import { resolveScheduledStepDependencies, validateInternalStepDependencies } from './assemblyLayerSteps.js';
 const xAxisOf=q=>rawXAxisOf(normalizedAssemblyQuaternion(q)),yAxisOf=q=>rawYAxisOf(normalizedAssemblyQuaternion(q)),zAxisOf=q=>rawZAxisOf(normalizedAssemblyQuaternion(q));
@@ -18,12 +19,57 @@ const sub=(a,b)=>a.map((v,i)=>v-b[i]);
 const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
 const dot=(a,b)=>a.reduce((s,v,i)=>s+v*b[i],0);
 const tubeSupports=p=>[...new Set([...(Array.isArray(p.supportTubes)?p.supportTubes:[]),p.tube,p.a,p.b].filter(Boolean))];
+export function panelSupportTubes(model,panel){
+  const corners=model.panelCorners(panel);if(!corners)return tubeSupports(panel);
+  const supports=new Set(tubeSupports(panel));
+  for(const tube of model.tubes.values()){
+    if(tube.arm||tube.link||tube.bow)continue;const rail=model._rail(tube.id);if(!rail)continue;
+    if(corners.some((p,i)=>{const q=corners[(i+1)%4],edge=sub(q,p),edgeLength=Math.hypot(...edge),d=unit(edge);if(Math.abs(dot(d,rail.dir))<.995)return false;const v=sub(rail.p0,p),along=dot(v,d),endAlong=along+rail.len*dot(rail.dir,d),overlap=Math.min(edgeLength,Math.max(along,endAlong))-Math.max(0,Math.min(along,endAlong));return Math.hypot(...v.map((x,k)=>x-d[k]*along))<.6&&overlap>.6;}))supports.add(tube.id);
+  }
+  return [...supports];
+}
+export function framePanelIds(model,tubeIds,deferredIds=new Set()){
+  const frameTubes=new Set(tubeIds);
+  return [...model.panels.values()].filter(panel=>{
+    if(isOriginalComponent(panel)||deferredIds.has(panel.id))return false;
+    const supports=panelSupportTubes(model,panel);
+    return supports.length>0&&supports.every(id=>frameTubes.has(id));
+  }).map(panel=>panel.id);
+}
+export function reconcileFrameModulePanels(model,frameModules,steps,deferredIds=new Set()){
+  for(const module of frameModules){
+    const step=steps.find(item=>item.id===module.installStepId);
+    if(!step||!module.tubeIds?.length)continue;
+    const frameTubes=new Set(module.tubeIds);
+    module.panelIds=step.panelIds.filter(id=>{
+      const panel=model.panels.get(id);
+      if(!panel||isOriginalComponent(panel)||deferredIds.has(id))return false;
+      const supports=panelSupportTubes(model,panel);
+      return supports.length>0&&supports.every(supportId=>frameTubes.has(supportId));
+    });
+    const carried=new Set(module.panelIds);
+    module.partIds=[...module.partIds.filter(id=>!model.panels.has(id)),...module.panelIds];
+    const actionModule=step.action.modules?.find(item=>item.id===module.id);
+    if(actionModule)actionModule.partIds=[...module.partIds];
+    if(step.action.inPlacePartIds)step.action.inPlacePartIds=step.action.inPlacePartIds.filter(id=>!carried.has(id));
+  }
+  for(const step of steps){
+    if(!step.action?.layer)continue;
+    const modules=step.action.modules||[],movingTubes=new Set(modules.flatMap(module=>module.tubeIds||module.partIds.filter(id=>model.tubes.has(id))));
+    const carriedPanels=new Set(modules.flatMap(module=>module.partIds.filter(id=>model.panels.has(id)))),inPlace=new Set(step.action.inPlacePartIds||[]);
+    for(const id of step.panelIds||[]){
+      if(carriedPanels.has(id)){inPlace.delete(id);continue;}
+      const panel=model.panels.get(id);if(panel&&panelSupportTubes(model,panel).some(tubeId=>movingTubes.has(tubeId)))inPlace.add(id);
+    }
+    step.action.inPlacePartIds=[...inPlace];
+  }
+}
 const THREAD=new Set(['floating-wheel2','sleeve2','textil-round2','bag2','pool2','pool-small2','roof-large2']);
 const verify=(pathChecked=false,methodChecked=true,directionConsistent=true)=>({directionConsistent,pathChecked,methodChecked,physical:'unverified',load:'unverified',basis:methodChecked?'topology-and-conservative-geometry':'unresolved-installation-method'});
 const diag=(diagnostics,code,message,partIds,details)=>diagnostics.push({code,severity:'error',message,partIds,nodeIds:[],details});
 
 /** Reassign physical prethread parts before their carrier is closed, then defer coverings. */
-export function scheduleAssemblyAccessories(model,steps,diagnostics,regions=[],deferredAccessories=[]){
+export function scheduleAssemblyAccessories(model,steps,diagnostics,regions=[],deferredAccessories=[],{stepCountOnly=false}={}){
   const originalDependencies = new Map(steps.map(step => [step.id, [...step.dependsOn]]));
   const mergedSteps = new Map();
   for (const r of regions.filter(r=>r.kind==='roof')) {
@@ -59,6 +105,11 @@ export function scheduleAssemblyAccessories(model,steps,diagnostics,regions=[],d
     const q=f.quat||[0,0,0,1],axis=xAxisOf(q),bearings=[...model.fittings.values()].filter(p=>p.kind==='bearing2').filter(p=>{const d=xyz(f).map((v,i)=>v-xyz(p)[i]),along=dot(d,axis);return Math.abs(along)<15&&Math.hypot(...d.map((v,i)=>v-axis[i]*along))<.6;});
     if(bearings.length!==1)diag(diagnostics,'MISSING_WHEEL_BEARING','多功能轮需要明确的轮轴承安装引用，请核对轮轴和朝向。',[f.id,...bearings.map(p=>p.id)]);else {const s=owner.get(f.id);s.bearingSupports={...s.bearingSupports,[f.id]:bearings[0].id};}
   }
+  for(const fitting of model.fittings.values())if(fitting.kind==='bearing-connector4'){
+    const support=nativeAccessorySupport(model,fitting.id),target=support.valid&&owner.get(support.supportIds[0]),carrier=support.valid&&owner.get(support.carrierId);
+    if(target&&carrier&&steps.indexOf(target)<steps.indexOf(carrier))move(fitting.id,'fittingIds',target);
+    else diag(diagnostics,'BEARING_SUPPORT_ORDER_UNRESOLVED','轴承必须先固定到已完成的支架插口，再从开放管端穿入连续轴。',[fitting.id,...support.supportIds,support.carrierId].filter(Boolean));
+  }
   for(const c of model.clamps?.values()||[]){const base=model._clampBaseTube?.(c);const cohort=model.clampCohort?.(c.id);const carriers=[base?.id,...(cohort?.tubes||[])].filter(Boolean);const candidates=physical.filter(s=>carriers.some(id=>s.tubeIds.includes(id))).sort((a,b)=>steps.indexOf(a)-steps.indexOf(b)),first=c.connectorId==='tube_clamp'?candidates.at(-1):candidates[0];if(first){move(c.id,'clampIds',first);if(c.connectorId==='tube_clamp')first.clampSupports={...first.clampSupports,[c.id]:carriers};else first.threadSupports={...first.threadSupports,[c.id]:carriers};}else diag(diagnostics,'MISSING_DOUBLE_TUBE_SUPPORT','双管连接环没有可识别的两根穿管轴。',[c.id]);}
   // Dedicated factory slides are fitted when their real entry/exit supports
   // exist, before upper guardrails can obstruct the entrance platform.
@@ -74,11 +125,7 @@ export function scheduleAssemblyAccessories(model,steps,diagnostics,regions=[],d
   // risers can obstruct it. Later tube actions still check against that panel.
   for(const panel of model.panels.values()){
     const corners=model.panelCorners(panel);if(!corners)continue;
-    const supports=new Set(tubeSupports(panel));
-    for(const tube of model.tubes.values()){
-      if(tube.arm||tube.link||tube.bow)continue;const rail=model._rail(tube.id);if(!rail)continue;
-      if(corners.some((p,i)=>{const q=corners[(i+1)%4],d=unit(sub(q,p));if(Math.abs(dot(d,rail.dir))<.995)return false;const v=sub(rail.p0,p),along=dot(v,d);return Math.hypot(...v.map((x,k)=>x-d[k]*along))<.6 && along<Math.hypot(...sub(q,p))+.6 && along+rail.len>-.6;}))supports.add(tube.id);
-    }
+    const supports=new Set(panelSupportTubes(model,panel));
     // Original/confirmed components retain their own final installation step
     // and component-specific fixing instructions. Still resolve every actual
     // perimeter support for the normal motion and support-pose gates below.
@@ -114,6 +161,8 @@ export function scheduleAssemblyAccessories(model,steps,diagnostics,regions=[],d
   }
   resolveScheduledStepDependencies(steps, originalDependencies, mergedSteps, diagnostics);
   for(const s of steps){if(s.action.type==='attach')continue;s.partIds=[...new Set(Object.keys(MAPS).flatMap(k=>s[k]))];}
+  // 以下仅追加说明书诊断；步骤数不使用它们，统计的安全检查仍由安全引擎执行。
+  if(stepCountOnly)return;
   for(const p of [...model.panels.values(),...model.fittings.values()])if(p.appearanceVersion&&(ACCESSORY_IDS.has(p.kind)||PANEL_ACCESSORY_IDS.has(p.panelId))){
     let result;try{result=p.appearanceVersion===2?confirmedDiagnostics(model,p):p.kind?model.accessoryDiagnostics(p.kind,p.tube,{facing:p.facing,ignoreId:p.id}):model.panelAccessoryDiagnostics(p);}catch(error){result={valid:false,reason:String(error)};}
     if(!componentMountsValid(model,p)||!result?.valid)diag(diagnostics,'ACCESSORY_INSTALLATION_INVALID','配件的安装引用、朝向、支撑或空间无效，请检查诊断所指部件。',[p.id,...tubeSupports(p)],result);
@@ -152,7 +201,7 @@ function frameSequence(model,nodeIds,tubeIds,emit,diagnostics,threads=[]){
   if(nodes.length)build(nodes,tubes);
 }
 
-export function addAssemblyOperations(model,plan){
+export function addAssemblyOperations(model,plan,onProgress,{reuseEnvelopes=false,stepCountOnly=false}={}){
   const loaded=assemblyMeshes();if(!loaded)throw new Error('装配网格还没加载');
   const nativeEnvelopes=loaded.nativeEnvelopes;
   const {steps,diagnostics}=plan,installed=new Set(),runDone=new Set(),threadDone=new Set(),poses=new Map(),threadAssemblies=[],threadCarrierConsumed=new Set(),preparedRigid=new Set(),softLinings=[];let previous;
@@ -165,16 +214,25 @@ export function addAssemblyOperations(model,plan){
   const panelLinerContacts=new Map();
   for(const step of steps)for(const [linerId,{carriers}]of Object.entries(step.flexibleLinings||{}))for(const panel of model.panels.values())for(const railId of tubeSupports(panel))if(carriers.includes(railId))panelLinerContacts.set(`${panel.id}:${linerId}`,{panelId:panel.id,linerId,railId,basis:'source-native-shared-carrier-lip'});
   const fittingMatingContacts=new Map();
-  for(const fitting of model.fittings.values())if(!THREAD.has(fitting.kind)&&!fitting.appearanceVersion){const resolved=nativeAccessorySupport(model,fitting.id);if(resolved.valid)for(const supportId of resolved.supportIds){const kind=model.nodes.has(supportId)?'node-stub':model.fittings.get(supportId)?.kind==='bearing2'?'wheel-bearing':null;if(kind)fittingMatingContacts.set(`${fitting.id}:${supportId}`,{fittingId:fitting.id,supportId,kind,axis:resolved.mount.direction,basis:resolved.basis});}}
+  for(const fitting of model.fittings.values())if(!THREAD.has(fitting.kind)&&!fitting.appearanceVersion){const resolved=nativeAccessorySupport(model,fitting.id);if(resolved.valid)for(const supportId of resolved.supportIds){const kind=fitting.kind==='bearing-connector4'?'structural-bearing-stub':model.nodes.has(supportId)?'node-stub':fitting.kind==='casters2'&&model.fittings.get(supportId)?.kind==='adapter2'?'caster-adapter':model.fittings.get(supportId)?.kind==='bearing2'?'wheel-bearing':null;if(kind)fittingMatingContacts.set(`${fitting.id}:${supportId}`,{fittingId:fitting.id,supportId,kind,axis:resolved.mount.direction,basis:resolved.basis});}}
   const c45MatingContacts=new Map(plan.interfaces.filter(mark=>mark.directionBasis==='qdf-file-C45-mouth-and-matching-receiver-axis').map(mark=>[`${mark.nodeId}:${mark.supportTubeId}`,{cornerId:mark.nodeId,receiverNodeId:mark.mateNodeId,tubeId:mark.supportTubeId,basis:mark.directionBasis}]));
-  const reinforcement=reinforcementPart(),core=createCoreChannels(model,{entryPanelContacts,linerCarrierContacts,panelLinerContacts,fittingMatingContacts,c45MatingContacts});
+  const reinforcement=reinforcementPart(),core=createCoreChannels(model,{entryPanelContacts,linerCarrierContacts,panelLinerContacts,fittingMatingContacts,c45MatingContacts},reuseEnvelopes);
   const checkPath=(moving,installed,...args)=>core.check(moving,[...new Set([...installed,...preparedRigid])].filter(id=>!softLinings.some(lining=>lining.folded&&lining.id===id&&moving.every(part=>lining.carriers.includes(part)||lining.carriers.some(t=>{const tube=model.tubes.get(t);return tube.a===part||tube.b===part;})))),...args);
-  const materialKeys=id=>plan.ledger.instances.filter(x=>x.partIds.includes(id)&&x.group!=='screws').map(x=>`${x.group}:${x.key}`);
+  const materialKeys=id=>stepCountOnly?[]:plan.ledger.instances.filter(x=>x.partIds.includes(id)).map(x=>`${x.group}:${x.key}`);
+  let processedSteps=0;
   for(const step of steps){step.operations=[];const opByPart=new Map();let staging=[0,0,0];
     const region=plan.regions.find(r=>r.id===step.regionId),regional=step.action.detached ? region.detachedTranslation : [0,0,0];
     const present=new Set(installed);
     const emit=(type,partIds,text,extra={})=>{
       if(type==='insert-tube'){
+        const bearings=[...model.fittings.values()].filter(f=>f.kind==='bearing-connector4').map(f=>({f,support:nativeAccessorySupport(model,f.id)})).filter(({support})=>support.valid&&partIds.includes(support.carrierId));
+        if(bearings.length){
+          const tube=model.tubes.get(bearings[0].support.carrierId),axis=unit(extra.translation),points=[tube.a,tube.b].map(id=>xyz(model.nodes.get(id))),near=Math.min(...points.map(p=>dot(p,axis))),far=Math.max(...bearings.map(({f})=>dot(xyz(f),axis)+2.5)),travel=Math.max(Math.hypot(...extra.translation),far-near+5);
+          const aligned=bearings.every(({f,support})=>present.has(f.id)&&Math.abs(dot(support.shaftAxis,axis))>.999999&&Math.hypot(...(poses.get(f.id)||[0,0,0]))<1e-6)&&[tube.a,tube.b].filter(id=>present.has(id)).length<2;
+          if(!aligned)diag(diagnostics,'BEARING_SHAFT_METHOD_UNRESOLVED','连续轴穿入前需要全部轴承已固定、孔轴一致，并保留开放管端。',[tube.id,...bearings.map(({f})=>f.id)]);
+          extra={...extra,translation:axis.map(v=>v*travel),direction:axis.map(v=>-v),referencePartIds:[...(extra.referencePartIds||[]),...bearings.map(({f})=>f.id)],bearingShaftMethod:{bearingIds:bearings.map(({f})=>f.id),valid:aligned,basis:'fixed-bearings-before-open-ended-continuous-shaft'}};
+          text=copy('先确认图示轴承已固定到支架，保持两孔同轴；从开放端沿箭头穿入连续轴，再连接另一端框架。','Secure the shown bearings to their supports, align their bores, and slide the continuous shaft through from its open end before joining the other frame.','Gezeigte Lager an ihren Stützen befestigen, Bohrungen axial ausrichten und durchgehendes Rohr vom offenen Ende einschieben; danach den anderen Rahmen verbinden.');
+        }
         const carried=threadAssemblies.filter(thread=>thread.verification.methodChecked&&thread.carriers.some(id=>partIds.includes(id)));
         if(carried.length){
           const carriers=[...new Set(carried.flatMap(thread=>thread.carriers))],accessories=[...new Set(carried.filter(thread=>!thread.flexible).map(thread=>thread.id))],moving=[...carriers,...accessories];
@@ -194,17 +252,19 @@ export function addAssemblyOperations(model,plan){
       }
       const actualOffset=(extra.placementTranslation||[0,0,0]).map((v,i)=>v+regional[i]+staging[i]);
       const channel=core.channels.find(c=>c.active&&(c.middle.some(id=>partIds.includes(id))||partIds.includes(c.terminalNodeIds[1])));
-      if(type==='orient-connector'&&channel){const nodeId=partIds.find(id=>channel.middle.includes(id)||id===channel.terminalNodeIds[1]),point=xyz(model.nodes.get(nodeId)),tip=dot(channel.end.map((v,i)=>v+(poses.get(channel.id)?.[i]||0)),channel.axis),target=dot(point.map((v,i)=>v+actualOffset[i]),channel.axis),clearance=Math.max(0,tip-target+7.5);if(clearance>1e-6){type='thread-core-connector';extra={...extra,translation:channel.axis.map(v=>v*clearance),direction:channel.axis.map(v=>-v),position:point,referencePartIds:channel.run.tubeIds,channelId:channel.id};text=copy('沿箭头把贯通接头穿过露出的木芯，保持通孔与木芯同轴，再接到已装管端。','Slide the through-connector over the protruding wood profile along the arrow, keeping the bore aligned, then seat it on the tube end.','Durchgangskupplung entlang des Pfeils über das herausragende Holzprofil schieben, Bohrung axial halten und auf das Rohrende setzen.');}}
-      if(type==='insert-tube'){const next=core.channels.find(c=>c.active&&c.run.tubeIds.some(id=>partIds.includes(id))&&!partIds.includes(c.firstCarrier));if(next){const tube=model.tubes.get(partIds.find(id=>next.run.tubeIds.includes(id))),points=[tube.a,tube.b].map(id=>xyz(model.nodes.get(id))),axis=unit(extra.translation),tip=Math.max(dot(next.start.map((v,i)=>v+(poses.get(next.id)?.[i]||0)),axis),dot(next.end.map((v,i)=>v+(poses.get(next.id)?.[i]||0)),axis)),near=Math.min(...points.map(point=>dot(point.map((v,i)=>v+actualOffset[i]),axis))),clearance=Math.max(Math.hypot(...extra.translation),tip-near+7.5);extra={...extra,translation:axis.map(v=>v*clearance),direction:axis.map(v=>-v),channelId:next.id};text=copy('拿取下一根贯通管，沿露出的木芯同轴穿入，再插紧箭头所指接头；末端保持开放。','Slide the next tube over the exposed wood profile on the same axis, then seat it on the indicated connector; keep its far end open.','Nächstes Rohr axial über das freiliegende Holzprofil schieben und auf die gezeigte Kupplung setzen; anderes Ende offen lassen.');}}
+      if(type==='orient-connector'&&channel){const nodeId=partIds.find(id=>channel.middle.includes(id)||id===channel.terminalNodeIds[1]),point=xyz(model.nodes.get(nodeId)),tip=dot(channel.end.map((v,i)=>v+(poses.get(channel.id)?.[i]||0)),channel.axis),target=dot(point.map((v,i)=>v+actualOffset[i]),channel.axis),clearance=Math.max(0,tip-target+7.5);if(clearance>1e-6){type='thread-core-connector';extra={...extra,translation:channel.axis.map(v=>v*clearance),direction:channel.axis.map(v=>-v),position:point,referencePartIds:channel.run.tubeIds,channelId:channel.id};text=copy('沿箭头把贯通接头穿过露出的加固铝管，保持通孔与铝管同轴，再接到已装管端。','Slide the through-connector over the protruding aluminium reinforcement tube along the arrow, keeping the bore aligned, then seat it on the tube end.','Durchgangskupplung entlang des Pfeils über das herausragende Aluminium-Verstärkungsrohr schieben, Bohrung axial halten und auf das Rohrende setzen.');}}
+      if(type==='insert-tube'){const next=core.channels.find(c=>c.active&&c.run.tubeIds.some(id=>partIds.includes(id))&&!partIds.includes(c.firstCarrier));if(next){const tube=model.tubes.get(partIds.find(id=>next.run.tubeIds.includes(id))),points=[tube.a,tube.b].map(id=>xyz(model.nodes.get(id))),axis=unit(extra.translation),tip=Math.max(dot(next.start.map((v,i)=>v+(poses.get(next.id)?.[i]||0)),axis),dot(next.end.map((v,i)=>v+(poses.get(next.id)?.[i]||0)),axis)),near=Math.min(...points.map(point=>dot(point.map((v,i)=>v+actualOffset[i]),axis))),clearance=Math.max(Math.hypot(...extra.translation),tip-near+7.5);extra={...extra,translation:axis.map(v=>v*clearance),direction:axis.map(v=>-v),channelId:next.id};text=copy('拿取下一根贯通管，沿露出的加固铝管同轴穿入，再插紧箭头所指接头；末端保持开放。','Slide the next tube over the exposed aluminium reinforcement tube on the same axis, then seat it on the indicated connector; keep its far end open.','Nächstes Rohr axial über das freiliegende Aluminium-Verstärkungsrohr schieben und auf die gezeigte Kupplung setzen; anderes Ende offen lassen.');}}
       const unique=[...new Set(partIds)],id=`${step.id}-operation-${step.operations.length+1}`;
       const op={id,type,order:step.operations.length+1,partIds:unique,consumesPartIds:unique,dependsOn:previous?[previous]:[],instructions:[text],verification:verify(),...extra};
       const offset=(op.placementTranslation || [0,0,0]).map((v,i)=>v+regional[i]+staging[i]);
       op.placementTranslation=offset;
-      if(op.translation && op.direction && !['prethread-accessory','thread-flexible-carrier'].includes(type)) {
+      if(op.translation && op.direction && !['prethread-accessory','thread-flexible-carrier'].includes(type) && (!stepCountOnly||type==='lower-frame')) {
         const start=op.translation.map((v,i)=>v+offset[i]);
         const obstruction=checkPath(op.movingEnvelopeIds||op.partIds,[...present],start,offset,{obstacleTranslations:poses});
         op.verification=verify(!obstruction,!obstruction);
         if(obstruction)diag(diagnostics,'INSTALLATION_PATH_BLOCKED','安装动作的完整部件包络被已装部件阻挡，请调整局部预装顺序或开放接口。',[obstruction.movingPartId,obstruction.obstaclePartId],{...obstruction,operationId:id,type});
+      } else if(stepCountOnly&&op.translation&&op.direction&&!['prethread-accessory','thread-flexible-carrier'].includes(type)) {
+        op.verification={...verify(false,false),pathApplicability:'not-evaluated-step-count'};
       }
       for(const p of op.consumesPartIds){present.add(p);preparedRigid.delete(p);poses.set(p,offset);}
       if(op.translation)for(const p of op.partIds)poses.set(p,offset);
@@ -212,7 +272,8 @@ export function addAssemblyOperations(model,plan){
       step.operations.push(op);previous=id;for(const p of op.consumesPartIds)opByPart.set(p,id);
       if(type==='insert-tube')for(const channel of core.channels.filter(c=>!c.active&&c.valid&&op.partIds.includes(c.firstCarrier))){
         channel.active=true;poses.set(channel.id,offset);const tube=model.tubes.get(channel.firstCarrier),reach=Math.max(...[tube.a,tube.b].map(id=>dot(sub(xyz(model.nodes.get(id)),channel.start),channel.axis)));
-        const coreOp=emit('preinsert-reinforcement',[channel.firstCarrier],copy('从仍开放的管端沿箭头插入80cm木芯；为下一根管保留露出的芯材，中间接头先穿芯再闭合；固定前把芯材居中。木芯在图中旁置示意，实际穿入管内。','Insert the 80 cm wood profile through the open tube end. Leave the protruding portion for the next tube; thread intermediate connectors before closure, then center the profile before fastening. The profile is illustrated beside the tube; insert it inside the tube.','80-cm-Holzprofil durch das offene Rohrende einschieben. Überstand für das nächste Rohr lassen; Zwischenkupplungen vor dem Schließen auffädeln und Profil vor dem Befestigen mittig ausrichten. Das Profil wird neben dem Rohr gezeigt; tatsächlich wird es in das Rohr eingeschoben.'),{consumesPartIds:[],movingEnvelopeIds:[channel.id],translation:channel.axis.map(v=>v*reach),direction:channel.axis.map(v=>-v),position:channel.start,placementTranslation:offset.map((v,i)=>v-regional[i]-staging[i]),referencePartIds:[channel.firstCarrier],reinforcementId:reinforcement?.id,channelId:channel.id,profileKey:channel.run.tubeIds[0],protrusionCm:80-reach,verification:{...verify(false,channel.valid),basis:channel.basis,crossSectionCompatibility:channel.crossSection}});
+        const length = REINFORCEMENT_SPECS[channel.run.partId]?.length || 75;
+        const coreOp=emit('preinsert-reinforcement',[channel.firstCarrier],copy(`从仍开放的管端沿箭头插入${length}cm加固铝管；为下一根管保留露出的部分，中间接头先穿铝管再闭合；固定前居中。加固铝管在图中旁置示意，实际穿入管内。`,`Insert the ${length} cm aluminium reinforcement tube through the open tube end. Leave the protruding portion for the next tube; thread intermediate connectors before closure, then center the reinforcement before fastening. It is illustrated beside the tube; insert it inside the tube.`,`${length}-cm-Aluminium-Verstärkungsrohr durch das offene Rohrende einschieben. Überstand für das nächste Rohr lassen; Zwischenkupplungen vor dem Schließen auffädeln und Verstärkungsrohr vor dem Befestigen mittig ausrichten. Es wird neben dem Trägerrohr gezeigt; tatsächlich wird es in das Rohr eingeschoben.`),{consumesPartIds:[],movingEnvelopeIds:[channel.id],translation:channel.axis.map(v=>v*reach),direction:channel.axis.map(v=>-v),position:channel.start,placementTranslation:offset.map((v,i)=>v-regional[i]-staging[i]),referencePartIds:[channel.firstCarrier],reinforcementId:channel.run.partId||reinforcement?.id,channelId:channel.id,profileKey:channel.run.tubeIds[0],protrusionCm:channel.span-reach,verification:{...verify(false,channel.valid),basis:channel.basis,crossSectionCompatibility:channel.crossSection}});
         coreOp.verification.basis=channel.basis;coreOp.verification.crossSectionCompatibility=channel.crossSection;present.add(channel.id);installed.add(channel.id);
       }
       return op;
@@ -220,8 +281,9 @@ export function addAssemblyOperations(model,plan){
     for(const channel of core.channels)if(!runDone.has(channel)&&channel.run.tubeIds.some(id=>step.tubeIds.includes(id))){
       runDone.add(channel);
       if(!channel.valid)diag(diagnostics,'REINFORCEMENT_PLACEMENT_UNVERIFIED','加固型材的长度、材质或管内放置位置尚未确认，请核对原始设计与配件目录。',[...channel.run.tubeIds,...channel.middle],{span:channel.span,stepId:step.id});
-      if(!step.tubeIds.includes(channel.firstCarrier))diag(diagnostics,'REINFORCEMENT_CHANNEL_SPLIT','木芯贯通列的入口管尚未安装，不能先封闭另一端。',[...channel.run.tubeIds,...channel.middle],{firstCarrier:channel.firstCarrier,stepId:step.id});
-      emit('prepare-core-channel',[channel.firstCarrier],copy('先确认80cm木芯的连续管轴；入口管的另一端和中间接头暂时保持开放，芯材插入前不要封口。','Identify the continuous 80 cm wood-profile channel. Keep the entry tube and intermediate connector ports open until the profile is inserted.','Durchgehenden 80-cm-Holzprofilkanal bestimmen. Eintrittsrohr und Zwischenkupplung vor dem Einschieben offen lassen.'),{consumesPartIds:[],referencePartIds:[channel.firstCarrier],openPorts:channel.middle,verification:{...verify(false,channel.valid),basis:channel.basis,crossSectionCompatibility:channel.crossSection}});
+      if(!step.tubeIds.includes(channel.firstCarrier))diag(diagnostics,'REINFORCEMENT_CHANNEL_SPLIT','加固铝管贯通列的入口管尚未安装，不能先封闭另一端。',[...channel.run.tubeIds,...channel.middle],{firstCarrier:channel.firstCarrier,stepId:step.id});
+      const length = REINFORCEMENT_SPECS[channel.run.partId]?.length || 75;
+      emit('prepare-core-channel',[channel.firstCarrier],copy(`先确认${length}cm加固铝管的连续管轴；入口管的另一端和中间接头暂时保持开放，加固铝管插入前不要封口。`,`Identify the continuous channel for the ${length} cm aluminium reinforcement tube. Keep the entry tube and intermediate connector ports open until the reinforcement is inserted.`,`Durchgehenden Kanal für das ${length}-cm-Aluminium-Verstärkungsrohr bestimmen. Eintrittsrohr und Zwischenkupplung vor dem Einschieben offen lassen.`),{consumesPartIds:[],referencePartIds:[channel.firstCarrier],openPorts:channel.middle,verification:{...verify(false,channel.valid),basis:channel.basis,crossSectionCompatibility:channel.crossSection}});
     }
     for(const [key,map] of [['textileIds','textiles'],['fittingIds','fittings'],['clampIds','clamps']])for(const id of step[key]){
       const p=model[map].get(id);if(threadDone.has(id)||step.action.type==='attach')continue;
@@ -290,9 +352,9 @@ export function addAssemblyOperations(model,plan){
       frameSequence(model,m.nodeIds,m.tubeIds,emit,diagnostics,threadAssemblies.filter(thread=>!thread.flexible&&thread.carriers.every(id=>m.tubeIds.includes(id))));
       unfold(staging,m.tubeIds);for(const lining of softLinings.filter(l=>!l.folded&&l.carriers.every(id=>m.tubeIds.includes(id)))){m.partIds.push(lining.id);visualModule.partIds=[...m.partIds];}
       staging=[0,0,0];for(const id of m.partIds)handled.add(id);
-      const obstruction=checkPath(m.partIds,[...installed],m.installationTranslation);
-      const op=emit('lower-frame',m.partIds,copy('先拼好此局部框架，分别对齐本组立柱，沿箭头向下套入；其他独立框架按后续动作安装。','Preassemble this frame, align these uprights and lower it along the arrow. Install other separate frames in their own actions.','Diesen Rahmen vormontieren, an diesen Stützen ausrichten und entlang des Pfeils absenken. Andere Rahmen einzeln montieren.'),{consumesPartIds:[],translation:m.installationTranslation,direction:[0,-1,0],position:xyz(model.nodes.get(m.nodeIds[0])),referencePartIds:m.interfaceIds.map(id=>plan.interfaces.find(x=>x.id===id)?.supportTubeId).filter(Boolean),verification:verify(!obstruction)});
-      if(obstruction)op.verification.methodChecked=false;
+      // emit() checks this complete movement after earlier operations have
+      // updated the installed pose set; the preliminary check duplicated it.
+      emit('lower-frame',m.partIds,copy('先拼好此局部框架，分别对齐本组立柱，沿箭头向下套入；其他独立框架按后续动作安装。','Preassemble this frame, align these uprights and lower it along the arrow. Install other separate frames in their own actions.','Diesen Rahmen vormontieren, an diesen Stützen ausrichten und entlang des Pfeils absenken. Andere Rahmen einzeln montieren.'),{consumesPartIds:[],translation:m.installationTranslation,direction:[0,-1,0],position:xyz(model.nodes.get(m.nodeIds[0])),referencePartIds:m.interfaceIds.map(id=>plan.interfaces.find(x=>x.id===id)?.supportTubeId).filter(Boolean)});
     }
     const remainingTubes=physicalTubes.filter(id=>!handled.has(id));
     const freeNodes=step.nodeIds.filter(id=>!handled.has(id));
@@ -305,22 +367,24 @@ export function addAssemblyOperations(model,plan){
       for(const id of freeNodes)emit('orient-connector',[id],copy('摆正高亮连接件，保留下一动作所需插口。','Orient the highlighted connector; keep the ports for the next action open.','Markierte Kupplung ausrichten; erforderliche Anschlüsse freilassen.'),{openPorts:[id]});
       for(const id of remainingTubes){const t=model.tubes.get(id),anchors=[t.a,t.b].filter(n=>installed.has(n));
         if(anchors.length>1){diag(diagnostics,'UNVERIFIED_IN_PLACE_CLOSURE','管件两端接头已经接入主体，原位封口没有已验证的替代顺序；请先留开接头或改为预装框架。',[id,...anchors]);emit('unresolved-closure',[id],copy('两端均已连接：此原位安装方法尚未确认，调整顺序后再导出。','Both end connectors are already joined: this installation sequence is unresolved; adjust it before export.','Beide Endkupplungen sind bereits verbunden: Montagefolge ungeklärt; vor dem Export anpassen.'),{verification:verify(false,false)});continue;}
-        const anchor=anchors[0]||t.a,free=anchor===t.a?t.b:t.a,d=unit(model._tubeDirAt(t,model.nodes.get(anchor),model.nodes.get(free))),translation=d.map(v=>v*12),obstruction=checkPath([id],[...installed],translation);
-        emit('insert-tube',[id],copy(`拿取${partName(getTube(t.tubeId))}，沿箭头插入箭头所指接头，另一端保持开放。`,`Insert ${partName(getTube(t.tubeId))} into the connector indicated by the arrow; keep the other end open.`,`${partName(getTube(t.tubeId))} entlang des Pfeils in die vom Pfeil angezeigte Kupplung einsetzen; anderes Ende offen lassen.`),{referencePartIds:[anchor],translation,direction:d.map(v=>-v),position:xyz(model.nodes.get(anchor)),openPorts:[free],verification:verify(!obstruction,!obstruction)});
+        const anchor=anchors[0]||t.a,free=anchor===t.a?t.b:t.a,d=unit(model._tubeDirAt(t,model.nodes.get(anchor),model.nodes.get(free))),translation=d.map(v=>v*12);
+        // emit() performs the authoritative check with the current poses,
+        // including parts installed by earlier operations in this same step.
+        emit('insert-tube',[id],copy(`拿取${partName(getTube(t.tubeId))}，沿箭头插入箭头所指接头，另一端保持开放。`,`Insert ${partName(getTube(t.tubeId))} into the connector indicated by the arrow; keep the other end open.`,`${partName(getTube(t.tubeId))} entlang des Pfeils in die vom Pfeil angezeigte Kupplung einsetzen; anderes Ende offen lassen.`),{referencePartIds:[anchor],translation,direction:d.map(v=>-v),position:xyz(model.nodes.get(anchor)),openPorts:[free]});
 
       }
     }
     unfold(regional);
     for(const id of (step.action.type==='attach'?[]:[...step.panelIds,...step.fittingIds,...step.slideIds,...step.clampIds]).filter(id=>!threadDone.has(id)).sort((a,b)=>{const rank=id=>model.panels.has(id)&&!step.panelAfterSlide?.[id]?-2.5:model.slides.get(id)?.kind==='slide-end2'?-3:model.slides.get(id)?.kind==='slide2'?-2:({'bearing2':0,'adapter2':1,'multi-wheel2':2,'floating-wheel2':2,'steering-lock2':3,'hub-cap2':3})[model.fittings.get(id)?.kind]??4;return rank(a)-rank(b);} )){
-      const native=(model.fittings.has(id)&&!model.fittings.get(id).appearanceVersion)||model.slides.has(id)?nativeAccessorySupport(model,id):null;
+      const native=(model.fittings.has(id)&&(!model.fittings.get(id).appearanceVersion||model.fittings.get(id).kind==='alu-connector2'))||model.slides.has(id)?nativeAccessorySupport(model,id):null;
       if(native&&!native.valid)diag(diagnostics,'NATIVE_SUPPORT_UNRESOLVED','原生配件缺少与实际安装点和插接轴相符的支撑，不能用无遮挡位置代替安装方法。',[id],native);
       const panel=model.panels.get(id),specialFrame=panel&&isOriginalComponent(panel)?componentFrame(model,panel):null;
       // Component appearance uses its own mounting frame, including facing;
       // the generic model-middle outward normal can point through its back.
       const specialNormal=specialFrame&&(panel.appearanceVersion===1&&panel.panelId==='panel_40x40_pocket'?specialFrame.axes[1]:specialFrame.axes[2]);
       const envelope=partEnvelope(model,id),normals=(envelope[0]?.axes || (envelope[0]?.points?[unit(cross(sub(envelope[0].points[1],envelope[0].points[0]),sub(envelope[0].points[2],envelope[0].points[0])))]:[])).flatMap(axis=>[axis.map(v=>v*18),axis.map(v=>v*-18)]),panelCorners=model.panels.has(id)?model.panelCorners(model.panels.get(id)):null,panelNormal=specialNormal||(panelCorners&&(model.panels.get(id).geom?.quat?zAxisOf(model.panels.get(id).geom.quat):panelMountNormal(unit(sub(panelCorners[1],panelCorners[0])),unit(sub(panelCorners[3],panelCorners[0])),panelCorners[0].map((_,i)=>panelCorners.reduce((sum,p)=>sum+p[i],0)/4),modelMiddle(model.nodes.values())).map(v=>v*(model.panels.get(id).side<0?-1:1)))),panelDepth=panelNormal?envelope.flatMap(shape=>shape.points?shape.points.map(point=>dot(point,panelNormal)):shape.kind==='box'?[dot(shape.pos,panelNormal)-shape.half.reduce((sum,h,i)=>sum+h*Math.abs(dot(shape.axes[i],panelNormal)),0),dot(shape.pos,panelNormal)+shape.half.reduce((sum,h,i)=>sum+h*Math.abs(dot(shape.axes[i],panelNormal)),0)]:[]):[],panelReach=panelDepth.length?Math.max(8,Math.max(...panelDepth)-Math.min(...panelDepth)+3):18,panelApproaches=panelNormal?[panelNormal.map(v=>v*panelReach),panelNormal.map(v=>v*Math.max(18,panelReach))]:[],candidates=panelNormal?panelApproaches:model.slides.has(id)?[[0,18,0]]:native?.valid&&model.fittings.has(id)?[native.mount.direction.map(v=>v*18)]:[...normals,[0,18,0],[18,0,0],[-18,0,0],[0,0,18],[0,0,-18],[0,-18,0]];
-      const failures=[];let translation;const tried=new Set();for(const delta of candidates){const key=delta.map(v=>v.toFixed(4)).join(',');if(tried.has(key))continue;tried.add(key);const failure=checkPath([id],[...present],delta.map((v,i)=>v+regional[i]),regional,{obstacleTranslations:poses});failures.push(failure);if(!failure){translation=delta;break;}}
-      if(!envelope.length || !translation)diag(diagnostics,'ACCESSORY_INSTALLATION_PATH_UNRESOLVED','板面或配件没有可确认的无遮挡安装路径，请调整朝向、支撑或区域顺序。',[id],{candidates:candidates.length,failures});
+      const failures=[];let translation;const tried=new Set();if(!stepCountOnly)for(const delta of candidates){const key=delta.map(v=>v.toFixed(4)).join(',');if(tried.has(key))continue;tried.add(key);const failure=checkPath([id],[...present],delta.map((v,i)=>v+regional[i]),regional,{obstacleTranslations:poses});failures.push(failure);if(!failure){translation=delta;break;}}
+      if(!stepCountOnly&&(!envelope.length || !translation))diag(diagnostics,'ACCESSORY_INSTALLATION_PATH_UNRESOLVED','板面或配件没有可确认的无遮挡安装路径，请调整朝向、支撑或区域顺序。',[id],{candidates:candidates.length,failures});
       const entry=[...entryPanelContacts.values()].find(contact=>contact.panelId===id);
       const component=model.panels.get(id)||model.fittings.get(id),special=isOriginalComponent(component)?componentInstallCopy(componentPartId(component),component):null;
       const fitOp=emit('fit-accessory',[id],special?.instructions[0]||copy('拿取图中配件，按图示朝向固定到已完成的支撑；确认所有相邻框架已拼接后再遮盖接口。','Fit the shown accessory to the completed support; cover ports only after adjacent frames are joined.','Gezeigtes Zubehör an der fertigen Stütze befestigen; Anschlüsse erst nach dem Verbinden benachbarter Rahmen abdecken.'),{...(special?{instructions:[...special.instructions],componentId:componentPartId(component),installationCopyBasis:'component-catalog-special-instructions'}:{}),referencePartIds:[...new Set([...(step.panelSupports?.[id]||tubeSupports(model.panels.get(id)||model.fittings.get(id)||{})),...(native?.supportIds||[]),...(entry?[entry.slideId,entry.railId]:[]),...(step.clampSupports?.[id]||[]),...(step.bearingSupports?.[id]?[step.bearingSupports[id]]:[])])],translation,direction:translation&&unit(translation).map(v=>-v),position:envelope[0]?.pos||envelope[0]?.points?.[0]||[0,step.y,0],verification:verify(!!translation,!!translation)});
@@ -339,6 +403,7 @@ export function addAssemblyOperations(model,plan){
     for(const op of step.operations){const keys=new Set([...batch,op].flatMap(o=>o.partIds.flatMap(materialKeys)));const repeatedMotion=op.translation&&batch.some(previous=>previous.translation&&previous.partIds.some(id=>op.partIds.includes(id)));if(batch.length&&(repeatedMotion||keys.size>6||batch.length>=3||op.type==='lower-frame'||op.type==='attach-module'||batch.some(o=>['lower-frame','attach-module'].includes(o.type))))flush();batch.push(op);}flush();
     // A dense moving frame may reference many material types: split focus groups without repeating consumption.
     step.detailGroups=step.detailGroups.flatMap(group=>{if(group.materialKeys.length<=6)return [group];const out=[];for(let i=0;i<group.materialKeys.length;i+=6){const keys=group.materialKeys.slice(i,i+6);out.push({...group,id:`${group.id}-${i/6+1}`,materialKeys:keys,partIds:group.partIds.filter(id=>materialKeys(id).some(k=>keys.includes(k)))});}return out;});
+    onProgress?.(++processedSteps,steps.length);
   }
   for (const p of [...model.fittings.values(),...model.slides.values()]) if(!p.appearanceVersion && !nativeEnvelopes[p.kind])diag(diagnostics,'UNKNOWN_INSTALLATION_GEOMETRY','此配件缺少可核验的几何包络，无法确认安装路径。',[p.id],{kind:p.kind});
   const completed=new Set();for(const step of steps)for(const op of step.operations){for(const id of op.dependsOn)if(!completed.has(id))diag(diagnostics,'INVALID_OPERATION_DEPENDENCY','安装动作的前置动作尚未完成。',op.partIds,{operationId:op.id,dependsOn:id});completed.add(op.id);}
@@ -349,8 +414,7 @@ export function addAssemblyOperations(model,plan){
   for(const id of entities)if(consumption.get(id)!==1)diag(diagnostics,'OPERATION_CONSUMPTION_MISMATCH','安装动作的实体消耗必须恰好一次。',[id],{count:consumption.get(id)||0});
   // The existing BOM allocation is authoritative. Detail pages never allocate again.
   for(const op of operations)op.consumesMaterialInstanceIds=[];
-  for(const instance of plan.ledger.instances){
-    if(instance.group==='screws')continue;
+  for(const instance of stepCountOnly?[]:plan.ledger.instances){
     const candidates=operations.filter(op=>instance.partIds.some(id=>op.consumesPartIds.includes(id)));
     const core=instance.group==='reinforcements'?operations.find(op=>op.type==='preinsert-reinforcement' && instance.partIds.some(id=>op.partIds.includes(id))):null;
     const first=core||candidates[0];
@@ -366,5 +430,5 @@ export function addAssemblyOperations(model,plan){
     else diag(diagnostics,'OPERATION_MATERIAL_UNASSIGNED','物料台账没有对应的安装动作。',instance.partIds,{instanceId:instance.id});
   }
 
-  plan.verification={directionChecked:operations.every(op=>op.verification.directionConsistent),pathChecked:!diagnostics.some(d=>['INSTALLATION_PATH_BLOCKED','ACCESSORY_INSTALLATION_PATH_UNRESOLVED','UNKNOWN_INSTALLATION_GEOMETRY','PRETHREAD_METHOD_UNVERIFIED','REINFORCEMENT_PATH_UNVERIFIED','REINFORCEMENT_CHANNEL_SPLIT','REINFORCEMENT_PLACEMENT_UNVERIFIED','MISSING_THREAD_SUPPORT'].includes(d.code))&&operations.filter(op=>op.translation).every(op=>op.verification.pathChecked),methodChecked:!diagnostics.some(d=>d.severity==='error')&&operations.every(op=>op.verification.methodChecked),physical:'unverified',load:'unverified'};
+  plan.verification={directionChecked:operations.every(op=>op.verification.directionConsistent),pathChecked:!stepCountOnly&&!diagnostics.some(d=>['INSTALLATION_PATH_BLOCKED','ACCESSORY_INSTALLATION_PATH_UNRESOLVED','UNKNOWN_INSTALLATION_GEOMETRY','PRETHREAD_METHOD_UNVERIFIED','REINFORCEMENT_PATH_UNVERIFIED','REINFORCEMENT_CHANNEL_SPLIT','REINFORCEMENT_PLACEMENT_UNVERIFIED','MISSING_THREAD_SUPPORT'].includes(d.code))&&operations.filter(op=>op.translation).every(op=>op.verification.pathChecked),methodChecked:!stepCountOnly&&!diagnostics.some(d=>d.severity==='error')&&operations.every(op=>op.verification.methodChecked),physical:'unverified',load:'unverified'};
 }

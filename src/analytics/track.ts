@@ -60,6 +60,14 @@ const rolled = new Map<string, number>()
 // 每次加载页面换一个标识。同一标签页内重新打开设计器也能分成两次访问。
 const visit = rid()
 let started = false
+let currentObject = ''
+const OBJECT_RE = /^(?:official|scheme|ai):[A-Za-z0-9_-]{1,48}$/
+export function entryAnalyticsObject(): string {
+  if (typeof location === 'undefined') return ''
+  const value = new URLSearchParams(location.search).get('analytics_object') || ''
+  return OBJECT_RE.test(value) ? value : ''
+}
+export function setAnalyticsObject(value: string): void { currentObject = OBJECT_RE.test(value) ? value : '' }
 
 type SiteClock = { timeVersion?: number; embeddedInput?: (event: Event, source: Window) => void }
 
@@ -113,7 +121,7 @@ export function landedFrom(): string {
 }
 
 function drainRolled(): void {
-  for (const [name, n] of rolled) queue.push({ name, props: { n, visit } })
+  for (const [name, n] of rolled) queue.push({ name, props: { n, visit, analytics_v: 2 } })
   rolled.clear()
 }
 
@@ -154,8 +162,8 @@ export function track(name: string, props?: Props): void {
     } catch { /* 托管页面通知不影响原动作和统计 */ }
   }
   if (!URL_) return
-  queue.push({ name, props: { ...props, visit,
-    ...(name === 'builder.app.open' ? { time_v: 1, time_owner: parentClock() ? 'site' : 'builder' } : {}),
+  queue.push({ name, props: { ...(currentObject ? { object: currentObject } : {}), ...props, visit, analytics_v: 2, elapsed: Math.floor(performance.now()),
+    ...(name === 'builder.app.open' ? { time_v: 1, time_owner: parentClock() ? 'site' : 'builder', reason: props?.view ? 'read_only' : 'editable' } : {}),
   } })
   if (queue.length >= MAX_BATCH) { flush(); return }
   if (!timer) timer = setTimeout(() => flush(), BATCH_MS)

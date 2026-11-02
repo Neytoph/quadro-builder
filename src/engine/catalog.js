@@ -85,7 +85,7 @@ export function getPanel(id) {
 /** Teil nach id ueber alle Rubriken -- fuer Stueckliste und Bestand. */
 export function getPartById(id) {
   const all = [...allConnectors(), ...accessories(), ...allTubes(), ...panels(),
-    ...reinforcements(), ...screws()];
+    ...reinforcements()];
   return all.find((p) => p.id === id) || null;
 }
 
@@ -125,6 +125,7 @@ export function partForFitting(kind, mask) {
   // Die Lagerkupplung hat kein eigenes QDF-Element -- sie ist eine Klemm-
   // Kupplung, die wir selbst setzen, und wird als bearing2 geschrieben.
   if (kind === "bearing-clamp") return getConnector("bearing");
+  if (kind === "windmill-clamp") return getConnector("windmill");
   // Rohrkappe und offenes Verbinderende sind ZWEI Teile, nicht eins: die Kappe
   // (`tube-cap2`) ist 24 mm lang und an einem Ende geschlossen, das offene
   // Verbinderende (`open-connector2`) eine 50 mm lange, beidseitig offene
@@ -135,25 +136,18 @@ export function partForFitting(kind, mask) {
     // gezaehlt wird nur der Rest: ein, zwei oder drei Arme.
     let arms = 0;
     for (let b = 2; b < 6; b++) if ((mask || 0) & (1 << b)) arms++;
-    return getConnector(arms >= 3 ? "hole_t" : arms === 2 ? "hole_2" : "hole_1");
+    return getConnector(arms === 4 ? "windmill" : arms >= 3 ? "hole_t" : arms === 2 ? "hole_2" : "hole_1");
   }
-  const all = [...allConnectors(), ...accessories(), ...allTubes(), ...panels()];
+  const all = [...allConnectors(), ...accessories(), ...allTubes(), ...panels(), ...reinforcements()];
   // Manche Teile waehlt die Leiste unter ihrer KATALOG-Kennung statt unter der
   // QDF-Art: die Lochzapfenkupplungen und die beiden Teile der Flexikupplung.
   // Ohne diesen zweiten Griff stand ueber der Szene kein Name.
   return all.find((x) => x.qdf === kind) || all.find((x) => x.id === kind) || null;
 }
 
-// Verstaerkungen (Holz-Profile), die in Rohre geschoben werden. Zu kaufen gibt
-// es nur die 80-cm-Laenge; die Alu-Profile der Herstellersoftware sind weg.
+// 内置加固铝管；目录分别记录实际长度和对应的节点间距。
 export function reinforcements() {
   return catalog().reinforcements || [];
-}
-
-// Schrauben. Eigene Gruppe, weil sie NUR gerechnet werden: nichts zu setzen,
-// nichts zu zeichnen, nichts im Bestand. Der Preis gilt je Packung (`pack`).
-export function screws() {
-  return catalog().screws || [];
 }
 
 /**
@@ -175,14 +169,9 @@ export function poolLinerFor(s1, s2) {
   }, null).def;
 }
 
-/** Schraube nach Kennung, z. B. "screw_panel". */
-export function getScrew(id) {
-  return screws().find((s) => s.id === id) || null;
-}
-
 // Standard-Verstaerkungsprofil (erstes definiertes).
 export function reinforcementPart() {
-  return reinforcements()[0] || null;
+  return reinforcements().find(part => part.id === 'reinforce80') || null;
 }
 
 export function defaultPanel() {

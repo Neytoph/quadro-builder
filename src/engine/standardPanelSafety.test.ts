@@ -52,9 +52,9 @@ describe('官方标准板保留既有安全检查角色', () => {
     expect(risks(current).some(f => f.rule === 'deck_edges')).toBe(false)
   })
 
-  it.each(STANDARD)('%s 损坏实际存档缺一横边，新旧均保留deck_edges风险', id => {
+  it.each(STANDARD)('%s 缺一条非固定边时保留deck_edges提示，实际固定仍有效', id => {
     const { model, part, perimeter } = platform(id), data = model.toJSON()
-    // 基于已安装的实际JSON移除非a/b横边，模拟损坏保存；不是一次合法安装。
+    // 从实际存档移除非固定边，验证安装有效性与平台缺边提示各自成立。
     const missing = perimeter.find(t => t.id !== part.a && t.id !== part.b)!
     data.tubes = data.tubes.filter(t => t.id !== missing.id)
     const { current, old } = readPair(data)
@@ -62,7 +62,7 @@ describe('官方标准板保留既有安全检查角色', () => {
     expect(risks(current)).toEqual(risks(old))
     const finding = risks(current).find(f => f.rule === 'deck_edges')!
     expect(finding.ids.panels).toEqual([part.id]); expect(finding.params.edges).toBe(1)
-    expect(computeSafety(current).findings.some(f => f.rule === 'accessory_mounts')).toBe(true)
+    expect(computeSafety(current).findings.some(f => f.rule === 'accessory_mounts')).toBe(false)
   })
 
   it('官方半板真实覆盖高处40×20开口，新旧均不误报entrapment', () => {

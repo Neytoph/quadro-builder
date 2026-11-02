@@ -14,7 +14,7 @@
     "defaultTube": "T35",
     "diagonalTube": "T35",
     "defaultPanel": "panel_40x40",
-    "panelThickness": 1.6,
+    "panelThickness": 0.3,
     "comment": "Masse echt: Kupplung 50 mm, Rohr-Aussen 49 mm (tubeRadius 2.45), Kupplungs-Arme ~50 mm lang, ~42 mm Durchmesser (armRadius 2.1) -> duenner als das Rohr, greifen IN die Rohre. Knoten-Abstand (Mitte zu Mitte) = Rohrlaenge + connectorSize. 35er-Rohr -> 40 cm Raster (passend zu Platte 40x40); 15er -> 20 cm (Platte 40x20). Schraegen/Rampen/Daecher: das Bau-Werkzeug baut immer 45 Grad mit 35er-Rohr (T35). Beim Import werden nur Schraegen auf 45 Grad gezwungen, die an einer 45-Grad-Winkelkupplung (connector45_2) andocken; Doppelrohr-Verbinder-Rampen und andere Rampenformen behalten ihre Original-Geometrie."
   },
   "colors": {
@@ -231,6 +231,16 @@
       "url": "https://quadroshop.com/products/flexi-connector-bolt"
     },
     {
+      "id": "windmill",
+      "code": "WINDMILL",
+      "name": "Windradverbinder",
+      "name_en": "Rotating cross connector",
+      "arms": 4,
+      "kind": "special",
+      "price": 0,
+      "buildable": false
+    },
+    {
       "id": "hole_t",
       "code": "CH3",
       "name": "Lochzapfenkupplung 3-armig",
@@ -391,6 +401,18 @@
       "buildable": true,
       "colored": true,
       "url": "https://quadroshop.com/products/tube-75cm"
+    },
+    {
+      "id": "TC15",
+      "code": "TC15",
+      "name": "Kleines Bogenrohr",
+      "name_en": "Small curved tube",
+      "length_cm": null,
+      "radius_cm": 20,
+      "shape": "curved",
+      "price": 0,
+      "buildable": true,
+      "colored": true
     },
     {
       "id": "TC1",
@@ -767,18 +789,38 @@
   ],
   "reinforcements": [
     {
+      "id": "reinforce35", "code": "", "name": "Aluminium-Verstärkungsrohr 35 cm",
+      "name_en": "Internal aluminium reinforcement tube 35 cm", "length_cm": 35,
+      "coverage_cm": 40, "material": "Aluminium", "price": 0,
+      "note": "内置加固铝管，实际长度35cm，对应40cm节点间距。", "url": ""
+    },
+    {
+      "id": "reinforce55", "code": "40275", "name": "Aluminium-Verstärkungsrohr 55 cm",
+      "name_en": "Internal aluminium reinforcement tube 55 cm", "length_cm": 55,
+      "coverage_cm": 60, "material": "Aluminium", "price": 0,
+      "note": "内置加固铝管，实际长度55cm，对应60cm节点间距。", "url": ""
+    },
+    {
       "id": "reinforce80",
       "code": "RV8",
-      "name": "Holz-Profil 80 cm",
-      "name_en": "Wood profile 80 cm",
-      "length_cm": 80,
-      "material": "Holz",
+      "name": "Aluminium-Verstärkungsrohr 75 cm",
+      "name_en": "Internal aluminium reinforcement tube 75 cm",
+      "length_cm": 75,
+      "coverage_cm": 80,
+      "material": "Aluminium",
       "price": 8.99,
-      "note": "Stab, der in die Rohre geschoben wird und sie versteift; es gibt NUR diese eine Länge (80 cm, Holz) zu kaufen -- die Alu-Profile der Herstellersoftware sind nicht mehr erhältlich. Ein Profil deckt 80 cm Knotenabstand: entweder ein 75er-Rohr oder zwei 35er in einer Linie; nötig bei frei tragenden, von unten ungestuetzten Ebenen",
-      "url": "https://quadroshop.com/products/wood-tube-core"
+      "note": "内置加固铝管，实际长度 75 cm；一根对应 80 cm 节点间距，可加固一根 75 cm 管或同一直线上的两根 35 cm 管。",
+      "url": ""
+    },
+    {
+      "id": "alu_connector", "code": "40274", "name": "Verbinder für Aluminium-Verstärkungsrohre",
+      "name_en": "Aluminium reinforcement tube connector", "qdf": "alu-connector2",
+      "length_cm": 40, "material": "Stahl", "price": 0,
+      "note": "连接同轴相邻的两根内置加固铝管，细长金属连接条。", "url": ""
     }
   ],
   "accessories": [
+    { "id": "panel_sector_20", "name": "小扇形板", "qdf": "panel_sector_20", "compat": true, "price": 0 },
     { "id": "panel_sector_40", "name": "扇形小板", "qdf": "panel_sector_40", "compat": true, "price": 0 },
     { "id": "lattice_curved", "name": "曲面攀爬网", "qdf": "lattice_curved", "compat": true, "price": 0 },
     { "id": "trampoline", "name": "蹦床", "qdf": "trampoline", "compat": true, "price": 0 },
@@ -1171,69 +1213,6 @@
       "price": 0,
       "compat": true,
       "note": "软包滚筒：套在一根管子外面的软包，料表按管长分行。兼容件，.qdf 里没有这一项。"
-    }
-  ],
-  "screws": [
-    {
-      "id": "screw_tube",
-      "code": "",
-      "name": "Rohrschraube",
-      "name_en": "Tube screw",
-      "price": 2.99,
-      "pack": 20,
-      "colored": true,
-      "url": "https://quadroshop.com/collections/screws/products/tube-screws-20pcs",
-      "note": "Verbindet ein Rohr mit der Kupplung; je Rohrende eine. Gibt es in den Rohrfarben · Preis und Packgröße: quadroshop.com, Stand 2026-08-18"
-    },
-    {
-      "id": "screw_panel",
-      "code": "",
-      "name": "Plattenschraube",
-      "name_en": "Panel screw",
-      "price": 2.99,
-      "pack": 8,
-      "url": "https://quadroshop.com/collections/screws/products/panel-screw",
-      "note": "Hält eine Platte durch das Rohr hindurch an der Kupplung; vier je Platte. Immer schwarz · Preis und Packgröße: quadroshop.com, Stand 2026-08-18"
-    },
-    {
-      "id": "screw_acrylic",
-      "code": "40641",
-      "name": "Acrylglasschraube",
-      "name_en": "Acrylic screw",
-      "price": 3.49,
-      "pack": 8,
-      "url": "https://quadroshop.com/products/acrylic-glass-screw",
-      "note": "Hält die Acrylglasscheibe in der Rahmenplatte; vier je Scheibe, zusätzlich zu den vier Plattenschrauben. Weiß · Preis und Packgröße: quadroshop.com, Stand 2026-09-22"
-    },
-    {
-      "id": "screw_slide_conical",
-      "code": "",
-      "name": "Konische Rutschenschraube",
-      "name_en": "Conical slide screw",
-      "price": 11.49,
-      "pack": 4,
-      "url": "https://quadroshop.com/collections/screws/products/conical-slide-screw",
-      "note": "Verbindet Rutschenkörper untereinander bzw. mit dem Auslauf; zwei je Verbindung · Preis und Packgröße: quadroshop.com, Stand 2026-08-18"
-    },
-    {
-      "id": "screw_slide_conical_counter",
-      "code": "",
-      "name": "Rutschenschraube Gegenstück",
-      "name_en": "Slide screw counterpiece",
-      "price": 4.49,
-      "pack": 2,
-      "url": "https://quadroshop.com/collections/screws/products/conical-slide-screw-counterpiece",
-      "note": "Gegenstück zu jeder konischen Schraube an einer Rutschen-Verbindung · Preis und Packgröße: quadroshop.com, Stand 2026-08-18"
-    },
-    {
-      "id": "screw_slide",
-      "code": "",
-      "name": "Rutschenschraube",
-      "name_en": "Slide screw",
-      "price": 5.49,
-      "pack": 2,
-      "url": "https://quadroshop.com/collections/screws/products/slide-screw",
-      "note": "Zusätzlich je Rutschen-Verbindung; läuft durch ein Rohr in die Kupplung · Preis und Packgröße: quadroshop.com, Stand 2026-08-18"
     }
   ]
 }

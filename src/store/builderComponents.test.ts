@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
+import { loadCatalog } from '../engine/catalog.js'
 import { CONFIRMED_COMPONENTS } from '../engine/componentPack.js'
 import { builderComponents, componentDimensions, componentForTool, componentHintKey, type BuilderComponent } from './builderComponents'
 import { activateComponent, componentChoices } from './componentChoices'
@@ -6,6 +7,8 @@ import { accessoryStrings } from '../ui/accessoryStrings'
 import { PART_DE, PART_EN, PART_ZH, colorLabel } from '../names'
 import { getLang, setLang } from '../engine/i18n.js'
 import type { useEngine } from './EngineContext'
+
+beforeAll(() => loadCatalog())
 
 describe('已确认组件目录与真实安装入口', () => {
   it('安装卡与清单的固定配色使用完整三语名称', () => {
