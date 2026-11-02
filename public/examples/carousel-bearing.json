@@ -1,0 +1,178 @@
+{
+  "format": 2,
+  "nodes": [
+    {
+      "id": "n1",
+      "x": 0,
+      "y": 2.5,
+      "z": 0
+    },
+    {
+      "id": "n2",
+      "x": 40,
+      "y": 2.5,
+      "z": 0
+    },
+    {
+      "id": "n4",
+      "x": -40,
+      "y": 2.5,
+      "z": 0
+    },
+    {
+      "id": "n6",
+      "x": 0,
+      "y": 2.5,
+      "z": 40
+    },
+    {
+      "id": "n8",
+      "x": 0,
+      "y": 2.5,
+      "z": -40
+    },
+    {
+      "id": "n10",
+      "x": 0,
+      "y": 12.67,
+      "z": 0,
+      "preferType": "6way"
+    },
+    {
+      "id": "n12",
+      "x": 0,
+      "y": 52.67,
+      "z": 0
+    },
+    {
+      "id": "n14",
+      "x": 20,
+      "y": 12.67,
+      "z": 0
+    },
+    {
+      "id": "n16",
+      "x": -20,
+      "y": 12.67,
+      "z": 0
+    },
+    {
+      "id": "n18",
+      "x": 0,
+      "y": 12.67,
+      "z": 20
+    },
+    {
+      "id": "n20",
+      "x": 0,
+      "y": 12.67,
+      "z": -20
+    }
+  ],
+  "tubes": [
+    {
+      "id": "t3",
+      "a": "n1",
+      "b": "n2",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t5",
+      "a": "n1",
+      "b": "n4",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t7",
+      "a": "n1",
+      "b": "n6",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t9",
+      "a": "n1",
+      "b": "n8",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t13",
+      "a": "n10",
+      "b": "n12",
+      "tubeId": "T35",
+      "color": "blue",
+      "length": 35
+    },
+    {
+      "id": "t15",
+      "a": "n10",
+      "b": "n14",
+      "tubeId": "T15",
+      "color": "red",
+      "length": 15
+    },
+    {
+      "id": "t17",
+      "a": "n10",
+      "b": "n16",
+      "tubeId": "T15",
+      "color": "yellow",
+      "length": 15
+    },
+    {
+      "id": "t19",
+      "a": "n10",
+      "b": "n18",
+      "tubeId": "T15",
+      "color": "yellow",
+      "length": 15
+    },
+    {
+      "id": "t21",
+      "a": "n10",
+      "b": "n20",
+      "tubeId": "T15",
+      "color": "yellow",
+      "length": 15
+    }
+  ],
+  "panels": [],
+  "clamps": [],
+  "textiles": [],
+  "fittings": [
+    {
+      "id": "f11",
+      "kind": "carousel_bearing",
+      "x": 0,
+      "y": 12.67,
+      "z": 0,
+      "quat": [
+        0.2706,
+        -0.2706,
+        -0.6533,
+        0.6533
+      ],
+      "color": "#526b4c",
+      "params": {
+        "baseNode": "n1",
+        "rotorNode": "n10",
+        "tieCount": 4
+      },
+      "supportTubes": [
+        "t3",
+        "t5",
+        "t7",
+        "t9"
+      ]
+    }
+  ],
+  "slides": [],
+  "groups": []
+}

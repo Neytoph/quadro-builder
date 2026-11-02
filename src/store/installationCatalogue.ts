@@ -4,8 +4,9 @@ import { builderComponents, selectBuilderComponent } from './builderComponents'
 
 export type CatalogueTool = 'panels' | 'accessories' | 'textiles' | 'wheels' | 'slides' | 'pools' | 'tubes' | 'connectors'
 export type CatalogueEntry = { id: string; origin: 'official' | 'extended'; group: string; tool: CatalogueTool; method: string; aliases: string }
-// 用户确认的91件唯一归属与已核对来源；来源独立于运行时compat。
+// 每件唯一归属与已核对来源；来源独立于运行时compat。
 export const INSTALLATION_CATALOGUE: readonly CatalogueEntry[] = [
+  { id: 'carousel_bearing', origin: 'extended', group: 'auxiliary', tool: 'accessories', method: '扎带固定', aliases: 'UCF209 方形带座轴承 旋转木马 转盘 金属轴承 rotary carousel flange bearing Drehlager Karussell' },
   {
     "id": "panel_40x40",
     "origin": "official",

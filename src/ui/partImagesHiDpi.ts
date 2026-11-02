@@ -30,6 +30,7 @@ export const PART_IMAGES_LARGE: ReadonlySet<string> = new Set([
   "bag",
   "balls",
   "bearing",
+  "carousel_bearing",
   "caster",
   "cross",
   "diagonal",

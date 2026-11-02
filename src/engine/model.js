@@ -7,6 +7,7 @@ import { confirmedSpec } from './componentPack.js';
 import { confirmedCandidates, ropeCandidate } from './confirmedComponentModel.js';
 import { insetPanelProbes } from './insetPanelMounts.js';
 import { validAssemblyConfig } from './assemblyConfig.js';
+import { carouselBaseMounts, addCarouselBearing, carouselBearingValid, rotateCarouselBearing } from './carouselBearingModel.js';
 
 // Zellweite des Rasters, mit dem die Kollisionspruefung Nachbarn sucht. Etwas
 // groesser als das laengste Rohr (75 cm + Kupplung): ein Rohr liegt damit in
@@ -44,6 +45,7 @@ import { round2 as round, quatFromXAxis, quatFromBasis, xAxisOf, yAxisOf, zAxisO
 // Herstellers: `at` ist der Anker (Kupplung oder Rohr), `offset` der Abstand in
 // cm entlang der gewaehlten Achse. Die Achse ist immer die lokale +X des Teils.
 const FITTING_MOUNTS = {
+  "carousel_bearing": { at: "node", offset: 0 },
   "bearing2":        { at: "node", offset: 0 },   // Radlager: 5-cm-Stueck an der Kupplung
   "casters2":        { at: "node", offset: 0 },   // Laufrolle; der Adapter kommt mit
   // Laufrollen-Adapter allein: in den Herstellerdateien 40-mal als eigenes Teil
@@ -277,6 +279,7 @@ export const BLACK_FITTINGS = new Set([
 // sie um. Die Poolfolie gibt es nur in Blau; Radlager, Schwimmrad und
 // Rohrkappe nur in Schwarz (siehe BLACK_FITTINGS).
 export function fixedFittingColor(kind) {
+  if (kind === 'carousel_bearing') return '#526b4c';
   if (BLACK_FITTINGS.has(kind)) return "black";
   if (POOL_KINDS.has(kind)) return "blue";
   return null;
@@ -361,7 +364,7 @@ export function holeClampDirsAt(model, node, cs = 5) {
  * darin, daneben passt nichts mehr. Dieselbe Liste fuehren builder.js, scene.js
  * (zeichnet den Stutzen) und bom.js (zaehlt ihn als Arm).
  */
-export const ARM_FITTINGS = new Set(["adapter2", "bearing2", "steering-lock2", "open-connector2"]);
+export const ARM_FITTINGS = new Set(["adapter2", "bearing2", "steering-lock2", "open-connector2", "carousel_bearing"]);
 
 /**
  * Teile, die den Stutzen ABSCHLIESSEN. Die Multirad-Arretierung sitzt an seinem
@@ -370,8 +373,9 @@ export const ARM_FITTINGS = new Set(["adapter2", "bearing2", "steering-lock2", "
  * nur, was UNTER ihr sitzt: das Radlager (und das Rad darauf, das ohnehin am
  * Lager haengt, nicht am Stutzen).
  */
-export const STUB_END_FITTINGS = new Set(["steering-lock2"]);
+export const STUB_END_FITTINGS = new Set(["steering-lock2", "carousel_bearing"]);
 export const STUB_END_ALLOWED = new Set(["bearing2", "multi-wheel2"]);
+const CAROUSEL_STUB_FITTINGS = new Set(['carousel_bearing']);
 
 /**
  * In welchen Richtungen steckt an dieser Kupplung ein Anbauteil im Stutzen?
@@ -725,6 +729,8 @@ export class BuildModel {
   removeNode(id) {
     const weg = this.nodes.get(id);
     if (!weg) return;
+    for (const f of this.fittings.values()) if (f.kind === 'carousel_bearing'
+      && [f.params?.baseNode, f.params?.rotorNode].includes(id)) this.fittings.delete(f.id);
     // Die Lagerkupplung gehoert zu der Kupplung, die sie traegt -- faellt die,
     // faellt auch die Klemme.
     if (weg.bearingOn) this.fittings.delete(weg.bearingOn);
@@ -951,6 +957,7 @@ export class BuildModel {
     const t = this.tubes.get(id);
     if (t) this._releaseArms(t);
     this.tubes.delete(id);
+    for (const f of this.fittings.values()) if (f.kind === 'carousel_bearing' && f.supportTubes?.includes(id)) this.fittings.delete(f.id);
     this._prunePanels();
     this._pruneClamps();
     this._pruneOrphanedC45Bodies();
@@ -1368,6 +1375,7 @@ export class BuildModel {
    * Rohr) bleiben, wo sie sind.
    */
   rotateFitting(id) {
+    if (this.fittings.get(id)?.kind === 'carousel_bearing') return rotateCarouselBearing(this, id);
     const step = this._nextFittingMount(id);
     if (!step) return false;
     const { f, mount } = step;
@@ -1388,6 +1396,7 @@ export class BuildModel {
 
   /** Laesst sich dieses Anbauteil weiterdrehen? (fuer Zeiger und Meldung) */
   canRotateFitting(id) {
+    if (this.fittings.get(id)?.kind === 'carousel_bearing') return carouselBearingValid(this, this.fittings.get(id));
     return !!this._nextFittingMount(id);
   }
 
@@ -1504,6 +1513,7 @@ export class BuildModel {
    * Liefert je Stelle { pos:[x,y,z], dir:[x,y,z], nodeId?, tubeId? }.
    */
   fittingMounts(kind, cs = 5) {
+    if (kind === 'carousel_bearing') return carouselBaseMounts(this);
     if (kind === "multi-wheel2") return this._wheelMounts();
     if (kind === "hub-cap2" || kind === "tube-cap2") return this._wheelCapMounts();
     if (kind === "textil-round2") return this._roundCoverMounts();
@@ -1766,8 +1776,10 @@ export class BuildModel {
       // Rad, das ohnehin am Lager haengt) bleibt moeglich.
       const abgeschlossen = STUB_END_ALLOWED.has(kind)
         ? [] : armFittingDirsAt(this, n, STUB_END_FITTINGS);
+      const rotaryBlocked = STUB_END_ALLOWED.has(kind) ? armFittingDirsAt(this, n, CAROUSEL_STUB_FITTINGS) : [];
       for (const dir of (spec.dirs === "down" ? [[0, -1, 0]] : CARDINALS)) {
         if (taken.has(cardinalName(dir))) continue;
+        if (rotaryBlocked.some(d => dot3(d, dir) > 0.9)) continue;
         if (durchKlemme.some((k) => dot3(k, dir) > 0.9)) continue;
         if (abgeschlossen.some((k) => dot3(k, dir) > 0.9)) continue;
         const pos = [n.x + dir[0] * spec.offset, n.y + dir[1] * spec.offset, n.z + dir[2] * spec.offset];
@@ -2571,6 +2583,10 @@ export class BuildModel {
    */
   addFittingAt(kind, mount, color) {
     if (!PLACEABLE_FITTINGS.includes(kind)) return null;
+    if (kind === 'carousel_bearing') return addCarouselBearing(this, mount);
+    if (mount?.dir && mount?.pos && [...this.fittings.values()].some(f => f.kind === 'carousel_bearing'
+      && f.quat && Math.hypot(f.x - mount.pos[0], f.y - mount.pos[1], f.z - mount.pos[2]) < 0.01
+      && dot3(xAxisOf(f.quat), mount.dir) > 0.9)) return null;
     // Rohrkappe und Radkappe schliessen beide ein Rohrende ab -- an derselben
     // Stelle ergibt nur eine von beiden Sinn.
     const CAPS = ["hub-cap2", "tube-cap2"];
@@ -4032,6 +4048,13 @@ export class BuildModel {
       const tube = this.tubes.get(f.tube);
       if ((ACCESSORY_IDS.has(f.kind) || (f.kind==='multi-wheel2' && f.appearanceVersion===2)) && tube && (Array.isArray(f.supportTubes) ? f.supportTubes : [f.tube]).every(id => { const t = this.tubes.get(id); return t && nodes.has(t.a) && nodes.has(t.b); })) fittings.add(f.id);
     }
+    for (const f of this.fittings.values()) if (f.kind === 'carousel_bearing') {
+      if (fittings.has(f.id)) {
+        addNodes([f.params?.baseNode, ...this._floodNodes(new Set([f.params?.rotorNode]))]);
+        for (const tid of f.supportTubes || []) { const tube = this.tubes.get(tid); if (tube) addNodes([tube.a, tube.b]); }
+      } else if (nodes.has(f.params?.baseNode) && nodes.has(f.params?.rotorNode)
+        && f.supportTubes?.every(id => { const t = this.tubes.get(id); return t && nodes.has(t.a) && nodes.has(t.b); })) fittings.add(f.id);
+    }
     return { nodes, clamps, slides, fittings };
   }
 
@@ -4621,6 +4644,8 @@ export class BuildModel {
       this.slides.set(rec.id, rec);
     }
     for (const f of frag.fittings || []) {
+      if (f.kind === 'carousel_bearing' && (!neu.has(f.params?.baseNode) || !neu.has(f.params?.rotorNode)
+        || !f.supportTubes?.every(id => neu.has(id)))) continue;
       const rec = versetzt(f, "f", "fittings");
       // 软包滚筒记着管子的 id，片段里的管换了新 id；管没一起带过来就丢掉
       if (rec.kind === "sleeve" || ACCESSORY_IDS.has(rec.kind) || (rec.kind==='multi-wheel2' && rec.tube)) {
@@ -4635,6 +4660,7 @@ export class BuildModel {
         rec.params = structuredClone(f.params);
       }
       if (f.appearanceVersion === 2) for (const key of ['a', 'b']) if (f[key]) rec[key] = neu.get(f[key]);
+      if (f.kind === 'carousel_bearing') rec.params = { ...rec.params, baseNode: neu.get(f.params.baseNode), rotorNode: neu.get(f.params.rotorNode) };
       this.fittings.set(rec.id, rec);
     }
     // 承载接头跟随新轴承配件，删除副本时只能删除副本自己的配件。
@@ -5129,14 +5155,24 @@ export class BuildModel {
     // (Von oben blickt man gegen die Y-Achse, dort liegt +Z unten im Bild.)
     const drehePunkt = (x, z) => {
       let dx = x - cx, dz = z - cz;
-      for (let k = 0; k < schritte; k++) { const nx = -dz, nz = dx; dx = nx; dz = nz; }
+      if (Number.isInteger(schritte)) {
+        for (let k = 0; k < schritte; k++) { const nx = -dz, nz = dx; dx = nx; dz = nz; }
+      } else {
+        const a = schritte * Math.PI / 2, co = Math.cos(a), si = Math.sin(a);
+        [dx, dz] = [co * dx - si * dz, si * dx + co * dz];
+      }
       return [round(cx + dx), round(cz + dz)];
     };
     // Richtungen drehen um den Ursprung, nicht um die Achse.
     const dreheDir = (v) => {
       if (!v || v.length !== 3) return v;
       let x = v[0], z = v[2];
-      for (let k = 0; k < schritte; k++) { const nx = -z, nz = x; x = nx; z = nz; }
+      if (Number.isInteger(schritte)) {
+        for (let k = 0; k < schritte; k++) { const nx = -z, nz = x; x = nx; z = nz; }
+      } else {
+        const a = schritte * Math.PI / 2, co = Math.cos(a), si = Math.sin(a);
+        [x, z] = [co * x - si * z, si * x + co * z];
+      }
       const r6 = (t) => Math.round(t * 1e6) / 1e6;
       return [r6(x), v[1], r6(z)];
     };
@@ -5460,6 +5496,11 @@ export class BuildModel {
 
   _incompleteComponentMove(tg) {
     for (const part of [...this.panels.values(), ...this.fittings.values()]) {
+      if (part.kind === 'carousel_bearing') {
+        const baseNodes = (part.supportTubes || []).flatMap(id => { const t = this.tubes.get(id); return t ? [t.a, t.b] : []; });
+        const required = [...baseNodes, part.params?.rotorNode];
+        if (required.some(id => tg.nodes.has(id)) && required.some(id => !tg.nodes.has(id))) return part.id;
+      }
       if (!part.appearanceVersion || !part.supportTubes) continue;
       const supportTubes = Array.isArray(part.supportTubes) ? part.supportTubes : [part.tube, part.a, part.b].filter(Boolean);
       const nodes = [...new Set(supportTubes.flatMap(id => { const t = this.tubes.get(id); return t ? [t.a, t.b] : []; }))];
@@ -5469,9 +5510,11 @@ export class BuildModel {
   }
 
   _invalidComponents() {
-    return new Set([...this.panels.values(), ...this.fittings.values()].filter(p =>
+    const invalid = new Set([...this.panels.values(), ...this.fittings.values()].filter(p =>
       p.appearanceVersion && (PANEL_ACCESSORY_IDS.has(p.panelId) || ACCESSORY_IDS.has(p.kind)) && (!componentMountsValid(this, p)
         || !(p.appearanceVersion === 2 ? confirmedDiagnostics(this, p) : p.kind ? this.accessoryDiagnostics(p.kind, p.tube, { facing: p.facing, ignoreId: p.id }) : this.panelAccessoryDiagnostics(p)).valid)).map(p => p.id));
+    for (const f of this.fittings.values()) if (f.kind === 'carousel_bearing' && !carouselBearingValid(this, f)) invalid.add(f.id);
+    return invalid;
   }
 
   // Hat der Knoten eine senkrechte Stuetze nach unten (Rohr zu einem Knoten direkt darunter)?
@@ -6266,6 +6309,9 @@ export class BuildModel {
       if (n.clampOn && (!tubeIds.has(n.clampOn.tubeId || n.clampOn.id) ||
         !Number.isFinite(n.clampOn.t))) return { ok: false, reason: "data" };
     }
+    for (const f of data.fittings || []) if (f.kind === 'carousel_bearing'
+      && (!nodeIds.has(f.params?.baseNode) || !nodeIds.has(f.params?.rotorNode)
+        || !Array.isArray(f.supportTubes) || f.supportTubes.length !== 4 || !f.supportTubes.every(id => tubeIds.has(id)))) return { ok: false, reason: 'data' };
     this.clear();
     this.assemblyConfig = data.assemblyConfig == null ? null : structuredClone(data.assemblyConfig);
     let maxSeq = 0;
@@ -6351,6 +6397,7 @@ export class BuildModel {
         rest: f.rest || null,
         balls: !!f.balls,
         tube: f.tube || null,
+        ...(kind === 'carousel_bearing' ? { params: structuredClone(f.params), supportTubes: structuredClone(f.supportTubes) } : {}),
         ...(f.appearanceVersion != null ? { appearanceVersion: f.appearanceVersion, params: structuredClone(f.params), mounts: structuredClone(f.mounts), supportTubes: structuredClone(f.supportTubes), facing: f.facing || 1 } : {}),
         ...(f.appearanceVersion === 2 ? { partId: f.partId, a: f.a, b: f.b, t0: f.t0, len: f.len, curveReverse: f.curveReverse, ropeLength: f.ropeLength } : {}),
       });

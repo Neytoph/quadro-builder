@@ -48,7 +48,7 @@ export async function renderAccessoryIcons(data: unknown, host: HTMLElement, req
     return clonedMaterials.get(source)!
   }
   const results: Array<{ id: string; url: string; meshes: number; size: number[] }> = []
-  const nativeWheels = accessories().filter(part => part.id === 'wheel').map(part => ({ id: part.id, name: part.name, kind: part.qdf, placement: 'fitting' as const }))
+  const nativeWheels = accessories().filter(part => part.id === 'wheel' || part.id === 'carousel_bearing').map(part => ({ id: part.id, name: part.name, kind: part.qdf, placement: 'fitting' as const }))
   const directory = [...builderComponents(), ...nativeWheels, ...['TA35', 'TA75'].map(id => ({ id, name: id, placement: 'tube' as const }))]
   const targetFor = (part: typeof directory[number]) => [...(part.placement === 'tube' ? model.tubes : part.placement === 'panel' ? model.panels : model.fittings).values()]
     .find(item => (item.tubeId || item.panelId || item.partId || item.kind) === part.id || ('kind' in part && part.kind && item.kind === part.kind))
@@ -77,6 +77,8 @@ export async function renderAccessoryIcons(data: unknown, host: HTMLElement, req
           stage.add(mesh); meshes++
         })
       } else if (object instanceof THREE.Mesh && (options.includeFrame || tagOf(object)?.id === target.id)) {
+        // 目录图标只展示轴承本体；安装场景保留扎带。
+        if (part.id === 'carousel_bearing' && !options.includeFrame && object.name.startsWith('ucf209:tie')) return
         const mesh = new THREE.Mesh(object.geometry, materialFor(object.material))
         mesh.applyMatrix4(object.matrixWorld)
         stage.add(mesh); meshes++

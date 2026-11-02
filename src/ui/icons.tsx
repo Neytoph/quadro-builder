@@ -80,6 +80,7 @@ export const CONN_CAT_ICON: Record<string, string> = {
 }
 
 export const ACC_CAT_ICON: Record<string, string> = {
+  carousel_bearing: '<rect x="2" y="2" width="12" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.2"/><circle cx="8" cy="8" r="3.4" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="4" cy="4" r=".8" fill="currentColor"/><circle cx="12" cy="4" r=".8" fill="currentColor"/><circle cx="4" cy="12" r=".8" fill="currentColor"/><circle cx="12" cy="12" r=".8" fill="currentColor"/>',
   'multi-wheel2': TOOL_ICON.wheel,
   'floating-wheel2': '<circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="2.6"/><circle cx="8" cy="8" r="1.8" fill="currentColor"/>',
   'casters2': '<path d="M8 1.6 L8 5.4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M4.4 5.4 L11.6 5.4 L10.4 9 L5.6 9 Z" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="11.6" r="3" fill="none" stroke="currentColor" stroke-width="1.5"/>',

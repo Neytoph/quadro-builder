@@ -3,6 +3,11 @@ import { getPartById, partName } from './catalog.js';
 import { confirmedSpec, confirmedColor } from './componentPack.js';
 
 const INFO = {
+  carousel_bearing: {
+    zh: ['每套含轴承与4根扎带', '旋转轴承安装', '将方形外座用四根扎带固定到水平十字底座的四根管上，接头插柱接入内圈；上部绕内圈轴线旋转，外座与底座保持固定。'],
+    en: ['Each kit includes the bearing and 4 cable ties', 'Install rotary bearing', 'Secure the square housing to the four tubes of a horizontal cross base with cable ties. Insert the connector stub into the inner ring; the upper frame rotates while the housing and base stay fixed.'],
+    de: ['Je Set: Lager und 4 Kabelbinder', 'Drehlager montieren', 'Das quadratische Gehäuse mit vier Kabelbindern an den vier Rohren des waagerechten Kreuzsockels befestigen. Den Verbinderzapfen in den Innenring stecken; der obere Rahmen dreht sich, Gehäuse und Sockel bleiben fest.'],
+  },
   steering_wheel: {
     zh: ['每套含2个卡箍及紧固件', '方向盘安装', '将两个卡箍分别固定在横管上，连接底座，确认圆环朝向与周围净空。'],
     en: ['Each kit includes 2 pipe clamps and fasteners', 'Install steering wheel', 'Secure both clamps to the horizontal tube, attach the hub and check the wheel direction and clearance.'],
@@ -150,6 +155,7 @@ function copy(partId, part) {
 
 export function isOriginalComponent(part) {
   const id = componentPartId(part);
+  if (id === 'carousel_bearing') return true;
   return part?.appearanceVersion === 2 ? !!confirmedSpec(id)
     : part?.appearanceVersion === 1 && ORIGINAL_COMPONENT_IDS.has(id);
 }

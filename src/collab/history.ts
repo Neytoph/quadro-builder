@@ -29,6 +29,11 @@ export function refsOf(get: (k: string) => unknown): string[] {
     case 'panel':
     case 'textile':
     case 'fitting':
+      if (get('kind') === 'carousel_bearing') {
+        const params = get('params') as { baseNode?: string; rotorNode?: string } | undefined
+        add(params?.baseNode)
+        add(params?.rotorNode)
+      }
       add(get('a'))
       add(get('b'))
       add(get('tube'))

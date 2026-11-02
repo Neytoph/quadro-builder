@@ -23,7 +23,7 @@ try {
     const page = await browser.newPage({ viewport: { width: 1000, height: 800 } })
     try {
       // 每个真实夹具独立释放 WebGL 上下文，避免大目录产生上下文累积。
-      await page.goto(`${process.env.BASE || 'http://127.0.0.1:18636'}/examples/original-accessories.json`)
+      await page.goto(`${process.env.BASE || 'http://127.0.0.1:18636'}/examples/original-accessories.json`, { waitUntil: 'domcontentloaded' })
       console.log(`开始渲染真实组件：${path.relative(root, modelPath)}`)
       const rendered = await page.evaluate(async ({ data, ids, outputSize }) => {
         const { renderAccessoryIcons } = await import('/scripts/accessory-icon-render.ts')

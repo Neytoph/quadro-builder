@@ -1,0 +1,75 @@
+{
+  "format": 2,
+  "nodes": [
+    {
+      "id": "n1",
+      "x": 0,
+      "y": 2.5,
+      "z": 0
+    },
+    {
+      "id": "n2",
+      "x": 40,
+      "y": 2.5,
+      "z": 0
+    },
+    {
+      "id": "n4",
+      "x": -40,
+      "y": 2.5,
+      "z": 0
+    },
+    {
+      "id": "n6",
+      "x": 0,
+      "y": 2.5,
+      "z": 40
+    },
+    {
+      "id": "n8",
+      "x": 0,
+      "y": 2.5,
+      "z": -40
+    }
+  ],
+  "tubes": [
+    {
+      "id": "t3",
+      "a": "n1",
+      "b": "n2",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t5",
+      "a": "n1",
+      "b": "n4",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t7",
+      "a": "n1",
+      "b": "n6",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t9",
+      "a": "n1",
+      "b": "n8",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    }
+  ],
+  "panels": [],
+  "clamps": [],
+  "textiles": [],
+  "fittings": [],
+  "slides": [],
+  "groups": []
+}

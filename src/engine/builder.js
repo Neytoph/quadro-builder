@@ -16,6 +16,8 @@ import { CONNECTOR_ARM_BITS } from "./qdfimport.js";
 import { ACCESSORY_IDS, PANEL_ACCESSORY_IDS, componentFrame } from './accessoryPack.js';
 import { confirmedSpec } from './componentPack.js';
 import { pickStepAnchor, stepCandidates, stepCandidatesFromSelection, stepNeighbor } from "./stepAnchor.js";
+import { carouselBearingAtRotor, carouselBearingForPick } from './carouselBearingModel.js';
+import { CarouselRotationGesture } from './carouselRotationGesture.js';
 
 // Kupplungen, die auf einem Rohr sitzen statt im Raster: QDF-Art -> Katalogteil.
 // Teile, die sich um ein Rohr klemmen lassen. Die Lochzapfenkupplung gehört
@@ -170,7 +172,7 @@ export class Builder {
    * 中间状态。
    */
   busy() {
-    return !!(this.held || this._paste || this._drag || this._clampDrag || this._clampSlide);
+    return !!(this.held || this._paste || this._drag || this._clampDrag || this._clampSlide || this._carouselDrag);
   }
 
   _externalChange() {
@@ -193,6 +195,7 @@ export class Builder {
   }
 
   setReadOnly(on) {
+    if (on && (this._carouselDrag || this._carouselCandidate)) this._abortGesture();
     this.readOnly = !!on;
     if (this.readOnly && this.mode !== "select" && this.mode !== "assembly") this.setMode("select");
   }
@@ -223,6 +226,7 @@ export class Builder {
    * wechselt erst beim naechsten Escape den Modus.
    */
   clearMarks() {
+    if (this._carouselDrag || this._carouselCandidate) { this._abortGesture(); return true; }
     if (this.installationPreview) { this.cancelInstallation(); return true; }
     const had = this.selection.size > 0 || !!this.highlight || !!this.panelRail ||
       !!this.reinforceRail || (this.mode !== "select" && !!this.selectedNodeId);
@@ -263,6 +267,7 @@ export class Builder {
 
   // --- oeffentliche Steuerung --------------------------------------------
   setMode(mode) {
+    if (this._carouselDrag || this._carouselCandidate) this._abortGesture();
     this._ropeFirst = null;
     this._installationPart = null; this.installationPreview = null;
     this.scene.clearInstallationPreview?.();
@@ -1772,7 +1777,7 @@ export class Builder {
       { labelFor, slideNameFor, labelIds, soloId, soloLabel, assembly, suggest, reinforce,
         selected, highlight: this.highlight || firstRails, invalid, tints: this.tints,
         focusId: this.panelRail ? this.panelRail.id : null,
-        preview: !!(this._paste || this._drag || this._clampDrag || this._clampSlide) });
+        preview: !!(this._paste || this._drag || this._clampDrag || this._clampSlide || this._carouselDrag) });
     this._buildHandles();
     if (this._installationPart) this.scene.showInstallationPreview(this.model, this._installationPart, this.installationPreview.valid);
     this.scene.requestRender();
@@ -1781,7 +1786,7 @@ export class Builder {
     // mit, obwohl der Stand noch gar nicht gilt. Beim Absetzen wird ohnehin neu
     // gezeichnet -- dann laeuft es einmal. Nur die Knoepfe, die vom Zustand
     // abhaengen (Drehen), werden nachgezogen.
-    if (!this._paste && !this._drag && !this._clampDrag && !this._clampSlide) this.onChange();
+    if (!this._paste && !this._drag && !this._clampDrag && !this._clampSlide && !this._carouselDrag) this.onChange();
     else this.onPreview();
   }
 
@@ -1872,7 +1877,7 @@ export class Builder {
 
   /** 真实管子占用的世界轴 bit；斜管无法套普通通型。 */
   _worldOccupiedBits(node) {
-    let bits = 0;
+    let bits = carouselBearingAtRotor(this.model, node.id) ? 0x08 : 0;
     for (const t of this.model.tubes.values()) {
       if (t.arm || t.link) continue;
       const other = t.a === node.id ? this.model.nodes.get(t.b)
@@ -1917,7 +1922,7 @@ export class Builder {
   }
 
   _nodeAcceptsConnector(node, typeId) {
-    if (!node || node.unused || node.c45body || node.part) return false;
+    if (!node || (node.unused && !carouselBearingAtRotor(this.model, node.id)) || node.c45body || node.part) return false;
     if (this.model.hasWheelCap && this.model.hasWheelCap(node)) return false;
     const occ = this._worldOccupiedBits(node);
     if (occ == null) return false;
@@ -1954,6 +1959,7 @@ export class Builder {
     }
     node.preferType = typeId;
     node.quat = pick;
+    node.unused = false;
     const axes = [xAxisOf(pick), yAxisOf(pick), zAxisOf(pick)];
     node.arms = CONNECTOR_ARM_BITS.filter(([bit]) => mask & bit).map(([, dir]) =>
       [0, 1, 2].map((i) => axes[0][i] * dir[0] + axes[1][i] * dir[1] + axes[2][i] * dir[2]));
@@ -2784,6 +2790,16 @@ export class Builder {
         if (pick && pick.data.kind === "clamp" && this._beginClampDrag(pick.data.id)) return;
       }
       this._dragKandidat = null;
+      this._carouselCandidate = null;
+      if (e.button === 0 && !this.readOnly && !this._down.add && !e.altKey
+          && (this.mode === 'select' || (this.mode === 'fitting' && this.fittingKind === 'carousel_bearing'))) {
+        const pick = this.scene.pickForDelete(e.clientX, e.clientY);
+        const id = carouselBearingForPick(this.model, pick);
+        if (id) {
+          this._carouselCandidate = { id, x: e.clientX, y: e.clientY, point: pick.point };
+          return;
+        }
+      }
       if (e.button === 0 && !this._down.box && this.mode === "select") {
         const pick = this._pickSelect(e.clientX, e.clientY);
         if (pick && pick.data.kind === "clamp") {
@@ -2900,6 +2916,13 @@ export class Builder {
    * wegnehmen, ein begonnenes Verschieben auf den Stand davor zuruecksetzen.
    */
   _abortGesture() {
+    this._carouselCandidate = null;
+    if (this._carouselDrag) {
+      this._carouselDrag.cancel();
+      this._carouselDrag = null;
+      this.scene.setCursor('default');
+      this.refresh();
+    }
     this._clearLongPress();
     this._longDone = false;
     this._dragKandidat = null;
@@ -2997,6 +3020,21 @@ export class Builder {
     // Cursor-Modus: mit gedrueckter linker Taste ziehen zieht ein Auswahl-
     // Rechteck auf, statt zu drehen (das liegt dort auf der rechten Taste).
     // Finger auf einem gewaehlten Teil, jetzt bewegt: der Zug beginnt hier.
+    if (this._carouselCandidate && (e.buttons & 1) && this._down
+        && Math.hypot(e.clientX - this._down.x, e.clientY - this._down.y) > CLICK_TOLERANCE) {
+      const c = this._carouselCandidate;
+      this._carouselCandidate = null;
+      this._clearLongPress();
+      this.scene.endOrbit();
+      this._carouselDrag = new CarouselRotationGesture(this.model, c.id, c.x, c.y, c.point,
+        (...args) => this.scene.pointOnPlane(...args));
+      this.scene.setCursor('grabbing');
+    }
+    if (this._carouselDrag && (e.buttons & 1)) {
+      this._carouselDrag.update(e.clientX, e.clientY);
+      this.refresh();
+      return;
+    }
     if (this._dragKandidat && (e.buttons & 1) && this._down
         && Math.hypot(e.clientX - this._down.x, e.clientY - this._down.y) > CLICK_TOLERANCE) {
       const kandidat = this._dragKandidat;
@@ -3245,6 +3283,16 @@ export class Builder {
     }
     // Verschieben abschliessen: hier faellt der eine Undo-Schritt an und hier
     // werden deckungsgleiche Kupplungen zusammengelegt.
+    this._carouselCandidate = null;
+    if (this._carouselDrag) {
+      const gesture = this._carouselDrag;
+      this._carouselDrag = null;
+      this.scene.setCursor('default');
+      this.scene.endOrbit();
+      this._pushHistory(gesture.before);
+      this.refresh();
+      return;
+    }
     if (this._drag) { this._endMoveDrag(); return; }
     if (this._clampDrag) { this._endClampDrag(e); return; }
     if (this._clampSlide) { this._endClampSlide(); return; }
@@ -3914,6 +3962,7 @@ export class Builder {
       }
     }
     if (p && p.data.kind === "fitting") {
+      if (this.model.fittings.get(p.data.id)?.kind === 'carousel_bearing') return;
       // Klick auf ein gesetztes Teil DREHT es weiter (wie beim Bogenrohr) --
       // geloescht wird im Auswahl-Modus. Teile ohne Wahlmoeglichkeit bleiben.
       let turned = false;
@@ -3963,6 +4012,7 @@ export class Builder {
     // erste gesetzte Rad das Rohr und nichts liesse sich mehr daneben setzen.
     if (pick && pick.data.kind === "fitting"
         && this.model.fittings.get(pick.data.id)?.kind === this.fittingKind) {
+      if (this.fittingKind === 'carousel_bearing') return;
       let turned = false;
       this.recordHistory(() => { turned = this.model.rotateFitting(pick.data.id); });
       if (!turned) this.onNotice(t("notice_fitting_fixed"), "warn");

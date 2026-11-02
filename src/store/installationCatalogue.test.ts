@@ -26,16 +26,16 @@ function routingApi() {
   return api as unknown as EngineApi
 }
 
-it('91个真实物理件各归属一次，数量与确认方案完整一致', () => {
+it('92个真实物理件各归属一次，包含新增旋转轴承', () => {
   const entries = installationChoices(routingApi(), key => key)
-  expect(entries).toHaveLength(91)
-  expect(new Set(entries.map(entry => entry.id)).size).toBe(91)
-  expect(Object.fromEntries([...new Set(entries.map(entry => entry.tool))].map(tool => [tool, entries.filter(entry => entry.tool === tool).length]))).toEqual({ panels:24, accessories:10, textiles:13, wheels:7, slides:4, pools:5, tubes:10, connectors:18 })
+  expect(entries).toHaveLength(92)
+  expect(new Set(entries.map(entry => entry.id)).size).toBe(92)
+  expect(Object.fromEntries([...new Set(entries.map(entry => entry.tool))].map(tool => [tool, entries.filter(entry => entry.tool === tool).length]))).toEqual({ panels:24, accessories:11, textiles:13, wheels:7, slides:4, pools:5, tubes:10, connectors:18 })
   expect(entries.filter(entry => entry.group === 'outside')).toHaveLength(16)
   expect(entries.filter(entry => entry.group === 'inset')).toHaveLength(8)
   expect(entries.filter(entry => entry.group === 'on-tube')).toHaveLength(4)
   expect(entries.filter(entry => entry.group === 'on-frame')).toHaveLength(3)
-  expect(entries.filter(entry => entry.group === 'auxiliary')).toHaveLength(3)
+  expect(entries.filter(entry => entry.group === 'auxiliary')).toHaveLength(4)
 })
 
 it('已核对来源不随新版compat覆盖：官方套装与扩展整块透明板正确区分', () => {

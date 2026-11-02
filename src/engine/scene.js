@@ -3,6 +3,7 @@
 import * as THREE from "three";
 import { ACCESSORY_IDS, PANEL_ACCESSORY_IDS, mountPoint, componentVolumes } from './accessoryPack.js';
 import { accessoryMeshes, panelAccessoryMeshes } from './accessoryMeshes.js';
+import { carouselBearingMeshes } from './carouselBearingMeshes.js';
 import { confirmedSpec } from './componentPack.js';
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { geometry, colorHex, connectorColor, getPanel } from "./catalog.js";
@@ -1729,6 +1730,7 @@ export class SceneManager {
    * Flaechennormale) -- genau wie im QDF.
    */
   _fittingMeshes(f) {
+    if (f.kind === 'carousel_bearing') return carouselBearingMeshes(this, f);
     if ((f.appearanceVersion === 2 && f.kind !== 'multi-wheel2') || (ACCESSORY_IDS.has(f.kind) && !confirmedSpec(f.kind))) return accessoryMeshes(this, this._renderModel, f, this._look(f.color || 'yellow'));
     const q = f.quat && f.quat.length === 4
       ? new THREE.Quaternion(f.quat[0], f.quat[1], f.quat[2], f.quat[3]).normalize()

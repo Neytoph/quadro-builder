@@ -36,6 +36,7 @@ export default function StatusTip({ menuOpen }: { menuOpen: boolean }) {
   const narrow = vw <= NARROW_MAX
   const { pane } = useDock()
   const key = api.pasting ? 'status.paste'
+    : api.mode === 'fitting' && api.fittingKind === 'carousel_bearing' ? 'status.carouselBearing'
     : api.placingConnector ? 'tip.placeConnector'
     : api.assembly.active ? 'status.assembly'
     : (BY_MODE[api.mode] || 'tip.select')

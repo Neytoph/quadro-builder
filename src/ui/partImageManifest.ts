@@ -122,6 +122,10 @@ export const PART_IMAGE_MANIFEST = {
       "src": "parts/bearing.png",
       "srcLarge": "parts/large/bearing.png"
     },
+    "carousel_bearing": {
+      "src": "parts/carousel_bearing.png",
+      "srcLarge": "parts/large/carousel_bearing.png"
+    },
     "caster": {
       "src": "parts/caster.png",
       "srcLarge": "parts/large/caster.png"
