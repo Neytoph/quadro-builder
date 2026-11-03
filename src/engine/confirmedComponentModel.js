@@ -379,7 +379,8 @@ function computeConfirmedCandidates(model,id,options) {
   if(spec.mountType==='corner') {
     const radius=spec.width;
     const out=[];for(const node of model.nodes.values()) {
-      const rails=[...model.tubes.values()].filter(t=>!t.bow && !t.arm && !t.link && (t.a===node.id || t.b===node.id)).map(t=>({tube:t,dir:unit(cSub(curvePoint(model,t.id,t.a===node.id?1:0),xyz(node))),start:t.a===node.id?0:1,len:model._rail(t.id)?.len||0})).filter(r=>r.len>=radius);
+      // 节点保存到0.01cm；旋转后的标准管保留坐标舍入范围内的长度误差。
+      const rails=[...model.tubes.values()].filter(t=>!t.bow && !t.arm && !t.link && (t.a===node.id || t.b===node.id)).map(t=>({tube:t,dir:unit(cSub(curvePoint(model,t.id,t.a===node.id?1:0),xyz(node))),start:t.a===node.id?0:1,len:model._rail(t.id)?.len||0})).filter(r=>r.len>=radius-.02);
       for(let i=0;i<rails.length;i++)for(let j=i+1;j<rails.length;j++) {
         const a=rails[i],b=rails[j];if(Math.abs(cDot(a.dir,b.dir))>0.01)continue;
         const facing=options.sectorFacing===-1?-1:1;

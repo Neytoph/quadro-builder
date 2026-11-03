@@ -7,8 +7,40 @@ import { computeBOM } from './bom.js'
 import { panelInstallationFacing } from './panelInstallationFacing.js'
 import { zAxisOf } from './util.js'
 import { Builder } from './builder.js'
+import { rotateCarouselBearing } from './carouselBearingModel.js'
 
 beforeAll(loadCatalog)
+
+it.each([20, 40])('%i厘米扇形板随轴承转到任意角度时保留标准管支撑', radius => {
+  const model = new BuildModel(), base = model.addNode(0, 2.5, 0)
+  for (const [x, z] of [[40, 0], [-40, 0], [0, 40], [0, -40]]) {
+    const end = model.addNode(x, 2.5, z)
+    model.addTube(base.id, end.id, 'T35', 'green', 35)
+  }
+  const bearing = model.addFittingAt('carousel_bearing', model.fittingMounts('carousel_bearing')[0])!
+  const rotor = model.nodes.get(bearing.params.rotorNode)!
+  rotor.unused = false; rotor.preferType = '6way'
+  for (const [x, z] of [[radius, 0], [0, radius]]) {
+    const end = model.addNode(x, rotor.y, z)
+    model.addTube(rotor.id, end.id, radius === 20 ? 'T15' : 'T35', 'blue', radius - 5)
+  }
+  const candidate = model.confirmedMounts(`panel_sector_${radius}`)
+    .map((part: any) => panelInstallationFacing(model, part, [0, 100, 0]).part).find((part: any) => part.valid)!
+  const panel = model.addConfirmedComponent(candidate, 'yellow')!
+  expect(panel).toBeTruthy()
+  const initial = model.toJSON()
+  for (const angle of [15, 30, 45, 60, 75, 137.2, 359.5]) {
+    expect(model.loadJSON(initial).ok).toBe(true)
+    expect(rotateCarouselBearing(model, bearing.id, angle / 90), `${radius}cm / ${angle}°`).toBe(true)
+    expect(model.confirmedDiagnostics(model.fittings.get(panel.id)).valid).toBe(true)
+  }
+  const short = new BuildModel(), corner = short.addNode(0, 80, 0)
+  for (const [x, y] of [[radius - .1, 80], [0, 80 + radius - .1]]) {
+    const end = short.addNode(x, y, 0)
+    short.addTube(corner.id, end.id, radius === 20 ? 'T15' : 'T35', 'blue', radius - 5)
+  }
+  expect(short.confirmedMounts(`panel_sector_${radius}`).filter((part: any) => part.valid)).toHaveLength(0)
+})
 
 it.each([['panel_sector_20', 'T15', 15, 20], ['panel_sector_40', 'T35', 35, 40]])(
   '%s 的相邻安装位分开显示，并能共用一条直管', (id, tubeId, length, radius) => {

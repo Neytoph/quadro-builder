@@ -75,7 +75,7 @@ export function mountPoint(model, mount) {
 }
 
 export function componentFrame(model, part) {
-  if(part.kind==='multi-wheel2') {
+  if(part.kind==='multi-wheel2' || part.kind==='carousel_bearing') {
     if(![part.x,part.y,part.z].every(Number.isFinite))return null;
     const q=part.quat || [0,0,0,1];
     if(!Array.isArray(q) || q.length!==4 || !q.every(Number.isFinite) || Math.abs(Math.hypot(...q)-1)>.001)return null;
@@ -122,6 +122,8 @@ function volume(frame, lo, hi) {
 }
 
 export function componentVolumes(model, part, { sweep = false } = {}) {
+  // 轴承本体位于插柱后方；使用本体外包围盒，给直接接入上部的面板留出实际空间。
+  if(part.kind==='carousel_bearing'){const frame=componentFrame(model,part);return frame?[volume(frame,[2.5,-6.85,-6.85],[7.72,6.85,6.85])]:[];}
   // 原生抓取网格为7.5×30.2×30.2cm；保持原配件空间检查的保守4cm轴向半厚度。
   if(part.kind==='multi-wheel2'){const frame=componentFrame(model,part);return frame?[volume(frame,[-4,-15.1,-15.1],[4,15.1,15.1])]:[];}
   if (part.appearanceVersion === 2 || !part.appearanceVersion && ['panel_40x40', 'panel_40x20'].includes(part.panelId)) return confirmedVolumes(model, part);
@@ -321,7 +323,7 @@ function computeComponentObstacle(model, part, { sweep, collisionCache, curvedTu
     if(!entry){
       const boxes = (ACCESSORY_IDS.has(other.kind) && (!confirmedSpec(other.kind) || other.appearanceVersion === 2)) || (other.appearanceVersion && PANEL_ACCESSORY_IDS.has(other.panelId)) || ['panel_40x40', 'panel_40x20'].includes(other.panelId)
         ? componentVolumes(model, other, { sweep: other.kind === 'swing' })
-        : other.kind==='multi-wheel2' ? componentVolumes(model,other) : (other.a && other.b ? panelVolume(model, other) : [{ pos: [other.x, other.y, other.z], axes: other.quat?.every(Number.isFinite) ? [xAxisOf(other.quat), yAxisOf(other.quat), zAxisOf(other.quat)] : [[1, 0, 0], [0, 1, 0], [0, 0, 1]], half: other.kind === 'floating-wheel2' ? [7.5, 15.1, 15.1] : [3, 3, 3] }]);
+        : other.kind==='multi-wheel2' || other.kind==='carousel_bearing' ? componentVolumes(model,other) : (other.a && other.b ? panelVolume(model, other) : [{ pos: [other.x, other.y, other.z], axes: other.quat?.every(Number.isFinite) ? [xAxisOf(other.quat), yAxisOf(other.quat), zAxisOf(other.quat)] : [[1, 0, 0], [0, 1, 0], [0, 0, 1]], half: other.kind === 'floating-wheel2' ? [7.5, 15.1, 15.1] : [3, 3, 3] }]);
       const bounded=boxes.map(box=>({box,bounds:volumeBounds(box)}));
       entry={bounded,bounds:combinedBounds(bounded)};collisionCache?.set(other,entry);
     }

@@ -11,6 +11,8 @@ import { ModelHistory, refsOf } from '../collab/history'
 import { Builder } from './builder.js'
 import { carouselBearingForPick, rotateCarouselBearing } from './carouselBearingModel.js'
 import { CarouselRotationGesture } from './carouselRotationGesture.js'
+import { componentVolumes, componentObstacle } from './accessoryPack.js'
+import { panelInstallationFacing } from './panelInstallationFacing.js'
 
 beforeAll(async () => { await loadCatalog() })
 function fixture() {
@@ -32,6 +34,25 @@ function installed() {
   return { ...result, bearing, rotor, end }
 }
 describe('UCF209十字底座与独立转轴', () => {
+  it('平台直接连接转轴时保留轴承上方空间，并继续拒绝穿入轴承本体', () => {
+    const { model, bearing, rotor } = installed()
+    rotor.preferType = '6way'
+    const end = model.addNode(0, rotor.y, 20)
+    model.addTube(rotor.id, end.id, 'T15', 'green', 15)
+    const mount = model.confirmedMounts('panel_sector_20')
+      .map((part: any) => panelInstallationFacing(model, part, [0, 100, 0]).part)
+      .find((part: any) => part.valid && Math.abs(part.y - rotor.y) < .01)!
+    expect(mount).toBeTruthy()
+    const panel = model.addConfirmedComponent(mount, 'blue')!
+    expect(panel).toBeTruthy()
+    expect(componentObstacle(model, panel)).toBeNull()
+    const box = componentVolumes(model, bearing)[0]
+    const highest = box.pos[1] + box.axes.reduce((sum: number, axis: number[], i: number) => sum + Math.abs(axis[1]) * box.half[i], 0)
+    expect(highest).toBeCloseTo(bearing.y - 2.5)
+    expect(componentObstacle(model, { ...panel, y: panel.y - 3 })).toMatchObject({ kind: 'fitting', id: bearing.id })
+    expect(rotateCarouselBearing(model, bearing.id, 31.7 / 90)).toBe(true)
+    expect(model.confirmedDiagnostics(model.fittings.get(panel.id)).valid).toBe(true)
+  })
   it('安装轴承保持空位，用户可选择二通、三通或六通，保存后仍为空位', () => {
     const { model, mount } = fixture()
     const before = computeBOM(model).connectors

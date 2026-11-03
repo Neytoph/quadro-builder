@@ -1,0 +1,1042 @@
+{
+  "format": 2,
+  "nodes": [
+    {
+      "id": "n1",
+      "x": 0,
+      "y": 2.5,
+      "z": 0
+    },
+    {
+      "id": "n2",
+      "x": 40,
+      "y": 2.5,
+      "z": 0
+    },
+    {
+      "id": "n4",
+      "x": -40,
+      "y": 2.5,
+      "z": 0
+    },
+    {
+      "id": "n6",
+      "x": 0,
+      "y": 2.5,
+      "z": 40
+    },
+    {
+      "id": "n8",
+      "x": 0,
+      "y": 2.5,
+      "z": -40
+    },
+    {
+      "id": "n10",
+      "x": 0,
+      "y": 12.67,
+      "z": 0,
+      "quat": [
+        0,
+        -0.104528463,
+        0,
+        0.994521895
+      ],
+      "preferType": "6way"
+    },
+    {
+      "id": "n12",
+      "x": 0,
+      "y": 32.67,
+      "z": 0,
+      "quat": [
+        0,
+        -0.104528463,
+        0,
+        0.994521895
+      ]
+    },
+    {
+      "id": "n14",
+      "x": 19.56,
+      "y": 12.67,
+      "z": 4.16,
+      "quat": [
+        0,
+        -0.104528463,
+        0,
+        0.994521895
+      ]
+    },
+    {
+      "id": "n15",
+      "x": -4.16,
+      "y": 12.67,
+      "z": 19.56,
+      "quat": [
+        0,
+        -0.104528463,
+        0,
+        0.994521895
+      ]
+    },
+    {
+      "id": "n17",
+      "x": 19.56,
+      "y": 132.67,
+      "z": 4.16,
+      "quat": [
+        0,
+        -0.104528463,
+        0,
+        0.994521895
+      ]
+    },
+    {
+      "id": "n18",
+      "x": -4.16,
+      "y": 132.67,
+      "z": 19.56,
+      "quat": [
+        0,
+        -0.104528463,
+        0,
+        0.994521895
+      ]
+    },
+    {
+      "id": "n20",
+      "x": 19.56,
+      "y": 32.67,
+      "z": 4.16,
+      "quat": [
+        0,
+        -0.104528463,
+        0,
+        0.994521895
+      ]
+    },
+    {
+      "id": "n22",
+      "x": 19.56,
+      "y": 52.67,
+      "z": 4.16,
+      "quat": [
+        0,
+        -0.104528463,
+        0,
+        0.994521895
+      ]
+    },
+    {
+      "id": "n25",
+      "x": -19.56,
+      "y": 12.67,
+      "z": -4.16,
+      "quat": [
+        0,
+        -0.104528463,
+        0,
+        0.994521895
+      ]
+    },
+    {
+      "id": "n27",
+      "x": -19.56,
+      "y": 132.67,
+      "z": -4.16,
+      "quat": [
+        0,
+        -0.104528463,
+        0,
+        0.994521895
+      ]
+    },
+    {
+      "id": "n29",
+      "x": -4.16,
+      "y": 52.67,
+      "z": 19.56,
+      "quat": [
+        0,
+        -0.104528463,
+        0,
+        0.994521895
+      ]
+    },
+    {
+      "id": "n30",
+      "x": -19.56,
+      "y": 52.67,
+      "z": -4.16,
+      "quat": [
+        0,
+        -0.104528463,
+        0,
+        0.994521895
+      ]
+    },
+    {
+      "id": "n32",
+      "x": -4.16,
+      "y": 32.67,
+      "z": 19.56,
+      "quat": [
+        0,
+        -0.104528463,
+        0,
+        0.994521895
+      ]
+    },
+    {
+      "id": "n36",
+      "x": 4.16,
+      "y": 12.67,
+      "z": -19.56,
+      "quat": [
+        0,
+        -0.104528463,
+        0,
+        0.994521895
+      ]
+    },
+    {
+      "id": "n38",
+      "x": 4.16,
+      "y": 132.67,
+      "z": -19.56,
+      "quat": [
+        0,
+        -0.104528463,
+        0,
+        0.994521895
+      ]
+    },
+    {
+      "id": "n40",
+      "x": 4.16,
+      "y": 52.67,
+      "z": -19.56,
+      "quat": [
+        0,
+        -0.104528463,
+        0,
+        0.994521895
+      ]
+    },
+    {
+      "id": "n42",
+      "x": -19.56,
+      "y": 32.67,
+      "z": -4.16,
+      "quat": [
+        0,
+        -0.104528463,
+        0,
+        0.994521895
+      ]
+    },
+    {
+      "id": "n43",
+      "x": 4.16,
+      "y": 32.67,
+      "z": -19.56,
+      "quat": [
+        0,
+        -0.104528463,
+        0,
+        0.994521895
+      ]
+    },
+    {
+      "id": "n61",
+      "x": 0,
+      "y": 132.67,
+      "z": 0,
+      "quat": [
+        0,
+        -0.104528463,
+        0,
+        0.994521895
+      ]
+    },
+    {
+      "id": "n66",
+      "x": 0,
+      "y": 152.67,
+      "z": 0,
+      "quat": [
+        0,
+        -0.104528463,
+        0,
+        0.994521895
+      ]
+    },
+    {
+      "id": "n68",
+      "x": 0,
+      "y": 147.67,
+      "z": 0,
+      "partQuat": [
+        0.703226432,
+        0.703226432,
+        0.073912076,
+        0.073912076
+      ],
+      "partMask": 63,
+      "quat": [
+        0,
+        -0.104528463,
+        0,
+        0.994521895
+      ],
+      "part": "windmill",
+      "clampOn": {
+        "tubeId": "t67",
+        "t": 15
+      },
+      "stub": [
+        0.978148,
+        0,
+        0.207912
+      ]
+    }
+  ],
+  "tubes": [
+    {
+      "id": "t3",
+      "a": "n1",
+      "b": "n2",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t5",
+      "a": "n1",
+      "b": "n4",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t7",
+      "a": "n1",
+      "b": "n6",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t9",
+      "a": "n1",
+      "b": "n8",
+      "tubeId": "T35",
+      "color": "green",
+      "length": 35
+    },
+    {
+      "id": "t13",
+      "a": "n10",
+      "b": "n12",
+      "tubeId": "T15",
+      "color": "yellow",
+      "length": 15
+    },
+    {
+      "id": "t16",
+      "a": "n14",
+      "b": "n15",
+      "tubeId": "TC15",
+      "color": "red",
+      "length": null,
+      "bow": true,
+      "bowCenter": [
+        0,
+        12.67,
+        0
+      ]
+    },
+    {
+      "id": "t19",
+      "a": "n17",
+      "b": "n18",
+      "tubeId": "TC15",
+      "color": "red",
+      "length": null,
+      "bow": true,
+      "bowCenter": [
+        0,
+        132.67,
+        0
+      ]
+    },
+    {
+      "id": "t21",
+      "a": "n14",
+      "b": "n20",
+      "tubeId": "T15",
+      "color": "red",
+      "length": 15
+    },
+    {
+      "id": "t23",
+      "a": "n20",
+      "b": "n22",
+      "tubeId": "T15",
+      "color": "red",
+      "length": 15
+    },
+    {
+      "id": "t24",
+      "a": "n22",
+      "b": "n17",
+      "tubeId": "T75",
+      "color": "red",
+      "length": 75.00000000000001
+    },
+    {
+      "id": "t26",
+      "a": "n15",
+      "b": "n25",
+      "tubeId": "TC15",
+      "color": "blue",
+      "length": null,
+      "bow": true,
+      "bowCenter": [
+        0,
+        12.67,
+        0
+      ]
+    },
+    {
+      "id": "t28",
+      "a": "n18",
+      "b": "n27",
+      "tubeId": "TC15",
+      "color": "blue",
+      "length": null,
+      "bow": true,
+      "bowCenter": [
+        0,
+        132.67,
+        0
+      ]
+    },
+    {
+      "id": "t31",
+      "a": "n29",
+      "b": "n30",
+      "tubeId": "TC15",
+      "color": "blue",
+      "length": null,
+      "bow": true,
+      "bowCenter": [
+        0,
+        52.67,
+        0
+      ]
+    },
+    {
+      "id": "t33",
+      "a": "n15",
+      "b": "n32",
+      "tubeId": "T15",
+      "color": "blue",
+      "length": 15
+    },
+    {
+      "id": "t34",
+      "a": "n32",
+      "b": "n29",
+      "tubeId": "T15",
+      "color": "blue",
+      "length": 15
+    },
+    {
+      "id": "t35",
+      "a": "n29",
+      "b": "n18",
+      "tubeId": "T75",
+      "color": "blue",
+      "length": 75.00000000000001
+    },
+    {
+      "id": "t37",
+      "a": "n25",
+      "b": "n36",
+      "tubeId": "TC15",
+      "color": "green",
+      "length": null,
+      "bow": true,
+      "bowCenter": [
+        0,
+        12.67,
+        0
+      ]
+    },
+    {
+      "id": "t39",
+      "a": "n27",
+      "b": "n38",
+      "tubeId": "TC15",
+      "color": "green",
+      "length": null,
+      "bow": true,
+      "bowCenter": [
+        0,
+        132.67,
+        0
+      ]
+    },
+    {
+      "id": "t41",
+      "a": "n30",
+      "b": "n40",
+      "tubeId": "TC15",
+      "color": "green",
+      "length": null,
+      "bow": true,
+      "bowCenter": [
+        0,
+        52.67,
+        0
+      ]
+    },
+    {
+      "id": "t44",
+      "a": "n42",
+      "b": "n43",
+      "tubeId": "TC15",
+      "color": "green",
+      "length": null,
+      "bow": true,
+      "bowCenter": [
+        0,
+        32.67,
+        0
+      ]
+    },
+    {
+      "id": "t45",
+      "a": "n25",
+      "b": "n42",
+      "tubeId": "T15",
+      "color": "green",
+      "length": 15
+    },
+    {
+      "id": "t46",
+      "a": "n42",
+      "b": "n30",
+      "tubeId": "T15",
+      "color": "green",
+      "length": 15
+    },
+    {
+      "id": "t47",
+      "a": "n30",
+      "b": "n27",
+      "tubeId": "T75",
+      "color": "green",
+      "length": 75.00000000000001
+    },
+    {
+      "id": "t48",
+      "a": "n36",
+      "b": "n14",
+      "tubeId": "TC15",
+      "color": "yellow",
+      "length": null,
+      "bow": true,
+      "bowCenter": [
+        0,
+        12.67,
+        0
+      ]
+    },
+    {
+      "id": "t49",
+      "a": "n38",
+      "b": "n17",
+      "tubeId": "TC15",
+      "color": "yellow",
+      "length": null,
+      "bow": true,
+      "bowCenter": [
+        0,
+        132.67,
+        0
+      ]
+    },
+    {
+      "id": "t50",
+      "a": "n40",
+      "b": "n22",
+      "tubeId": "TC15",
+      "color": "yellow",
+      "length": null,
+      "bow": true,
+      "bowCenter": [
+        0,
+        52.67,
+        0
+      ]
+    },
+    {
+      "id": "t51",
+      "a": "n43",
+      "b": "n20",
+      "tubeId": "TC15",
+      "color": "yellow",
+      "length": null,
+      "bow": true,
+      "bowCenter": [
+        0,
+        32.67,
+        0
+      ]
+    },
+    {
+      "id": "t52",
+      "a": "n36",
+      "b": "n43",
+      "tubeId": "T15",
+      "color": "yellow",
+      "length": 15
+    },
+    {
+      "id": "t53",
+      "a": "n43",
+      "b": "n40",
+      "tubeId": "T15",
+      "color": "yellow",
+      "length": 15
+    },
+    {
+      "id": "t54",
+      "a": "n40",
+      "b": "n38",
+      "tubeId": "T75",
+      "color": "yellow",
+      "length": 75.00000000000001
+    },
+    {
+      "id": "t55",
+      "a": "n10",
+      "b": "n14",
+      "tubeId": "T15",
+      "color": "red",
+      "length": 15
+    },
+    {
+      "id": "t56",
+      "a": "n10",
+      "b": "n25",
+      "tubeId": "T15",
+      "color": "green",
+      "length": 15
+    },
+    {
+      "id": "t57",
+      "a": "n10",
+      "b": "n15",
+      "tubeId": "T15",
+      "color": "blue",
+      "length": 15
+    },
+    {
+      "id": "t58",
+      "a": "n12",
+      "b": "n20",
+      "tubeId": "T15",
+      "color": "red",
+      "length": 15
+    },
+    {
+      "id": "t59",
+      "a": "n12",
+      "b": "n42",
+      "tubeId": "T15",
+      "color": "green",
+      "length": 15
+    },
+    {
+      "id": "t60",
+      "a": "n12",
+      "b": "n43",
+      "tubeId": "T15",
+      "color": "blue",
+      "length": 15
+    },
+    {
+      "id": "t62",
+      "a": "n61",
+      "b": "n17",
+      "tubeId": "T15",
+      "color": "yellow",
+      "length": 15
+    },
+    {
+      "id": "t63",
+      "a": "n61",
+      "b": "n18",
+      "tubeId": "T15",
+      "color": "yellow",
+      "length": 15
+    },
+    {
+      "id": "t64",
+      "a": "n61",
+      "b": "n27",
+      "tubeId": "T15",
+      "color": "yellow",
+      "length": 15
+    },
+    {
+      "id": "t65",
+      "a": "n61",
+      "b": "n38",
+      "tubeId": "T15",
+      "color": "yellow",
+      "length": 15
+    },
+    {
+      "id": "t67",
+      "a": "n61",
+      "b": "n66",
+      "tubeId": "T15",
+      "color": "blue",
+      "length": 15
+    }
+  ],
+  "panels": [],
+  "clamps": [],
+  "textiles": [],
+  "fittings": [
+    {
+      "id": "f11",
+      "kind": "carousel_bearing",
+      "x": 0,
+      "y": 12.67,
+      "z": 0,
+      "quat": [
+        0.2706,
+        -0.2706,
+        -0.6533,
+        0.6533
+      ],
+      "color": "#526b4c",
+      "params": {
+        "baseNode": "n1",
+        "rotorNode": "n10",
+        "tieCount": 4,
+        "angle": 12
+      },
+      "supportTubes": [
+        "t3",
+        "t5",
+        "t7",
+        "t9"
+      ]
+    },
+    {
+      "id": "f69",
+      "kind": "panel_sector_20",
+      "x": 0,
+      "y": 12.67,
+      "z": 0,
+      "quat": [
+        -0.444996716,
+        -0.549525179,
+        -0.549525179,
+        0.444996716
+      ],
+      "color": "blue",
+      "tube": "t55",
+      "appearanceVersion": 2,
+      "params": {
+        "id": "panel_sector_20",
+        "name": "小扇形板",
+        "mountType": "corner",
+        "feature": "sector",
+        "width": 20,
+        "height": 20,
+        "depth": 1.2,
+        "placement": "fitting",
+        "verifiedLoad": false,
+        "appearanceVersion": 2,
+        "kitContents": [
+          "component",
+          "retainers"
+        ],
+        "name_en": "Small quarter-circle panel",
+        "name_de": "Kleine Viertelkreisplatte",
+        "fixedColor": null,
+        "mount": "corner",
+        "designAssumption": true,
+        "assumption": "frame-grid-unmeasured",
+        "qdfSupported": false,
+        "qdfSimplified": false
+      },
+      "mounts": [
+        {
+          "tube": "t55",
+          "t": 0.2,
+          "role": "panel-screw",
+          "width": 2
+        },
+        {
+          "tube": "t55",
+          "t": 0.8,
+          "role": "panel-screw",
+          "width": 2
+        },
+        {
+          "tube": "t57",
+          "t": 0.2,
+          "role": "panel-screw",
+          "width": 2
+        },
+        {
+          "tube": "t57",
+          "t": 0.8,
+          "role": "panel-screw",
+          "width": 2
+        }
+      ],
+      "supportTubes": [
+        "t55",
+        "t57"
+      ],
+      "facing": -1,
+      "partId": "panel_sector_20",
+      "a": "t55",
+      "b": "t57"
+    },
+    {
+      "id": "f70",
+      "kind": "panel_sector_20",
+      "x": 0,
+      "y": 12.67,
+      "z": 0,
+      "quat": [
+        -0.073912076,
+        0.703226432,
+        0.703226432,
+        0.073912076
+      ],
+      "color": "green",
+      "tube": "t56",
+      "appearanceVersion": 2,
+      "params": {
+        "id": "panel_sector_20",
+        "name": "小扇形板",
+        "mountType": "corner",
+        "feature": "sector",
+        "width": 20,
+        "height": 20,
+        "depth": 1.2,
+        "placement": "fitting",
+        "verifiedLoad": false,
+        "appearanceVersion": 2,
+        "kitContents": [
+          "component",
+          "retainers"
+        ],
+        "name_en": "Small quarter-circle panel",
+        "name_de": "Kleine Viertelkreisplatte",
+        "fixedColor": null,
+        "mount": "corner",
+        "designAssumption": true,
+        "assumption": "frame-grid-unmeasured",
+        "qdfSupported": false,
+        "qdfSimplified": false
+      },
+      "mounts": [
+        {
+          "tube": "t56",
+          "t": 0.2,
+          "role": "panel-screw",
+          "width": 2
+        },
+        {
+          "tube": "t56",
+          "t": 0.8,
+          "role": "panel-screw",
+          "width": 2
+        },
+        {
+          "tube": "t57",
+          "t": 0.2,
+          "role": "panel-screw",
+          "width": 2
+        },
+        {
+          "tube": "t57",
+          "t": 0.8,
+          "role": "panel-screw",
+          "width": 2
+        }
+      ],
+      "supportTubes": [
+        "t56",
+        "t57"
+      ],
+      "facing": 1,
+      "partId": "panel_sector_20",
+      "a": "t56",
+      "b": "t57"
+    },
+    {
+      "id": "f71",
+      "kind": "panel_sector_20",
+      "x": 0,
+      "y": 32.67,
+      "z": 0,
+      "quat": [
+        -0.703226432,
+        -0.073912076,
+        -0.073912076,
+        0.703226432
+      ],
+      "color": "red",
+      "tube": "t58",
+      "appearanceVersion": 2,
+      "params": {
+        "id": "panel_sector_20",
+        "name": "小扇形板",
+        "mountType": "corner",
+        "feature": "sector",
+        "width": 20,
+        "height": 20,
+        "depth": 1.2,
+        "placement": "fitting",
+        "verifiedLoad": false,
+        "appearanceVersion": 2,
+        "kitContents": [
+          "component",
+          "retainers"
+        ],
+        "name_en": "Small quarter-circle panel",
+        "name_de": "Kleine Viertelkreisplatte",
+        "fixedColor": null,
+        "mount": "corner",
+        "designAssumption": true,
+        "assumption": "frame-grid-unmeasured",
+        "qdfSupported": false,
+        "qdfSimplified": false
+      },
+      "mounts": [
+        {
+          "tube": "t58",
+          "t": 0.2,
+          "role": "panel-screw",
+          "width": 2
+        },
+        {
+          "tube": "t58",
+          "t": 0.8,
+          "role": "panel-screw",
+          "width": 2
+        },
+        {
+          "tube": "t60",
+          "t": 0.2,
+          "role": "panel-screw",
+          "width": 2
+        },
+        {
+          "tube": "t60",
+          "t": 0.8,
+          "role": "panel-screw",
+          "width": 2
+        }
+      ],
+      "supportTubes": [
+        "t58",
+        "t60"
+      ],
+      "facing": 1,
+      "partId": "panel_sector_20",
+      "a": "t58",
+      "b": "t60"
+    },
+    {
+      "id": "f72",
+      "kind": "panel_sector_20",
+      "x": 0,
+      "y": 32.67,
+      "z": 0,
+      "quat": [
+        -0.549525179,
+        0.444996716,
+        0.444996716,
+        0.549525179
+      ],
+      "color": "yellow",
+      "tube": "t59",
+      "appearanceVersion": 2,
+      "params": {
+        "id": "panel_sector_20",
+        "name": "小扇形板",
+        "mountType": "corner",
+        "feature": "sector",
+        "width": 20,
+        "height": 20,
+        "depth": 1.2,
+        "placement": "fitting",
+        "verifiedLoad": false,
+        "appearanceVersion": 2,
+        "kitContents": [
+          "component",
+          "retainers"
+        ],
+        "name_en": "Small quarter-circle panel",
+        "name_de": "Kleine Viertelkreisplatte",
+        "fixedColor": null,
+        "mount": "corner",
+        "designAssumption": true,
+        "assumption": "frame-grid-unmeasured",
+        "qdfSupported": false,
+        "qdfSimplified": false
+      },
+      "mounts": [
+        {
+          "tube": "t59",
+          "t": 0.2,
+          "role": "panel-screw",
+          "width": 2
+        },
+        {
+          "tube": "t59",
+          "t": 0.8,
+          "role": "panel-screw",
+          "width": 2
+        },
+        {
+          "tube": "t60",
+          "t": 0.2,
+          "role": "panel-screw",
+          "width": 2
+        },
+        {
+          "tube": "t60",
+          "t": 0.8,
+          "role": "panel-screw",
+          "width": 2
+        }
+      ],
+      "supportTubes": [
+        "t59",
+        "t60"
+      ],
+      "facing": -1,
+      "partId": "panel_sector_20",
+      "a": "t59",
+      "b": "t60"
+    }
+  ],
+  "slides": [],
+  "groups": []
+}
