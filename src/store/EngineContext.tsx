@@ -561,7 +561,7 @@ function persistPersonal(tab: Tab) {
  */
 function makePlanTab(planId: string, name: string): Tab {
   const tabId = docs.newTabId()
-  return { tabId, docId: null, name, dirty: false, planId, view: {}, local: createTabDoc(tabId, null) }
+  return { tabId, docId: null, name, dirty: false, planId, readOnly:true, view: {}, local: createTabDoc(tabId, null) }
 }
 
 function tabParts(tab: Tab) {
@@ -929,6 +929,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const e = eng.current
     if (!e) return
     switching.current = true
+    e.scene.clearDisplayObject()
     e.builder.modelReplaced()
     e.builder.setHistory(tab.local.history)
     e.builder.setReadOnly(!!tab.readOnly || bootEntry().lockedView)
@@ -1726,15 +1727,17 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const setTabAccess = useCallback((tabId: string, o: { readOnly: boolean; idTag: string }) => {
     const tab = tabsRef.current.find(x => x.tabId === tabId)
     if (!tab) return
+    const wasReadOnly=tab.readOnly
     tab.readOnly = o.readOnly
     tab.idTag = o.idTag
     const e2 = eng.current
     if (!e2 || tabId !== activeRef.current) return
+    if(wasReadOnly&&!o.readOnly){applyTab(tab);syncTabs();return}
     e2.builder.setReadOnly(o.readOnly)
     e2.model.idTag = o.idTag
     e2.builder.refresh()
     bump()
-  }, [bump])
+  }, [bump,applyTab,syncTabs])
 
   /** 标签页的文档（共享方案要连上服务器） */
   const tabLocal = useCallback((tabId: string) => tabsRef.current.find(x => x.tabId === tabId)?.local || null, [])

@@ -45,6 +45,8 @@ export default function PlanOverlays() {
   const narrow = vw <= NARROW_MAX
   const items = useRef(new Map<string, { el: HTMLElement; pts: () => P3[]; box: boolean }>())
   const [fork, setFork] = useState(false)
+  const placement=useRef<{x:number;y:number;cancelled:boolean}|null>(null)
+  const pointers=useRef(new Set<number>())
   const s = collab.session
   const { engine } = api
 
@@ -95,12 +97,13 @@ export default function PlanOverlays() {
   const place = (ev: React.MouseEvent) => {
     ev.preventDefault()
     ev.stopPropagation()
+    if(!collab.canComment||placement.current?.cancelled)return
     const e = api.engine()
     if (!e || ev.button !== 0) return
     const hit = e.scene.pickPoint(ev.clientX, ev.clientY) as Anchor | null
     if (!hit) return
     collab.setActiveThread(null)
-    collab.setPinDraft({ partId: hit.partId, point: hit.point.map(v => Math.round(v * 10) / 10) as P3 })
+    collab.setPinDraft({ partId: hit.partId, point: hit.point.map(v => Math.round(v * 10) / 10) as P3,...(collab.plan?.viewOnly?{sceneRevision:collab.plan.sceneRevision}:{}) })
     collab.setPlacingPin(false)
   }
 
@@ -121,7 +124,10 @@ export default function PlanOverlays() {
     <>
       {collab.placingPin && (
         <>
-          <div className="fixed inset-0 z-[38] cursor-crosshair" style={{ top: projectBarHeight(vw), touchAction: 'none' }} data-ui="pin-placer" onClick={place} />
+          <div className="fixed inset-0 z-[38] cursor-crosshair" style={{ top: projectBarHeight(vw), touchAction: 'none' }} data-ui="pin-placer" onClick={place}
+            onPointerDown={event=>{pointers.current.add(event.pointerId);if(pointers.current.size===1)placement.current={x:event.clientX,y:event.clientY,cancelled:false};else if(placement.current)placement.current.cancelled=true}}
+            onPointerMove={event=>{if(placement.current&&Math.hypot(event.clientX-placement.current.x,event.clientY-placement.current.y)>7)placement.current.cancelled=true}}
+            onPointerUp={event=>pointers.current.delete(event.pointerId)} onPointerCancel={event=>{pointers.current.delete(event.pointerId);if(placement.current)placement.current.cancelled=true}} />
           <div className="qb-card cb-pin-placement" style={{ top: projectBarHeight(vw) + PANEL_GAP + TOOLBAR_CHROME_H + 8 }} data-ui="pin-placement-hint">
             <span>{t(narrow ? 'collab.pin.placeTouchHint' : 'collab.pin.placeHint')}</span>
             <button type="button" className="qb-btn qb-btn-ghost qb-btn-sm" data-ui="cancel-pin-placement" onClick={() => collab.setPlacingPin(false)}>{t('confirm.cancel')}</button>
@@ -176,7 +182,7 @@ export default function PlanOverlays() {
       {viewer && me && (
         <div className="cb-ro low qb-card" data-ui="read-only-banner" data-tour="read-only-banner"><MessageSquare />
           <span><b>{t(collab.role === 'guest' ? 'collab.readOnly.visitorTitle' : 'collab.readOnly.commenterTitle')}</b> · {t(collab.role === 'guest' ? 'collab.readOnly.visitor' : 'collab.readOnly.commenter')}</span>
-          {collab.role !== 'guest' && <button type="button" className="qb-btn qb-btn-ghost qb-btn-sm" onClick={() => setFork(true)} data-ui="plan-fork"><GitFork />{t('collab.forkOwn')}</button>}
+          {collab.role !== 'guest'&&!collab.plan?.viewOnly && <button type="button" className="qb-btn qb-btn-ghost qb-btn-sm" onClick={() => setFork(true)} data-ui="plan-fork"><GitFork />{t('collab.forkOwn')}</button>}
         </div>
       )}
       {fork && <ForkModal onClose={() => setFork(false)} />}
@@ -274,7 +280,7 @@ function useGoneNote(th: Thread, gone: boolean) {
   const [note, setNote] = useState<{ label: string; text: string } | null>(null)
   useEffect(() => {
     const pid = th.anchor?.partId
-    if (!gone || !pid) { setNote(null); return }
+    if (!gone || !pid || plan?.viewOnly) { setNote(null); return }
     let dead = false
     void (async () => {
       const own = versions.filter(v => v.kind !== 'reference').sort((a, b) => a.createdAt - b.createdAt)
@@ -311,7 +317,7 @@ function Bubble({ th, gone }: { th: Thread; gone: boolean }) {
   const pid = th.anchor?.partId
   const label = pid && e && !gone ? partLabel(e.builder, e.model, pid) : null
   const where = !pid ? t('collab.pin.space') : gone ? t('collab.pin.goneWhere', { part: note?.label || t('collab.pin.part') }) : (label || t('collab.pin.part'))
-  const member = collab.role !== 'guest'
+  const member = collab.canComment
   // 气泡里的新回复标「新」，看过就不标：打开就记已读
   const [seen] = useState(() => collab.isUnread)
   const { isUnread, markRead, report } = collab

@@ -3,6 +3,7 @@
 // 带上服务端给的说明，界面照原样提示。
 
 import type { ModelJSON } from './ymodel'
+import type { DisplayAsset } from '../store/modelCover'
 
 export type Role = 'owner' | 'editor' | 'commenter' | 'guest'
 export type InviteRole = 'editor' | 'commenter'
@@ -26,6 +27,10 @@ export interface Me {
 }
 
 export interface Plan {
+	canComment?: boolean
+	canView3D?: boolean
+	canEdit?: boolean
+	sceneRevision?: string
   viewOnly?: boolean
   locked?: boolean
   coverUrl?: string
@@ -74,6 +79,7 @@ export interface Review {
 }
 
 export interface Anchor {
+  sceneRevision?: string
   partId: string | null
   point: [number, number, number]
 }
@@ -95,6 +101,7 @@ export interface Post {
 }
 
 export interface Thread {
+  partGone?: boolean
   id: number
   kind: 'pin' | 'chat'
   anchor: Anchor | null
@@ -204,7 +211,8 @@ export const collabApi = {
   review: (id: string, body: { versionId: number; summary: string }) => call<Review>('POST', `/collab/plans/${enc(id)}/reviews`, body),
   respond: (id: string, rid: number, body: { decision: 'changes' | 'confirmed'; comment: string }) => call<Review>('POST', `/collab/plans/${enc(id)}/reviews/${rid}/respond`, body),
   threads: async (id: string, signal?: AbortSignal) => (await call<{ threads: Thread[] }>('GET', `/collab/plans/${enc(id)}/threads`, undefined, signal)).threads,
-  newThread: (id: string, body: { anchor: Anchor; versionId: number | null; body: string; photos: string[]; refs: Ref[] }) =>
+  previewScene: (id: string, revision: string) => call<DisplayAsset>('GET', `/collab/plans/${enc(id)}/preview-scene?revision=${enc(revision)}`),
+  newThread: (id: string, body: { anchor: Anchor; sceneRevision?: string; versionId: number | null; body: string; photos: string[]; refs: Ref[] }) =>
     call<{ id: number }>('POST', `/collab/plans/${enc(id)}/threads`, body),
   reply: (tid: number, body: { body: string; photos: string[]; refs: Ref[] }) =>
     call<{ id: number }>('POST', `/collab/threads/${tid}/posts`, body),

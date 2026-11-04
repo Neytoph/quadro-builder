@@ -54,7 +54,7 @@ export default function CommentsPane() {
 
       {tab === 'pins' && (
         <>
-          {collab.role !== 'guest' && <button type="button" className="qb-btn cb-add-pin" data-ui="add-pin" onClick={() => {
+          {collab.canComment && <button type="button" className="qb-btn cb-add-pin" data-ui="add-pin" onClick={() => {
             api.setMode('select')
             collab.setActiveThread(null)
             collab.setPinDraft(null)
@@ -154,7 +154,7 @@ function Chat({ chat, seen }: { chat: Thread | null; seen: (p: Post) => boolean 
         })}
         <div ref={end} />
       </div>
-      {chat && collab.role !== 'guest' && (
+      {chat && collab.canComment && (
         <Compose placeholder={t('collab.chat.placeholder')} sendLabel={t('collab.send')} withRefs
           send={(body, files, refs) => collab.reply(chat.id, body, files, refs)} />
       )}

@@ -18,6 +18,7 @@ import { docToJSON, type ModelJSON } from './ymodel'
 import { diffBom, diffModels, type BomDiffRow, type ModelDiff } from './compare'
 import { ScopedRequests } from './scopedRequests'
 import { slotLocked } from '../sync/slotAccess'
+import { attachModelDisplay } from '../store/modelCover'
 
 export type CollabMode = 'off' | 'plan' | 'delivery' | 'room' | 'snapshot'
 
@@ -61,6 +62,7 @@ interface CollabApi {
   plan: Plan | null
   role: Role
   canEdit: boolean
+  canComment: boolean
   canDeliver: boolean
   peers: Peer[]
   /** 成员的颜色：按加入顺序 */
@@ -226,7 +228,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
       loading.current.add(planId)
       collabApi.plan(planId).then((plan) => {
         if (!alive.current) return
-        if(plan.viewOnly){setTabAccess(tabId,{readOnly:true,idTag:''});if(EDITOR_EMBED)parent.postMessage({type:'xmf-model-editor:readonly',plan:planId,name:plan.name,coverUrl:plan.coverUrl},location.origin);else if(activePlanId===planId)location.replace('/model-preview.html?plan='+encodeURIComponent(planId));return}
+        if(plan.viewOnly&&!(plan.canView3D&&plan.canComment)){setTabAccess(tabId,{readOnly:true,idTag:''});if(EDITOR_EMBED)parent.postMessage({type:'xmf-model-editor:readonly',plan:planId,name:plan.name,coverUrl:plan.coverUrl},location.origin);else if(activePlanId===planId)location.replace('/model-preview.html?plan='+encodeURIComponent(planId));return}
         const local = tabLocal(tabId)
         if (!local) return
         const s = new PlanSession(plan, local)
@@ -238,6 +240,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
         setReadAt(r => ({ ...r, [planId]: plan.me?.lastReadAt || 0 }))
         s.subscribe(bump)
         setTabAccess(tabId, { readOnly: !s.canEdit, idTag: s.idTag })
+        if(plan.viewOnly)void s.refresh().catch(report)
         bump()
       }).catch((err) => {
         setErrors(e => ({ ...e, [planId]: errText(err) }))
@@ -249,12 +252,40 @@ export function CollabProvider({ children }: { children: ReactNode }) {
 
   // 角色变了（重连后取到新的方案信息）：能不能编辑跟着变
   const canEdit = !!session && !session.plan.viewOnly && canEditRole(session.plan.myRole)
+  const canComment=!!session&&!session.plan.locked&&(session.plan.canComment??(!session.plan.viewOnly&&session.plan.myRole!=='guest'))
   useEffect(() => {
     if (!session || !activeTab) return
     setTabAccess(activeTab.tabId, { readOnly: !canEdit, idTag: session.idTag })
     // 只跟角色走
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, canEdit, activeTab?.tabId, setTabAccess])
+
+  const displayedTabs=useRef(new Set<string>())
+  useEffect(()=>{
+    if(!session?.displayAsset||!activeTab)return
+    const current=engine();if(!current)return
+    const controller=new AbortController(),tabId=activeTab.tabId,asset=session.displayAsset
+    current.builder.modelReplaced()
+    current.builder.setReadOnly(true)
+    if(!current.model.loadJSON({format:2,nodes:[],tubes:[]}).ok)throw new Error(t('collab.badModel'))
+    current.builder.refresh()
+    let dispose:(()=>void)|undefined
+    void attachModelDisplay(current.scene,asset,!displayedTabs.current.has(tabId),controller.signal).then(release=>{
+      if(controller.signal.aborted){release();return}
+      dispose=release;displayedTabs.current.add(tabId)
+    }).catch(error=>{if(!controller.signal.aborted)setErrors(old=>({...old,[session.id]:errText(error)}))})
+    return()=>{controller.abort();dispose?.()}
+  },[session?.displayAsset,activeTab?.tabId,engine,t])
+
+  useEffect(()=>{
+    if(session&&!canComment){setPlacingPin(false);setPinDraft(null);setActiveThread(null)}
+  },[session,canComment])
+
+  useEffect(()=>{
+    if(pinDraft?.sceneRevision&&session?.displayRevision&&pinDraft.sceneRevision!==session.displayRevision){
+      setPlacingPin(true);notify(t('collab.pin.modelChanged'),'warn')
+    }
+  },[pinDraft?.sceneRevision,session?.displayRevision,notify,t])
 
   // 标签页的名字跟着方案的名字：自己改的、别人改的、服务端取来的
   useEffect(() => {
@@ -343,7 +374,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
         }
         if (!entry.plan) return
         const plan = await collabApi.plan(entry.plan)
-        if(plan.viewOnly){if(EDITOR_EMBED)parent.postMessage({type:'xmf-model-editor:readonly',plan:plan.id,name:plan.name,coverUrl:plan.coverUrl},location.origin);else location.replace('/model-preview.html?plan='+encodeURIComponent(plan.id));return}
+        if(plan.viewOnly&&!(plan.canView3D&&plan.canComment)){if(EDITOR_EMBED)parent.postMessage({type:'xmf-model-editor:readonly',plan:plan.id,name:plan.name,coverUrl:plan.coverUrl},location.origin);else location.replace('/model-preview.html?plan='+encodeURIComponent(plan.id));return}
         api.openPlanTab(plan.id, plan.name)
       } catch (err) {
         setJoining(false)
@@ -395,6 +426,19 @@ export function CollabProvider({ children }: { children: ReactNode }) {
     if (!activePlanId) return
     Promise.all([refreshThreads(), refreshVersions()]).catch(report)
   }, [activePlanId, refreshThreads, refreshVersions, report])
+
+  useEffect(()=>{
+    if(!session)return
+    const check=()=>{if(!document.hidden)void refreshThreads().catch(report)}
+    const foreground=()=>{
+      if(document.hidden)return
+      check()
+      if(session.plan.viewOnly)void session.refresh().catch(report)
+    }
+    const timer=window.setInterval(check,5000)
+    document.addEventListener('visibilitychange',foreground)
+    return()=>{clearInterval(timer);document.removeEventListener('visibilitychange',foreground)}
+  },[session,refreshThreads,report])
 
   /** 告诉在线的其他人评论、版本有变化，让他们重新取一遍 */
   const nudge = useCallback(() => {
@@ -534,18 +578,20 @@ export function CollabProvider({ children }: { children: ReactNode }) {
   }, [versions])
 
   const addPin = useCallback(async (anchor: Anchor, body: string, files: File[]) => {
-    if (!session) return
+    if (!session||!canComment) throw new Error(t('collab.readOnly.commenter'))
     const generation = planGeneration.current
     const photos = await upload(files)
     if (generation !== planGeneration.current || generation.id !== session.id) throw new Error('active plan changed')
-    const { id } = await collabApi.newThread(session.id, { anchor, versionId: currentVersionId, body, photos, refs: [] })
+    let id:number
+    try{({id}=await collabApi.newThread(session.id, { anchor, sceneRevision:anchor.sceneRevision, versionId: currentVersionId, body, photos, refs: [] }))}
+    catch(error){if(anchor.sceneRevision&&error instanceof ApiError&&error.code==='slot_conflict'){await session.refresh();setPlacingPin(true)}throw error}
     if (generation !== planGeneration.current) return
     setPinDraft(null)
     await refreshThreads()
     if (generation !== planGeneration.current) return
     setActiveThread(id)
     nudge()
-  }, [session, upload, currentVersionId, refreshThreads, nudge])
+  }, [session,canComment,t, upload, currentVersionId, refreshThreads, nudge])
 
   const reply = useCallback(async (tid: number, body: string, files: File[], refs: Ref[]) => {
     const generation = planGeneration.current
@@ -566,6 +612,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
   }, [activePlanId, threads, refreshThreads, nudge])
 
   const partGone = useCallback((th: Thread) => {
+    if(session?.plan.viewOnly)return !!th.partGone
     const pid = th.anchor?.partId
     if (!pid) return false
     const m = engine()?.model
@@ -574,7 +621,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
       || m.textiles.has(pid) || m.fittings.has(pid) || m.slides.has(pid))
     // tick：零件增删以后重新算
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [engine, tick])
+  }, [engine, tick,session?.plan.viewOnly])
 
   const pinOrder = useMemo(() => {
     const ids = threads.filter(th => th.kind === 'pin').map(th => th.id).sort((a, b) => a - b)
@@ -728,11 +775,11 @@ export function CollabProvider({ children }: { children: ReactNode }) {
 
   const value: CollabApi = {
     enabled, mode,
-    error: activePlanId ? errors[activePlanId] || null : entry.plan && !activePlanId ? errors[entry.plan] || null : null,
+    error: activePlanId ? errors[activePlanId] || session?.error || null : entry.plan && !activePlanId ? errors[entry.plan] || null : null,
     rev, session,
-    plan: session?.plan || null,
+    plan: session?.plan.viewOnly?{...session.plan,sceneRevision:session.displayRevision||session.plan.sceneRevision}:session?.plan || null,
     role: session?.plan.myRole || 'guest',
-    canEdit,
+    canEdit,canComment,
     canDeliver: !!session?.canDeliver,
     peers, colorOf,
     threads, versions, isUnread, unread, markRead, refreshThreads, refreshVersions,

@@ -34,7 +34,8 @@ export default function RightDock() {
   const api = useEngine()
   const collab = useCollab()
   // 评论和版本只属于共享方案：切到自己的标签页就不显示
-  const live = (open === 'comments' || open === 'versions') && collab.mode !== 'plan' ? null : open
+  const restricted=collab.plan?.viewOnly&&open!=='comments'
+  const live = restricted||(open === 'comments' || open === 'versions') && collab.mode !== 'plan' ? null : open
   const { t } = useI18n()
   const { right, left, vw, vh, toolbarW } = usePanelLayout()
   const [pane, leaving] = usePresence(live)

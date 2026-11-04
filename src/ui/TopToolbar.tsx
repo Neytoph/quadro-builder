@@ -23,7 +23,7 @@ export default function TopToolbar() {
   const api = useEngine()
   const collab = useCollab()
   const { pane, setPane } = useDock()
-  const commenting = collab.mode === 'plan' && collab.role !== 'guest'
+  const commenting = collab.mode === 'plan' && collab.canComment
   const locked = collab.mode === 'plan' && !collab.canEdit
   const { t, lang } = useI18n()
   const { vw, left, setToolbarW } = usePanelLayout()

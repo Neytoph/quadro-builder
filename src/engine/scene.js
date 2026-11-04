@@ -717,6 +717,7 @@ export class SceneManager {
 
   /** 停止渲染循环并释放不再使用的场景。 */
   dispose() {
+    this.clearDisplayObject();
     if (this._disposed) return;
     cancelAnimationFrame(this._animationFrame);
     this.selectionTransformGizmo?.dispose();
@@ -874,7 +875,12 @@ export class SceneManager {
     this._needsRender = true;
     const heim = new THREE.Vector3(...this._defaultCam.target);
     const pad = geometry().connectorSize / 2;
-    const b = opts.bounds || (model && model.bounds ? model.bounds(pad) : null);
+      let b = opts.bounds;
+      if (!b && this._displayObject) {
+        const box = new THREE.Box3().setFromObject(this._displayObject);
+        if (!box.isEmpty()) b = { min: box.min.toArray(), max: box.max.toArray(), size: box.getSize(new THREE.Vector3()).toArray() };
+      }
+      if (!b && model && model.bounds) b = model.bounds(pad);
     const leer = !b || (!b.size[0] && !b.size[1] && !b.size[2]);
     let target, dist;
     if (leer) {
@@ -6208,6 +6214,28 @@ export class SceneManager {
     return data ? { object: hit.object, data, point: hit.point, distance: hit.distance, instanceId: hit.instanceId } : null;
   }
 
+  setDisplayObject(object, dispose) {
+    this.clearDisplayObject();
+    this._displayObject = object;
+    this._displayDispose = dispose;
+    this.buildGroup.visible = false;
+    this.scene.add(object);
+    this._shadowsDirty();
+    this.requestRender();
+  }
+
+  clearDisplayObject(expected) {
+    if (!this._displayObject || expected && this._displayObject !== expected) return;
+    const object = this._displayObject, dispose = this._displayDispose;
+    this._displayObject = null;
+    this._displayDispose = null;
+    this.scene.remove(object);
+    dispose();
+    this.buildGroup.visible = true;
+    this._shadowsDirty();
+    this.requestRender();
+  }
+
   pickBuild(clientX, clientY) {
     const hit = this.raycastObjects(
       clientX, clientY,
@@ -6223,6 +6251,15 @@ export class SceneManager {
    * 返回 { partId, point:[x,y,z] }，地面也没点到（朝天上点）是 null。
    */
   pickPoint(clientX, clientY) {
+    if (this._displayObject) {
+      this.scene.updateMatrixWorld(true);
+      this._setMouse(clientX, clientY);
+      const hit = this._raycaster.intersectObject(this._displayObject, true).find(hit => {
+        for (let object = hit.object; object; object = object.parent) if (!object.visible) return false;
+        return true;
+      });
+      if (hit) return { partId: null, point: hit.point.toArray() };
+    }
     const hit = this.pickForDelete(clientX, clientY);
     if (hit && hit.data && hit.data.id != null) {
       return { partId: String(hit.data.id), point: [hit.point.x, hit.point.y, hit.point.z] };

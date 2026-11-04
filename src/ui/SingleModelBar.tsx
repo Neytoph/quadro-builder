@@ -26,7 +26,8 @@ export default function SingleModelBar() {
   useEffect(()=>{if(menu)content.current?.querySelector<HTMLButtonElement>('button')?.focus()},[menu])
   const active = api.tabs.find(tab => tab.tabId === api.activeTabId)
   const plan = collab.mode === 'plan', bound = !!(active?.docId || active?.libraryId || active?.planId)
-  const items = DOCK_PILLS.filter(item => ['file','bom','inventory','safety'].includes(item.id) || item.id === 'library' && !bound && !EDITOR_EMBED)
+  const items = DOCK_PILLS.filter(item => !collab.plan?.viewOnly&&(['file','bom','inventory','safety'].includes(item.id) || item.id === 'library' && !bound && !EDITOR_EMBED))
+  const navigation=[...items,...(plan?PLAN_PILLS.filter(item=>!collab.plan?.viewOnly||item.id==='comments'):[])]
   const rename = async () => {
     if (!active || api.readOnly) return
     const name = await api.askName(t('single.name'), t('chrome.save'), active.name)
@@ -38,13 +39,13 @@ export default function SingleModelBar() {
     {!EDITOR_EMBED && <><a href="/" className="qb-project-home shrink-0" aria-label={t('nav.home')}><img src={`${import.meta.env.BASE_URL}favicon.svg`} width={32} height={32} alt=""/></a><MyModelsLink toolbar/></>}
     <div className="qb-single-title" data-tour="current-design"><button type="button" title={t('single.name')} disabled={!api.entryReady || api.readOnly} onClick={() => void rename()}>{active?.name || t('tab.untitled')}</button><small role="status" data-ui="single-save-state">{plan ? t('single.collab') : t(String(storage.getAccountScope()) === 'anonymous' ? 'single.guest' : `sync.${displaySaveState(active || {}, active?.dirty || false)}`)}</small></div>
     {!plan && <button type="button" className="qb-single-save xmf-button" data-button-motion="off" disabled={!api.ready || !api.entryReady || api.readOnly || api.saving || saving} aria-busy={api.saving || saving} onClick={() => {setSaving(true);void api.saveCurrent().finally(()=>setSaving(false))}} aria-label={t('chrome.save')}><Save size={18} aria-hidden="true"/><span>{t('chrome.save')}</span></button>}
-    <nav className="qb-single-nav" aria-label={t('chrome.navigation')}>{[...items,...(plan?PLAN_PILLS:[])].map(item => <button key={item.id} type="button" data-pane={item.id} aria-expanded={pane === item.id} aria-label={t(item.labelKey)} title={t(item.labelKey)} className="qb-nav-button" onClick={() => toggle(item.id)}><DockIcon pane={item.id}/><span>{t(item.labelKey)}</span></button>)}</nav>
+    <nav className="qb-single-nav" aria-label={t('chrome.navigation')}>{navigation.map(item => <button key={item.id} type="button" data-pane={item.id} aria-expanded={pane === item.id} aria-label={t(item.labelKey)} title={t(item.labelKey)} className="qb-nav-button" onClick={() => toggle(item.id)}><DockIcon pane={item.id}/><span>{t(item.labelKey)}</span></button>)}</nav>
     <button ref={anchor} className="qb-single-menu-trigger qb-nav-button" type="button" aria-label={t('chrome.resources')} aria-expanded={menu} onClick={()=>setMenu(!menu)}><Menu size={20}/></button>
     {shown && <Pop anchor={anchor.current} leaving={leaving} onClose={closeMenu} width={280} align="right"><div ref={content} role="menu" data-ui="mobile-topbar-dialog" className="qb-single-menu" onKeyDown={event=>{
       const controls=Array.from(content.current!.querySelectorAll<HTMLButtonElement>('button')),index=controls.indexOf(event.target as HTMLButtonElement)
       if(['ArrowDown','ArrowUp','Home','End'].includes(event.key)){event.preventDefault();let target=0;if(event.key==='End')target=controls.length-1;else if(event.key!=='Home')target=(index+(event.key==='ArrowUp'?-1:1)+controls.length)%controls.length;controls[target].focus()}
       if(event.key==='Escape'){event.stopPropagation();closeMenu();anchor.current?.focus()}
-    }}>{[...items,...(plan?PLAN_PILLS:[])].map(item=><button type="button" key={item.id} role="menuitem" onClick={()=>{closeMenu();toggle(item.id)}}><DockIcon pane={item.id}/><span>{t(item.labelKey)}</span></button>)}</div></Pop>}
+    }}>{navigation.map(item=><button type="button" key={item.id} role="menuitem" onClick={()=>{closeMenu();toggle(item.id)}}><DockIcon pane={item.id}/><span>{t(item.labelKey)}</span></button>)}</div></Pop>}
     {!EDITOR_EMBED && <div data-site-slot="help" hidden className="qb-host-help"/>}
   </div>
 }

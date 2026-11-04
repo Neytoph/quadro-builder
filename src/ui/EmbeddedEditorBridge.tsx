@@ -35,8 +35,10 @@ export default function EmbeddedEditorBridge(){
      if(collab.mode==='plan'){
       const session=collab.session
       if(!session||!session.synced)throw new Error(live.current.t('sync.failed'))
-      const changed=!session.plan.data||modelContent(session.toJSON())!==modelContent(session.plan.data)||session.name!==session.plan.name
-      if(changed&&collab.canEdit)await session.exportNow()
+      if(collab.canEdit){
+       const changed=!session.plan.data||modelContent(session.toJSON())!==modelContent(session.plan.data)||session.name!==session.plan.name
+       if(changed)await session.exportNow()
+      }
       await api.checkpointEditor();send('close');return
      }
      const state=api.editorState();await api.checkpointEditor();send(state.dirty?'unsaved':'close',{...state});return

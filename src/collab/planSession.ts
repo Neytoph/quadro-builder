@@ -10,7 +10,8 @@
 import * as Y from 'yjs'
 import { WebsocketProvider } from 'y-websocket'
 import { BuildModel, buildQDF, partsOfData } from '../engine-api'
-import { collabApi, wsServerUrl, type ExportBody, type Parts, type Plan } from './api'
+import { ApiError, collabApi, wsServerUrl, type ExportBody, type Parts, type Plan } from './api'
+import type { DisplayAsset } from '../store/modelCover'
 import { SEED_ORIGIN, type LocalDoc } from './localDocs'
 import { docIsEmpty, docToJSON, flatten, metaMap, NAME_ORIGIN, planName, sameJson, setPlanName, writeJSON, type EditSummary, type ModelJSON } from './ymodel'
 
@@ -96,6 +97,11 @@ export class PlanSession {
   conn: ConnState = 'connecting'
   /** 连上过服务器、拿到过服务器那一份 */
   synced = false
+  displayAsset: DisplayAsset | null = null
+  displayRevision = ''
+  error: string | null = null
+  private destroyed = false
+  private refreshing: Promise<void> | null = null
   private exportTimer: number | null = null
   private listeners = new Set<() => void>()
   private editSeq = 0
@@ -116,12 +122,23 @@ export class PlanSession {
     this.plan = plan
     this.id = plan.id
     this.local = local
-    this.permissionTimer=window.setInterval(()=>void this.refresh().catch(()=>{this.plan={...this.plan,myRole:'guest',viewOnly:true};this.provider.disconnect();this.emit()}),5000)
+    this.permissionTimer=window.setInterval(()=>{
+      if(this.plan.viewOnly&&document.hidden)return
+      void this.refresh().catch(error=>{
+        if(this.destroyed)return
+        if(!this.plan.viewOnly||error instanceof ApiError&&[401,403].includes(error.status)){
+          this.plan={...this.plan,myRole:'guest',viewOnly:true,canComment:false,canView3D:false}
+          this.displayAsset=null
+        }
+        this.conn='offline';this.provider.disconnect();this.emit()
+      })
+    },5000)
     this.idTag = `c${local.doc.clientID.toString(36)}_`
     this.provider = new WebsocketProvider(wsServerUrl(), 'ws', local.doc, {
       params: { plan: plan.id },
       // 所有方案的房间名都是 ws，同一个浏览器里的广播频道会串，只走服务器
       disableBc: true,
+      connect: !plan.viewOnly && canEditRole(plan.myRole),
     })
     this.provider.on('status', ({ status }: { status: string }) => {
       const before = this.conn
@@ -218,6 +235,7 @@ export class PlanSession {
 
   /** 方案的名字：文档里改过名就用文档里的，没改过用服务端的。 */
   get name(): string {
+    if(this.plan.viewOnly)return this.plan.name
     return planName(this.local.doc, this.id) ?? this.plan.name
   }
 
@@ -271,16 +289,42 @@ export class PlanSession {
   }
 
   /** 方案和自己的角色再取一遍（重连以后、角色调整以后）。 */
-  async refresh() {
+  refresh(): Promise<void> {
+    if(this.refreshing)return this.refreshing
+    this.refreshing=this.refreshPlan().finally(()=>{this.refreshing=null})
+    return this.refreshing
+  }
+
+  private async refreshPlan() {
     const wasLocked=!!this.plan.viewOnly
-    this.plan = await collabApi.plan(this.id)
-    if(this.plan.viewOnly||!canEditRole(this.plan.myRole))this.provider.disconnect()
-    else if(wasLocked)this.provider.connect()
-    this.setUser()
-    this.emit()
+    try{
+      const plan=await collabApi.plan(this.id)
+      if(this.destroyed)return
+      this.plan=plan
+      if(plan.viewOnly||!canEditRole(plan.myRole))this.provider.disconnect()
+      if(plan.viewOnly&&plan.canView3D&&plan.sceneRevision){
+        if(!this.displayAsset||this.displayRevision!==plan.sceneRevision){
+          const asset=await collabApi.previewScene(this.id,plan.sceneRevision)
+          if(this.destroyed)return
+          this.displayAsset=asset
+          this.displayRevision=plan.sceneRevision
+        }
+        this.conn='connected';this.synced=true
+      }else{
+        this.displayAsset=null
+        this.displayRevision=''
+        if(wasLocked&&!plan.viewOnly){this.synced=false;this.provider.connect()}
+        if(plan.viewOnly){this.conn='offline';this.synced=false}
+      }
+      this.error=null;this.setUser();this.emit()
+    }catch(error){
+      if(!this.destroyed){this.error=error instanceof Error?error.message:String(error);this.emit()}
+      throw error
+    }
   }
 
   toJSON(): ModelJSON {
+    if(this.plan.viewOnly)throw new Error(`plan ${this.id}: original model is not available`)
     return docToJSON(this.local.doc)
   }
 
@@ -325,6 +369,7 @@ export class PlanSession {
 
   /** 断开（标签页关了）。文档归标签页管，这里不动。 */
   destroy() {
+    this.destroyed=true
     if(this.permissionTimer)window.clearInterval(this.permissionTimer)
     window.removeEventListener('offline', this.onOffline)
     window.removeEventListener('online', this.onOnline)

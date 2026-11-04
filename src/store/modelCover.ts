@@ -1,7 +1,7 @@
 import { BuildModel, SceneManager, loadCatalog } from '../engine-api'
 import { waitSceneReady } from '../engine/thumbShot.js'
 import { applyFrameHex, loadTune } from '../engine/colorTune.js'
-import { Color, MeshBasicMaterial, ObjectLoader, MOUSE, TOUCH, Raycaster, Vector2, Vector3, type Mesh, type Object3D, type Object3DJSON, type MeshStandardMaterial } from 'three'
+import { Color, MeshBasicMaterial, ObjectLoader, MOUSE, TOUCH, Raycaster, Vector2, Vector3, Box3, type BufferGeometry, type InstancedMesh, type Material, type Texture, type Mesh, type Object3D, type Object3DJSON, type MeshStandardMaterial } from 'three'
 import { componentEnvironment } from '../engine/confirmedComponentMeshes.js'
 import { displayObject, usesDisplayEnvironment } from './displayAsset'
 
@@ -123,7 +123,47 @@ export function renderModelCover(data: unknown, display = false): Promise<string
 }
 
 /** 分享的只读几何复用 Builder 场景和相机，不创建编辑模型或账号存档。 */
-type DisplayAsset = { format: string; object: Object3DJSON; home: unknown; background: string; camera: Parameters<InstanceType<typeof SceneManager>['setCameraPose']>[0] }
+export type DisplayAsset = { format: string; object: Object3DJSON; home: unknown; background: string; camera: Parameters<InstanceType<typeof SceneManager>['setCameraPose']>[0] }
+
+/** 显示几何附加到既有场景；不生成可编辑造型或同步文档。 */
+export async function attachModelDisplay(scene: InstanceType<typeof SceneManager>, asset: DisplayAsset, frame: boolean, signal?: AbortSignal) {
+  if(asset.format!=='builder-display/1')throw new Error('Invalid 3D preview')
+  const object=await new ObjectLoader().parseAsync(asset.object)
+  const release=()=>{
+    const geometries=new Set<BufferGeometry>(),materials=new Set<Material>(),textures=new Set<Texture>()
+    object.traverse(child=>{
+      const mesh=child as Mesh
+      if((mesh as InstancedMesh).isInstancedMesh)(mesh as InstancedMesh).dispose()
+      if(mesh.geometry)geometries.add(mesh.geometry)
+      for(const material of Array.isArray(mesh.material)?mesh.material:mesh.material?[mesh.material]:[]){
+        materials.add(material)
+        for(const [key,value]of Object.entries(material))if(key!=='envMap'&&(value as Texture)?.isTexture)textures.add(value as Texture)
+      }
+    })
+    for(const geometry of geometries)geometry.dispose()
+    for(const material of materials)material.dispose()
+    for(const texture of textures)texture.dispose()
+  }
+  if(signal?.aborted){release();signal.throwIfAborted()}
+  const pose=scene.getCameraPose()
+  object.traverse(child=>{
+    const mesh=child as Mesh
+    for(const material of Array.isArray(mesh.material)?mesh.material:mesh.material?[mesh.material]:[]){
+      const surface=material as MeshStandardMaterial
+      if(usesDisplayEnvironment(surface)){surface.envMap=componentEnvironment(scene);surface.needsUpdate=true}
+    }
+  })
+  scene.setDisplayObject(object,release)
+  scene.setHomeContext(asset.home)
+  scene.setBackground(asset.background)
+  scene.setCameraPose(frame?asset.camera:pose)
+  if(frame){
+    const bounds=new Box3().setFromObject(object)
+    if(!bounds.isEmpty())scene._frameAlong(null,scene.camera.position.clone().sub(scene.controls.target).normalize(),{bounds:{min:bounds.min.toArray(),max:bounds.max.toArray(),size:bounds.getSize(new Vector3()).toArray()},margin:1.2})
+  }
+  scene.requestRender()
+  return ()=>scene.clearDisplayObject(object)
+}
 
 export async function mountModelDisplay(host: HTMLElement, input: string | DisplayAsset) {
   const asset = typeof input === 'string' ? await (async () => {
