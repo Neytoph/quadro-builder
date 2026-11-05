@@ -5,7 +5,7 @@ const siteNames = ['builder.wechat.open', 'builder.wechat.download', 'builder.we
 const sources = ['home', 'chat', 'builder-help', 'builder-save', 'builder-manual']
 
 // 隔离统计出口，不发送真实请求；业务成功位置由 EngineContext 的调用方确认。
-const fetchSpy = vi.fn(async () => new Response(null, { status: 204 }))
+const fetchSpy = vi.fn(async () => new Response(null, { status: 204, headers: { 'X-QH-Analytics-Time': String(performance.timeOrigin + performance.now()) } }))
 const spyWindow = () => vi.spyOn(window, 'addEventListener')
 const spyDocument = () => vi.spyOn(document, 'addEventListener')
 let windowListeners: ReturnType<typeof spyWindow>
@@ -17,6 +17,7 @@ beforeEach(() => {
   vi.stubEnv('VITE_ANALYTICS_URL', '')
   vi.stubGlobal('fetch', fetchSpy)
   fetchSpy.mockClear()
+  vi.spyOn(document, 'hasFocus').mockReturnValue(true)
   windowListeners = vi.spyOn(window, 'addEventListener')
   documentListeners = vi.spyOn(document, 'addEventListener')
 })
@@ -61,7 +62,7 @@ describe('托管页面行动和统计桥接', () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
-  it('独立Builder第十五秒发送有效时长，程序事件不算活跃，重复初始化不加计时器', async () => {
+  it('独立Builder校时后按精确区间计时，程序事件不算活跃，重复初始化不加计时器', async () => {
     vi.stubEnv('VITE_ANALYTICS_URL', '/events')
     vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
     const { startAnalytics } = await import('./track')
@@ -69,10 +70,10 @@ describe('托管页面行动和统计桥接', () => {
     startAnalytics()
     window.dispatchEvent(new Event('pointermove'))
     await vi.advanceTimersByTimeAsync(15000)
-    expect(fetchSpy).toHaveBeenCalledOnce()
-    const [, init] = fetchSpy.mock.calls[0] as unknown as [string, RequestInit]
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+    const [, init] = fetchSpy.mock.calls[1] as unknown as [string, RequestInit]
     expect(JSON.parse(String(init.body)).events).toEqual([
-      { name: 'builder.app.time', props: { visible: 15, active: 0, visit: expect.any(String), analytics_v: 2, elapsed: expect.any(Number) } },
+      { id: expect.any(String), name: 'builder.app.time', props: { time_v: 2, from_ms: expect.any(Number), until_ms: expect.any(Number), active_ms: 0, visible: 15, active: 0, visit: expect.any(String), analytics_v: 2, elapsed: expect.any(Number) } },
     ])
     expect(vi.getTimerCount()).toBe(1)
   })
@@ -106,7 +107,7 @@ describe('托管页面行动和统计桥接', () => {
     const [url, init] = fetchSpy.mock.calls[0] as unknown as [string, RequestInit]
     expect(url).toBe('/events')
     expect(JSON.parse(String(init.body)).events).toEqual([
-      { name: 'builder.design.save', props: { named: true, visit: expect.any(String), analytics_v: 2, elapsed: expect.any(Number) } },
+      { id: expect.any(String), name: 'builder.design.save', props: { named: true, visit: expect.any(String), analytics_v: 2, elapsed: expect.any(Number) } },
     ])
   })
 
@@ -120,7 +121,7 @@ describe('托管页面行动和统计桥接', () => {
     for (const name of siteNames) {
       for (const source of sources) {
         send({ name, props: { source, text: '用户输入', docId: '私人文档' }, user: '私人标识' })
-        expected.push({ name, props: { source, visit: expect.any(String), analytics_v: 2, elapsed: expect.any(Number) } })
+        expected.push({ id: expect.any(String), name, props: { source, visit: expect.any(String), analytics_v: 2, elapsed: expect.any(Number) } })
       }
     }
     window.dispatchEvent(new Event('quadro-builder:track'))
@@ -134,8 +135,8 @@ describe('托管页面行动和统计桥接', () => {
       { name: 'builder.wechat.open', props: { source: 'HOME' } },
     ]) send(detail)
     await vi.advanceTimersByTimeAsync(4000)
-    expect(fetchSpy).toHaveBeenCalledOnce()
-    const [url, init] = fetchSpy.mock.calls[0] as unknown as [string, RequestInit]
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+    const [url, init] = fetchSpy.mock.calls[1] as unknown as [string, RequestInit]
     expect(url).toBe('/events')
     expect(JSON.parse(String(init.body)).events).toEqual(expected)
     expect(actions).not.toHaveBeenCalled()
@@ -148,8 +149,8 @@ describe('托管页面行动和统计桥接', () => {
     startAnalytics()
     send({ name: 'builder.wechat.open', props: { source: 'builder-help' } })
     await vi.advanceTimersByTimeAsync(4000)
-    expect(fetchSpy).toHaveBeenCalledOnce()
-    const [, init] = fetchSpy.mock.calls[0] as unknown as [string, RequestInit]
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+    const [, init] = fetchSpy.mock.calls[1] as unknown as [string, RequestInit]
     expect(JSON.parse(String(init.body)).events).toHaveLength(1)
   })
 })

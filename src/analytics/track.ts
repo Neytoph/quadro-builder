@@ -43,13 +43,14 @@ const MAX_BATCH = 20
 const TIME_TICK_MS = 5000
 const TIME_REPORT_MS = 15000
 const ACTIVE_WINDOW_MS = 30000
+const IDLE_WINDOW_MS = 120000
 // 托管页面可订阅成功动作、提交有限的入口统计；不传模型或用户输入。
 const SITE_ACTIONS = new Set(['builder.design.save', 'builder.design.saveAs', 'builder.export.manual.done'])
 const SITE_TRACK_NAMES = new Set(['builder.wechat.open', 'builder.wechat.download', 'builder.wechat.prompt'])
 const SITE_TRACK_SOURCES = new Set(['home', 'chat', 'builder-help', 'builder-save', 'builder-manual'])
 
 type Props = Record<string, string | number | boolean>
-type Queued = { name: string; props?: Props }
+type Queued = { id?: string; name: string; props?: Props }
 
 let queue: Queued[] = []
 let timer: ReturnType<typeof setTimeout> | null = null
@@ -59,6 +60,16 @@ let timer: ReturnType<typeof setTimeout> | null = null
 const rolled = new Map<string, number>()
 // 每次加载页面换一个标识。同一标签页内重新打开设计器也能分成两次访问。
 const visit = rid()
+let eventSequence = 0
+let serverOffset: number | null = null
+function syncClock(): void {
+  if (!URL_) return
+  const sent = performance.now()
+  void fetch(URL_, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ events: [] }) }).then(response => {
+    const received = performance.now(), server = Number(response.headers.get('X-QH-Analytics-Time'))
+    if (response.ok && server > 0 && received - sent < 10000) serverOffset = server - (performance.timeOrigin + (sent + received) / 2)
+  }).catch(() => {})
+}
 let started = false
 let currentObject = ''
 const OBJECT_RE = /^(?:official|scheme|ai):[A-Za-z0-9_-]{1,48}$/
@@ -75,7 +86,7 @@ function parentClock(): SiteClock | undefined {
   try {
     if (window.parent === window || window.parent.location.origin !== window.location.origin) return
     const clock = (window.parent as Window & { QHTrack?: SiteClock }).QHTrack
-    if (clock?.timeVersion === 1 && typeof clock.embeddedInput === 'function') return clock
+    if ((clock?.timeVersion === 1 || clock?.timeVersion === 2) && typeof clock.embeddedInput === 'function') return clock
   } catch { /* 跨域嵌入由 Builder 自己计时 */ }
 }
 
@@ -121,7 +132,7 @@ export function landedFrom(): string {
 }
 
 function drainRolled(): void {
-  for (const [name, n] of rolled) queue.push({ name, props: { n, visit, analytics_v: 2 } })
+  for (const [name, n] of rolled) queue.push({ id: `${visit}_${++eventSequence}`, name, props: { n, visit, analytics_v: 2 } })
   rolled.clear()
 }
 
@@ -143,12 +154,19 @@ function flush(beacon = false): void {
         return
       }
     }
+    const sentAt = performance.now()
     void fetch(URL_, {
       method: 'POST',
       body,
       keepalive: true,
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
+    }).then(response => {
+      const receivedAt = performance.now()
+      const server = Number(response.headers.get('X-QH-Analytics-Time'))
+      if (response.ok && serverOffset === null && server > 0 && receivedAt - sentAt < 10000) {
+        serverOffset = server - (performance.timeOrigin + (sentAt + receivedAt) / 2)
+      }
     }).catch(() => {})
   } catch { /* 见规矩 3 */ }
   if (beacon && queue.length > 0) flush(true)
@@ -162,8 +180,8 @@ export function track(name: string, props?: Props): void {
     } catch { /* 托管页面通知不影响原动作和统计 */ }
   }
   if (!URL_) return
-  queue.push({ name, props: { ...(currentObject ? { object: currentObject } : {}), ...props, visit, analytics_v: 2, elapsed: Math.floor(performance.now()),
-    ...(name === 'builder.app.open' ? { time_v: 1, time_owner: parentClock() ? 'site' : 'builder', reason: props?.view ? 'read_only' : 'editable' } : {}),
+  queue.push({ id: `${visit}_${++eventSequence}`, name, props: { ...(currentObject ? { object: currentObject } : {}), ...props, visit, analytics_v: 2, elapsed: Math.floor(performance.now()),
+    ...(name === 'builder.app.open' ? { time_v: 2, time_owner: parentClock() ? 'site' : 'builder', reason: props?.view ? 'read_only' : 'editable' } : {}),
   } })
   if (queue.length >= MAX_BATCH) { flush(); return }
   if (!timer) timer = setTimeout(() => flush(), BATCH_MS)
@@ -211,45 +229,54 @@ export function startAnalytics(): void {
     window.addEventListener('pagehide', () => flush(true))
     return
   }
+  syncClock()
   let lastTick = performance.now()
   let lastInput = -Infinity
-  let wasVisible = !timingDocument.prerendering && document.visibilityState === 'visible'
-  let visibleMs = 0
-  let activeMs = 0
-  let reportedVisibleSec = 0
-  let reportedActiveSec = 0
+  let wasVisible = !timingDocument.prerendering && document.visibilityState === 'visible' && document.hasFocus()
+  let lastPresence = lastTick
+  const spans: Array<{ from: number; until: number; active: boolean }> = []
+  const appendSpan = (from: number, until: number, active: boolean) => {
+    from = Math.round(from); until = Math.round(until)
+    if (until <= from) return
+    const previous = spans[spans.length - 1]
+    if (previous && previous.until === from && previous.active === active && until - previous.from <= 30000) previous.until = until
+    else spans.push({ from, until, active })
+    if (spans.length > 64) spans.shift()
+  }
   let lastReport = lastTick
 
   const tick = () => {
     if (timingDocument.prerendering) return
     const now = performance.now()
     // 休眠或浏览器节流后不把整段间隔算成前台时长。
-    const elapsed = Math.max(0, Math.min(now - lastTick, TIME_TICK_MS * 2))
     if (wasVisible) {
-      visibleMs += elapsed
-      activeMs += Math.min(elapsed, Math.max(0, lastInput + ACTIVE_WINDOW_MS - (now - elapsed)))
+      const from = Math.max(lastTick, now - TIME_TICK_MS * 2)
+      const until = Math.min(now, lastPresence + IDLE_WINDOW_MS)
+      const activeUntil = Math.min(until, Math.max(from, lastInput + ACTIVE_WINDOW_MS))
+      appendSpan(from, activeUntil, true)
+      appendSpan(Math.max(from, activeUntil), until, false)
     }
     lastTick = now
   }
   const report = (beacon = false) => {
     if (timingDocument.prerendering) return
     tick()
-    const visibleSec = Math.floor(visibleMs / 1000)
-    const activeSec = Math.floor(activeMs / 1000)
-    const visible = visibleSec - reportedVisibleSec
-    const active = Math.min(visible, activeSec - reportedActiveSec)
-    if (visible > 0 || active > 0) {
-      track('builder.app.time', { visible, active })
-      reportedVisibleSec = visibleSec
-      reportedActiveSec += active
+    if (serverOffset !== null) {
+      for (const span of spans.splice(0)) {
+        const from = Math.round(performance.timeOrigin + serverOffset + span.from)
+        const until = Math.round(performance.timeOrigin + serverOffset + span.until)
+        const ms = until - from
+        if (ms > 0) track('builder.app.time', { time_v: 2, from_ms: from, until_ms: until, active_ms: span.active ? ms : 0, visible: Math.floor(ms / 1000), active: span.active ? Math.floor(ms / 1000) : 0 })
+      }
     }
     lastReport = performance.now()
     if (beacon) flush(true)
   }
   const input = (event: Event) => {
-    if (!event.isTrusted || !wasVisible || timingDocument.prerendering) return
+    if (!event.isTrusted || !wasVisible || !document.hasFocus() || timingDocument.prerendering) return
     tick()
     lastInput = performance.now()
+    lastPresence = lastInput
   }
   for (const name of ['pointerdown', 'pointermove', 'keydown', 'wheel', 'touchstart', 'scroll']) {
     window.addEventListener(name, input, { passive: true })
@@ -265,14 +292,18 @@ export function startAnalytics(): void {
       lastInput = -Infinity
     } else {
       lastTick = performance.now()
-      wasVisible = !timingDocument.prerendering
+      wasVisible = !timingDocument.prerendering && document.hasFocus()
+      lastPresence = lastTick
     }
   })
   // pagehide 比 unload 可靠：手机上从 Safari 切走走的是这条。
   document.addEventListener('prerenderingchange', () => {
     lastTick = performance.now(); lastReport = lastTick
-    wasVisible = document.visibilityState === 'visible'
+    wasVisible = document.visibilityState === 'visible' && document.hasFocus()
+    lastPresence = lastTick
   }, { once: true })
   window.addEventListener('pagehide', () => { report(true); wasVisible = false; lastInput = -Infinity })
-  window.addEventListener('pageshow', () => { lastTick = performance.now(); wasVisible = !timingDocument.prerendering && document.visibilityState === 'visible' })
+  window.addEventListener('pageshow', event => { if (event.persisted) { serverOffset = null; spans.length = 0; syncClock() }; lastTick = performance.now(); lastPresence = lastTick; wasVisible = !timingDocument.prerendering && document.visibilityState === 'visible' && document.hasFocus() })
+  window.addEventListener('blur', () => { report(true); wasVisible = document.visibilityState === 'visible' && document.hasFocus(); if (!wasVisible) lastInput = -Infinity })
+  window.addEventListener('focus', () => { report(); serverOffset = null; syncClock(); lastTick = performance.now(); lastPresence = lastTick; wasVisible = !timingDocument.prerendering && document.visibilityState === 'visible' })
 }
