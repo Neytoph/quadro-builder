@@ -22,6 +22,7 @@
 // Bewusst ohne Three.js und DOM -- wie qdfimport.js in Node testbar.
 
 import { geometry, getPanel, getTube } from "./catalog.js";
+import { bridgeParams } from './rainbowBridge.js';
 import { ACCESSORY_PACK, componentFrame } from './accessoryPack.js';
 import { confirmedSpec, confirmedColor } from './componentPack.js';
 import { QDF_FEATURE_KEYS } from './qdfFeatures.js';
@@ -738,12 +739,24 @@ export function buildQDF(model, opts = {}) {
       def ? [def.w, def.h] : null, p.side, turned, p.params?.screwAxis ? componentFrame(model,p)?.axes[2] : null);
     if (line) { lines.push(line); stats.panels++; }
   }
-  for (const x of (model.textiles ? model.textiles.values() : [])) {
+  for (const x of [...model.textiles.values(), ...[...model.fittings.values()].filter(f => f.kind === 'textile_bridge')]) {
+    const variant = x.kind === 'textile_bridge' ? 'bridge' : x.variant;
+    let material = panelMat(x.color, variant || null);
+    if (variant === "bridge") {
+      const rails = [x.a, x.b].map(id => {
+        const tube = model.tubes.get(id);
+        return tube && [tube.a, tube.b].map(nid => { const n = node(nid); return [n.x, n.y, n.z]; });
+      });
+      if (rails.some(rail => !rail)) continue;
+      material = 1000 + stats.textiles;
+      const data = encodeURIComponent(JSON.stringify({ rails, params: bridgeParams(x.bridge) }));
+      lines.push(`material3{${material},"red (bridge:${data})", 2, 1.,0.,0., 0.6,0.5,0.5,7.5, 0.6,0.5,0.5,7.5, "", 0}`);
+    }
     // 彩虹带、彩虹桥是布件的变体：材质名带标记，官方软件里是普通布件。
     // 原件的套筒在局部 X 的两头、顺着局部 Y 套在管上（抓来的 textil2_350x750：
     // 沿管 35、两管之间 75）：局部 X 要横过两根承重管，所以按「转过」的写法，
     // 第一个尺寸是沿管的长度。短布面照这样写成 150 × 350。
-    const line = rectLine("textil2", model.panelCorners(x), panelMat(x.color, x.variant || null), [x.w, x.h], x.side, true);
+    const line = rectLine("textil2", model.panelCorners(x), material, [x.w, x.h], x.side, true);
     if (line) { lines.push(line); stats.textiles++; }
   }
 
@@ -772,6 +785,7 @@ export function buildQDF(model, opts = {}) {
   // Anbauteile: Punkt + Ausrichtung, beim Netz zusaetzlich die Masse. Die
   // Feldzahl je Art richtet sich nach dem, was die Herstellerdateien fuehren.
   for (const f of (model.fittings ? model.fittings.values() : [])) {
+    if (f.kind === 'textile_bridge') continue;
     if (f.appearanceVersion === 2 && confirmedSpec(f.partId || f.kind)) {
       warnings.push({ code: 'omitted_accessory', partId: f.partId || confirmedSpec(f.kind).id, id: f.id });
       continue;

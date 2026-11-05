@@ -4,6 +4,7 @@ import {selectionTransformStrings} from './selectionTransformStrings'
 import AccessoryInstallation from './AccessoryInstallation'
 import ClampGuide from './ClampGuide'
 import FlexiGuide from './FlexiGuide'
+import BridgeSettings from './BridgeSettings'
 
 export default function SingleSelectionPanel() {
   const api=useEngine(),{lang,t}=useI18n(),s=selectionTransformStrings[lang],builder=api.engine()?.builder
@@ -14,6 +15,7 @@ export default function SingleSelectionPanel() {
   const panel=id && api.engine()?.model.panels.get(id)
   const canAdjust=adjustment && !flexi && !(panel?.appearanceVersion && panel.panelId==='panel_40x40_pocket')
   const adjust=()=>{builder?.adjustSelectedPart();api.bump()}
+  if (builder?.bridgeTarget()) return <BridgeSettings />
   let label:string=s.adjust
   if(adjustment==='panel')label=s.flip
   if(adjustment==='pool')label=s.balls

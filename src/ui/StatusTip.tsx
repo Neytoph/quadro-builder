@@ -6,6 +6,7 @@ import { useDock } from './dock'
 import { usePresence } from './motion'
 import { componentForTool, componentHintKey, componentDimensions } from '../store/builderComponents'
 import { useMobileControls } from './useMobileControls'
+import BridgeSettings from './BridgeSettings'
 
 const BY_MODE: Record<string, string> = {
   select: 'tip.select',
@@ -76,6 +77,15 @@ export default function StatusTip({ menuOpen }: { menuOpen: boolean }) {
     return () => window.clearTimeout(id)
   }, [text, menuOpen, component?.id, installing])
   const [shown, leaving] = usePresence(api.toast ? null : say)
+
+  const bridge = api.engine()?.builder._bridgeTool()
+  if (bridge && !menuOpen && !api.readOnly) {
+    const tip = statusTipBox(left, vw, toolbarW, pane ? right : null)
+    const box = narrow ? { left: 8, right: 8, bottom: 68 }
+      : { top: tip?.top ?? 140, right: pane ? right.width + 24 : 12, width: 300 }
+    if (narrow && pane) return null
+    return <div data-ui="bridge-settings" className="fixed z-40 flex justify-center pointer-events-none" style={box}><BridgeSettings /></div>
+  }
 
   // 组件操作由右侧操作区域统一承载。
   if(api.mode==='select' && api.selectionCount===1 && !api.readOnly)return null

@@ -6,6 +6,7 @@ import { withPlacementPass, placementMemo, railLineScope } from './incrementalPl
 import { Vector3 } from "three";
 import { ALUMINIUM_CONNECTOR, reinforcementGuide, aluminiumConnectorTargets } from './reinforcement.js';
 import { buildableTubes, geometry, getTube, spacingFor, getPanel, defaultPanel, diagonalTubeId, slideKindLabel, slideKindName, isCurvedTube, gridSpacing, partName, partForFitting, getPartById, getConnector, poolLinerFor, reinforcementPart, textilePart } from "./catalog.js";
+import { bridgeParams } from './rainbowBridge.js';
 import { CLASSIC_COLOR_IDS, officialColorId } from "./colors.js";
 import { colorPreviewModel, normalizeColor } from './customColors.js';
 import { connectorLabelInfo } from "./buildplan.js";
@@ -128,6 +129,7 @@ export class Builder {
     this.placeConnectorId = null;       // 普通通型：套到现有空插座接头上
     // Platten-Modus: erstes angeklicktes Tragrohr + Stelle entlang davon.
     this.panelRail = null;
+    this.bridgeDefaults = bridgeParams();
     this.installationPreview = null;
     this.insetScrewAxis='auto';
     this._installationPart = null;
@@ -447,6 +449,7 @@ export class Builder {
       return;
     }
     if (this.mode !== "fitting") return;
+    if (this._bridgeTool()) return;
     if (this.fittingKind === 'rope') {
       if (this._countFittingPlaces() < 2) this.onNotice(installationReason(this.model, {reason:'missing_support'}), 'info');
       return;
@@ -518,6 +521,7 @@ export class Builder {
 
   /** Wieviele Stellen das gewaehlte Anbauteil jetzt hat -- wie _buildFittingHandles. */
   _countFittingPlaces() {
+    if (this._bridgeTool()) return [...this.model.tubes.keys()].filter(id => this.model._rail(id)).length;
     const kind = this.fittingKind;
     if (kind === 'rope') return this._tubeMidpoints().length;
     if (confirmedSpec(this.fittingPart || kind)?.placement === 'fitting') return this.model.confirmedMounts(this.fittingPart || kind).filter(mount => mount.valid).length;
@@ -609,6 +613,7 @@ export class Builder {
     this._installationPart = null; this.installationPreview = null; this.scene.clearInstallationPreview?.();
     const confirmed = confirmedSpec(partId || kind);
     this.fittingKind = confirmed?.placement === 'fitting' ? confirmed.kind || confirmed.id : kind === 'wheel' ? 'multi-wheel2' : kind;
+    if ((partId || kind) === 'textile_bridge') { this.fittingKind = 'textil2'; partId = 'textile_bridge'; }
     // 同一种 qdf 元素下的具体件（布件 / 彩虹带 / 彩虹桥），放下去时给它打变体标记
     this.fittingPart = partId;
     this._ropeFirst = null;
@@ -1669,6 +1674,7 @@ export class Builder {
   _railUsable(id, lattice = false) {
     const t = this.model.tubes.get(id);
     if (!t || t.arm || t.link || t.bow) return false;
+    if (this._bridgeTool()) return true;
     if (this.panelRail) return this.highlight ? this.highlight.has(id) : false;
     return this._freePartners(id, null, lattice).length > 0;
   }
@@ -1681,6 +1687,8 @@ export class Builder {
    * @param {boolean} lattice
    */
   _freePartners(railId, at = null, lattice = this.mode === "fitting" && RAIL_FITTINGS.has(this.fittingKind)) {
+    if (this._bridgeTool()) return [...this.model.tubes.keys()]
+      .filter(id => id !== railId && this.model._rail(id)).map(id => ({ id }));
     const radius=lattice?(this._isRainbowTextile()?Infinity:this._railSize()?.gap||160):Math.max(...(this._panelDims()||[80]));
     const scope=railLineScope(this.model,railId,radius+8);
     delete scope.groups;
@@ -1873,6 +1881,7 @@ export class Builder {
     return {
       mode: this.mode, tubeId: this.tubeId, panelId: this.panelId,
       fittingKind: this.fittingKind, poolLinerId: this.poolLinerId,
+      fittingPart: this.fittingPart, bridgeDefaults: this.bridgeDefaults,
       clampPart: this.clampPart, slideKind: this.slideKind,
       color: this.color,
       assemblyOrder: this.assemblyOrder, assemblyStep: this.assemblyStep,
@@ -1885,6 +1894,8 @@ export class Builder {
     if (s.tubeId) this.tubeId = s.tubeId;
     if (s.panelId) this.panelId = s.panelId;
     if (s.fittingKind) this.fittingKind = s.fittingKind;
+    this.fittingPart = s.fittingPart || null;
+    this.bridgeDefaults = bridgeParams(s.bridgeDefaults);
     this.poolLinerId = s.poolLinerId || null;
     if (s.clampPart) this.clampPart = s.clampPart;
     if (s.slideKind) this.slideKind = s.slideKind;
@@ -2181,6 +2192,7 @@ export class Builder {
       if (!x) return null;
       const def = textilePart(m.textileSpan(x), x.variant);
       const name = def ? partName(def) : t("bom_textile");
+      if (x.variant === "bridge") return name;
       return x.w && x.h && !(def && def.rail) ? `${name} ${x.w}×${x.h} cm` : name;
     }
     if (kind === "clamp") {
@@ -3018,6 +3030,7 @@ export class Builder {
   // Anbauteile: an jeder Montagestelle des gewaehlten Teils ein Ankerpunkt.
   // Wo dasselbe Teil schon steckt, wird keiner gezeigt -- gestapelt wird nicht.
   _buildFittingHandles() {
+    if (this._bridgeTool()) return;
     if(this.fittingKind==='bearing-clamp'&&this._bearingController().selected){this.bearingConnection.buildHandles();return;}
     // Merkt sich, an welchen Kupplungen das gewaehlte Teil sitzen darf -- der
     // Zeiger zeigt dort eine Hand, auch wenn er den Ankerpunkt knapp verfehlt.
@@ -4910,6 +4923,7 @@ export class Builder {
   }
 
   _clickFitting(e) {
+    if (this._bridgeTool()) { this._clickBridge(e); return; }
     if (this.fittingKind === 'rope') { this._clickRope(e); return; }
     if (this.fittingKind === 'gym_rings') {
       if (this.readOnly) return;
@@ -5098,6 +5112,48 @@ export class Builder {
     if (this.fittingKind !== "textil2" || !this.fittingPart) return null;
     const def = getPartById(this.fittingPart);
     return (def && def.rail) || null;
+  }
+
+  _bridgeTool() {
+    return this.mode === "fitting" && ((this.fittingPart || this.fittingKind) === 'textile_bridge'
+      || (this.fittingKind === "textil2" && getPartById(this.fittingPart)?.variant === "bridge"));
+  }
+
+  bridgeTarget() {
+    if (this.mode !== "select" || this.selection.size !== 1) return null;
+    const [id, kind] = [...this.selection][0];
+    const tx = kind === "textile" && this.model.textiles.get(id);
+    if (tx?.variant === "bridge") return tx;
+    const fitting = kind === "fitting" && this.model.fittings.get(id);
+    return fitting?.kind === 'textile_bridge' ? fitting : null;
+  }
+
+  setBridgeParams(patch) {
+    if (this.readOnly) return false;
+    const target = this.bridgeTarget();
+    if (target) this.recordHistory(() => { this.model.updateBridge(target.id, patch); });
+    else if (this._bridgeTool()) this.bridgeDefaults = bridgeParams({ ...this.bridgeDefaults, ...patch });
+    else return false;
+    this.refresh();
+    return true;
+  }
+
+  _clickBridge(e) {
+    const hit = this._pickRailFromEvent(e);
+    if (!hit?.id) { this._clearPanelRail(); return; }
+    if (this.panelRail?.id === hit.id) { this._clearPanelRail(); return; }
+    if (!this.panelRail) {
+      this.panelRail = { id: hit.id, at: 0 };
+      this.highlight = new Set([hit.id, ...this._freePartners(hit.id).map(p => p.id)]);
+      this.refresh();
+      return;
+    }
+    let added;
+    this.recordHistory(() => { added = this.model.addBridge(this.panelRail.id, hit.id, this.bridgeDefaults); });
+    this.panelRail = null;
+    this.highlight = null;
+    if (added) this._notePlaced(added.id, "textile");
+    this.refresh();
   }
 
   /**
@@ -5381,6 +5437,7 @@ export class Builder {
    * 点到接头上时，按接到这颗接头的承重管来算。
    */
   _clickLattice(e) {
+    if (this._bridgeTool()) { this._clickBridge(e); return; }
     const h = this.scene.pickHandle(e.clientX, e.clientY);
     if (h && h.data && h.data.railMount) {
       const m = h.data.railMount;

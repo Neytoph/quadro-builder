@@ -2,6 +2,7 @@
 // Bewusst ohne Three.js-Abhaengigkeit, damit es testbar und Backend-tauglich bleibt.
 
 import { MERGE_EPS, FORMAT_VERSION, DIAGONAL_SNAP_TOL, DIRECTIONS, DIAGONAL_DIRECTIONS, DIR_ALIGN_TOL, ARM_ALIGN_TOL, CONN_TYPE_MASK, anchorGap } from "./config.js";
+import { bridgeParams, bridgeShape, bridgeExtentPoints } from './rainbowBridge.js';
 import { withPlacementPass, placementMemo, placementBounds, pointsBounds, railBounds, railLineScope } from './incrementalPlacement.js';
 import { ACCESSORY_IDS, PANEL_ACCESSORY_IDS, accessoryMount, accessoryDiagnostics, panelAccessoryDiagnostics, componentMountsValid, componentVolumes, componentFrame, confirmedDiagnostics, nativeWheelComponentObstacle } from './accessoryPack.js';
 import { confirmedSpec, usesCustomClimbingColor } from './componentPack.js';
@@ -1157,6 +1158,7 @@ export class BuildModel {
    * umlaufend. Liefert null, wenn eines der Tragrohre fehlt.
    */
   panelCorners(p) {
+    if (p.variant === "bridge" || p.kind === 'textile_bridge') return bridgeShape(this, p)?.corners || null;
     const ra = this._rail(p.a), rb = this._rail(p.b);
     if (!ra || !rb) return null;
     const d = ra.dir;
@@ -3057,6 +3059,10 @@ export class BuildModel {
    * Tuch fester Groesse (textilePart). null, wenn ein Tragrohr fehlt.
    */
   textileSpan(tx) {
+    if (tx.variant === "bridge") {
+      const shape = bridgeShape(this, tx);
+      return shape ? { len: shape.params.tubeLength, gap: tx.h || 0 } : null;
+    }
     const ra = this._rail(tx.a), rb = this._rail(tx.b);
     if (!ra || !rb) return null;
     const off = [rb.p0[0] - ra.p0[0], rb.p0[1] - ra.p0[1], rb.p0[2] - ra.p0[2]];
@@ -3085,6 +3091,27 @@ export class BuildModel {
     };
     this.textiles.set(tx.id, tx);
     return tx;
+  }
+
+  addBridge(aId, bId, params = {}) {
+    const ra = this._rail(aId), rb = this._rail(bId);
+    if (!ra || !rb || aId === bId) return null;
+    const bridge = bridgeParams(params);
+    const tx = { id: this._id("x"), a: aId, b: bId, t0: 0, len: ra.len,
+      w: bridge.tubeLength, h: 0, color: null, side: 1, variant: "bridge", bridge };
+    const shape = bridgeShape(this, tx);
+    if (!shape) return null;
+    tx.h = round(Math.hypot(...shape.ropes[0][0].map((v, i) => v - shape.ropes[0].at(-1)[i])));
+    this.textiles.set(tx.id, tx);
+    return tx;
+  }
+
+  updateBridge(id, patch) {
+    const tx = this.textiles.get(id) || this.fittings.get(id);
+    if (tx?.variant !== "bridge" && tx?.kind !== 'textile_bridge') return false;
+    tx.bridge = bridgeParams({ ...bridgeParams(tx.bridge), ...patch });
+    tx.w = tx.bridge.tubeLength;
+    return true;
   }
 
   /**
@@ -6902,6 +6929,10 @@ export class BuildModel {
       hi = [Math.max(hi[0], x), Math.max(hi[1], y), Math.max(hi[2], z)];
     };
     for (const n of this.nodes.values()) push(n.x, n.y, n.z);
+    for (const tx of [...this.textiles.values(), ...this.fittings.values()]) {
+      if (tx.variant !== "bridge" && tx.kind !== 'textile_bridge') continue;
+      for (const p of bridgeExtentPoints(bridgeShape(this, tx))) push(...p);
+    }
     for (const f of (this.fittings ? this.fittings.values() : [])) push(f.x, f.y, f.z);
     for (const s of (this.slides ? this.slides.values() : [])) {
       push(s.x, s.y, s.z);
@@ -6942,11 +6973,18 @@ export class BuildModel {
     }
     for (const p of (this.textiles ? this.textiles.values() : [])) {
       if (!want.has(p.id)) continue;
+      if (p.variant === "bridge") {
+        for (const end of bridgeExtentPoints(bridgeShape(this, p))) push(...end);
+        continue;
+      }
       const cor = this.panelCorners(p);
       if (cor) for (const c of cor) push(c[0], c[1], c[2]);
     }
     for (const f of (this.fittings ? this.fittings.values() : [])) {
-      if (want.has(f.id)) push(f.x, f.y, f.z);
+      if (want.has(f.id)) {
+        push(f.x, f.y, f.z);
+        if (f.kind === 'textile_bridge') for (const end of bridgeExtentPoints(bridgeShape(this, f))) push(...end);
+      }
     }
     for (const s of (this.slides ? this.slides.values() : [])) {
       if (!want.has(s.id)) continue;
@@ -7359,6 +7397,7 @@ export class BuildModel {
         const o = { id: t.id, a: t.a, b: t.b, t0: round(t.t0), len: round(t.len), w: t.w, h: t.h, color: t.color };
         if ((t.side || 1) < 0) o.side = -1;
         if (t.variant) o.variant = t.variant;   // 彩虹带 / 彩虹桥
+        if (t.variant === "bridge") o.bridge = bridgeParams(t.bridge);
         return o;
       }),
       fittings: [...this.fittings.values()].map((f) => {
@@ -7372,6 +7411,7 @@ export class BuildModel {
         if (f.rest) o.rest = f.rest;
         if (f.balls) o.balls = true;      // 泳池里倒了海洋球
         if (f.tube) o.tube = f.tube;      // 软包滚筒套在哪根管上
+        if (f.kind === 'textile_bridge') o.bridge = bridgeParams(f.bridge);
         for (const key of ['appearanceVersion', 'params', 'mounts', 'supportTubes', 'facing', 'partId', 'a', 'b', 't0', 'len', 'curveReverse', 'ropeLength']) if (f[key] != null) o[key] = structuredClone(f[key]);
         return o;
       }),
@@ -7492,6 +7532,7 @@ export class BuildModel {
       if (!rec) continue;
       rec.w = t.w; rec.h = t.h;
       if (t.variant) rec.variant = t.variant;
+      if (t.variant === "bridge") rec.bridge = bridgeParams(t.bridge);
       this.textiles.set(t.id, rec);
       maxSeq = Math.max(maxSeq, parseSeq(t.id));
     }
@@ -7502,6 +7543,7 @@ export class BuildModel {
       const kind = version < 2 && f.kind === "open-connector2" ? "tube-cap2" : f.kind;
       this.fittings.set(f.id, {
         id: f.id, kind, x: f.x, y: f.y, z: f.z,
+        ...(kind === 'textile_bridge' ? { bridge: bridgeParams(f.bridge) } : {}),
         quat: f.quat || null, color: f.color || null,
         w: f.w, h: f.h, d: f.d, mask: f.mask,
         // Felder aus der Datei, die wir nur durchreichen (Flexikupplung & Co.)

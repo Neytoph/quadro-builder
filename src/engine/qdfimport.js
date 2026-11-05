@@ -30,6 +30,7 @@ import { FORMAT_VERSION, C45_SLEEVE_LEN, C45_ARM_LEN } from "./config.js";
 import { QDF_FEATURE_SUFFIX, qdfPanelDimensionKey } from './qdfFeatures.js';
 import { holePartForMask, holeArmDirs, BOLT_PART, MAX_HINGES } from "./model.js";
 import { aluminiumConnectorSupport } from './reinforcement.js';
+import { bridgeParams } from './rainbowBridge.js';
 
 // Alle benannten Richtungen (kardinal + 45°-diagonal) fuer Arm-Erkennung.
 const S45 = Math.SQRT1_2;
@@ -310,6 +311,8 @@ export function parseQDF(text, opts = {}) {
   const holeMaterials = new Set(); // Material-Nummern, die eine Lochplatte kennzeichnen
   const acrylicMaterials = new Set(); // dito fuer die Acrylglasplatte
   const featureMaterials = new Map(); // Material-Nummer -> feature (功能板)
+  const bridgeMaterials = new Map();
+  const pendingBridges = [];
   const nodes = [];            // { id, x, y, z }
   const tubes = [];            // { id, a, b, tubeId, color, length }
   const panels = [];           // { id, nodes:[4 ids], panelId, color }
@@ -487,6 +490,13 @@ export function parseQDF(text, opts = {}) {
     if (p.name === "material3") {
       const id = p.rest.find((v) => typeof v === "number");
       let colorName = p.rest.find((v) => typeof v === "string");
+      if (typeof colorName === "string" && colorName.startsWith("red (bridge:") && colorName.endsWith(")")) {
+        const data = JSON.parse(decodeURIComponent(colorName.slice(12, -1)));
+        if (!Array.isArray(data.rails) || data.rails.length !== 2 || data.rails.some(rail => !Array.isArray(rail) || rail.length !== 2
+          || rail.some(point => !Array.isArray(point) || point.length !== 3 || !point.every(Number.isFinite)))) throw new Error("Invalid rainbow bridge anchors");
+        bridgeMaterials.set(id, data);
+        colorName = "red";
+      }
       if (typeof colorName === "string" && colorName.endsWith(HOLE_SUFFIX)) {
         if (id != null) holeMaterials.add(id);
         colorName = colorName.slice(0, -HOLE_SUFFIX.length);
@@ -888,6 +898,11 @@ export function parseQDF(text, opts = {}) {
           ...(padW ? { padW: round(padW) } : {}), ...(padH ? { padH: round(padH) } : {}) } });
 
     } else if (p.name === "textil2") {
+      const bridge = bridgeMaterials.get(p.rest[0]);
+      if (bridge) {
+        if (!istTot(p)) pendingBridges.push(bridge);
+        continue;
+      }
       // Netz/Stoff: gleiche Struktur wie panel2 (Zentrum + Maße + Quat). Maße z.B.
       // 35x75 cm -> Netz 40x80 cm (nicht im Platten-Katalog -> eigene Textil-Sammlung).
       if (!p.tuple || p.tuple.length < 7) { skipped[p.name] = (skipped[p.name] || 0) + 1; continue; }
@@ -1458,13 +1473,29 @@ export function parseQDF(text, opts = {}) {
     const used = new Set();
     for (const t of tubes) { used.add(t.a); used.add(t.b); }
     for (const pa of panels) for (const id of pa.nodes || []) used.add(id);
-    for (const tx of textiles) for (const id of tx.nodes) used.add(id);
+    for (const tx of textiles) for (const id of tx.nodes || []) used.add(id);
     for (let i = nodes.length - 1; i >= 0; i--) {
       const n = nodes[i];
       if (used.has(n.id) || n.part) continue;
       if (n.fromFile) n.unused = true;
       else nodes.splice(i, 1);
     }
+  }
+
+  for (const entry of pendingBridges) {
+    const findTube = ends => tubes.find(tube => {
+      if (tube.arm || tube.link || tube.bow) return false;
+      const a = nodes.find(n => n.id === tube.a), b = nodes.find(n => n.id === tube.b);
+      if (!a || !b) return false;
+      const near = (n, p) => Math.hypot(n.x - p[0], n.y - p[1], n.z - p[2]) <= eps;
+      return (near(a, ends[0]) && near(b, ends[1])) || (near(a, ends[1]) && near(b, ends[0]));
+    });
+    const a = findTube(entry.rails[0]), b = findTube(entry.rails[1]);
+    if (!a || !b || a.id === b.id) { skipped.textil2 = (skipped.textil2 || 0) + 1; continue; }
+    const bridge = bridgeParams(entry.params);
+    const span = Math.hypot(...entry.rails[0][0].map((v, i) => v - entry.rails[0][1][i]));
+    const gap = Math.hypot(...entry.rails[0][0].map((v, i) => v - entry.rails[1][0][i]));
+    textiles.push({ id: "x" + seq++, a: a.id, b: b.id, t0: 0, len: span, w: bridge.tubeLength, h: gap, color: null, variant: "bridge", bridge });
   }
 
   return {

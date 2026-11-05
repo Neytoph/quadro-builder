@@ -1,6 +1,7 @@
 // 3D-Szene + Rendering (Three.js). Kennt das Modell nur zum Zeichnen.
 
 import * as THREE from "three";
+import { bridgeShape, BRIDGE_RADIUS } from './rainbowBridge.js';
 import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
@@ -4639,6 +4640,41 @@ export class SceneManager {
       }
     }
 
+    const bridgeShapes = new Map();
+    if (!hideFlat) for (const tx of [...model.textiles.values(), ...model.fittings.values()]) {
+      if ((tx.variant !== "bridge" && tx.kind !== 'textile_bridge') || stateOf(tx.id) === "future") continue;
+      const shape = bridgeShape(model, tx);
+      if (!shape) continue;
+      bridgeShapes.set(tx.id, shape);
+    }
+    const drawBridge = (part, kind) => {
+      const shape = bridgeShapes.get(part.id);
+      if (!shape) return;
+      const plain = asm && stateOf(part.id) === 'done';
+      const picks = kind === 'textile' ? this.pickTextiles : this.pickFittings;
+      const tubeGeo = this._cachedGeo("bridge:hollow-tube", () => new THREE.LatheGeometry([
+        new THREE.Vector2(BRIDGE_RADIUS - 0.4, -0.5), new THREE.Vector2(BRIDGE_RADIUS, -0.5),
+        new THREE.Vector2(BRIDGE_RADIUS, 0.5), new THREE.Vector2(BRIDGE_RADIUS - 0.4, 0.5),
+        new THREE.Vector2(BRIDGE_RADIUS - 0.4, -0.5),
+      ], 24));
+      for (const rung of shape.rungs) {
+        const material = matFor(part.id, plain ? this._fadedMaterial(true)
+          : this._accentMaterial(RAINBOW[rung.colorIndex % RAINBOW.length]));
+        const matrix = new THREE.Matrix4().compose(new THREE.Vector3(...rung.center),
+          new THREE.Quaternion().setFromUnitVectors(UP, new THREE.Vector3(...rung.dir)), new THREE.Vector3(1, rung.length, 1));
+        this._batchAdd(tubeGeo, material, matrix, kind, part.id, picks);
+      }
+      const ropeGeo = this._cachedGeo("bridge:rope", () => new THREE.CylinderGeometry(0.24, 0.24, 1, 8));
+      const ropeMat = matFor(part.id, plain ? this._fadedMaterial(true) : this._accentMaterial(0x766653));
+      for (const rope of shape.ropes) for (let i = 1; i < rope.length; i++) {
+        const a = new THREE.Vector3(...rope[i - 1]), b = new THREE.Vector3(...rope[i]);
+        const delta = b.clone().sub(a), length = delta.length();
+        if (length < 1e-6) continue;
+        const matrix = new THREE.Matrix4().compose(a.add(b).multiplyScalar(0.5),
+          new THREE.Quaternion().setFromUnitVectors(UP, delta.divideScalar(length)), new THREE.Vector3(1, length, 1));
+        this._batchAdd(ropeGeo, ropeMat, matrix, kind, part.id, picks);
+      }
+    };
     // Rohre (Zylinder zwischen zwei Knoten)
     for (const t of model.tubes.values()) {
       const a = model.nodes.get(t.a), b = model.nodes.get(t.b);
@@ -4947,6 +4983,10 @@ export class SceneManager {
     // Tuch ist auch am echten Geruest blickdicht.
     for (const tx of (model.textiles ? model.textiles.values() : [])) {
       if (hideFlat) continue;
+      if (tx.variant === "bridge") {
+        drawBridge(tx, 'textile');
+        continue;
+      }
       const cor = model.panelCorners(tx);
       if (!cor) continue;
       const st = stateOf(tx.id);
@@ -4993,22 +5033,6 @@ export class SceneManager {
         }
         continue;
       }
-      if (tx.variant === "bridge") {
-        // 彩虹桥：一排软包横杠，每 10 厘米一根，七色轮着来
-        const n = Math.max(2, Math.round(u.length() / 10));
-        const rung = this._cachedGeo("rung:" + Math.round(w.length()), () => {
-          const g = new THREE.CylinderGeometry(3, 3, Math.max(4, w.length() - 6), 12);
-          g.rotateX(Math.PI / 2);
-          return g;
-        });
-        for (let i = 0; i < n; i++) {
-          const pos = va.clone().addScaledVector(u, (i + 0.5) / n).addScaledVector(w, 0.5);
-          const m4 = new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis).setPosition(pos);
-          const rm = plain ? mat : matFor(tx.id, this._accentMaterial(RAINBOW[i % RAINBOW.length]));
-          this._batchAdd(rung, rm, m4, "textile", tx.id, this.pickTextiles);
-        }
-        continue;
-      }
       // 没有原件的尺寸（比如 40×40）：照原件的形状自己画——布在轴线高度平铺，
       // 两头各一整圈套筒套在管子外面。沿管方向两头各让出半个接头。
       {
@@ -5029,6 +5053,7 @@ export class SceneManager {
       if (frameOnly && !FRAME_FITTINGS.has(f.kind)) continue;
       const st = stateOf(f.id);
       if (st === "future") continue;
+      if (f.kind === 'textile_bridge' && bridgeShapes.has(f.id)) { drawBridge(f, 'fitting'); continue; }
       for (const mesh of this._fittingMeshes(f)) {
         const role = mesh.userData.role;
         mesh.userData = { kind: "fitting", id: f.id, role };

@@ -1,0 +1,16 @@
+.qb-bridge-settings { width: 300px; max-width: 100%; padding: 12px 14px; color: #1f2430; font-size: 12px; pointer-events: auto; }
+.qb-bridge-heading { display: flex; justify-content: space-between; gap: 8px; align-items: center; width: 100%; border: 0; padding: 0; background: none; color: inherit; text-align: left; font: inherit; cursor: pointer; }
+.qb-bridge-heading[aria-expanded="true"] { margin-bottom: 8px; }
+.qb-bridge-heading:focus-visible { outline: 2px solid #ea580c; outline-offset: 3px; }
+.qb-bridge-heading strong { font-size: 13px; }
+.qb-bridge-heading > span { color: #6b625b; font-size: 11px; margin-left: auto; }
+.qb-bridge-fields { display: grid; gap: 6px; }
+.qb-bridge-fields label { display: grid; grid-template-columns: minmax(0, 1fr) 76px 30px; gap: 8px; align-items: center; min-height: 30px; }
+.qb-bridge-fields input { width: 100%; min-height: 30px; border: 1px solid #e8dcd2; border-radius: 6px; padding: 4px 7px; background: #fffaf5; color: inherit; font: inherit; }
+.qb-bridge-fields input:focus-visible { outline: 2px solid #ea580c; outline-offset: 2px; }
+.qb-bridge-unit { color: #7a6d62; font-size: 11px; }
+@media (max-width: 640px), (pointer: coarse) {
+  .qb-bridge-heading { min-height: 44px; }
+  .qb-bridge-fields label { min-height: 44px; }
+  .qb-bridge-fields input { min-height: 44px; font-size: 16px; }
+}
