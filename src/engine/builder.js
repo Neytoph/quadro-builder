@@ -2372,7 +2372,16 @@ export class Builder {
     if (this.placeConnectorId) { this._buildConnectorPlaceHandles(); return; }
 
     if (this.model.isEmpty()) {
-      this.scene.addHandle([0, 0, 0], { origin: true }, "origin");
+      const origin = { x: 0, y: 0, z: 0 };
+      const tube = getTube(this.tubeId);
+      for (const d of DIRECTIONS) {
+        if (this._targetBelowGround(origin, d.vec)) continue;
+        this.scene.addHandle([0, 0, 0], {
+          origin: true, dir: d.vec, dirName: d.name, arrowCompact: true,
+          previewSpan: isCurvedTube(this.tubeId) ? 0 : spacingFor(tube.length_cm),
+          previewColor: this.color === RANDOM_COLOR ? null : this.color,
+        }, "dir");
+      }
       return;
     }
     // Freie Oeffnung eines Doppelrohrverbinders/einer Rohrklammer: dort gehoert
@@ -5822,13 +5831,24 @@ export class Builder {
     if (h) {
       if (h.data.clampOpening) { this._placeSecondTube(h.data.center, h.data.dir, h.data.bearingNode, h.data.clampId); return; }
       if (h.data.origin) {
+        if (!this.model.isEmpty()) return;
+        let res;
         this.recordHistory(() => {
-          // Erste Kupplung auf y = 0 -- genau wie in den Herstellerdateien, wo
-          // die unterste Kupplung dort sitzt. Der Würfel reicht dann eine halbe
-          // Kupplung nach unten und steht auf dem (2,5 cm tiefer gezeichneten)
-          // Boden auf, statt darüber zu schweben.
-          this.selectedNodeId = this.model.addNode(0, 0, 0).id;
+          // 首根管和中央接头一起创建，撤销后恢复空画布引导线。
+          const node = this.model.addNode(0, 0, 0);
+          const tube = getTube(this.tubeId);
+          const color = this.colorFor("tube", node.id);
+          res = isCurvedTube(this.tubeId)
+            ? this.model.extendBow(node.id, h.data.dir, this._bowNormal(h.data.dir, node), tube.id, color, tube.radius_cm || gridSpacing())
+            : this.model.extend(node.id, h.data.dir, tube.id, color, tube.length_cm, spacingFor(tube.length_cm));
+          if (!res?.tube) this.model.nodes.delete(node.id);
         });
+        if (res?.tube) {
+          this._notePlaced(res.tube.id, "tube");
+          this.selectedNodeId = null;
+          this.stepFrom = [res.node.id];
+        } else if (res?.ground) this.onNotice(t("notice_ground"), "warn");
+        else if (res?.collision) this.onNotice(t("notice_collision"), "warn");
         this.refresh();
         return;
       }
