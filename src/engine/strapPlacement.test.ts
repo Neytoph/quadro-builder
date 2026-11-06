@@ -165,4 +165,14 @@ describe('任意两根管之间的绑带', () => {
       expect(componentVolumes(model,damaged)).toEqual([])
     }
   })
+
+  it('斜管端部默认留距在节点保存到0.01厘米后仍然有效，明显越界仍拒绝', () => {
+    const { model, a, b } = fixture([[40,144.98,-90.71],[40,123.7667965644,-111.9232034356],[40,120,-80],[40,120,-120]])
+    const first = tubeTieMount(model, a.id, [40,120,-120], 'strap')!
+    const part = model.addConfirmedComponent(model.ropeDiagnostics(first, {tube:b.id,t:.7}, 'strap'), 'black')!
+    expect(part).toBeTruthy()
+    const copy = new BuildModel(); expect(copy.loadJSON(model.toJSON()).ok).toBe(true)
+    expect(componentMountsValid(copy, copy.fittings.get(part.id)!)).toBe(true)
+    expect(copy.ropeDiagnostics({tube:a.id,t:.84},{tube:b.id,t:.7},'strap').valid).toBe(false)
+  })
 })

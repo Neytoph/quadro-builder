@@ -216,7 +216,8 @@ export function ropeCandidate(model,first,second,partId='rope') {
   if(!a || !b || [first.t,second.t].some(t=>t<0.05 || t>0.95))return bad('missing_support');
   if(partId==='strap' && [first,second].some(m=>{
     const length=tubeCurveLength(model,m.tube),margin=(geometry().connectorSize+spec.bandWidth)/2;
-    return !length || Math.min(m.t,1-m.t)*length<margin-1e-6;
+    // 原生节点保存到0.01厘米；斜管重读后仍接受该精度内的端部留距。
+    return !length || Math.min(m.t,1-m.t)*length<margin-0.01;
   }))return bad('tube_short');
   const length=Math.hypot(...cSub(b,a));if(!Number.isFinite(length) || (partId!=='strap' && (length<8 || length>240)))return bad('tube_short');
   // 相贴的管也可以绑扎；重合定位点使用承载管切线建立稳定朝向。

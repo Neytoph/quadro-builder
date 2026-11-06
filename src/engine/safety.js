@@ -21,6 +21,7 @@ import { getPanel } from "./catalog.js";
 import { ACCESSORY_IDS, PANEL_ACCESSORY_IDS, componentMountsValid, componentObstacle } from './accessoryPack.js';
 import { confirmedSpec } from './componentPack.js';
 import { panelEdgeCoverage } from './confirmedComponentModel.js';
+import { computeSupportGraph } from './supportGraph.js';
 
 const EPS = 2;              // cm：网格点重合判定
 const CORNER_EPS = 6;       // cm：板角落到接头的距离（半个接头加余量）
@@ -279,52 +280,24 @@ function ruleClearZone(model, room, out) {
   out.push({ rule: "clear_zone", level: "info", ref: "7", params: { w, d, roomOk }, ids: {} });
 }
 
-function ruleFloating(model, ground, out) {
-  // 带轮子或轴承的模型（小车、旋转件）整体离地是正常的
-  for (const f of model.fittings.values()) {
-    if (["multi-wheel2", "floating-wheel2", "casters2", "bearing2"].includes(f.kind)) return;
-  }
-  for (const n of model.nodes.values()) if (n.bearingOn || n.clampOn) return;
-  const adj = new Map();
-  const link = (a, b) => {
-    if (!adj.has(a)) adj.set(a, new Set());
-    if (!adj.has(b)) adj.set(b, new Set());
-    adj.get(a).add(b); adj.get(b).add(a);
-  };
-  for (const n of model.nodes.values()) if (!n.unused && !adj.has(n.id)) adj.set(n.id, new Set());
-  for (const t of model.tubes.values()) link(t.a, t.b);
-  for (const n of model.nodes.values()) {
-    if (!n.clampOn) continue;
-    const t = model.tubes.get(n.clampOn.tubeId);
-    if (t) { link(n.id, t.a); link(n.id, t.b); }
-  }
-  // 官方文件里的斜梁、屋脊常常只靠 45° 接头的几何贴着主体，没有连线：
-  // 挨得很近（15 cm 内）的接头算连在一起。
-  const list = [...model.nodes.values()].filter((nd) => !nd.unused);
-  for (let i = 0; i < list.length; i++) {
-    for (let j = i + 1; j < list.length; j++) {
-      const a = list[i], b = list[j];
-      if (Math.abs(a.y - b.y) > 15) continue;
-      if (Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z) <= 15) link(a.id, b.id);
-    }
-  }
-  const seen = new Set();
+function ruleFloating(model, ground, support, out) {
+  // 轮子／轴承原有离地豁免只作用于所在组件，不掩盖别处悬空的结构。
+  const mobile = [...model.fittings.values()].filter(f => ["multi-wheel2", "floating-wheel2", "casters2", "bearing2"].includes(f.kind));
   const nodes = [];
   let n = 0;
-  for (const start of adj.keys()) {
-    if (seen.has(start)) continue;
-    const comp = [];
-    const stack = [start];
-    seen.add(start);
-    while (stack.length) {
-      const id = stack.pop();
-      comp.push(id);
-      for (const o of adj.get(id) || []) if (!seen.has(o)) { seen.add(o); stack.push(o); }
-    }
-    if (comp.length < 2) continue;
+  for (const comp of support.components) {
+    if (comp.size < 2) continue;
     let minY = Infinity;
     for (const id of comp) { const nd = model.nodes.get(id); if (nd) minY = Math.min(minY, nd.y); }
-    if (minY - ground > GROUND_EPS) { n++; nodes.push(...comp); }
+    if (minY - ground <= GROUND_EPS) continue;
+    const carriesMobile = mobile.some(f => {
+      const tube = model.tubes.get(f.tube);
+      return tube && comp.has(tube.a) || [...comp].some(id => {
+        const node = model.nodes.get(id);
+        return node.bearingOn === f.id || Math.hypot(node.x - f.x, node.y - f.y, node.z - f.z) <= CORNER_EPS;
+      });
+    });
+    if (!carriesMobile) { n++; nodes.push(...comp); }
   }
   if (n) out.push({ rule: "floating", level: "error", ref: "builder", params: { n }, ids: { nodes } });
 }
@@ -372,24 +345,18 @@ function ruleRailing(model, decks, ground, covers, out) {
  * 全部规则跑一遍。opts.room = { w, d }（厘米，可选，填了就和无障碍区比）。
  * 返回 { findings, height }：findings 按 错误 → 提醒 → 说明 排；height 是最高站立面（cm）。
  */
-function ruleAccessories(model, out) {
+function ruleAccessories(model, support, out) {
   const parts = [...model.panels.values(), ...model.fittings.values()].filter(p => (ACCESSORY_IDS.has(p.kind) && (!confirmedSpec(p.kind) || p.appearanceVersion === 2)) || (p.appearanceVersion && PANEL_ACCESSORY_IDS.has(p.panelId)));
   if (!parts.length) return;
   const collect = selected => ({ panels: selected.filter(p => p.panelId).map(p => p.id), fittings: selected.filter(p => p.kind).map(p => p.id), tubes: [...new Set(selected.flatMap(p => Array.isArray(p.supportTubes) ? p.supportTubes.filter(id => typeof id === 'string') : [p.tube].filter(Boolean)))] });
   const broken = parts.filter(p => !componentMountsValid(model, p));
   const structurallyValid = parts.filter(p => !broken.includes(p));
   if (broken.length) out.push({ rule: 'accessory_mounts', level: 'error', ref: 'builder', params: { n: broken.length }, ids: collect(broken) });
-  const floating = [], tipping = [], cache = new Map();
-  const connected = id => {
-    if (cache.has(id)) return cache.get(id);
-    const ids = model._floodNodes(new Set([id]));
-    for (const nodeId of ids) cache.set(nodeId, ids);
-    return ids;
-  };
+  const floating = [], tipping = [];
   for (const part of structurallyValid) {
     const tubeIds = part.supportTubes || [part.tube].filter(Boolean);
-    const groups = tubeIds.map(id => model.tubes.get(id)).filter(Boolean).map(t => connected(t.a));
-    if (!groups.length || groups.some(ids => ![...ids].some(id => model.nodes.get(id)?.y <= GROUND_EPS))) { floating.push(part); continue; }
+    const groups = [...new Set(tubeIds.map(id => model.tubes.get(id)).filter(Boolean).map(t => support.byNode.get(t.a)))];
+    if (!groups.length || groups.some(ids => !ids || ![...ids].some(id => model.nodes.get(id)?.y <= GROUND_EPS))) { floating.push(part); continue; }
     const nodes = [...new Set(groups.flatMap(ids => [...ids]))].map(id => model.nodes.get(id)).filter(Boolean);
     const contacts = nodes.filter(n => n.y <= GROUND_EPS);
     const short = Math.min(Math.max(...contacts.map(n => n.x)) - Math.min(...contacts.map(n => n.x)), Math.max(...contacts.map(n => n.z)) - Math.min(...contacts.map(n => n.z)));
@@ -407,6 +374,7 @@ export function computeSafety(model, opts = {}) {
   const out = [];
   if (!model || !model.nodes.size) return { findings: out, height: 0 };
   const ground = groundOf(model);
+  const support = computeSupportGraph(model);
   const decks = decksOf(model);
   const covers = coversOf(model);
   const height = standingHeight(model, decks, ground);
@@ -418,9 +386,9 @@ export function computeSafety(model, opts = {}) {
   ruleAnchoring(model, decks, ground, out);
   ruleTipping(model, ground, out);
   ruleClearZone(model, opts.room, out);
-  ruleFloating(model, ground, out);
+  ruleFloating(model, ground, support, out);
   ruleRailing(model, decks, ground, covers, out);
-  ruleAccessories(model, out);
+  ruleAccessories(model, support, out);
   out.sort((a, b) => LEVEL_RANK[a.level] - LEVEL_RANK[b.level]);
   return { findings: out, height };
 }
