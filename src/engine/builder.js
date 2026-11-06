@@ -20,7 +20,7 @@ import { TUBE_FITTINGS, POOL_KINDS, isHolePart, holeArmDirs, holeClampDirsAt, HO
 import { CONNECTOR_ARM_BITS } from "./qdfimport.js";
 import { ACCESSORY_IDS, PANEL_ACCESSORY_IDS, componentFrame } from './accessoryPack.js';
 import { confirmedSpec, usesCustomClimbingColor } from './componentPack.js';
-import { supportsPanelFixing, panelRailScrewAxis, curvePoint } from './confirmedComponentModel.js';
+import { supportsPanelFixing, panelRailScrewAxis, curvePoint, tubeTieMount } from './confirmedComponentModel.js';
 import { insetPanelProbes } from './insetPanelMounts.js';
 import { installationReason, installationFacingNotice } from './installationReason.js';
 import { panelInstallationFacing } from './panelInstallationFacing.js';
@@ -450,7 +450,7 @@ export class Builder {
     }
     if (this.mode !== "fitting") return;
     if (this._bridgeTool()) return;
-    if (this.fittingKind === 'rope') {
+    if (this._tubeTieTool()) {
       if (this._countFittingPlaces() < 2) this.onNotice(installationReason(this.model, {reason:'missing_support'}), 'info');
       return;
     }
@@ -523,7 +523,7 @@ export class Builder {
   _countFittingPlaces() {
     if (this._bridgeTool()) return [...this.model.tubes.keys()].filter(id => this.model._rail(id)).length;
     const kind = this.fittingKind;
-    if (kind === 'rope') return this._tubeMidpoints().length;
+    if (this._tubeTieTool()) return this._tubeMidpoints(null,null,{includeBows:true}).length;
     if (confirmedSpec(this.fittingPart || kind)?.placement === 'fitting') return this.model.confirmedMounts(this.fittingPart || kind).filter(mount => mount.valid).length;
     if (ACCESSORY_IDS.has(kind)) return this.model.accessoryMounts(kind).length;
     const cs = geometry().connectorSize;
@@ -3045,7 +3045,7 @@ export class Builder {
     // Zeiger zeigt dort eine Hand, auch wenn er den Ankerpunkt knapp verfehlt.
     this._fittingMountNodes = new Set();
     this._confirmedFittingMounts = null;
-    if (this.fittingKind === 'rope') { this._buildRopeHandles(); return; }
+    if (this._tubeTieTool()) { this._buildRopeHandles(); return; }
     if (this.fittingKind === 'gym_rings') { this._buildGymRingHandles(); return; }
     if (confirmedSpec(this.fittingPart || this.fittingKind)?.placement === 'fitting') {
       const id = this.fittingPart || this.fittingKind, sector=confirmedSpec(id)?.feature==='sector';
@@ -3228,13 +3228,15 @@ export class Builder {
   }
 
   // 绳结与8字件共用沿管跟随的定位点；已选第一端保留方形标记。
+  _tubeTieTool() { return this.fittingKind === 'rope' || this.fittingKind === 'strap'; }
+
   _buildRopeHandles() {
     this._ropeHoverKey = null;
     this.scene.clearInstallationPreview?.();
-    const first = this._ropeFirst, rail = first && this.model._rail(first.tube);
-    if (first && !rail) { this._ropeFirst = null; this.installationPreview = null; }
-    if (rail) this.scene.addHandle(rail.p0.map((v, i) => v + rail.dir[i] * rail.len * first.t), { ropeFirst: true, placeNode:true }, 'place');
-    for (const midpoint of this._tubeMidpoints()) {
+    const first = this._ropeFirst, position = first && curvePoint(this.model,first.tube,first.t);
+    if (first && !position) { this._ropeFirst = null; this.installationPreview = null; }
+    if (position) this.scene.addHandle(position, { ropeFirst: true, placeNode:true }, 'place');
+    for (const midpoint of this._tubeMidpoints(null,null,{includeBows:true})) {
       if (midpoint.tubeId === this._ropeFirst?.tube) continue;
       const mount = this._ropeMountAt(midpoint.tubeId, {x:midpoint.pos[0],y:midpoint.pos[1],z:midpoint.pos[2]});
       if (!mount) continue;
@@ -3244,14 +3246,16 @@ export class Builder {
   }
 
   _ropeMountAt(tubeId, point) {
-    const rail = this.model._rail(tubeId);
-    if (!rail || !point) return null;
-    const t = Math.max(0.05, Math.min(0.95, this._alongTube(tubeId, point) / rail.len));
-    return {tube:tubeId, t, pos:rail.p0.map((v, i) => v + rail.dir[i] * rail.len * t)};
+    return tubeTieMount(this.model,tubeId,point,this.fittingKind);
   }
 
   _ropePointerMount(x, y) {
     const handle = this.scene.pickHandle(x, y);
+    // 紧贴两管时第一端标记可能盖住另一根管；仍可从可见管身选择第二端。
+    if (this.fittingKind === 'strap' && handle?.data?.ropeFirst) {
+      const pick = this.scene.pickTube(x, y);
+      if (pick && pick.data.id !== this._ropeFirst?.tube) return {pick,mount:this._ropeMountAt(pick.data.id,pick.point)};
+    }
     if (handle?.data?.ropeFirst) return {handle, mount:null};
     if (handle?.data?.ropeMount) return {handle, mount:handle.data.ropeMount};
     const pick = this.scene.pickTube(x, y);
@@ -3264,7 +3268,7 @@ export class Builder {
     if (key === this._ropeHoverKey) return;
     this._ropeHoverKey = key;
     if (!key) { this.scene.clearInstallationPreview?.(); return; }
-    const probe = this.model.ropeDiagnostics(first, {tube:mount.tube,t:mount.t});
+    const probe = this.model.ropeDiagnostics(first, {tube:mount.tube,t:mount.t}, this.fittingKind);
     this.scene.showInstallationPreview(this.model, probe, probe.valid);
   }
 
@@ -3278,20 +3282,21 @@ export class Builder {
     const endpoint = {tube:mount.tube, t:mount.t};
     if (!this._ropeFirst || this._ropeFirst.tube === endpoint.tube) {
       this._ropeFirst = endpoint;
-      this.installationPreview = {kind:'fitting',partId:'rope',mountCount:1,supportCount:1,valid:false,reason:t('notice_rope_second'),canFlip:false,assumption:'frame-grid-unmeasured'};
+      const notice=t(this.fittingKind==='strap'?'notice_strap_second':'notice_rope_second');
+      this.installationPreview = {kind:'fitting',partId:this.fittingKind,mountCount:1,supportCount:1,valid:false,reason:notice,canFlip:false,assumption:'frame-grid-unmeasured'};
       this.scene.clearInstallationPreview?.();
-      this.onNotice(t('notice_rope_second'), 'info');
+      this.onNotice(notice, 'info');
       this.refresh();
       return;
     }
-    const probe = this.model.ropeDiagnostics(this._ropeFirst, endpoint);
+    const probe = this.model.ropeDiagnostics(this._ropeFirst, endpoint, this.fittingKind);
     if (!probe.valid) {
       this.onNotice(installationReason(this.model, probe), 'warn');
       this.scene.showInstallationPreview(this.model, probe, false);
       return;
     }
     this._ropeFirst = null;
-    this._previewInstallation(probe, 'rope');
+    this._previewInstallation(probe, this.fittingKind);
   }
 
   _buildGymRingHandles() {
@@ -3344,14 +3349,15 @@ export class Builder {
   }
 
   /** Mitte jedes echten Rohrs -- Vorschlagspunkte fuer Teile, die dort klemmen. */
-  _tubeMidpoints(sel, amKnoten) {
+  _tubeMidpoints(sel, amKnoten, {includeBows=false} = {}) {
     const out = [];
     for (const t of this.model.tubes.values()) {
-      if (t.arm || t.link || t.bow) continue;
+      if (t.arm || t.link || (t.bow && !includeBows)) continue;
       if (sel && !amKnoten(t.id)) continue;
       const a = this.model.nodes.get(t.a), b = this.model.nodes.get(t.b);
       if (!a || !b) continue;
-      out.push({ tubeId: t.id, pos: [(a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2] });
+      const pos=curvePoint(this.model,t.id,0.5);
+      if(pos)out.push({ tubeId: t.id, pos });
     }
     return out;
   }
@@ -3655,7 +3661,7 @@ export class Builder {
       if (e.pointerType === 'touch') return;
       this._panelHoverKey = null;
       this.scene.clearPanelPlacementPreview?.();
-      if (this.mode === 'fitting' && this.fittingKind === 'rope') this._showRopeHover(null);
+      if (this.mode === 'fitting' && this._tubeTieTool()) this._showRopeHover(null);
       if (this.mode === 'fitting' && this.fittingKind === 'gym_rings') {
         this._gymRingHoverKey = null;
         this.scene.clearInstallationPreview?.();
@@ -3934,7 +3940,7 @@ export class Builder {
       obj=h?.object || (mount ? pick?.object : null);
     } else if (this.mode === 'fitting' && this.fittingKind === 'bearing-clamp' && this._bearingController().selected) {
       obj=this.bearingConnection.hover(e);
-    } else if (this.mode === 'fitting' && this.fittingKind === 'rope') {
+    } else if (this.mode === 'fitting' && this._tubeTieTool()) {
       this._trackTubeHandles(x, y);
       const {handle:h, pick, mount} = this._ropePointerMount(x, y);
       this._showRopeHover(mount);
@@ -4933,7 +4939,7 @@ export class Builder {
 
   _clickFitting(e) {
     if (this._bridgeTool()) { this._clickBridge(e); return; }
-    if (this.fittingKind === 'rope') { this._clickRope(e); return; }
+    if (this._tubeTieTool()) { this._clickRope(e); return; }
     if (this.fittingKind === 'gym_rings') {
       if (this.readOnly) return;
       const {mount}=this._gymRingPointerMount(e.clientX,e.clientY);

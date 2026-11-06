@@ -1,5 +1,6 @@
 export const accessoryStrings = {
   zh: {
+    'accessory.mount.strap': '依次选择两根管上的绑扎位置。',
     'accessory.compat': '兼容',
     'accessory.assumption': '搭建效果仅供预览，承重情况需实物确认。',
     'accessory.stage.choose': '选择组件 → 点击可安装位置，即可安装',
@@ -47,6 +48,7 @@ export const accessoryStrings = {
     'accessory.qdf.both': '已导出 QDF。未包含：{omitted}；简化表示：{simplified}。请用原生 JSON 保存完整组件。',
   },
   en: {
+    'accessory.mount.strap': 'Choose a tie point on each tube.',
     'accessory.compat': 'Compatible',
     'accessory.assumption': 'For design previews. Confirm load capacity with the physical parts.',
     'accessory.stage.choose': 'Choose a component → Click a suitable position to install',
@@ -94,6 +96,7 @@ export const accessoryStrings = {
     'accessory.qdf.both': 'QDF exported. Omitted: {omitted}; simplified representations: {simplified}. Save native JSON to keep complete components.',
   },
   de: {
+    'accessory.mount.strap': 'Je einen Bindepunkt an zwei Rohren wählen.',
     'accessory.compat': 'Kompatibel',
     'accessory.assumption': 'Entwurfsvorschau. Tragfähigkeit am realen Bauteil prüfen.',
     'accessory.stage.choose': 'Bauteil wählen → Passende Position zum Montieren anklicken',

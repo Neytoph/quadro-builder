@@ -272,6 +272,14 @@ export const INSTALLATION_CATALOGUE: readonly CatalogueEntry[] = [
     "aliases": ""
   },
   {
+    "id": "strap",
+    "origin": "extended",
+    "group": "auxiliary",
+    "tool": "accessories",
+    "method": "扎带固定",
+    "aliases": "绑带 扎带 捆绑 绑扎 tie strap band webbing Bindegurt"
+  },
+  {
     "id": "rope",
     "origin": "extended",
     "group": "auxiliary",

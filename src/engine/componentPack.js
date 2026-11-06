@@ -29,6 +29,9 @@ export const CONFIRMED_COMPONENTS = [
   panel('panel_40x40_grid', '格子板', 'grid'),
   fitting('panel_sector_20', '小扇形板', 'corner', 'sector', 20, 20),
 ].map((spec,index) => ({ ...spec, ...(INSET_PANEL_IDS.has(spec.id)?{mountLayout:INSET_MOUNT_LAYOUT,kitContents:['component','transparent-screw-4']}:{}), name_en: EN[index] || 'Small quarter-circle panel', name_de: DE[index] || 'Kleine Viertelkreisplatte', fixedColor:({panel_40x40_climbing:'#39a7df',panel_40x30_climbing:'#64b66b',panel_40x20_climbing:'#ed5b49'})[spec.id] || ({lego:'#2FCB5A',basketball:'#008ce7',magnet:'#f3f3ed',felt:'#efc947',clock:'#f6d334',maze:'#77bf64',basin:'#a9acb0',roller:'#f0d33f',trampoline:'#26292b',rope:'#f0e8d6',grid:'#f6f2e7',capsule:'#eaf7fa',acrylic:'#eaf7fa',acrylic_holes:'#eaf7fa',sensory:'#f5ba33'})[spec.feature] || null, mount:spec.mountType, designAssumption:true, assumption: 'frame-grid-unmeasured', qdfSupported:spec.placement==='panel', qdfSimplified:spec.placement==='panel' }));
+CONFIRMED_COMPONENTS.push({ ...fitting('strap', '绑带', 'rope', 'rope'), bandWidth: 5, depth: 0.2,
+  name_en: 'Tie strap', name_de: 'Bindegurt', fixedColor: '#363a3f', mount: 'rope',
+  designAssumption: true, assumption: 'frame-grid-unmeasured', qdfSupported: false, qdfSimplified: false });
 export const CONFIRMED_PANEL_IDS = new Set(CONFIRMED_COMPONENTS.filter(p => p.placement === 'panel').map(p => p.id));
 export const CONFIRMED_FITTING_IDS = new Set(CONFIRMED_COMPONENTS.filter(p => p.placement === 'fitting').flatMap(p => [p.id, p.kind || p.id]));
 export function confirmedSpec(id) { return CONFIRMED_COMPONENTS.find(p => p.id === id || p.kind === id) || null; }

@@ -101,6 +101,7 @@ const SCREW_ICON = '<circle cx="8" cy="4" r="2.6" fill="none" stroke="currentCol
 const CAP_ICON = '<circle cx="8" cy="8" r="5.2" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="8" r="2" fill="currentColor"/>'
 
 const BY_ID: Record<string, string> = {
+  strap: '<path d="M3 3.5h5a4 4 0 0 1 0 8H3v-3h5a1 1 0 0 0 0-2H3z" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="2" y="2" width="3" height="6" rx=".7" fill="none" stroke="currentColor" stroke-width="1.2"/>',
   ...CONN_CAT_ICON,
   ...ACC_CAT_ICON,
   wheel: ACC_CAT_ICON['multi-wheel2'],
@@ -179,7 +180,7 @@ export function PartImg({ id, imageKey, svg, size = 18 }: { id?: string | null; 
   // 没图的也占同样大的格子，和有图的行文字对齐
   return (
     <span className="qb-part-image shrink-0 inline-flex items-center justify-center" style={{ width: size, height: size }}>
-      {id && !['windmill', 'TC15', 'panel_sector_20'].includes(id) ? <span title={id} style={{ color: '#8b929c', fontSize: size * .5 }}>?</span> : <Svg16 inner={svg} size={size} />}
+      {id && !['windmill', 'TC15', 'panel_sector_20', 'strap'].includes(id) ? <span title={id} style={{ color: '#8b929c', fontSize: size * .5 }}>?</span> : <Svg16 inner={svg} size={size} />}
     </span>
   )
 }

@@ -34,16 +34,17 @@ function routingApi() {
   return api as unknown as EngineApi
 }
 
-it('目录组件各归属一次，包含新增旋转轴承', () => {
+it('目录组件各归属一次，包含旋转轴承和任意两管绑带', () => {
   const entries = installationChoices(routingApi(), key => key)
-  expect(entries).toHaveLength(99)
-  expect(new Set(entries.map(entry => entry.id)).size).toBe(99)
-  expect(Object.fromEntries([...new Set(entries.map(entry => entry.tool))].map(tool => [tool, entries.filter(entry => entry.tool === tool).length]))).toEqual({ panels:25, accessories:11, textiles:13, wheels:7, slides:4, pools:5, tubes:11, connectors:19, reinforce:4 })
+  expect(entries).toHaveLength(100)
+  expect(new Set(entries.map(entry => entry.id)).size).toBe(100)
+  expect(entries.find(entry => entry.id === 'strap')).toMatchObject({tool:'accessories',method:'扎带固定'})
+  expect(Object.fromEntries([...new Set(entries.map(entry => entry.tool))].map(tool => [tool, entries.filter(entry => entry.tool === tool).length]))).toEqual({ panels:25, accessories:12, textiles:13, wheels:7, slides:4, pools:5, tubes:11, connectors:19, reinforce:4 })
   expect(entries.filter(entry => entry.group === 'outside')).toHaveLength(17)
   expect(entries.filter(entry => entry.group === 'inset')).toHaveLength(8)
   expect(entries.filter(entry => entry.group === 'on-tube')).toHaveLength(4)
   expect(entries.filter(entry => entry.group === 'on-frame')).toHaveLength(3)
-  expect(entries.filter(entry => entry.group === 'auxiliary')).toHaveLength(4)
+  expect(entries.filter(entry => entry.group === 'auxiliary')).toHaveLength(5)
 })
 
 it('已核对来源不随新版compat覆盖：官方套装与扩展整块透明板正确区分', () => {

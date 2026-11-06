@@ -207,14 +207,70 @@ function trampolineCandidates(model,spec) {
   }
   return out;
 }
-export function ropeCandidate(model,first,second) {
-  const spec=confirmedSpec('rope');
+export function ropeCandidate(model,first,second,partId='rope') {
+  const spec=confirmedSpec(partId);
+  if(!spec || spec.feature!=='rope')return bad('missing_support');
   if(!first || !second || first.tube===second.tube)return bad('missing_support');
+  if([first,second].some(m=>{const tube=model.tubes.get(m.tube);return !tube || tube.arm || tube.link;}))return bad('missing_support');
   const a=curvePoint(model,first.tube,first.t),b=curvePoint(model,second.tube,second.t);
   if(!a || !b || [first.t,second.t].some(t=>t<0.05 || t>0.95))return bad('missing_support');
-  const length=Math.hypot(...cSub(b,a));if(length<8 || length>240)return bad('tube_short');
-  const x=unit(cSub(b,a)),z=unit(cross(x,Math.abs(x[1])>0.9?[1,0,0]:[0,1,0])),y=cross(z,x),frame={pos:center([a,b]),axes:[x,y,z],quat:quatFromBasis(x,y,z)};
-  return {...asFitting(spec,{tube:first.tube,a:first.tube,b:second.tube},frame,{mounts:[first,second].map(m=>({...m,role:'knot',width:1})),supportTubes:[first.tube,second.tube]}),ropeLength:length};
+  if(partId==='strap' && [first,second].some(m=>{
+    const length=tubeCurveLength(model,m.tube),margin=(geometry().connectorSize+spec.bandWidth)/2;
+    return !length || Math.min(m.t,1-m.t)*length<margin-1e-6;
+  }))return bad('tube_short');
+  const length=Math.hypot(...cSub(b,a));if(!Number.isFinite(length) || (partId!=='strap' && (length<8 || length>240)))return bad('tube_short');
+  // 相贴的管也可以绑扎；重合定位点使用承载管切线建立稳定朝向。
+  const tangent=unit(cSub(curvePoint(model,first.tube,first.t+0.001),curvePoint(model,first.tube,first.t-0.001)));
+  const x=length>1e-8?unit(cSub(b,a)):tangent,z=unit(cross(x,Math.abs(x[1])>0.9?[1,0,0]:[0,1,0])),y=cross(z,x),frame={pos:center([a,b]),axes:[x,y,z],quat:quatFromBasis(x,y,z)};
+  if(!frame.axes.flat().every(Number.isFinite))return bad('missing_support');
+  return {...asFitting(spec,{tube:first.tube,a:first.tube,b:second.tube},frame,{mounts:[first,second].map(m=>({...m,role:partId==='strap'?'wrap':'knot',width:partId==='strap'?spec.bandWidth:1})),supportTubes:[first.tube,second.tube]}),ropeLength:length};
+}
+
+// 沿真实管轴定位，弯管使用圆弧参数；不将圆弧上的点击投到两端弦线上。
+function tubeCurveLength(model,tubeId) {
+  const tube=model.tubes.get(tubeId),a=tube && model.nodes.get(tube.a),b=tube && model.nodes.get(tube.b);
+  if(!a || !b)return 0;
+  return tube.bow && Array.isArray(tube.bowCenter)?Math.hypot(...cSub(xyz(a),tube.bowCenter))*Math.PI/2:Math.hypot(...cSub(xyz(b),xyz(a)));
+}
+
+export function tubeTieMount(model,tubeId,point,partId='rope') {
+  const tube=model.tubes.get(tubeId),a=tube && model.nodes.get(tube.a),b=tube && model.nodes.get(tube.b);
+  if(!a || !b || tube.arm || tube.link || !point)return null;
+  const p=Array.isArray(point)?point:[point.x,point.y,point.z];if(!p.every(Number.isFinite))return null;
+  let t;
+  if(tube.bow){
+    const c=tube.bowCenter;if(!Array.isArray(c))return null;
+    const va=cSub(xyz(a),c),vb=cSub(xyz(b),c),d=cSub(p,c);
+    t=Math.atan2(cDot(d,vb)/cDot(vb,vb),cDot(d,va)/cDot(va,va))/(Math.PI/2);
+  }else{
+    const d=cSub(xyz(b),xyz(a));t=cDot(cSub(p,xyz(a)),d)/cDot(d,d);
+  }
+  if(!Number.isFinite(t))return null;
+  const margin=partId==='strap'?Math.max(.05,(geometry().connectorSize+confirmedSpec('strap').bandWidth)/2/tubeCurveLength(model,tubeId)):.05;
+  if(margin>=.5)return null;
+  t=Math.max(margin,Math.min(1-margin,t));const pos=curvePoint(model,tubeId,t);
+  return pos?.every(Number.isFinite)?{tube:tubeId,t,pos}:null;
+}
+
+export function strapShape(model,part) {
+  if(part.kind!=='strap' || !Array.isArray(part.mounts) || part.mounts.length!==2)return null;
+  if(part.mounts.some(m=>!m || typeof m.tube!=='string' || !Number.isFinite(m.t) || m.t<0 || m.t>1))return null;
+  const spec=confirmedSpec('strap'),radius=geometry().tubeRadius+spec.depth/2,width=spec.bandWidth,depth=spec.depth;
+  const points=part.mounts.map(m=>curvePoint(model,m.tube,m.t));
+  if(points.some(p=>!p))return null;
+  const axes=part.mounts.map(m=>unit(cSub(curvePoint(model,m.tube,m.t+.001),curvePoint(model,m.tube,m.t-.001))));
+  let normal=cross(axes[0],axes[1]);
+  if(Math.hypot(...normal)<1e-5)normal=cross(axes[0],cSub(points[1],points[0]));
+  if(Math.hypot(...normal)<1e-5)normal=cross(axes[0],Math.abs(axes[0][1])<.9?[0,1,0]:[1,0,0]);
+  normal=unit(normal);if(![...points.flat(),...axes.flat(),...normal].every(Number.isFinite))return null;
+  const bands=Math.hypot(...cSub(points[1],points[0]))>1e-5?[-1,1].map(side=>{
+    const vertices=[];
+    for(let layer=0;layer<2;layer++)for(let end=0;end<2;end++)for(const edge of [-1,1]){
+      vertices.push(points[end].map((v,i)=>v+normal[i]*side*(radius+(layer-.5)*depth)+axes[end][i]*edge*width/2));
+    }
+    return vertices;
+  }):[];
+  return {points,axes,normal,bands,radius,width,depth};
 }
 function railCandidates(model,spec,{legacyInset=false,deduplicate=true,screwAxis='vertical',oppositeRetainers=false}={}) {
   const out=[],seen=new Set();
@@ -401,7 +457,7 @@ function computeConfirmedCandidates(model,id,options) {
   }
   // 彩虹桥按连续框边识别，布片和绳子保留各自的安装方式。
   const candidates=spec.feature==='bridge'?bridgeCandidates(model,spec):railCandidates(model,spec);
-  return spec.feature==='rope'?candidates.map(p=>ropeCandidate(model,...p.mounts)):candidates;
+  return spec.feature==='rope'?candidates.map(p=>ropeCandidate(model,p.mounts[0],p.mounts[1],spec.id)):candidates;
 }
 
 // 同一框格保留实际可用的固定方向；批量装配可保留全部方案。
@@ -435,8 +491,8 @@ export function confirmedStructuralValid(model,part) {
   if(part.params?.screwAxis!=null && !['vertical','horizontal'].includes(part.params.screwAxis))return false;
   if(spec.feature==='lego' && part.params?.studHeight!=null && part.params.studHeight!==spec.studHeight)return false;
   if(spec.feature==='rope') {
-    if(part.mounts.length!==2 || part.mounts.some(m=>m.role!=='knot' || m.width!==1))return false;
-    const candidate=ropeCandidate(model,...part.mounts);
+    if(part.mounts.length!==2 || part.mounts.some(m=>m.role!==(spec.id==='strap'?'wrap':'knot') || m.width!==(spec.id==='strap'?spec.bandWidth:1)))return false;
+    const candidate=ropeCandidate(model,part.mounts[0],part.mounts[1],spec.id);
     return candidate.valid && sameRotation(candidate.quat,part.quat) && Math.abs(candidate.ropeLength-part.ropeLength)<0.01 && Math.hypot(...cSub(candidate.pos,[part.x,part.y,part.z]))<0.1 && candidate.supportTubes.length===part.supportTubes.length && candidate.supportTubes.every(id=>part.supportTubes.includes(id));
   }
   if(spec.feature==='trampoline') {
@@ -514,6 +570,14 @@ function componentBodyVolumes(model,part) {
       if(y1>3 && x1>3)boxes.push(cVolume(frame,[Math.max(3,x0),3,PANEL_OUTER_FACE-geometry().panelThickness],[x1,y1,PANEL_OUTER_FACE]));
     }
     return boxes;
+  }
+  if(spec.id==='strap'){
+    const shape=strapShape(model,part);if(!shape)return [];
+    const wraps=shape.points.map((pos,i)=>({pos,axes:[shape.axes[i],shape.normal,cross(shape.axes[i],shape.normal)],half:[shape.width/2,shape.radius+shape.depth/2,shape.radius+shape.depth/2]}));
+    return [...wraps,...shape.bands.map(vertices=>{
+      const points=vertices.map(p=>worldToLocal(frame,p)),lo=[0,1,2].map(i=>Math.min(...points.map(p=>p[i]))),hi=[0,1,2].map(i=>Math.max(...points.map(p=>p[i])));
+      return cVolume(frame,lo,hi);
+    })];
   }
   if(spec.feature==='rope')return [cVolume(frame,[-part.ropeLength/2,-2,-0.6],[part.ropeLength/2,0.6,0.6])];
   if(spec.mountType==='tube') {const rail=model._rail(part.tube),length=rail?.len-10;return rail?[cVolume(frame,[-length/2,-spec.radius,-spec.radius],[length/2,spec.radius,spec.radius])]:[];}

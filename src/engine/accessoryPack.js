@@ -520,7 +520,7 @@ export function confirmedDiagnostics(model, probe, {collisionCache = null,mountC
   const spec = confirmedSpec(probe.panelId || probe.kind || probe.partId);
   if (!spec) return invalid('missing_support');
   let part;
-  if (spec.feature === 'rope') part = { ...ropeCandidate(model, ...(probe.mounts || [])), id: probe.id, color: probe.color };
+  if (spec.feature === 'rope') part = { ...ropeCandidate(model, probe.mounts?.[0], probe.mounts?.[1], spec.id), id: probe.id, color: probe.color };
   else if(spec.feature==='trampoline')part={...trampolineCandidate(model,probe),id:probe.id,color:probe.color};
   else if (probe.panelId) part = confirmedPanelDiagnostics(model, probe);
   else {

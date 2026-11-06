@@ -1538,7 +1538,7 @@ export class BuildModel {
       bounds:placementBounds(this,p),ids:new Set(p.supportTubes||[])
     }),()=>confirmedDiagnostics(this,p,{collisionCache,mountCache,candidates})));
   }
-  ropeDiagnostics(first, second) { return confirmedDiagnostics(this, ropeCandidate(this, first, second)); }
+  ropeDiagnostics(first, second, partId = 'rope') { return confirmedDiagnostics(this, ropeCandidate(this, first, second, partId)); }
   confirmedDiagnostics(probe) { return probe.nativeGeometry ? this.panelPlacementDiagnostics(probe) : confirmedDiagnostics(this, probe); }
   nativePanelDiagnostics(probe) { return nativePanelDiagnostics(this, probe); }
   nativePanelMounts(panelId) { return nativePanelMounts(this,panelId); }

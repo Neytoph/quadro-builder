@@ -12,7 +12,7 @@ import { panelScrewPose, panelLipProfiles, sectorScrewMounts, PANEL_SCREW_RADIUS
 import { COLOR_HEX } from './colors.js';
 import { readComponentAppearance, diamondNetSegments } from './componentAppearance.js';
 import { geometry } from './catalog.js';
-import { confirmedFrame, curvePoint, worldToLocal, rungPositions } from './confirmedComponentModel.js';
+import { confirmedFrame, curvePoint, worldToLocal, rungPositions, strapShape } from './confirmedComponentModel.js';
 const font=new FontLoader().parse(fontData);
 const colors=['#e64343','#ffcf3d','#f09cbc','#74b166','#318dde','#9c75cb'];
 const clearPanelFeatures=new Set(['acrylic','acrylic_holes','capsule']);
@@ -94,6 +94,27 @@ function outline(w,h,feature,inset=false) {
     for(let i=0;i<8;i++){const xx=x-n-(w-2*n)*(i+0.5)/8;shape.lineTo(xx,y);shape.lineTo(xx,y-(i%2?0:4));shape.lineTo(xx-(w-2*n)/16,y-(i%2?0:4));shape.lineTo(xx-(w-2*n)/16,y);}
   }
   shape.lineTo(-x+n,y);shape.absarc(-x,y,n,0,-Math.PI/2,true);shape.lineTo(-x,-y+n);shape.absarc(-x,-y,n,Math.PI/2,0,true);shape.closePath();return shape;
+}
+
+/** @returns {THREE.Mesh[]} */
+function buildStrapMeshes(f,model,part,frame,spec) {
+  const shape=strapShape(model,part);if(!shape)return [];
+  const {radius,width}=shape,color=spec.fixedColor;
+  const points=shape.points.map(p=>vec(worldToLocal(frame,p))),inverse=new THREE.Quaternion(...frame.quat).invert(),axes=shape.axes.map(a=>vec(a).applyQuaternion(inverse));
+  // 两端分别沿承载管绕一圈，连接带允许扭转以适应两根管的不同方向。
+  points.forEach((point,i)=>{
+    const rotation=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0),axes[i]);
+    f.add(`strap-wrap:${radius}:${width}`,()=>new THREE.CylinderGeometry(radius,radius,width,48,1,true),color,point.toArray(),rotation,'cloth');
+  });
+  for(const band of shape.bands){
+    const vertices=band.flatMap(p=>worldToLocal(frame,p));
+    const key=`strap-band:${JSON.stringify(vertices)}`;
+    f.add(key,()=>{
+      const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(vertices,3));
+      geo.setIndex([0,1,2,1,3,2,4,6,5,5,6,7,0,4,1,1,4,5,2,3,6,3,7,6,0,2,4,2,6,4,1,5,3,3,5,7]);geo.computeVertexNormals();return geo;
+    },color,[0,0,0],null,'cloth');
+  }
+  return f.meshes;
 }
 function plateGeometry(w,h,feature,inset=false) {
   const depth=geometry().panelThickness,bevel=inset&&!clearPanelFeatures.has(feature)?Math.min(0.06,depth/4):0;
@@ -322,6 +343,7 @@ export function confirmedComponentMeshes(scene,model,part) {
     return f.meshes;
   }
   if(spec.feature==='rope') {
+    if(spec.id==='strap')return buildStrapMeshes(f,model,part,frame,spec);
     for(let strand=0;strand<3;strand++){const points=[];for(let i=0;i<=80;i++){const x=-part.ropeLength/2+i*part.ropeLength/80,a=i*1.4+strand*Math.PI*2/3;points.push([x,-Math.sin(i/80*Math.PI)*1.5+Math.cos(a)*0.2,Math.sin(a)*0.2]);}f.tube('braid:'+strand,points,0.18,'#f0e8d6');}
     for(const mount of part.mounts) {
       const p=worldToLocal(frame,curvePoint(model,mount.tube,mount.t));f.torus('rope-knot',0.7,0.3,'#e9dfc8',p);
