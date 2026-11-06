@@ -426,6 +426,10 @@ export const PART_IMAGE_MANIFEST = {
       "src": "parts/straight.png",
       "srcLarge": "parts/large/straight.png"
     },
+    "strap": {
+      "src": "parts/strap.png",
+      "srcLarge": "parts/large/strap.png"
+    },
     "swing": {
       "src": "parts/swing.png",
       "srcLarge": "parts/large/swing.png"

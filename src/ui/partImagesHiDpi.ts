@@ -100,6 +100,7 @@ export const PART_IMAGES_LARGE: ReadonlySet<string> = new Set([
   "steering_lock",
   "steering_wheel",
   "straight",
+  "strap",
   "swing",
   "t",
   "textile",
