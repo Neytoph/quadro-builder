@@ -26,6 +26,16 @@ import { bearingEndpoints, bearingConnectionProbe, coaxial } from './bearingConn
 // groesser als das laengste Rohr (75 cm + Kupplung): ein Rohr liegt damit in
 // hoechstens zwei Zellen je Achse.
 const COLL_CELL = 100;
+// 吸附只容许浮点计算误差，端点必须留在所选引导射线上。
+const TUBE_GUIDE_EPS = 1e-6;
+const cleanGeometryCoordinate = value => Math.abs(value - Math.round(value)) < 1e-10 ? Math.round(value) : value;
+function followsTubeGuide(from, to, direction) {
+  const length = Math.hypot(...direction);
+  if (!length) return false;
+  const unit = direction.map(v => v / length), delta = [to.x - from.x, to.y - from.y, to.z - from.z];
+  const along = delta.reduce((sum, value, axis) => sum + value * unit[axis], 0);
+  return along > 0 && Math.hypot(...delta.map((value, axis) => value - along * unit[axis])) <= TUBE_GUIDE_EPS;
+}
 export const fixedTubeColor = id => id === 'TA35' || id === 'TA75' ? '#b9c0c5' : null;
 
 export function slopeArmDirsAt(model, node) {
@@ -705,6 +715,13 @@ export class BuildModel {
     return null;
   }
 
+  // 有确定几何落点时只复用重合节点，避免近距离合并改变形状。
+  findNodeExact(x, y, z) {
+    const p = { x, y, z }, eps2 = TUBE_GUIDE_EPS * TUBE_GUIDE_EPS;
+    for (const node of this.nodes.values()) if (dist2(node, p) <= eps2) return node;
+    return null;
+  }
+
   /**
    * Hoehe der untersten Kupplungslage. Im Editor gebaute Modelle sitzen auf
    * y = connectorSize/2, importierte auf y = 0 -- die Rutsche endet auf der
@@ -729,8 +746,8 @@ export class BuildModel {
     return ALLOW_BELOW_GROUND ? false : y < -GROUND_TOL;
   }
 
-  addNode(x, y, z) {
-    const existing = this.findNodeNear(x, y, z);
+  addNode(x, y, z, { merge = true } = {}) {
+    const existing = merge ? this.findNodeNear(x, y, z) : null;
     // Wird hier gebaut, ist die Kupplung in Gebrauch -- der Vermerk aus dem
     // Import (steht in der Datei, haelt aber nichts) gilt dann nicht mehr.
     if (existing) { delete existing.unused; return existing; }
@@ -2266,7 +2283,7 @@ export class BuildModel {
   addTubeClamp(tubeId, point, part, cs = 5) {
     const m = this.tubeClampMount(tubeId, point, part, cs);
     if (!m) return null;
-    const node = this.addNode(round(m.pos[0]), round(m.pos[1]), round(m.pos[2]));
+    const node = this.findNodeExact(...m.pos) || this.addNode(m.pos[0], m.pos[1], m.pos[2], { merge: false });
     // Die Lagerkupplung ist ein ANBAUTEIL, das um das Rohr klemmt, und die
     // Kupplung, die sie traegt, ein eigener Knoten -- genau so fuehrt die Datei
     // beides (bearing-connector4 am Rohr, connector3 10 cm daneben). Frueher war
@@ -5548,7 +5565,7 @@ export class BuildModel {
 
   _applyOffset(tg, dx, dy, dz) {
     const shift = (o) => {
-      o.x = round(o.x + dx); o.y = round(o.y + dy); o.z = round(o.z + dz);
+      o.x = cleanGeometryCoordinate(o.x + dx); o.y = cleanGeometryCoordinate(o.y + dy); o.z = cleanGeometryCoordinate(o.z + dz);
     };
     for (const id of tg.nodes) shift(this.nodes.get(id));
     for (const id of tg.clamps) shift(this.clamps.get(id));
@@ -5558,7 +5575,7 @@ export class BuildModel {
       shift(s);
       // Der Einhaengepunkt gehoert zur Rutsche und wandert mit.
       if (s.hook && s.hook.length === 3)
-        s.hook = [round(s.hook[0] + dx), round(s.hook[1] + dy), round(s.hook[2] + dz)];
+        s.hook = [cleanGeometryCoordinate(s.hook[0] + dx), cleanGeometryCoordinate(s.hook[1] + dy), cleanGeometryCoordinate(s.hook[2] + dz)];
     }
     this._moveTubeGeom(tg.nodes, [dx, dy, dz]);
     this._movePanelGeom(tg.nodes, [dx, dy, dz]);
@@ -5579,8 +5596,7 @@ export class BuildModel {
       const bewegt = ids.filter((id) => movedIds.has(id)).length;
       if (!bewegt) continue;
       if (bewegt === ids.length && delta) {
-        p.geom = { ...p.geom, p: [round(p.geom.p[0] + delta[0]),
-          round(p.geom.p[1] + delta[1]), round(p.geom.p[2] + delta[2])] };
+        p.geom = { ...p.geom, p: p.geom.p.map((value, axis) => cleanGeometryCoordinate(value + delta[axis])) };
       } else {
         delete p.geom;
       }
@@ -5602,13 +5618,11 @@ export class BuildModel {
       // 弯管的圆心跟着两头一起平移，不然还按旧圆心画弧，弯管就歪成一截短管。
       // 转和镜像各自改圆心（rotateSelection / mirrorSelection），这里只管平移。
       if (t.bow && t.bowCenter && ba && bb && delta) {
-        t.bowCenter = [round(t.bowCenter[0] + delta[0]), round(t.bowCenter[1] + delta[1]),
-          round(t.bowCenter[2] + delta[2])];
+        t.bowCenter = t.bowCenter.map((value, axis) => cleanGeometryCoordinate(value + delta[axis]));
       }
       if (!t.geom) continue;
       if (ba && bb && delta) {
-        t.geom = { ...t.geom, p0: [round(t.geom.p0[0] + delta[0]),
-          round(t.geom.p0[1] + delta[1]), round(t.geom.p0[2] + delta[2])] };
+        t.geom = { ...t.geom, p0: t.geom.p0.map((value, axis) => cleanGeometryCoordinate(value + delta[axis])) };
       } else {
         delete t.geom;
       }
@@ -5785,11 +5799,11 @@ export class BuildModel {
     const r6 = (t) => Math.round(t * 1e6) / 1e6;
     const flipPos = (o) => {
       if (!o) return;
-    if (i === 0) o.x = round(2 * c - o.x); else o.z = round(2 * c - o.z);
+    if (i === 0) o.x = cleanGeometryCoordinate(2 * c - o.x); else o.z = cleanGeometryCoordinate(2 * c - o.z);
     };
     const flipPt = (p) => {
       if (!Array.isArray(p) || p.length !== 3) return p;
-      const q = p.slice(); q[i] = round(2 * c - q[i]); return q;
+      const q = p.slice(); q[i] = cleanGeometryCoordinate(2 * c - q[i]); return q;
     };
     const flipDir = (v) => {
       if (!v || v.length !== 3) return v;
@@ -5944,7 +5958,7 @@ export class BuildModel {
     const invalidBefore=this._invalidComponents();
     const fail=reason=>{this.loadJSON(snapshot);return {ok:false,reason};};
     const u=axis.map(value=>value/Math.hypot(...axis)), co=Math.cos(radians), si=Math.sin(radians);
-    const point=p=>rodriguesAt(p,pivot,u,co,si).map(round);
+    const point=p=>rodriguesAt(p,pivot,u,co,si).map(cleanGeometryCoordinate);
     const direction=v=>rodriguesDir(v,u,co,si).map(round4);
     const spin=q=>spinAroundAxis(q || [0,0,0,1],u,radians);
     const move=part=>{[part.x,part.y,part.z]=point([part.x,part.y,part.z]);};
@@ -6021,7 +6035,7 @@ export class BuildModel {
         const a = schritte * Math.PI / 2, co = Math.cos(a), si = Math.sin(a);
         [dx, dz] = [co * dx - si * dz, si * dx + co * dz];
       }
-      return [round(cx + dx), round(cz + dz)];
+      return [cleanGeometryCoordinate(cx + dx), cleanGeometryCoordinate(cz + dz)];
     };
     // Richtungen drehen um den Ursprung, nicht um die Achse.
     const dreheDir = (v) => {
@@ -6147,7 +6161,7 @@ export class BuildModel {
     }
     if (!nearby.length) return [0, 0, 0];
 
-    const eps2 = MERGE_EPS * MERGE_EPS;
+    const eps2 = TUBE_GUIDE_EPS * TUBE_GUIDE_EPS;
     const countHits = (dx, dy, dz) => {
       let hits = 0;
       for (const m of moved) {
@@ -6189,7 +6203,7 @@ export class BuildModel {
         }
       }
     }
-    return [round(best.dx), round(best.dy), round(best.dz)];
+    return [best.dx, best.dy, best.dz];
   }
 
   /**
@@ -6202,7 +6216,7 @@ export class BuildModel {
   _mergeMovedNodes(movedIds) {
     let merged = 0;
     const survivors = new Set();
-    const eps2 = MERGE_EPS * MERGE_EPS;
+    const eps2 = TUBE_GUIDE_EPS * TUBE_GUIDE_EPS;
     for (const id of movedIds) {
       const n = this.nodes.get(id);
       if (!n) continue;
@@ -6515,8 +6529,9 @@ export class BuildModel {
       z: from.z + dirVec[2] * spacing,
     };
     if (this.isBelowGround(target.y)) return { ground: true };
-    let existing = this.findNodeNear(target.x, target.y, target.z);
-    // 同一实体管架闭环时，允许一个连接件孔距内的安装误差；双管虚拟桥不跨组选点。
+    const nearby = this.findNodeNear(target.x, target.y, target.z);
+    let existing = nearby && followsTubeGuide(from, nearby, dirVec) ? nearby : null;
+    // 同一管架的长度容差只沿引导线使用，不能横向吸附改变管子角度。
     {
       const sameComponent = id => context.components.get(id) === context.components.get(from.id);
       let bestDistance = existing ? Math.hypot(existing.x - target.x, existing.y - target.y, existing.z - target.z) : Infinity;
@@ -6528,7 +6543,7 @@ export class BuildModel {
         const tolerance = sameFrame ? Math.max(snapTol, connectorSize + MERGE_EPS) : snapTol;
         if (distance > tolerance || (bestConnected && !sameFrame) || (sameFrame === !!bestConnected && distance >= bestDistance)) continue;
         const axis = norm3([node.x - from.x, node.y - from.y, node.z - from.z]);
-        if (dot3(axis, norm3(dirVec)) < DIR_ALIGN_TOL) continue;
+        if (!followsTubeGuide(from, node, dirVec)) continue;
         const incoming = axis.map(v => -v);
         if (!this.canExtendFrom(node, incoming) || armFittingDirsAt(this, node).some(port => dot3(port, incoming) > ARM_ALIGN_TOL)) continue;
         if (this.tubeCollision(from, node, from.part === 'windmill' ? from.clampOn?.tubeId : null)) continue;
@@ -6554,7 +6569,7 @@ export class BuildModel {
     if (!plan || !plan.target) return plan;
     const from = this.nodes.get(fromNodeId);
     const { target, existing } = plan;
-    const to = existing || this.addNode(target.x, target.y, target.z);
+    const to = existing || this.addNode(target.x, target.y, target.z, { merge: false });
     delete to.unused;
     // Der neue Knoten steht in derselben Lage wie der, von dem gebaut wird --
     // sonst boete er am Ende einer gedrehten Reihe wieder die Weltachsen an und
@@ -6586,22 +6601,19 @@ export class BuildModel {
     const target = { x: bx + dir[0] * spacing, y: by + dir[1] * spacing, z: bz + dir[2] * spacing };
     // Adapter-Koerper UND Rohrende muessen ueber dem Boden bleiben.
     if (this.isBelowGround(by) || this.isBelowGround(target.y)) return { ground: true };
-    // Am oberen Ende sitzt haeufig schon eine Kupplung. Die Winkelkupplung frisst
-    // im Schraegen-Raster ein gutes Stueck Weg, deshalb landet das gerechnete
-    // Rohrende ein bis zwei Zentimeter daneben -- zu weit fuer den Auto-Merge
-    // (MERGE_EPS). Ohne dieses Snapping entstuende eine zweite Kupplung, die die
-    // vorhandene ueberlagert. Gleiche Logik wie in extendDiagonalSnap.
-    const snap = this._nodeNear(target, DIAGONAL_SNAP_TOL, [fromId]);
+    // C45的端点同样只吸附引导线上的节点，套筒体和管端不另行舍入。
+    const origin = { x: bx, y: by, z: bz };
+    const snap = this._nodeNear(target, DIAGONAL_SNAP_TOL, [fromId], node => followsTubeGuide(origin, node, dir));
     const end = snap || target;
     // Pfad des Diagonalrohrs schon belegt?
     if (this.tubeCollision({ x: bx, y: by, z: bz }, end)) return { collision: true };
-    const body = this.addNode(round(bx), round(by), round(bz));
+    const body = this.addNode(bx, by, bz, { merge: false });
     body.c45 = true;
     body.c45body = true;
     body.c45axis = c45axis.slice();
     this.addArm(from.id, body.id);
     this._updateC45Quat(body, from);
-    const to = snap || this.addNode(round(target.x), round(target.y), round(target.z));
+    const to = snap || this.addNode(target.x, target.y, target.z, { merge: false });
     const tube = this.addTube(body.id, to.id, tubeId, color, length);
     return { node: to, tube, body };
   }
@@ -6685,10 +6697,10 @@ export class BuildModel {
     const by = body.y - axis[1] * sleeveLen - dir[1] * armLen;
     const bz = body.z - axis[2] * sleeveLen - dir[2] * armLen;
     if (this.isBelowGround(by)) return { ground: true };
-    const candidateBase = { x: round(bx), y: round(by), z: round(bz) };
+    const candidateBase = { x: bx, y: by, z: bz };
     const candidateBody = { ...body, c45axis: axis };
     if (c45PlacementBlocked(this, candidateBase, candidateBody)) return { collision: true };
-    const base = this.addNode(round(bx), round(by), round(bz));
+    const base = this.findNodeExact(bx, by, bz) || this.addNode(bx, by, bz, { merge: false });
     // Ihre Wuerfelachsen folgen der Huelse: lokal +X zeigt zum Adapter.
     base.quat = quatFromXAxis(axis);
     body.c45 = true;
@@ -6824,9 +6836,9 @@ export class BuildModel {
       if (dot3(norm3(occupied), norm3(axis)) > ARM_ALIGN_TOL) return true;
     }
     const body = { id: null, c45axis: axis,
-      x: round(base.x + axis[0] * sleeveLen + dir[0] * armLen),
-      y: round(base.y + axis[1] * sleeveLen + dir[1] * armLen),
-      z: round(base.z + axis[2] * sleeveLen + dir[2] * armLen) };
+      x: base.x + axis[0] * sleeveLen + dir[0] * armLen,
+      y: base.y + axis[1] * sleeveLen + dir[1] * armLen,
+      z: base.z + axis[2] * sleeveLen + dir[2] * armLen };
     return c45PlacementBlocked(this, base, body, context);
   }
 
@@ -6838,7 +6850,7 @@ export class BuildModel {
     const bz = from.z + axis[2] * sleeveLen + dir[2] * armLen;
     if (this.isBelowGround(by)) return { ground: true };
     if (this.c45AdapterCollision(fromId, axis, dir, sleeveLen, armLen)) return { collision: true };
-    const body = this.addNode(round(bx), round(by), round(bz));
+    const body = this.findNodeExact(bx, by, bz) || this.addNode(bx, by, bz, { merge: false });
     body.c45 = true;
     body.c45body = true;
     body.c45axis = axis.slice();
@@ -7000,10 +7012,11 @@ export class BuildModel {
   }
 
   // Naechster vorhandener Knoten innerhalb tol um p, ohne die ausgeschlossenen ids.
-  _nodeNear(p, tol, exclude = []) {
+  _nodeNear(p, tol, exclude = [], accept = null) {
     let best = null, bestD = tol;
     for (const n of this.nodes.values()) {
       if (exclude.includes(n.id)) continue;
+      if (accept && !accept(n)) continue;
       const d = Math.hypot(n.x - p.x, n.y - p.y, n.z - p.z);
       if (d <= bestD) { bestD = d; best = n; }
     }
@@ -7047,7 +7060,7 @@ export class BuildModel {
       if (!target) continue;
       const delta = [target.x - from.x, target.y - from.y, target.z - from.z];
       const raw = delta.map((v, i) => v / radius - dir[i]), length = Math.hypot(...raw);
-      if (Math.abs(length - 1) > .005 || Math.abs(raw.reduce((s, v, i) => s + v * dir[i], 0)) > .005) continue;
+      if (Math.abs(length - 1) * radius > TUBE_GUIDE_EPS || Math.abs(raw.reduce((s, v, i) => s + v * dir[i], 0)) * radius > TUBE_GUIDE_EPS) continue;
       const normal = raw.map(v => v / length), incoming = normal.map(v => -v);
       if (!this.canExtendFrom(target, incoming) || armFittingDirsAt(this, target).some(axis => axis.reduce((s, v, i) => s + v * incoming[i], 0) > ARM_ALIGN_TOL)) continue;
       if (this.bowBelowGround(from, dir, normal, radius) || this.bowPathCollision(from, dir, normal, radius, target)) continue;
@@ -7098,7 +7111,7 @@ export class BuildModel {
       z: from.z + R * (dirVec[2] + normal[2]),
     };
     if (this.bowBelowGround(from, dirVec, normal, R)) return { ground: true };
-    const existing = this.findNodeNear(target.x, target.y, target.z);
+    const existing = this.findNodeExact(target.x, target.y, target.z);
     if (existing && this.tubeBetween(from.id, existing.id)) {
       return { node: existing, tube: null, duplicate: true };
     }
@@ -7106,15 +7119,15 @@ export class BuildModel {
       const incoming = normal.map(value => -value);
       if (!this.canExtendFrom(existing, incoming) || armFittingDirsAt(this, existing).some(axis => axis.reduce((sum, value, i) => sum + value * incoming[i], 0) > ARM_ALIGN_TOL)) return { collision: true };
     }
-    if (this.tubeCollision(from, existing || target, null, { bowCenter: [round(cx), round(cy), round(cz)] })) {
+    if (this.tubeCollision(from, existing || target, null, { bowCenter: [cx, cy, cz] })) {
       return { collision: true };
     }
-    const to = this.addNode(round(target.x), round(target.y), round(target.z));
+    const to = existing || this.addNode(target.x, target.y, target.z, { merge: false });
     if (from.id === to.id) return null;
     const tube = this.addTube(from.id, to.id, tubeId, color, null);
     if (tube) {
       tube.bow = true;
-      tube.bowCenter = [round(cx), round(cy), round(cz)];
+      tube.bowCenter = [cx, cy, cz];
       this._extendConnectorArms(tube);
     }
     return { node: to, tube };
@@ -7171,13 +7184,13 @@ export class BuildModel {
     let blocked = null;
     for (const n2 of order) {
       const target = {
-        x: round(a.x + R * (t0[0] + n2[0])),
-        y: round(a.y + R * (t0[1] + n2[1])),
-        z: round(a.z + R * (t0[2] + n2[2])),
+        x: cleanGeometryCoordinate(a.x + R * (t0[0] + n2[0])),
+        y: cleanGeometryCoordinate(a.y + R * (t0[1] + n2[1])),
+        z: cleanGeometryCoordinate(a.z + R * (t0[2] + n2[2])),
       };
       const cy = a.y + n2[1] * R;
       if (this.bowBelowGround(a, t0, n2, R)) { blocked = { ground: true }; continue; }
-      const hit = this.findNodeNear(target.x, target.y, target.z);
+      const hit = this.findNodeExact(target.x, target.y, target.z);
       if (hit && hit.id !== endId && this.tubeBetween(startId, hit.id)) { blocked = { duplicate: true }; continue; }
       const xyz = (node) => [node.x, node.y, node.z];
       const arc = Array.from({ length: 33 }, (_, i) => {
@@ -7230,11 +7243,11 @@ export class BuildModel {
       const detached = this.degree(oldEnd) > 1 || !!(b.part || b.bearingOn || b.c45body || b.clampOn || b.stub || b.preferType)
         || [...this.fittings.values()].some((f) => Math.hypot(f.x - b.x, f.y - b.y, f.z - b.z) < 2);
       if (detached) this._releaseArms(t, oldEnd);
-      const to = hit || this.addNode(target.x, target.y, target.z);
+      const to = hit || this.addNode(target.x, target.y, target.z, { merge: false });
       if (to.id === startId) { blocked = { duplicate: true }; continue; }
       t.a = startId;
       t.b = to.id;
-      t.bowCenter = [round(a.x + n2[0] * R), round(cy), round(a.z + n2[2] * R)];
+      t.bowCenter = [cleanGeometryCoordinate(a.x + n2[0] * R), cleanGeometryCoordinate(cy), cleanGeometryCoordinate(a.z + n2[2] * R)];
       if (t.geom) t.geom = { ...t.geom, p0: [a.x, a.y, a.z], dir: t0, up: n2 };
       // Zurueckgebliebener Knoten ohne Rohr verschwindet.
       if (oldEnd !== to.id && this.degree(oldEnd) === 0 && !detached) this.nodes.delete(oldEnd);

@@ -2696,7 +2696,7 @@ export class Builder {
       } else {
         const normal = this._bowNormal(d.vec, node), radius = tube.radius_cm || gridSpacing();
         const end = [node.x, node.y, node.z].map((v, i) => v + radius * (d.vec[i] + normal[i]));
-        const existing = this.model.findNodeNear(...end);
+        const existing = this.model.findNodeExact(...end);
         if (existing && (!this.model.canExtendFrom(existing, normal.map(v => -v)) || this._armOccupied(existing, normal.map(v => -v)))) continue;
       }
       const isCardDir = Math.max(Math.abs(d.vec[0]), Math.abs(d.vec[1]), Math.abs(d.vec[2])) > DIR_ALIGN_TOL;
@@ -3453,7 +3453,7 @@ export class Builder {
     if (this.model.isBelowGround(a.y) || this.model.isBelowGround(b.y) || this.model.tubeCollision(a, b)) return null;
     const axis = p2.map((v, i) => (v - p1[i]) / span);
     for (const [point, incoming] of [[p1, axis], [p2, axis.map(v => -v)]]) {
-      const node = this.model.findNodeNear(...point);
+      const node = this.model.findNodeExact(...point);
       if (node && (!this.model.canExtendFrom(node, incoming) || this._armOccupied(node, incoming))) return null;
     }
     return { p1, p2, span };
@@ -3466,8 +3466,8 @@ export class Builder {
     if (!placement) { this.onNotice(t('notice_collision'), 'warn'); return; }
     const { p1, p2 } = placement;
     this.recordHistory(() => {
-      const n1 = this.model.addNode(round2(p1[0]), round2(p1[1]), round2(p1[2]));
-      const n2 = this.model.addNode(round2(p2[0]), round2(p2[1]), round2(p2[2]));
+      const n1 = this.model.findNodeExact(...p1) || this.model.addNode(p1[0], p1[1], p1[2], { merge: false });
+      const n2 = this.model.findNodeExact(...p2) || this.model.addNode(p2[0], p2[1], p2[2], { merge: false });
       // 第二根管的插口朝向跟随夹子，先转夹子再加管时也能沿斜面继续搭。
       const clamp = clampId && this.model.clamps.get(clampId);
       if (clamp) {

@@ -43,7 +43,7 @@ describe('可安装引导线与端点闭环', () => {
     expect(model.extend(start.id, [1, 0, 0], 'T35', 'blue', 35, 40)).toEqual({ collision: true })
   })
 
-  it.each([0, Math.PI / 6])('双管斜面相接处有小偏差时，预览及实际安装共用端点，转角=%s', angle => {
+  it.each([0, Math.PI / 6])('双管框架优先沿引导线闭合，不吸向偏高的端点，转角=%s', angle => {
     const { model, builder, scene, add, join } = fixture()
     const rotate = (p: number[]) => new THREE.Vector3(...p).applyAxisAngle(new THREE.Vector3(1, 0, 0), angle).toArray()
     const start = add(rotate([40, 50, 40])), left = add(rotate([0, 50, 40]))
@@ -56,19 +56,22 @@ describe('可安装引导线与端点闭环', () => {
     const dir = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(1, 0, 0), angle).toArray()
     const count = model.nodes.size, before = model.toJSON()
     const plan = model.planTubeExtension(start.id, dir, 40)!
-    expect(plan.existing?.id).toBe(end.id)
+    expect(plan.existing?.id).toBe(baseRight.id)
     builder._buildHandles()
     const handle = scene.handleGroup.children.find((g: THREE.Object3D) => g.userData.nodeId === start.id && g.userData.dirName === '-Z')!
-    expect(handle.userData.previewTarget).toEqual([end.x, end.y, end.z])
+    expect(handle.userData.previewTarget).toEqual([baseRight.x, baseRight.y, baseRight.z])
     scene._setTubePreview(handle)
-    expect(scene._tubePreview.position.toArray()).toEqual([start.x, start.y, start.z].map((v, i) => (v + [end.x, end.y, end.z][i]) / 2))
+    scene._tubePreview.position.toArray().forEach((value: number, axis: number) => {
+      expect(value).toBeCloseTo(([start.x, start.y, start.z][axis] + [baseRight.x, baseRight.y, baseRight.z][axis]) / 2, 12)
+    })
     expect(model.toJSON()).toEqual(before)
     const result = model.extend(start.id, dir, 'T35', 'green', 35, 40)!
-    expect(result.node.id).toBe(end.id)
+    expect(result.node.id).toBe(baseRight.id)
     expect(model.nodes.size).toBe(count)
-    expect(model.incidentTubeIds(end.id)).toContain(result.tube!.id)
+    expect(model.incidentTubeIds(baseRight.id)).toContain(result.tube!.id)
+    expect(model.incidentTubeIds(end.id)).not.toContain(result.tube!.id)
     const reopened = new BuildModel(); reopened.loadJSON(model.toJSON())
-    expect(reopened.tubeBetween(start.id, end.id)?.id).toBe(result.tube!.id)
+    expect(reopened.tubeBetween(start.id, baseRight.id)?.id).toBe(result.tube!.id)
   })
 
   it('附近独立平行管架不使用双管闭环的大范围吸附', () => {

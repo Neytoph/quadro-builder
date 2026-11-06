@@ -462,17 +462,23 @@ export function resolveNodeConnection(model, nodeOrId) {
   }
   let types = node.unused ? [] : legacyConnectorsForNode(model, node);
   let type = node.unused ? null : legacyConnectorType(model, node);
+  // 普通接头的插杆只沿自身正交轴生成，斜管方向继续用于安装诊断。
+  const ordinaryDirs = ordinary ? worldDirs.filter((_, index) => isAxisDir(local[index])) : worldDirs;
   // 重复端口不能凭 degree 增加一个不存在的连接件臂。
   if (ordinary && nonAxis.length === 0 && (unique.length || preferredPattern || savedArms?.length)) {
     const geometric = connectorTypeForDirs(physicalDirs(node, worldDirs));
     type = preferredPattern ? node.preferType : geometric;
     types = type === 'end' ? [] : [type];
   }
+  if (ordinary && nonAxis.length && !node.preferType && !node.arms?.length && !node.c45 && !node.c45file) {
+    type = connectorTypeForDirs(ordinaryDirs);
+    types = type && type !== 'end' ? [type] : [];
+  }
   // connector45_2 本身是文件确认的实体；已有 c45body 归属时避免重复计料。
   const importedAdapter = hasStandaloneFileC45(model, node);
   if (importedAdapter && !types.includes('diagonal')) types = [...types, 'diagonal'];
   for (const value of types) if (!getConnector(value)) diag('UNKNOWN_CONNECTOR', `连接件 ${value} 不在零件目录中。`, '选择实际可用的连接件。');
-  const frame = connectorFrameOf(model, node), renderDirs = [...worldDirs];
+  const frame = connectorFrameOf(model, node), renderDirs = [...ordinaryDirs];
   const addRender = d => { const length = Math.hypot(...d) || 1, normalized = d.map(v => v / length); if (!renderDirs.some(e => e.reduce((s, v, i) => s + v * normalized[i], 0) > 0.99)) renderDirs.push(normalized); };
   for (const d of node.arms || []) if (Array.isArray(d) && d.length === 3) addRender(d);
   if (preferredPattern) for (const d of preferredPattern.arms) addRender(frame ? [0, 1, 2].map(i => d.reduce((s, v, j) => s + v * frame[j][i], 0)) : d);
