@@ -185,6 +185,7 @@ export class Builder {
     this.boxSelect = false;
     this._boxSelected = new Map();
     this._paste = null;              // Kopie, die gerade am Zeiger haengt
+    this.tapToPositionPaste = false;
     this._lastPointer = null;        // letzte Zeigerstelle (fuer Strg+V)
     this._tubeHoverPointer = null;
     this.transformMode='translate';
@@ -283,6 +284,7 @@ export class Builder {
     if (on) this._colorPreview = null;
     if (on) this._cancelHingeDrag();
     this.readOnly = !!on;
+    if (this.readOnly) this.cancelPaste();
     this.transformGizmo?.sync();
     if (this.readOnly && this.mode !== "select" && this.mode !== "assembly") this.setMode("select");
   }
@@ -1270,7 +1272,7 @@ export class Builder {
     if (!d || !d.sel) return false;
     // Ohne Zusammenlegen und ohne Trennen: die Kopie steht ja noch frei.
     const res = this.model.rotateSelection(d.sel, steps, { merge: false, grid: SNAP_STEP });
-    if (!res.ok) return false;
+    if (!res.ok) { this.onNotice(t("notice_rotate_" + res.reason), "warn"); return false; }
     d.valid = !this._troubleWith(d.sel, d.collidedBefore);
     this.refresh();
     return true;
@@ -1359,12 +1361,10 @@ export class Builder {
 
   /** Aktuelle Einfuege-Hoehe in cm, oder null. */
   get pasteHeightCm() {
-    const d = this._paste;
-    if (!d) return null;
-    const a = d.frag.anchor;
-    const y = d.flat ? a[1] : (d.planeY != null ? d.planeY : a[1]);
-    return Math.round(y);
+    return this._paste ? this._pasteOrigin()[1] : null;
   }
+
+  get canAdjustPasteHeight() { return !!this._paste && !this._paste.flat; }
 
   /**
    * 泳池内衬：有现成方框就标绿面让人点挂；没有框则整套跟指针走，↑↓ 换楼层。
@@ -1393,7 +1393,8 @@ export class Builder {
       this.onNotice(t("notice_pool_pick_frame"), "info");
       return "mount";
     }
-    this.onNotice(t("notice_pool_no_frame"), "info");
+    const touch = this.tapToPositionPaste || this.inputType === 'touch';
+    this.onNotice(t(touch ? "notice_pool_no_frame_touch" : "notice_pool_no_frame"), "info");
     return this._startPoolPaste(spec) ? "paste" : false;
   }
 
@@ -1484,13 +1485,16 @@ export class Builder {
    * Nur die Hoehe aendern; die waagerechte Lage bleibt, solange der Zeiger ruht.
    */
   nudgePasteY(steps) {
+    if (!this._paste) return false;
+    return this.setPasteHeightCm(this.pasteHeightCm + steps * this.moveStep);
+  }
+
+  setPasteHeightCm(height) {
+    if (this.readOnly || !this.canAdjustPasteHeight || !Number.isFinite(height)) return false;
     const d = this._paste;
-    if (!d || d.flat) return false;
-    const a = d.frag.anchor;
-    const cur = d.planeY != null ? d.planeY : a[1];
-    d.planeY = Math.max(0, cur + steps * this.moveStep);
+    d.planeY = Math.max(0, height);
     if (this._lastPointer) d.pinnedPointer = { x: this._lastPointer.x, y: this._lastPointer.y };
-    const xz = d.gridOffset || d.offset || a;
+    const xz = d.gridOffset || d.offset || d.frag.anchor;
     this._placePaste({ x: xz[0], y: d.planeY, z: xz[2] });
     return true;
   }
@@ -1512,8 +1516,7 @@ export class Builder {
     const a = d.frag.anchor;
     const schritt = this.moveStep;
     const raster = (v, ref) => ref + Math.round((v - ref) / schritt) * schritt;
-    const yRef = d.flat ? a[1] : (d.planeY != null ? d.planeY : a[1]);
-    const y = raster(yRef, a[1]);
+    const y = this._pasteOrigin()[1];
     const grid = point
       ? [raster(point.x, a[0]), y, raster(point.z, a[2])]
       : (d.gridOffset || [a[0], y, a[2]]);
@@ -1586,10 +1589,14 @@ export class Builder {
     if (p) this._placePaste(p);
   }
 
+  _tapPositionsPaste(e) {
+    return this.tapToPositionPaste || e.pointerType === 'touch' || e.pointerType === 'pen';
+  }
+
   /** Kopie absetzen. Nur an einer gueltigen Stelle; sonst bleibt sie haengen. */
   commitPaste() {
     const d = this._paste;
-    if (!d) return false;
+    if (!d || this.readOnly) return false;
     d.valid = !this._troubleWith(d.sel, d.collidedBefore);
     if (!d.valid) { this.onNotice(t("notice_collision"), "warn"); return false; }
     this._paste = null;
@@ -3514,6 +3521,15 @@ export class Builder {
     // kaemen waehrend des Zoomens abwechselnd Bewegungen BEIDER Finger an: der
     // Drehpunkt sprang dann zwischen ihnen hin und her.
     this._pointerId = null;
+    const touches = new Set();
+    let multiTouch = false;
+    const finishTouch = (e) => {
+      if (e.pointerType !== 'touch') return false;
+      touches.delete(e.pointerId);
+      const wasMultiTouch = multiTouch;
+      if (!touches.size) multiTouch = false;
+      return wasMultiTouch;
+    };
 
     // Rechtsklick im Platten-Modus dreht die Platte unter dem Zeiger um 90 Grad.
     // Sie hat zwei Lippen mit je zwei Schrauben -- die Drehung entscheidet, an
@@ -3556,7 +3572,16 @@ export class Builder {
     const onPointerDown = (e) => {
       const art = (e.pointerType === "touch" || e.pointerType === "pen") ? "touch" : "mouse";
       if (art !== this.inputType) { this.inputType = art; this.onInputTypeChange(); }
-      if (this._pointerId !== null) { this._abortGesture(); return; }
+      if (e.pointerType === 'touch') {
+        touches.add(e.pointerId);
+        if (!multiTouch && touches.size > 1) {
+          multiTouch = true;
+          this._abortGesture({ keepPaste: true });
+        }
+        // 一根手指先抬起时，剩下的手指仍属于缩放手势。
+        if (multiTouch) return;
+      }
+      if (this._pointerId !== null) { this._abortGesture({ keepPaste: true }); return; }
       // 还排着翻面：同一处又按下去是快点两下的第二下（选整块），翻面作废；
       // 按在别处就先把它翻完，免得在接下来的拖动中间才翻
       if (this._selectFlip) {
@@ -3654,7 +3679,7 @@ export class Builder {
     listen("pointerdown", onPointerDown);
     // Zeiger, die nicht zum laufenden Zug gehoeren, bleiben aussen vor.
     const fremd = (e) => this._pointerId !== null && e.pointerId !== this._pointerId;
-    listen("pointermove", (e) => { if (!fremd(e)) this._onMove(e); });
+    listen("pointermove", (e) => { if (!multiTouch && !fremd(e)) this._onMove(e); });
     listen('pointerleave', (e) => {
       this._tubeHoverPointer = null;
       this.scene.updateTubeCandidateHover?.(null);
@@ -3668,13 +3693,15 @@ export class Builder {
       }
     });
     listen("pointerup", (e) => {
-      if (fremd(e)) return;
+      if (finishTouch(e) || fremd(e)) return;
       this._pointerId = null;
       this._onUp(e);
     });
     // Abgebrochene Zeiger (Geste vom System uebernommen, Finger verlassen den
     // Bildschirm) hinterlassen sonst einen halb offenen Zug.
-    listen("pointercancel", (e) => { if (!fremd(e)) this._abortGesture(); });
+    listen("pointercancel", (e) => {
+      if (!finishTouch(e) && !fremd(e)) this._abortGesture({ keepPaste: true });
+    });
     // Mac-Trackpad: Zwei-Finger-Wisch ist ein Wheel-Event, kein Touch.
     // Ohne Zusatztaste bleibt es beim Zoomen; ⇧ oder ⌥ macht daraus Querverschieben.
     listen("wheel", (e) => {
@@ -3732,7 +3759,7 @@ export class Builder {
    * Laufenden Zug ohne Wirkung beenden: Drehen aufheben, Auswahl-Rechteck
    * wegnehmen, ein begonnenes Verschieben auf den Stand davor zuruecksetzen.
    */
-  _abortGesture() {
+  _abortGesture({ keepPaste = false } = {}) {
     this._carouselCandidate = null;
     if (this._carouselDrag) {
       this._carouselDrag.cancel();
@@ -3744,7 +3771,7 @@ export class Builder {
     this._clearLongPress();
     this._longDone = false;
     this._pointerId = null;
-    this.cancelPaste();
+    if (!keepPaste) this.cancelPaste();
     this._down = null;
     this._cubeDown = null;
     this._cubeDrag = null;
@@ -3811,12 +3838,15 @@ export class Builder {
     // Kamera stand still.
     if (this._paste) {
       if ((e.buttons & 1) && this.scene.orbiting) {
+        if (this._down && Math.hypot(e.clientX - this._down.x, e.clientY - this._down.y) > CLICK_TOLERANCE) {
+          this._down.pasteDragged = true;
+        }
         const dx = e.clientX - this._last.x, dy = e.clientY - this._last.y;
         this._last = { x: e.clientX, y: e.clientY };
         if (dx || dy) this.scene.orbitBy(dx, dy);
         return;
       }
-      this._updatePaste(e);
+      if (!this._tapPositionsPaste(e)) this._updatePaste(e);
       return;
     }
     if (this._carouselCandidate && (e.buttons & 1) && this._down
@@ -4067,13 +4097,18 @@ export class Builder {
     this._clearLongPress();
     const gehalten = this._longDone;
     this._longDone = false;
-    // Kopie absetzen -- aber nur bei einem ECHTEN Klick. Wer mit gedrueckter
-    // Taste gezogen hat, wollte die Ansicht drehen.
+    // 触屏点按只定位副本，面板确认后才写入模型历史。
     if (this._paste) {
-      this.scene.endOrbit();
-      if (d && Math.hypot(e.clientX - d.x, e.clientY - d.y) <= CLICK_TOLERANCE && e.button === 0) {
-        this.commitPaste();
+      if (d && !d.pasteDragged && Math.hypot(e.clientX - d.x, e.clientY - d.y) <= CLICK_TOLERANCE && e.button === 0) {
+        if (this._tapPositionsPaste(e)) {
+          this._paste.pinnedPointer = null;
+          const point = this._pastePoint(e.clientX, e.clientY);
+          if (point) this._placePaste(point);
+        } else {
+          this.commitPaste();
+        }
       }
+      this.scene.endOrbit();
       return;
     }
     this._carouselCandidate = null;

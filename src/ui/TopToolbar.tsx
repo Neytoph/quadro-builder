@@ -11,13 +11,15 @@ import InstallationCatalogueMenu from './InstallationCatalogueMenu'
 import { MOTION, usePresence } from './motion'
 import { Pop } from './Pop'
 import StatusTip from './StatusTip'
-import { LayoutGrid, MessageSquarePlus, Shapes } from 'lucide-react'
+import { ChevronDown, LayoutGrid, MessageSquarePlus, Shapes } from 'lucide-react'
 import { useCollab } from '../collab/CollabContext'
 import { useOverflowCompact } from './useOverflowCompact'
 import { useDock } from './dock'
 import { CUSTOM_COMPONENTS_EVENT } from './CustomComponentsMenu'
 import { customComponentStrings } from './customComponentStrings'
 import ComponentAdjustmentPanel from './ComponentAdjustmentPanel'
+import { MobileSelectionMenu } from './MobileEditing'
+import { mobileEditingStrings } from './mobileEditingStrings'
 
 export default function TopToolbar() {
   const api = useEngine()
@@ -28,14 +30,21 @@ export default function TopToolbar() {
   const { t, lang } = useI18n()
   const { vw, left, setToolbarW } = usePanelLayout()
   const narrow = vw <= NARROW_MAX
+  const mobile = api.touchEditing
   const barRef = useRef<HTMLDivElement>(null)
+  const selectRef = useRef<HTMLButtonElement>(null)
   const compact = useOverflowCompact(barRef)
   const [open, setOpen] = useState<CatalogueTool | null>(null)
   const [browsing, setBrowsing] = useState<CatalogueTool>('tubes')
   const [requestId, setRequestId] = useState(0)
-  const close = useCallback(() => setOpen(null), [])
+  const [selectionOpen, setSelectionOpen] = useState(false)
+  const selectActive = api.mode === 'select' && !api.boxSelect && !collab.placingPin
+  const selectMenuAvailable = mobile && api.ready && !api.readOnly && !locked && selectActive && !api.pasting
+  const closeSelection = useCallback(() => setSelectionOpen(false), [])
+  const close = useCallback(() => { setOpen(null); closeSelection() }, [closeSelection])
   const browse = useCallback((tool: CatalogueTool) => setBrowsing(tool), [])
   const toggle = (tool: CatalogueTool) => {
+    closeSelection()
     setRequestId(id => id + 1)
     setOpen(previous => previous && browsing === tool ? null : tool)
     setBrowsing(tool)
@@ -56,6 +65,7 @@ export default function TopToolbar() {
     return () => window.removeEventListener(UI_ESCAPE_EVENT, close)
   }, [close])
   useEffect(close, [api.activeTabId, api.readOnly, close])
+  useEffect(() => { if (!selectMenuAvailable) closeSelection() }, [selectMenuAvailable, closeSelection])
 
   const entries = api.catalog.tubes.length ? installationChoices(api, t) : []
   const selectedEntry = entries.find(entry => installationActive(entry, api))
@@ -89,22 +99,38 @@ export default function TopToolbar() {
         </div>
         {sep}
         <div className="qb-mode-group" role="group" aria-label={t('tool.select')}>
-          <button className="m-tool qb-tool qb-text-tool" data-ui="tool-select" title={narrow ? t('tool.select') : `${t('tool.select')} · Esc · ${t('keys.toggleTool')} (Space)`} aria-label={t('tool.select')} aria-pressed={api.mode === 'select' && !api.boxSelect && !collab.placingPin} data-mode-on={api.mode === 'select' && !api.boxSelect && !collab.placingPin} onClick={() => { api.setMode('select'); collab.setPlacingPin(false); close() }}>
-            <span>{t('tool.select')}</span><kbd className="qb-tool-key" aria-hidden="true">Esc</kbd>
+          <button ref={selectRef} className="m-tool qb-tool qb-text-tool" data-ui="tool-select"
+            title={mobile ? t('tool.select') : `${t('tool.select')} · Esc · ${t('keys.toggleTool')} (Space)`}
+            aria-label={selectMenuAvailable ? mobileEditingStrings[lang].selection : t('tool.select')}
+            aria-pressed={selectActive} aria-expanded={selectMenuAvailable ? selectionOpen : undefined}
+            data-mode-on={selectActive} onClick={() => {
+              if (selectMenuAvailable) {
+                setOpen(null)
+                setPane(null)
+                setSelectionOpen(value => !value)
+              } else {
+                api.setMode('select')
+                collab.setPlacingPin(false)
+                close()
+              }
+            }}>
+            <span>{t('tool.select')}</span>
+            {selectMenuAvailable && <ChevronDown size={13} aria-hidden="true" />}
+            {!mobile && <kbd className="qb-tool-key" aria-hidden="true">Esc</kbd>}
           </button>
-          <button type="button" className="m-tool qb-tool qb-text-tool" data-ui="tool-box-select" title={t('tip.boxSelect')} aria-label={t('tool.boxSelect')} aria-pressed={api.boxSelect && !collab.placingPin} data-mode-on={api.boxSelect && !collab.placingPin} onClick={() => { api.setBoxSelect(!api.boxSelect); collab.setPlacingPin(false); close() }}>
-            <span>{t('tool.boxSelect')}</span><kbd className="qb-tool-key" aria-hidden="true" title={t('keys.middleMouse')}>
+          <button type="button" className="m-tool qb-tool qb-text-tool" data-ui="tool-box-select" title={t(mobile ? 'tip.boxSelectTouch' : 'tip.boxSelect')} aria-label={t('tool.boxSelect')} aria-pressed={api.boxSelect && !collab.placingPin} data-mode-on={api.boxSelect && !collab.placingPin} onClick={() => { api.setBoxSelect(!api.boxSelect); collab.setPlacingPin(false); close() }}>
+            <span>{t('tool.boxSelect')}</span>{!mobile && <kbd className="qb-tool-key" aria-hidden="true" title={t('keys.middleMouse')}>
               <svg width="12" height="17" viewBox="0 0 16 22" fill="none">
                 <rect x="2.5" y="1.5" width="11" height="19" rx="5.5" stroke="currentColor" strokeWidth="1.3" />
                 <path d="M8 1.5V4M2.5 9H5.5M10.5 9H13.5" stroke="currentColor" strokeWidth="1.1" />
                 <rect x="6.25" y="4" width="3.5" height="6" rx="1.75" fill="#ea580c" />
               </svg>
-            </kbd>
+            </kbd>}
           </button>
         </div>
         <div className={`contents ${locked ? 'qb-locked' : ''}`}>
-          <button className="m-tool qb-tool qb-text-tool qb-delete-tool" data-mode-on={api.mode === 'delete'} aria-pressed={api.mode === 'delete'} data-tone="red" title={t('tool.deleteHint')} aria-label={t('tool.deleteHint')} onClick={() => { api.setMode(api.mode === 'delete' ? 'select' : 'delete'); close() }}>
-            <span>{t('tool.delete')}</span><kbd className="qb-tool-key" aria-hidden="true">D</kbd>
+          <button className="m-tool qb-tool qb-text-tool qb-delete-tool" data-mode-on={api.mode === 'delete'} aria-pressed={api.mode === 'delete'} data-tone="red" title={t(mobile ? 'tool.delete' : 'tool.deleteHint')} aria-label={t(mobile ? 'tool.delete' : 'tool.deleteHint')} onClick={() => { api.setMode(api.mode === 'delete' ? 'select' : 'delete'); close() }}>
+            <span>{t('tool.delete')}</span>{!mobile && <kbd className="qb-tool-key" aria-hidden="true">D</kbd>}
           </button>
           {sep}
           {CATALOGUE_TOOLS.map(tool => {
@@ -116,11 +142,11 @@ export default function TopToolbar() {
                 {tool === 'accessories' ? <Shapes size={18} strokeWidth={1.7} /> : <Svg16 inner={icons[tool]} />}<span>{t(TOOL_LABELS[tool])}</span>
               </button>
           })}
-          <button type="button" className="m-tool qb-tool" data-ui="tool-custom-components" title={narrow ? customComponentStrings[lang].title : `${customComponentStrings[lang].title} · 4`} aria-label={customComponentStrings[lang].title} onClick={event => {
+          <button type="button" className="m-tool qb-tool" data-ui="tool-custom-components" title={mobile ? customComponentStrings[lang].title : `${customComponentStrings[lang].title} · 4`} aria-label={customComponentStrings[lang].title} onClick={event => {
             const rect = event.currentTarget.getBoundingClientRect()
             close()
             window.dispatchEvent(new CustomEvent(CUSTOM_COMPONENTS_EVENT, { detail: { x: rect.left + rect.width / 2, y: rect.bottom + 8 } }))
-          }}><LayoutGrid size={16} strokeWidth={2} /><span>{customComponentStrings[lang].title}</span>{!narrow && <kbd className="qb-tool-key" aria-hidden="true">4</kbd>}</button>
+          }}><LayoutGrid size={16} strokeWidth={2} /><span>{customComponentStrings[lang].title}</span>{!mobile && <kbd className="qb-tool-key" aria-hidden="true">4</kbd>}</button>
         </div>
         {commenting && <>{sep}<button className="m-tool qb-tool" data-mode-on={collab.placingPin} aria-pressed={collab.placingPin} title={t('collab.pin.toolHint')} aria-label={t('collab.pin.toolHint')} data-ui="tool-comment" data-tour="tool-comment" onClick={() => {
           api.setMode('select'); collab.setPinDraft(null)
@@ -132,9 +158,10 @@ export default function TopToolbar() {
     <div data-ui="selection-actions-dock" className="qb-selection-actions-dock fixed z-40 pointer-events-none" style={{top:toolbarTop(left,vw)+TOOLBAR_CHROME_H+PANEL_GAP}}>
       <ComponentAdjustmentPanel menuOpen={open!==null || pane!==null}/>
     </div>
+    {selectionOpen && selectMenuAvailable && selectRef.current && <MobileSelectionMenu anchor={selectRef.current} onClose={closeSelection} />}
     {shown && <Pop anchor={barRef.current} leaving={leaving} onClose={close} align="center" width={472} className="ic-popover" belowOnly>
       <InstallationCatalogueMenu tool={shown} requestId={requestId} entries={entries} onBrowse={browse} onClose={close} />
     </Pop>}
-    <StatusTip menuOpen={open !== null} />
+    <StatusTip menuOpen={open !== null || selectionOpen} />
   </>
 }

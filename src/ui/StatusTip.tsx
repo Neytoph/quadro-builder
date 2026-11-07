@@ -5,7 +5,6 @@ import { NARROW_MAX, statusTipBox, usePanelLayout } from './panelLayout'
 import { useDock } from './dock'
 import { usePresence } from './motion'
 import { componentForTool, componentHintKey, componentDimensions } from '../store/builderComponents'
-import { useMobileControls } from './useMobileControls'
 import BridgeSettings from './BridgeSettings'
 
 const BY_MODE: Record<string, string> = {
@@ -40,7 +39,7 @@ const FITTING_HINTS: Record<string, string> = {
  */
 export default function StatusTip({ menuOpen }: { menuOpen: boolean }) {
   const api = useEngine()
-  const mobile = useMobileControls()
+  const mobile = api.touchEditing
   const { t } = useI18n()
   const { left, right, vw, toolbarW } = usePanelLayout()
   const narrow = vw <= NARROW_MAX

@@ -343,6 +343,7 @@ function AppInner() {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.isComposing) return
       const el = e.target as HTMLElement | null
+      if (el?.closest('[data-ui="editing-menu"]')) return
       if (el?.closest('[data-ui="scene-menu"], [data-ui="scene-trigger"]')) return
       const input = !!el?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')
       // 手机顶栏菜单自行处理键盘与焦点，避免菜单操作触发画布快捷键。

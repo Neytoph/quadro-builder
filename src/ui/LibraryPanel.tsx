@@ -5,6 +5,7 @@ import { storage, designEntry, checkAgainstInventory, missingCount } from '../en
 import { OFFICIAL_MODELS, officialThumbPath, officialName, matchesOfficial } from '../data/official'
 import { MODULE_GROUPS, PRESETS, presetThumbPath, type PresetDef } from '../data/presets'
 import { SINGLE_MODEL } from '../entry'
+import { useDock } from './dock'
 
 export const LIBRARY_OPEN_EVENT = 'quadro:library-open'
 
@@ -62,6 +63,7 @@ function StartCard({ p, label, onClick, showThumb }: { p: PresetDef; label: stri
 }
 
 export default function LibraryPanel() {
+  const { setPane } = useDock()
   const api = useEngine()
   const { t, lang } = useI18n()
   const folderRef = useRef<HTMLInputElement>(null)
@@ -215,13 +217,15 @@ export default function LibraryPanel() {
           <div className="space-y-3 px-0.5 pb-2">
             <div>
               <div className="text-[10px] uppercase tracking-wider text-gray-400 mb-1.5">{t('section.modules')}</div>
-              <p className="text-[11px] text-gray-500 mb-2 leading-snug">{t('hint.modules')}</p>
+              {!api.touchEditing && <p className="text-[11px] text-gray-500 mb-2 leading-snug">{t('hint.modules')}</p>}
               {MODULE_GROUPS.map(g => (
                 <div key={g.key} className="mb-3 last:mb-0">
                   <div className="text-[11px] text-gray-300 mb-1.5">{t(g.labelKey)}</div>
                   <div className="grid grid-cols-2 gap-2">
                     {g.items.map(p => (
-                      <StartCard key={p.key} p={p} label={t(p.labelKey)} onClick={() => api.placeModule(p.key)} showThumb={showThumbs} />
+                      <StartCard key={p.key} p={p} label={t(p.labelKey)} onClick={() => {
+                        if (api.placeModule(p.key) && api.touchEditing) setPane(null)
+                      }} showThumb={showThumbs} />
                     ))}
                   </div>
                 </div>

@@ -29,6 +29,6 @@ export default function SingleSelectionPanel() {
     </div>}
     {clamp && <div data-ui="clamp-guide"><ClampGuide/></div>}
     {flexi && <div data-ui="flexi-guide"><FlexiGuide/></div>}
-    <p className="qb-transform-help">{s.multiHint}</p>
+    {!api.touchEditing && <p className="qb-transform-help">{s.multiHint}</p>}
   </section>
 }

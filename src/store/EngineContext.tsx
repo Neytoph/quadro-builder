@@ -32,6 +32,7 @@ import { takeModelThumb, waitSceneReady } from '../engine/thumbShot.js'
 import { bomToCsv, bomToPngDataUrl, loadImage } from '../ui/bomExport'
 import { shareImageDataUrl } from '../ui/shareImage'
 import { MOTION } from '../ui/motion'
+import { useMobileControls } from '../ui/useMobileControls'
 import { paintOpening, type ModelOpeningState } from '../ui/ModelOpening'
 import { createTabDoc, dropTabDoc, memoryDoc, openTabDoc, readPersonalState, writePersonalState, SEED_ORIGIN, type LocalDoc } from '../collab/localDocs'
 import { partCountOf, writeJSON, setPlanName, type ModelJSON } from '../collab/ymodel'
@@ -217,7 +218,9 @@ interface EngineApi {
   importInventory: (file: File) => Promise<void>
   canPaste: boolean
   pasting: boolean
+  touchEditing: boolean
   pasteHeightCm: number | null
+  canAdjustPasteHeight: boolean
   side: SidePanel
   setSide: (p: SidePanel) => void
   notify: (message: string, kind?: ToastKind) => void
@@ -260,11 +263,14 @@ interface EngineApi {
   deleteSel: () => void
   copy: () => void
   paste: () => void
+  commitPaste: () => void
   cancelPaste: () => void
   nudgePasteY: (steps: number) => void
+  setPasteHeightCm: (height: number) => void
   selectAll: () => void
+  clearSelection: () => void
   selectConnected: () => void
-  placeModule: (key: string) => void
+  placeModule: (key: string) => boolean
   frame: () => void
   toggleGrass: () => void
   grassOn: boolean
@@ -692,6 +698,7 @@ export function asBom(raw: AnyRec): BomView {
 }
 
 export function EngineProvider({ children }: { children: ReactNode }) {
+  const mobile = useMobileControls()
   const sessionKey = useRef(EDITOR_SESSION)
   const { t, lang } = useI18n()
   const hostRef = useRef<HTMLDivElement | null>(null)
@@ -1186,6 +1193,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
           if (!switching.current) persistSessionRef.current()
         }
         builder.onPreview = () => bumpRef.current()
+        builder.onInputTypeChange = () => bumpRef.current()
         builder.onHistoryChange = () => markDirtyRef.current()
         builder.onNotice = ((msg: string, kind?: string) => notifyRef.current(String(msg), kind === 'warn' ? 'warn' : 'ok')) as E
         scene.onMeshesReady = () => builder.refresh()
@@ -1333,6 +1341,10 @@ export function EngineProvider({ children }: { children: ReactNode }) {
 
   const e = eng.current
   const builder = e?.builder
+  const touchEditing = mobile || builder?.inputType === 'touch'
+  useLayoutEffect(() => {
+    if (builder) builder.tapToPositionPaste = mobile
+  }, [builder, mobile])
   const model = e?.model
   const scene = e?.scene
   const homeContext = tabHomeContext(tabsRef.current.find(tab => tab.tabId === activeRef.current), model?.homeContext || null)
@@ -2499,16 +2511,17 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     clipboard.current = frag
     const n = ['tubes', 'panels', 'textiles', 'slides', 'fittings', 'clamps']
       .reduce((s, k) => s + ((((frag as AnyRec)[k] as unknown[] | undefined)?.length) ?? 0), 0)
-    notify(t('toast.copied', { n }))
+    notify(t(touchEditing ? 'toast.copiedShort' : 'toast.copied', { n }))
     bump()
-  }, [builder, bump, notify, t])
+  }, [builder, bump, notify, t, touchEditing])
 
   const paste = useCallback(() => {
     if (!clipboard.current) { notify(t('toast.pasteEmpty'), 'warn'); return }
-    builder?.startPaste?.(clipboard.current)
-    notify(t('toast.pasteHint'))
+    if (!builder?.startPaste(clipboard.current)) return
+    if (touchEditing) dismissToast()
+    else notify(t('toast.pasteHint'))
     bump()
-  }, [builder, bump, notify, t])
+  }, [builder, bump, dismissToast, notify, t, touchEditing])
 
   const selectAll = useCallback(() => {
     if (!builder) return
@@ -2527,20 +2540,23 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   }, [builder, bump, notify, t])
 
   const placeModule = useCallback((key: string) => {
+    if (!builder || builder.readOnly) return false
     const data = geometricPreset(key)
     const frag = data ? jsonToFragment(data) : null
-    if (!frag) { notify(t('toast.presetFailed'), 'err'); return }
+    if (!frag) { notify(t('toast.presetFailed'), 'err'); return false }
     // 单元里的板用当前选中色，管子保留四色轮换
-    if (builder && frag.panels.length) {
+    if (frag.panels.length) {
       const panelColor = builder.colorFor('panel') as string
       frag.panels = frag.panels.map(p => ({ ...p, color: panelColor }))
     }
+    if (!builder.startPaste(frag)) return false
     clipboard.current = frag
     track('builder.model.module', { key })
-    builder?.startPaste?.(frag)
-    notify(t('toast.moduleHint'))
+    if (touchEditing) dismissToast()
+    else notify(t('toast.moduleHint'))
     bump()
-  }, [builder, bump, notify, t])
+    return true
+  }, [builder, bump, dismissToast, notify, t, touchEditing])
 
   const cancelPaste = useCallback(() => {
     if (builder?.cancelPaste?.()) bump()
@@ -3414,7 +3430,9 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     exportInventory, importInventory,
     canPaste: !!clipboard.current,
     pasting: !!builder?.pasting,
+    touchEditing,
     pasteHeightCm: builder?.pasteHeightCm ?? null,
+    canAdjustPasteHeight: !!builder?.canAdjustPasteHeight,
     side, setSide, notify,
     dismissToast,
     placingConnector: (builder?.placeConnectorId as string) || null,
@@ -3441,7 +3459,10 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     selectionGroups: builder?.groupsInSelection?.() ?? 0,
     deleteSel: () => { bumpCount('builder.edit.delete'); builder?.deleteSelection(); bump() },
     copy, paste, cancelPaste, selectAll, selectConnected,
+    clearSelection: () => builder?.clearSelection(),
+    commitPaste: () => builder?.commitPaste(),
     nudgePasteY: (steps) => { builder?.nudgePasteY?.(steps); bump() },
+    setPasteHeightCm: (height) => { builder?.setPasteHeightCm(height); bump() },
     setViewCubePad, setViewCubeEnabled,
     frame: () => { scene?.resetCamera?.(model, { animate: true }); bump() },
     toggleGrass: () => {

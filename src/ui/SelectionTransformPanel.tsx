@@ -5,6 +5,7 @@ import {useI18n} from '../i18n'
 import {selectionTransformStrings} from './selectionTransformStrings'
 import './selectionTransform.css'
 import AccessoryInstallation from './AccessoryInstallation'
+import { SelectionEditActions } from './MobileEditing'
 
 export default function SelectionTransformPanel({menuOpen}:{menuOpen:boolean}) {
   const api=useEngine(),{lang,t}=useI18n(),s=selectionTransformStrings[lang],state=api.selectionTransform
@@ -38,9 +39,10 @@ export default function SelectionTransformPanel({menuOpen}:{menuOpen:boolean}) {
   }
   return <form className="qb-card qb-transform-panel pointer-events-auto" data-ui="selection-transform" aria-label={s.title} onSubmit={submit}>
     <div className="qb-transform-actions">
-      <div role="group" aria-label={s.title} className="qb-transform-modes">
+      <div role="group" aria-label={s.title} className={`qb-transform-modes${api.touchEditing ? ' qb-transform-mobile' : ''}`}>
         <button type="button" className="qb-btn qb-btn-sm qb-btn-ghost" aria-pressed={!showingAccessory && state.mode==='translate'} onClick={()=>{setAccessoryOpen(false);api.setSelectionTransformMode('translate')}} disabled={state.busy}><Move3D size={15}/>{s.move}</button>
         <button type="button" className="qb-btn qb-btn-sm qb-btn-ghost" aria-pressed={!showingAccessory && state.mode==='rotate'} onClick={()=>{setAccessoryOpen(false);api.setSelectionTransformMode('rotate')}} disabled={state.busy}><Rotate3D size={15}/>{s.rotate}</button>
+        {api.touchEditing && <SelectionEditActions disabled={state.busy} />}
         {hasAccessory && <button type="button" className="qb-btn qb-btn-sm qb-btn-ghost" data-ui="selection-accessory-tab" aria-pressed={showingAccessory} onClick={()=>setAccessoryOpen(true)} disabled={state.busy}>{t('tool.accessories')}</button>}
       </div>
       {!showingAccessory && <>
@@ -56,7 +58,7 @@ export default function SelectionTransformPanel({menuOpen}:{menuOpen:boolean}) {
       <label><span>{s.axis}</span><select aria-label={s.axis} value={axis} disabled={state.busy} onChange={event=>{setAxis(event.target.value as 'X'|'Y'|'Z');setAngle('0');setRotationDirty(false)}}><option value="X">X</option><option value="Y">Y</option><option value="Z">Z</option>{axis==='free' && <option value="free" disabled>{s.free}</option>}</select></label>
       <label><span>{s.angle} <small>{s.degree}</small></span><input type="number" step="0.01" inputMode="decimal" aria-label={`${s.angle} (${s.degree})`} value={angle} disabled={state.busy || axis==='free'} onChange={event=>{setAngle(event.target.value);setRotationDirty(true)}}/></label>
     </div>}
-    <p className="qb-transform-help">{state.mode==='rotate' ? s.rotationHelp : s.help}</p>
+    {!api.touchEditing && <p className="qb-transform-help">{state.mode==='rotate' ? s.rotationHelp : s.help}</p>}
     </>}
     {(error || state.error) && <p className="qb-transform-error" role="alert">{error || state.error}</p>}
   </form>
