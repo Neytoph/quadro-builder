@@ -4,7 +4,7 @@ import { componentMountsValid } from './accessoryPack.js';
 import { curvePoint } from './confirmedComponentModel.js';
 
 // 仅用于支撑检查；不写入模型，也不参与刚性组选取、移动或旋转。
-export function computeSupportGraph(model) {
+export function computeSupportGraph(model, groundLimit) {
   const active = new Set([...model.nodes.values()].filter(n => !n.unused).map(n => n.id));
   const adjacency = new Map([...active].map(id => [id, new Set()]));
   const link = (a, b) => {
@@ -25,8 +25,48 @@ export function computeSupportGraph(model) {
     if (![first.a, first.b, second.a, second.b].every(id => active.has(id))) continue;
     link(first.a, second.a); straps.add(part.id);
   }
+  const base = connectedComponents(adjacency);
+  const suspended = new Set();
+  const ropes = new Map();
+  for (const part of model.fittings.values()) {
+    if (part.kind !== 'rope' || part.appearanceVersion !== 2 || !componentMountsValid(model, part)) continue;
+    const ends = part.mounts.map(mount => {
+      const tube = model.tubes.get(mount.tube);
+      if (!active.has(tube.a) || !active.has(tube.b)) return null;
+      return { node: tube.a, height: curvePoint(model, mount.tube, mount.t)[1] };
+    });
+    if (ends.some(end => !end)) continue;
+    const [upper, lower] = ends.sort((a, b) => b.height - a.height);
+    if (upper.height <= lower.height + 0.001) continue;
+    const upperGroup = base.byNode.get(upper.node), lowerGroup = base.byNode.get(lower.node);
+    if (upperGroup === lowerGroup) continue;
+    if (!ropes.has(upperGroup)) ropes.set(upperGroup, []);
+    ropes.get(upperGroup).push({ upper: upper.node, lower: lower.node, lowerGroup });
+  }
+  if (!ropes.size) return { ...base, straps, suspended };
+
+  // 只有上端已获得地面支撑的绳索，才能把支撑传给下方的桥架。
+  const queue = base.components.filter(group => [...group].some(id => model.nodes.get(id).y <= groundLimit));
+  const supported = new Set(queue);
+  for (const group of queue) {
+    for (const { lowerGroup } of ropes.get(group) || []) {
+      if (supported.has(lowerGroup)) continue;
+      supported.add(lowerGroup);
+      queue.push(lowerGroup);
+      for (const id of lowerGroup) suspended.add(id);
+    }
+  }
+  for (const group of queue) {
+    for (const { upper, lower } of ropes.get(group) || []) {
+      if (suspended.has(lower)) link(upper, lower);
+    }
+  }
+  return { ...connectedComponents(adjacency), straps, suspended };
+}
+
+function connectedComponents(adjacency) {
   const components = [], byNode = new Map();
-  for (const start of active) {
+  for (const start of adjacency.keys()) {
     if (byNode.has(start)) continue;
     const nodes = new Set([start]), queue = [start]; byNode.set(start, nodes);
     for (const id of queue) for (const next of adjacency.get(id)) {
@@ -35,5 +75,5 @@ export function computeSupportGraph(model) {
     }
     components.push(nodes);
   }
-  return { components, byNode, straps };
+  return { components, byNode };
 }

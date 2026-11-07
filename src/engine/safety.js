@@ -157,10 +157,13 @@ function ruleOpenEnd(model, ground, out) {
   if (nodes.length) out.push({ rule: "open_end", level: "warn", ref: "1.1", params: { n: nodes.length }, ids: { nodes } });
 }
 
-function ruleDeckEdges(model, decks, out) {
+function ruleDeckEdges(model, decks, suspended, out) {
   const panels = [];
   let edges = 0;
   for (const { p, corners } of decks) {
+    const first = model.tubes.get(p.a), second = model.tubes.get(p.b);
+    if (first && second && retainsStandardPanelRole(p) && suspended.has(first.a)
+      && suspended.has(second.a) && componentMountsValid(model, p)) continue;
     let missing = 0;
     for (let i = 0; i < 4; i++) {
       const a = nodeNear(model, corners[i]), b = nodeNear(model, corners[(i + 1) % 4]);
@@ -374,12 +377,12 @@ export function computeSafety(model, opts = {}) {
   const out = [];
   if (!model || !model.nodes.size) return { findings: out, height: 0 };
   const ground = groundOf(model);
-  const support = computeSupportGraph(model);
+  const support = computeSupportGraph(model, GROUND_EPS);
   const decks = decksOf(model);
   const covers = coversOf(model);
   const height = standingHeight(model, decks, ground);
   ruleOpenEnd(model, ground, out);
-  ruleDeckEdges(model, decks, out);
+  ruleDeckEdges(model, decks, support.suspended, out);
   ruleEntrapment(model, ground, covers, out);
   ruleLevelGap(model, decks, ground, out);
   ruleFallHeight(height, opts.indoor, out);
