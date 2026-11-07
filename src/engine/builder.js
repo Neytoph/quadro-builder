@@ -30,6 +30,7 @@ import { SelectionTransformSession } from './selectionTransformSession.js';
 import { SelectionTransformGizmo } from './selectionTransformGizmo.js';
 import { SelectionTransformPreview } from './selectionTransformPreview.js';
 import { selectionTransformStrings } from '../ui/selectionTransformStrings';
+import { mobileEditingStrings } from '../ui/mobileEditingStrings';
 import { pickStepAnchor, stepCandidates, stepCandidatesFromSelection, stepNeighbor } from "./stepAnchor.js";
 import { carouselBearingAtRotor, carouselBearingForPick } from './carouselBearingModel.js';
 import { CarouselRotationGesture } from './carouselRotationGesture.js';
@@ -510,7 +511,7 @@ export class Builder {
     if (POOL_KINDS.has(this.fittingKind)) {
       const spec = this.poolLinerId && POOL_SETS[this.poolLinerId];
       if (spec && !this.model.poolLinerMounts(spec).length) {
-        this.onNotice(t("notice_pool_no_frame"), "info");
+        this._noticePoolNoFrame();
       }
       return;
     }
@@ -1393,9 +1394,13 @@ export class Builder {
       this.onNotice(t("notice_pool_pick_frame"), "info");
       return "mount";
     }
-    const touch = this.tapToPositionPaste || this.inputType === 'touch';
-    this.onNotice(t(touch ? "notice_pool_no_frame_touch" : "notice_pool_no_frame"), "info");
+    this._noticePoolNoFrame();
     return this._startPoolPaste(spec) ? "paste" : false;
+  }
+
+  _noticePoolNoFrame() {
+    const touch = this.tapToPositionPaste || this.inputType === 'touch';
+    this.onNotice(touch ? mobileEditingStrings[getLang()].poolNoFrame : t("notice_pool_no_frame"), "info");
   }
 
   _startPoolPaste(spec) {

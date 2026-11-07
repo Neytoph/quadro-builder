@@ -5,6 +5,7 @@ export const mobileEditingStrings = {
     group: '成组', ungroup: '解组', remove: '删除选中',
     placement: '放置副本', height: '高度', lower: '降低副本', raise: '升高副本',
     turnLeft: '向左旋转 90°', turnRight: '向右旋转 90°', place: '放置',
+    poolNoFrame: '没有可以挂这张内衬的框。',
   },
   en: {
     selection: 'Selection menu', all: 'Select all', clear: 'Clear selection', paste: 'Paste', copy: 'Copy selection',
@@ -12,6 +13,7 @@ export const mobileEditingStrings = {
     group: 'Group', ungroup: 'Ungroup', remove: 'Delete selection',
     placement: 'Place copy', height: 'Height', lower: 'Lower copy', raise: 'Raise copy',
     turnLeft: 'Rotate left 90°', turnRight: 'Rotate right 90°', place: 'Place',
+    poolNoFrame: 'No frame for this liner.',
   },
   de: {
     selection: 'Auswahlmenü', all: 'Alles auswählen', clear: 'Auswahl aufheben', paste: 'Einfügen', copy: 'Auswahl kopieren',
@@ -19,5 +21,6 @@ export const mobileEditingStrings = {
     group: 'Gruppieren', ungroup: 'Gruppe auflösen', remove: 'Auswahl löschen',
     placement: 'Kopie platzieren', height: 'Höhe', lower: 'Kopie senken', raise: 'Kopie heben',
     turnLeft: '90° nach links drehen', turnRight: '90° nach rechts drehen', place: 'Platzieren',
+    poolNoFrame: 'Kein Rahmen für diese Folie vorhanden.',
   },
 } as const
