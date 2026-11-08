@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { BuildModel } from './model.js'
+import { resolveNodeConnection } from './bom.js'
 import { loadCatalog } from './catalog.js'
 import { C45_ARM_LEN, C45_SLEEVE_LEN } from './config.js'
 import { DIRECTIONS, DIAGONAL_DIRECTIONS } from './config.js'
@@ -30,7 +31,7 @@ describe('新增管件严格沿所选引导线', () => {
     })
   }
 
-  for (const offset of [.1, .4, 1, 2.5]) {
+  for (const offset of [.006, .1, .4, 1, 2.5]) {
     it(`横管不吸向偏离引导线${offset}厘米的节点，新增节点也不二次合并`, () => {
       const model = new BuildModel(), from = model.addNode(0, 80, 0)
       const nearby = model.addNode(40, 80 + offset, 0)
@@ -71,6 +72,21 @@ describe('新增管件严格沿所选引导线', () => {
     expect(added.node.id).toBe(existing.id)
     expect(added.tube!.length).toBe(35)
     expect([added.node.y, added.node.z]).toEqual([80, 0])
+  })
+
+  it.each([false, true])('两根斜管到达同一存档坐标时共用接头（中途重开 %s）', reopen => {
+    const model = new BuildModel(), S = Math.SQRT1_2
+    const left = model.addNode(0, 90, -14.14), right = model.addNode(0, 90, 14.14)
+    const first = model.extendDiagonalSnap(left.id, [0, -S, S], 'T15', 'blue', 15, 20)!
+    expect(first.tube).toBeTruthy()
+    if (reopen) expect(model.loadJSON(model.toJSON()).ok).toBe(true)
+    const dir = [0, -S, -S]
+    expect(model.planTubeExtension(right.id, dir, 20)?.existing?.id).toBe(first.node.id)
+    const second = model.extendDiagonalSnap(right.id, dir, 'T15', 'red', 15, 20)!
+    expect(second.tube?.b).toBe(first.node.id)
+    expect(model.nodes.size).toBe(3)
+    expect(resolveNodeConnection(model, first.node.id).types).toEqual(['elbow'])
+    expect(model.collisions().size).toBe(0)
   })
 
   it('C45安装不被近端节点拉歪，套筒体与管端保留精确引导方向', () => {

@@ -6529,8 +6529,11 @@ export class BuildModel {
       z: from.z + dirVec[2] * spacing,
     };
     if (this.isBelowGround(target.y)) return { ground: true };
+    // 两端在存档精度下重合时复用接头，避免保存后留下两个重叠的管端。
+    const onGuide = node => followsTubeGuide(from, node, dirVec) ||
+      (round(node.x) === round(target.x) && round(node.y) === round(target.y) && round(node.z) === round(target.z));
     const nearby = this.findNodeNear(target.x, target.y, target.z);
-    let existing = nearby && followsTubeGuide(from, nearby, dirVec) ? nearby : null;
+    let existing = nearby && onGuide(nearby) ? nearby : null;
     // 同一管架的长度容差只沿引导线使用，不能横向吸附改变管子角度。
     {
       const sameComponent = id => context.components.get(id) === context.components.get(from.id);
@@ -6543,7 +6546,7 @@ export class BuildModel {
         const tolerance = sameFrame ? Math.max(snapTol, connectorSize + MERGE_EPS) : snapTol;
         if (distance > tolerance || (bestConnected && !sameFrame) || (sameFrame === !!bestConnected && distance >= bestDistance)) continue;
         const axis = norm3([node.x - from.x, node.y - from.y, node.z - from.z]);
-        if (!followsTubeGuide(from, node, dirVec)) continue;
+        if (!onGuide(node)) continue;
         const incoming = axis.map(v => -v);
         if (!this.canExtendFrom(node, incoming) || armFittingDirsAt(this, node).some(port => dot3(port, incoming) > ARM_ALIGN_TOL)) continue;
         if (this.tubeCollision(from, node, from.part === 'windmill' ? from.clampOn?.tubeId : null)) continue;
