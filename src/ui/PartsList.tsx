@@ -52,11 +52,15 @@ function Section({ title, rows, onPick }: { title: string; rows: BomRow[]; onPic
   )
 }
 
-export function BomPane() {
+export function BomPane({ onLocate }: { onLocate?: () => void }) {
   const api = useEngine()
   const { t, lang } = useI18n()
   const bom = api.bom
   const empty = !bom || bom.totals.tubes + bom.totals.connectors + bom.totals.panels + bom.totals.other === 0
+  const pick = (row: BomRow) => {
+    api.highlight(row)
+    onLocate?.()
+  }
 
   return (
     <>
@@ -87,14 +91,14 @@ export function BomPane() {
           ? <div className="text-xs text-gray-500">{t('side.empty')}</div>
           : (
             <>
-              <Section title={t('bom.tubes')} rows={bom.tubes} onPick={r => api.highlight(r.kind, r.id || '', r.color)} />
-              <Section title={t('bom.connectors')} rows={bom.connectors} onPick={r => api.highlight(r.kind, r.id || '')} />
-              <Section title={t('bom.panels')} rows={bom.panels} onPick={r => api.highlight(r.kind, r.id || '', r.color)} />
-              <Section title={t('bom.slides')} rows={bom.slides} onPick={r => api.highlight(r.kind, r.id || '')} />
-              <Section title={t('bom.wheels')} rows={bom.wheels} onPick={r => api.highlight('fittings', r.id || '')} />
-              <Section title={t('bom.textiles')} rows={bom.textiles} onPick={r => api.highlight(r.kind, r.id || '', r.color)} />
-              <Section title={t('bom.fittings')} rows={bom.fittings} onPick={r => api.highlight(r.kind, r.id || '')} />
-              <Section title={t('bom.reinforcements')} rows={bom.reinforcements} onPick={r => api.highlight(r.kind, r.id || '')} />
+              <Section title={t('bom.tubes')} rows={bom.tubes} onPick={pick} />
+              <Section title={t('bom.connectors')} rows={bom.connectors} onPick={pick} />
+              <Section title={t('bom.panels')} rows={bom.panels} onPick={pick} />
+              <Section title={t('bom.slides')} rows={bom.slides} onPick={pick} />
+              <Section title={t('bom.wheels')} rows={bom.wheels} onPick={pick} />
+              <Section title={t('bom.textiles')} rows={bom.textiles} onPick={pick} />
+              <Section title={t('bom.fittings')} rows={bom.fittings} onPick={pick} />
+              <Section title={t('bom.reinforcements')} rows={bom.reinforcements} onPick={pick} />
             </>
           )}
       </div>

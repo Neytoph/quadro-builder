@@ -1929,8 +1929,22 @@ export class Builder {
    * loeschbar oder umfaerbbar, und es gilt in jedem Modus.
    */
   setHighlight(ids) {
+    this._bomHighlight = null;
     if (!ids?.size && !this.highlight) return;
     this.highlight = ids && ids.size ? ids : null;
+    this.refresh();
+  }
+
+  toggleBomHighlight(key, partIds) {
+    if (!partIds?.length || (this._bomHighlight?.key === key && this.highlight === this._bomHighlight.ids)) {
+      this.setHighlight(null);
+      return;
+    }
+    this.panelRail = null;
+    this.reinforceRail = null;
+    const ids = new Set(partIds);
+    this._bomHighlight = { key, ids };
+    this.highlight = ids;
     this.refresh();
   }
 
@@ -2262,7 +2276,9 @@ export class Builder {
     for (const [id, kind] of this._boxSelected || []) {
       if (this.selection.get(id) !== kind) this._boxSelected.delete(id);
     }
-    const assembly =this.mode === "assembly" && this.buildPlan.steps.length
+    const bomHighlight = !!this.highlight && this.highlight === this._bomHighlight?.ids;
+    // 清单覆盖整个造型，查看位置时暂时使用完整装好的视图。
+    const assembly = !bomHighlight && this.mode === "assembly" && this.buildPlan.steps.length
       ? this._assemblyVisibility() : null;
     // Genau EIN gewaehltes Teil: dessen Namen anzeigen. Nur dann -- alle Namen
     // auf einmal machten das Bild unleserlich, deshalb gibt es den frueheren
@@ -2287,9 +2303,9 @@ export class Builder {
         ? partName(getPartById(this.model.tubes.get(profil)?.reinforcement?.partId || 'reinforce80'))
         : this._partLabel(soloId, this.selection.get(soloId)) } : null;
     // Only mark paths that accept the currently selected reinforcement size.
-    const suggest = this.mode === "reinforce"
+    const reinforce = !bomHighlight && this.mode === "reinforce";
+    const suggest = reinforce
       ? reinforcementGuide(this.model, this.reinforcementPartId, this.reinforceRail).installable : null;
-    const reinforce = this.mode === "reinforce";
     // Kollisions-Modus: immer ein Set (auch leeres), damit die Szene den Modus
     // erkennt und die uebrigen Rohre grau zeichnet.
     const selected = (this.mode === "select" || this.mode === "assembly") && this.selection.size
@@ -2313,11 +2329,11 @@ export class Builder {
         solidSelected: this.mode==='select' && selected?.size>1 && !this.highlight ? selected : this._boxSelected,
         interactionMode: this.mode,
         profileSelection: this._profilGewaehlt() ? this._profilAuswahl : null,
-        highlight: this._colorPreview || panelPlacement ? null : this.highlight || firstRails, invalid, tints: this.tints,
+        highlight: this._colorPreview || panelPlacement ? null : this.highlight || firstRails, bomHighlight, invalid, tints: this.tints,
         panelPlacementRails: this._colorPreview ? null : this._panelGuideIds,
         panelPlacementMode: this.mode === 'panel',
         focusId: this.panelRail ? this.panelRail.id : this.reinforceRail,
-        keepPanelFacesOpaque: this.mode === 'panel',
+        keepPanelFacesOpaque: this.mode === 'panel' && !bomHighlight,
         preview: !!(this._paste || this._clampDrag || this._hingeDrag || this._colorPreview || this._selectionTransform || this._carouselDrag) });
     this.transformGizmo?.sync();
     this._buildHandles();

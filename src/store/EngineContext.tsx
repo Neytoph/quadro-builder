@@ -1,10 +1,10 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { bumpCount, track, entryAnalyticsObject, setAnalyticsObject } from '../analytics/track'
 import {
-  BuildModel, Builder, SceneManager, loadCatalog, computeBOM, compareInventory, connectorsForNode, computeSafety,
+  BuildModel, Builder, SceneManager, loadCatalog, computeBOM, compareInventory, computeSafety,
   parseQDF, parseDesign, designEntry, buildQDF, buildableTubes, buildableCurvedTubes, buildablePanels, tubeColors, allConnectors, accessories,
   panels, geometry, RANDOM_COLOR, docs, storage, setLang as setEngineLang, t as engineT,
-  computeBuildPlan, partsOfModel, partsOfData, textilePart,
+  computeBuildPlan, partsOfModel, partsOfData,
 } from '../engine-api'
 import { useI18n } from '../i18n'
 import { onSyncEvent, syncSavedDoc, syncNow, syncProbe, syncStarted } from '../sync/bootstrap'
@@ -108,6 +108,7 @@ export interface TabInfo extends PersonalState {
 
 export interface BomRow {
   key: string
+  partIds?: string[]
   name: string
   count: number
   color?: string | null
@@ -283,7 +284,7 @@ interface EngineApi {
   homeContext: AnyRec | null
   bindHome: (record: AnyRec | null, expectedTabId?: string | null) => boolean
   frameHome: () => void
-  highlight: (kind: string, id: string, color?: string | null) => void
+  highlight: (row: BomRow) => void
   /** 按零件 id 高亮一批（安全审查点行用），再点同一批取消 */
   highlightIds: (key: string, ids: string[]) => void
   safety: SafetyResult | null
@@ -627,16 +628,19 @@ function download(name: string, text: string, type: string) {
 export function asBom(raw: AnyRec): BomView {
   const tubes = ((raw.tubes as AnyRec[]) || []).map(r => ({
     key: String(r.key ?? `${r.tubeId}|${r.color}`), name: cleanBomText(r.name), count: Number(r.count),
+    partIds: r.partIds as string[] | undefined,
     color: (r.color as string) || null, colorName: (r.colorName as string) || null, subtotal: Number(r.subtotal || 0),
     id: cleanBomText(r.tubeId), kind: 'tubes',
     kitContents: cleanBomText(r.kitContents), designAssumption: r.designAssumption === true, loadVerified: r.loadVerified,
   }))
   const connectors = ((raw.connectors as AnyRec[]) || []).map(r => ({
     key: `connectors:${r.type}`, name: cleanBomText(r.name), count: Number(r.count),
+    partIds: r.partIds as string[] | undefined,
     subtotal: Number(r.subtotal || 0), id: cleanBomText(r.type), kind: 'connectors',
   }))
   const panels = ((raw.panels as AnyRec[]) || []).map(r => ({
     key: String(r.key ?? `${r.panelId}|${r.color}`), name: cleanBomText(r.name), count: Number(r.count),
+    partIds: r.partIds as string[] | undefined,
     color: (r.color as string) || null, colorName: (r.colorName as string) || null, subtotal: Number(r.subtotal || 0),
     id: cleanBomText(r.panelId), kind: 'panels',
     kitContents: cleanBomText(r.kitContents), designAssumption: r.designAssumption === true, loadVerified: r.loadVerified,
@@ -648,6 +652,7 @@ export function asBom(raw: AnyRec): BomView {
     const id = cleanBomText(r.id) || cleanBomText(r.kind)
     const row: BomRow = {
       key: `fittings:${cleanBomText(r.key) || id}`, name: cleanBomText(r.name), count: Number(r.count),
+      partIds: r.partIds as string[] | undefined,
       subtotal: Number(r.subtotal || 0), id, kind: 'fittings',
       w: Number(r.w) || undefined, h: Number(r.h) || undefined,
       kitContents: cleanBomText(r.kitContents), designAssumption: r.designAssumption === true, loadVerified: r.loadVerified,
@@ -662,6 +667,7 @@ export function asBom(raw: AnyRec): BomView {
     const h = Number(r.h) || undefined
     textiles.push({
       key: String(r.key ?? r.id ?? `${w}x${h}|${r.color || ''}`),
+      partIds: r.partIds as string[] | undefined,
       name: cleanBomText(r.name),
       count: Number(r.count),
       color: (r.color as string) || null,
@@ -673,11 +679,13 @@ export function asBom(raw: AnyRec): BomView {
     })
   }
   const slides = ((raw.slides as AnyRec[]) || []).map(r => ({
-    key: `slides:${r.id || r.kind}`, name: cleanBomText(r.name), count: Number(r.count),
+    key: `slides:${r.key ?? r.kind}`, name: cleanBomText(r.name), count: Number(r.count),
+    partIds: r.partIds as string[] | undefined,
     subtotal: Number(r.subtotal || 0), id: cleanBomText(r.id) || cleanBomText(r.kind), kind: 'slides',
   }))
   const reinforcements = ((raw.reinforcements as AnyRec[]) || []).map(r => ({
     key: `reinforcements:${r.id}`, name: cleanBomText(r.name), count: Number(r.count),
+    partIds: r.partIds as string[] | undefined,
     subtotal: Number(r.subtotal || 0), id: cleanBomText(r.id), kind: 'reinforcements',
   }))
   const sum = (rows: BomRow[]) => rows.reduce((s, r) => s + r.count, 0)
@@ -1406,7 +1414,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const modelSnapshot = useMemo(() => model && ready ? JSON.stringify(model.toJSON({ pruneGroups: false })) : null, [model, ready, tick])
   const rawBom = useMemo(() => {
     if (!model || !ready) return null
-    try { return computeBOM(model) as AnyRec } catch { return null }
+    try { return computeBOM(model, { locateParts: true }) as AnyRec } catch { return null }
   }, [model, ready, modelSnapshot, lang])
   const bom = useMemo(() => rawBom ? asBom(rawBom) : null, [rawBom])
 
@@ -1581,48 +1589,12 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     toolMemory.current.retain(tabs.map(tab => tab.tabId))
   }, [tick, tabs, rememberTool])
 
-  const highlight = useCallback((kind: string, id: string, color?: string | null) => {
-    if (!builder || !model) return
-    const key = `${kind}:${id}:${color || ''}`
-    if (highlightKey.current === key) {
-      builder.setHighlight(null)
-      highlightKey.current = null
-      bump()
-      return
-    }
-    const ids = new Set<string>()
-    const colorOk = (el: AnyRec) => !color || el.color === color
-    if (kind === 'tubes') {
-      for (const tb of model.tubes.values()) {
-        if (!tb.arm && !tb.link && tb.tubeId === id && colorOk(tb)) ids.add(tb.id)
-      }
-    } else if (kind === 'panels') {
-      for (const p of model.panels.values()) if (p.panelId === id && colorOk(p)) ids.add(p.id)
-    } else if (kind === 'connectors') {
-      for (const n of model.nodes.values()) {
-        if (n.unused) continue
-        for (const typ of connectorsForNode(model, n) as string[]) if (typ === id) { ids.add(n.id); break }
-      }
-    } else if (kind === 'slides') {
-      for (const sl of model.slides.values()) if (sl.kind === id) ids.add(sl.id)
-    } else if (kind === 'reinforcements') {
-      for (const tb of model.tubes.values()) if (tb.reinforced && (tb.reinforcement?.partId || 'reinforce80') === id) ids.add(tb.id)
-      if (id === 'alu_connector') for (const f of model.fittings.values()) if (f.kind === 'alu-connector2') ids.add(f.id)
-    } else if (kind === 'textiles') {
-      // 普通布面、短布面、彩虹带各是一行：按这块布认出来的零件比对
-      for (const tx of model.textiles.values()) {
-        const def = textilePart(model.textileSpan(tx), tx.variant)
-        if (colorOk(tx) && (!id || (def && def.id) === id)) ids.add(tx.id)
-      }
-    } else {
-      for (const f of model.fittings.values()) {
-        if (f.kind === id || partIdOf(f) === id) ids.add(f.id)
-      }
-    }
-    builder.setHighlight(ids.size ? ids : null)
-    highlightKey.current = ids.size ? key : null
+  const highlight = useCallback((row: BomRow) => {
+    if (!builder) return
+    highlightKey.current = null
+    builder.toggleBomHighlight(`${row.kind}:${row.key}`, row.partIds)
     bump()
-  }, [builder, model, bump])
+  }, [builder, bump])
 
   const highlightIds = useCallback((key: string, list: string[]) => {
     if (!builder) return
@@ -3527,10 +3499,6 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     toolEntries.current = catalogueChoices
   })
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
-}
-
-function partIdOf(f: AnyRec) {
-  return String(f.partId || f.id || '')
 }
 
 export function useEngine() {

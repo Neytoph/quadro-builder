@@ -2,7 +2,7 @@
 
 import { getTube, getConnector, getPanel, colorName, partName, reinforcementPart, partForFitting, getPartById, poolLinerFor, geometry, slideKindName, textilePart } from "./catalog.js";
 import { round2, xAxisOf, yAxisOf, zAxisOf } from "./util.js";
-import { POOL_KINDS, isHolePart, isBoltPart, BOLT_PART, HINGE_PART, ARM_FITTINGS } from "./model.js";
+import { POOL_KINDS, isHolePart, isBoltPart, BOLT_PART, HINGE_PART, ARM_FITTINGS, hingeKey } from "./model.js";
 import { isOriginalComponent, componentKitFields, componentPartId, componentColorName, componentOutputColor, componentFittingKey, componentSizeLabel } from './accessoryInfo.js';
 import { CONN_TYPE_MASK, DIRECTIONS } from './config.js';
 import { SOFT_PARTS } from './softParts.js';
@@ -577,7 +577,20 @@ export function textileRow(model, tx) {
   return { def, id, fest, key };
 }
 
-export function computeBOM(model) {
+// 同一模型实例可能绘制多个独立计料的部件。
+export function bomPartKey(id, role) {
+  return `${id}#bom:${role}`;
+}
+
+export function computeBOM(model, { locateParts = false } = {}) {
+  // 只有交互清单需要位置，库存、导出和拼装说明沿用原有料表。
+  const locations = locateParts ? new Map() : null;
+  const locate = (group, key, id) => {
+    if (!locations) return;
+    const rowKey = group + ":" + key;
+    if (!locations.has(rowKey)) locations.set(rowKey, new Set());
+    locations.get(rowKey).add(id);
+  };
   // --- Rohre nach Typ + Farbe ---
   const tubeMap = new Map();
   for (const t of model.tubes.values()) {
@@ -585,6 +598,7 @@ export function computeBOM(model) {
     const key = t.tubeId + "|" + t.color;
     if (!tubeMap.has(key)) tubeMap.set(key, { tubeId: t.tubeId, color: t.color, count: 0 });
     tubeMap.get(key).count++;
+    locate("tubes", key, t.id);
   }
   const tubes = [...tubeMap.values()].map((r) => {
     const def = getTube(r.tubeId) || { name: r.tubeId, price: 0, length_cm: null };
@@ -614,13 +628,23 @@ export function computeBOM(model) {
       if (model.degree(n.id) >= 1 && !zu) openEnds++;
       continue;
     }
-    for (const type of types) connMap.set(type, (connMap.get(type) || 0) + 1);
+    let hingeIndex = 0;
+    for (const type of types) {
+      connMap.set(type, (connMap.get(type) || 0) + 1);
+      if (!locations) continue;
+      let id = n.id;
+      if (type === HINGE_PART && isBoltPart(n.part)) id = hingeKey(n.id, hingeIndex++);
+      else if (type === "diagonal" && (n.c45 || n.c45body || n.c45file)) id = bomPartKey(n.id, "diagonal");
+      else if (type === n.part && n.stub && !isHolePart(n.part) && !isBoltPart(n.part)) id = bomPartKey(n.id, "node-clamp");
+      locate("connectors", type, id);
+    }
   }
   // Doppelrohrverbinder / Klemmen sind eigenstaendige Bauteile (nicht an Knoten).
   if (model.clamps) {
     for (const c of model.clamps.values()) {
       const type = c.connectorId || "double_tube";
       connMap.set(type, (connMap.get(type) || 0) + 1);
+      locate("connectors", type, c.id);
     }
   }
   const connectors = [...connMap.entries()].map(([type, count]) => {
@@ -641,6 +665,7 @@ export function computeBOM(model) {
     const key = p.panelId + "|" + color;
     if (!panelMap.has(key)) panelMap.set(key, { panelId: p.panelId, color, count: 0, designCount: 0, insetCount: 0 });
     panelMap.get(key).count++;
+    locate("panels", key, p.id);
     if (isOriginalComponent(p)) panelMap.get(key).designCount++;
     if (p.params?.mountLayout === 'opposite-transparent-screws') panelMap.get(key).insetCount++;
   }
@@ -675,6 +700,7 @@ export function computeBOM(model) {
       });
     }
     textileMap.get(key).count++;
+    locate("textiles", key, tx.id);
   }
   const textiles = [...textileMap.values()].map((r) => {
     const base = r.def ? partName(r.def) : "textile";
@@ -701,7 +727,10 @@ export function computeBOM(model) {
   for (const f of (model.fittings ? model.fittings.values() : [])) {
     if (!POOL_KINDS.has(f.kind)) continue;
     const def = poolLinerFor(Math.abs(f.w || 0), Math.abs(f.d || 0));
-    if (def) poolLiners.set(def.id, (poolLiners.get(def.id) || 0) + 1);
+    if (def) {
+      poolLiners.set(def.id, (poolLiners.get(def.id) || 0) + 1);
+      locate("fittings", def.id, f.id);
+    }
   }
   // Aeltere Staende fuehren das Baellebad noch als fuenf Platten: dort zaehlt
   // der Boden, seine Grundflaeche gibt die Groesse.
@@ -712,12 +741,18 @@ export function computeBOM(model) {
     const span = (a, b) => Math.round(Math.hypot(
       corners[a][0] - corners[b][0], corners[a][1] - corners[b][1], corners[a][2] - corners[b][2]));
     const def = poolLinerFor(span(0, 1), span(0, 3));
-    if (def) poolLiners.set(def.id, (poolLiners.get(def.id) || 0) + 1);
+    if (def) {
+      poolLiners.set(def.id, (poolLiners.get(def.id) || 0) + 1);
+      locate("fittings", def.id, p.id);
+    }
   }
   // 海洋球：按池子的内空算袋数，一袋 500 个。
   let ballBags = 0;
   for (const f of (model.fittings ? model.fittings.values() : [])) {
-    if (POOL_KINDS.has(f.kind) && f.balls) ballBags += ballBagsFor(f);
+    if (!POOL_KINDS.has(f.kind) || !f.balls) continue;
+    const count = ballBagsFor(f);
+    ballBags += count;
+    if (count) locate("fittings", "balls", bomPartKey(f.id, "balls"));
   }
 
   // --- Anbauteile (Raeder, Rollen, Netze, Sonderkupplungen) --------------
@@ -740,6 +775,7 @@ export function computeBOM(model) {
       const skey = "sleeve|" + len;
       if (!fitMap.has(skey)) fitMap.set(skey, { def: getPartById("sleeve"), kind: "sleeve", count: 0, designCount: 0, len });
       fitMap.get(skey).count++;
+      locate("fittings", skey, f.id);
       if (isOriginalComponent(f)) fitMap.get(skey).designCount++;
       continue;
     }
@@ -747,6 +783,7 @@ export function computeBOM(model) {
     const key = componentFittingKey(f, def ? def.id : f.kind);
     if (!fitMap.has(key)) fitMap.set(key, { def, kind: f.kind, count: 0, designCount: 0, size: componentSizeLabel(f), w: f.w ?? f.params?.width, h: f.h ?? f.params?.height });
     fitMap.get(key).count++;
+    locate("fittings", key, f.id);
     if (isOriginalComponent(f)) fitMap.get(key).designCount++;
   }
   // Die Poolfolien reihen sich bei den Anbauteilen ein -- sie sind Zubehoer
@@ -760,7 +797,10 @@ export function computeBOM(model) {
   let acrylicSheets = 0;
   for (const p of model.panels.values()) {
     const def = getPanel(p.panelId);
-    if (def && def.acrylic && p.appearanceVersion !== 2) acrylicSheets++;
+    if (def && def.acrylic && p.appearanceVersion !== 2) {
+      acrylicSheets++;
+      locate("fittings", "acrylic_glass", bomPartKey(p.id, "acrylic-glass"));
+    }
   }
   if (acrylicSheets) {
     fitMap.set("acrylic_glass", { def: getPartById("acrylic_glass"), kind: "acrylic", count: acrylicSheets });
@@ -784,6 +824,7 @@ export function computeBOM(model) {
   const slideMap = new Map();
   for (const sl of (model.slides ? model.slides.values() : [])) {
     slideMap.set(sl.kind, (slideMap.get(sl.kind) || 0) + 1);
+    locate("slides", sl.kind, sl.id);
   }
   const slides = [...slideMap.entries()].map(([kind, count]) => {
     const def = partForFitting(kind);
@@ -809,8 +850,13 @@ export function computeBOM(model) {
     if (!def) throw new Error(`Unknown reinforcement: ${run.partId}`);
     const count = run.explicit ? 1 : Math.max(1, Math.round(run.length / (def.coverage_cm || 80)));
     counts.set(def.id, (counts.get(def.id) || 0) + count);
+    if (locations) for (const id of run.tubeIds) locate("reinforcements", def.id, bomPartKey(id, "reinforcement"));
   }
-  for (const fitting of model.fittings?.values() || []) if (fitting.kind === 'alu-connector2') counts.set('alu_connector', (counts.get('alu_connector') || 0) + 1);
+  for (const fitting of model.fittings?.values() || []) {
+    if (fitting.kind !== "alu-connector2") continue;
+    counts.set("alu_connector", (counts.get("alu_connector") || 0) + 1);
+    locate("reinforcements", "alu_connector", fitting.id);
+  }
   for (const [id, count] of counts) {
     const def = getPartById(id);
     reinforcements.push({ key: id, id, len: def.length_cm, name: partName(def), count,
@@ -828,6 +874,10 @@ export function computeBOM(model) {
     slides.reduce((s, r) => s + (r.subtotal || 0), 0)
   );
 
+  const groups = { tubes, connectors, panels, reinforcements, textiles, slides, fittings };
+  if (locations) for (const [group, rows] of Object.entries(groups)) {
+    for (const row of rows) row.partIds = [...(locations.get(group + ":" + (row.key ?? row.type)) || [])];
+  }
   return {
     tubes, connectors, panels, reinforcements, openEnds, textiles, slides, fittings,
     totals: {

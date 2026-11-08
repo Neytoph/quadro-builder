@@ -24,7 +24,7 @@ import { loadConnectorMeshes, loadSlideMeshes, loadFittingMeshes,
   loadSurfaceMeshes } from "./meshes.js";
 import { CONNECTOR_ARM_BITS } from "./qdfimport.js";
 import { preferPanelCell, preferGuideHandle } from "./pickcell.js";
-import { resolveNodeConnection, hasStandaloneFileC45 } from "./bom.js";
+import { resolveNodeConnection, hasStandaloneFileC45, bomPartKey } from "./bom.js";
 import { c45FrameFor } from './c45Pose.js';
 import { DEFAULT_TUNE, DEFAULT_GRADE, gradeHex, displayHex } from "./colorTune.js";
 import { createOutdoorVisuals, OUTDOOR_AREA } from './outdoor.js';
@@ -4164,6 +4164,7 @@ export class SceneManager {
     // die Cursor-Auswahl waere das stoerend: dort waehlt man staendig etwas an.
     const selected = opts.selected && opts.selected.size ? opts.selected : null;
     const highlight = opts.highlight && opts.highlight.size ? opts.highlight : null;
+    const bomHighlight = opts.bomHighlight ? highlight : null;
     this._solidSelectedParts = selected && !highlight ? opts.solidSelected : null;
     const focusId = opts.focusId != null ? opts.focusId : null;
     // Beides zugleich ist der Normalfall: etwas ist im Modell gewaehlt UND in
@@ -4180,21 +4181,21 @@ export class SceneManager {
     const invalid = opts.invalid && opts.invalid.size ? opts.invalid : null;
     // 按零件上色（id -> 颜色）：共享方案里别人选中的零件、版本对照里增减的零件
     const tints = opts.tints && opts.tints.size ? opts.tints : null;
-    const matFor = (id, base, keepOpaque = false) => {
+    const matFor = (id, base, keepOpaque = false, bomId = id) => {
       if (invalid && id != null && invalid.has(id)) return this._invalidMaterial(base);
       if (opts.reinforce && opts.suggest?.has(id)) return this._suggestMaterial(base);
       if (!opts.panelPlacementRails && focusId != null && id === focusId) return this._focusMaterial(base);
-      if (highlight && id != null && highlight.has(id)) {
+      if (highlight?.has(bomHighlight ? bomId : id)) {
         return focusId != null ? this._partnerMaterial(base) : this._selectedMaterial(base);
       }
       const parentId = typeof id === 'string' ? splitHingeKey(id)?.nodeId : null;
-      if (selected && (selected.has(id) || parentId && selected.has(parentId))
+      if (!bomHighlight && selected && (selected.has(id) || parentId && selected.has(parentId))
           && (opts.solidSelected?.has(id) || parentId && opts.solidSelected?.has(parentId))) {
         return this._boxSelectedMaterial(base);
       }
       if (marked) {
-        if (id != null && marked.has(id)) {
-          if (!highlight && opts.preserveSelectionAppearance) return base;
+        if (!highlight && id != null && marked.has(id)) {
+          if (opts.preserveSelectionAppearance) return base;
           return this._selectedMaterial(base);
         }
         if (dimOthers) return keepOpaque ? base : this._dimmedMaterial(base);
@@ -4430,7 +4431,8 @@ export class SceneManager {
         const grund = zustand.some((z) => z === "current") ? this._rodMaterial()
           : (asm && zustand.every((z) => z === "done")) ? this._assemblyDoneMaterial(this._rodMaterial())
           : this._rodMaterial();
-        const mat = matFor(lauf.tubes.find((id) => marked && marked.has(id)) ?? null, grund);
+        const profileId = lauf.tubes.find(id => marked?.has(bomHighlight ? bomPartKey(id, "reinforcement") : id));
+        const mat = matFor(profileId ?? null, grund, false, profileId ? bomPartKey(profileId, "reinforcement") : null);
         this._batchAdd(this._meshGeometry('fit:' + meshKey, rec),
           mat, new THREE.Matrix4().makeBasis(ex, ey, ez).scale(new THREE.Vector3(lauf.len / 80, 1, 1))
             .setPosition(new THREE.Vector3(...profilePosition)),
@@ -4469,7 +4471,7 @@ export class SceneManager {
       // die wird unten zusaetzlich gezeichnet.
       if (n.stub && isHolePart(n.part)) this._addPinConnector(model, n, matFor(n.id, mat), st);
       else if (isBoltPart(n.part)) this._addFlexiJoint(model, n, mat, st, matFor);
-      else if (n.stub && n.part) this._addTubeClamp(model, n, matFor(n.id, mat), st);
+      else if (n.stub && n.part) this._addTubeClamp(model, n, matFor(n.id, mat, false, bomPartKey(n.id, "node-clamp")), st);
       // Wo eine Radkappe sitzt, gibt es keine Kupplung mehr -- die Kappe
       // schliesst das Rohrende selbst ab. Der Flexikupplungs-Bolzen ersetzt sie
       // ebenfalls: er steckt selbst im Rohrende.
@@ -4519,7 +4521,7 @@ export class SceneManager {
         // aus -- sonst steht die 45-Grad-Kupplung als einziges Stueck kraeftig
         // schwarz im schon Gebauten.
         const c45base = this._c45Material();
-        const c45mat = matFor(n.id, c45base);
+        const c45mat = matFor(n.id, c45base, false, bomPartKey(n.id, "diagonal"));
         // Abgegriffenes Originalteil: EIN Mesh auf der Basiskupplung, mit deren
         // Lage -- genau dort und so fuehrt die Datei die connector45_2. Huelse,
         // Koerper und 45-Grad-Arm stecken darin, es braucht keinen Zusammenbau.
@@ -4641,7 +4643,8 @@ export class SceneManager {
     }
 
     const bridgeShapes = new Map();
-    if (!hideFlat) for (const tx of [...model.textiles.values(), ...model.fittings.values()]) {
+    if (!hideFlat || bomHighlight) for (const tx of [...model.textiles.values(), ...model.fittings.values()]) {
+      if (hideFlat && !bomHighlight.has(tx.id)) continue;
       if ((tx.variant !== "bridge" && tx.kind !== 'textile_bridge') || stateOf(tx.id) === "future") continue;
       const shape = bridgeShape(model, tx);
       if (!shape) continue;
@@ -4797,7 +4800,7 @@ export class SceneManager {
         const rodRadius = 1.5;  // 15 mm Radius = 30 mm Durchmesser in cm
         const rodGeo = this._tubeGeometry(rodRadius, len, 8);
         // Nicht anklickbar (kind null) -- das Profil steckt im Rohr.
-        this._batchAdd(rodGeo, matFor(t.id, this._rodMaterial()),
+        this._batchAdd(rodGeo, matFor(t.id, this._rodMaterial(), false, bomPartKey(t.id, "reinforcement")),
           new THREE.Matrix4().compose(mid, quat, ONE), 'tube', t.id, null);
       }
 
@@ -4819,7 +4822,8 @@ export class SceneManager {
     const thickness = geometry().panelThickness;
     const middle = modelMiddle(model.nodes.values());
     for (const p of model.panels.values()) {
-      if (hideFlat) continue;
+      const paneId = bomHighlight && bomPartKey(p.id, "acrylic-glass");
+      if (hideFlat && !bomHighlight?.has(p.id) && !bomHighlight?.has(paneId)) continue;
       const cor = model.panelCorners(p);
       if (!cor) continue;
       const st = stateOf(p.id);
@@ -4917,7 +4921,7 @@ export class SceneManager {
         // Material des Rahmens, sonst Glas.
         const paneMat = (st === "future" || (asm && st === "done")) ? mat : this._glassMaterial();
         const pane = this._acrylicPaneGeometry(u.length(), w.length(), thickness);
-        this._batchAdd(pane, matFor(p.id, paneMat), basis, "panel", p.id, this.pickPanels);
+        this._batchAdd(pane, matFor(p.id, paneMat, false, bomHighlight?.has(paneId) ? paneId : p.id), basis, "panel", p.id, this.pickPanels);
       }
 
       // Bällebad-Boden: Wasser-Volumen (75 % Füllhöhe) über dem Boden rendern.
@@ -4982,7 +4986,7 @@ export class SceneManager {
     // Netze/Stoffe (textil2): Flaeche ueber 4 Eck-Kupplungen. Deckend -- ein
     // Tuch ist auch am echten Geruest blickdicht.
     for (const tx of (model.textiles ? model.textiles.values() : [])) {
-      if (hideFlat) continue;
+      if (hideFlat && !bomHighlight?.has(tx.id)) continue;
       if (tx.variant === "bridge") {
         drawBridge(tx, 'textile');
         continue;
@@ -5049,8 +5053,9 @@ export class SceneManager {
 
     // Anbauteile: Raeder, Rollen, Kappen, Netze, Rundwand, Dach, Sonderkupplungen.
     for (const f of (model.fittings ? model.fittings.values() : [])) {
-      if (hideFlat && FLAT_FITTINGS.has(f.kind)) continue;
-      if (frameOnly && !FRAME_FITTINGS.has(f.kind)) continue;
+      const ballsId = bomHighlight && f.balls ? bomPartKey(f.id, "balls") : null;
+      if ((hideFlat && FLAT_FITTINGS.has(f.kind) || frameOnly && !FRAME_FITTINGS.has(f.kind))
+          && !bomHighlight?.has(f.id) && !bomHighlight?.has(ballsId)) continue;
       const st = stateOf(f.id);
       if (st === "future") continue;
       if (f.kind === 'textile_bridge' && bridgeShapes.has(f.id)) { drawBridge(f, 'fitting'); continue; }
@@ -5058,10 +5063,12 @@ export class SceneManager {
         const role = mesh.userData.role;
         mesh.userData = { kind: "fitting", id: f.id, role };
         const base = mesh.material;
-        // 水面平时保持蓝色，多选或框选时随整件统一着橙色。
-        mesh.material = role === "water" && !this._solidSelectedParts?.has(f.id) ? base
-          : matFor(f.id, (suggest && suggest.has(f.id)) ? this._suggestMaterial(base)
-          : base);
+        // 水面是辅助显示。海洋球有独立的清单行。
+        if (role === "water" && bomHighlight) {
+          mesh.material = matFor(null, base, false, ballsId);
+        } else if (role !== "water" || this._solidSelectedParts?.has(f.id)) {
+          mesh.material = matFor(f.id, suggest?.has(f.id) ? this._suggestMaterial(base) : base);
+        }
         this.buildGroup.add(mesh);
         this.pickFittings.push(mesh);
       }
@@ -5074,7 +5081,7 @@ export class SceneManager {
     this._slideChainFrame = null;
     this._slideChainNextId = null;
     for (const sl of (model.slides ? model.slides.values() : [])) {
-      if (hideFlat) continue;
+      if (hideFlat && !bomHighlight?.has(sl.id)) continue;
       const st = stateOf(sl.id);
       if (st === "future") continue;
       // Liegt zu dieser Art ein abgegriffenes Originalmodell vor?

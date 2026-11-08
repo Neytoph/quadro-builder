@@ -83,7 +83,7 @@ export default function RightDock() {
         {pane === 'library' && <LibraryPanel />}
         {pane === 'saves' && <SavesPanel />}
         {pane === 'advisor' && <KitAdvisor />}
-        {pane === 'bom' && <BomPane />}
+        {pane === 'bom' && <BomPane onLocate={narrow ? close : undefined} />}
         {pane === 'inventory' && <InventoryPane />}
         {pane === 'safety' && <SafetyPane />}
         {pane === 'comments' && <CommentsPane />}
