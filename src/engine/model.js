@@ -1,7 +1,7 @@
 // Datenmodell des Bauwerks: Graph aus Knoten (Kupplungen) und Kanten (Rohren).
 // Bewusst ohne Three.js-Abhaengigkeit, damit es testbar und Backend-tauglich bleibt.
 
-import { MERGE_EPS, FORMAT_VERSION, DIAGONAL_SNAP_TOL, DIRECTIONS, DIAGONAL_DIRECTIONS, DIR_ALIGN_TOL, ARM_ALIGN_TOL, CONN_TYPE_MASK, anchorGap } from "./config.js";
+import { MERGE_EPS, FORMAT_VERSION, DIAGONAL_SNAP_TOL, DIRECTIONS, DIAGONAL_DIRECTIONS, DIR_ALIGN_TOL, ARM_ALIGN_TOL, CLAMP_LINK_DIST, CONN_TYPE_MASK, anchorGap } from "./config.js";
 import { bridgeParams, bridgeShape, bridgeExtentPoints } from './rainbowBridge.js';
 import { withPlacementPass, placementMemo, placementBounds, pointsBounds, railBounds, railLineScope } from './incrementalPlacement.js';
 import { ACCESSORY_IDS, PANEL_ACCESSORY_IDS, accessoryMount, accessoryDiagnostics, panelAccessoryDiagnostics, componentMountsValid, componentVolumes, componentFrame, confirmedDiagnostics, nativeWheelComponentObstacle } from './accessoryPack.js';
@@ -4257,6 +4257,41 @@ export class BuildModel {
     return this._clampTubeAt([c.x + c.off[0], c.y + c.off[1], c.z + c.off[2]], c.dir);
   }
 
+  /** 旧版按最近节点接桥；只有实际夹住的两根管能确定唯一替代端点时才修复。 */
+  _repairClampLinks() {
+    if (!this.clamps.size) return;
+    const links = [...this.tubes.values()].filter(t => t.link);
+    if (!links.length) return;
+    const linkedEnds = new Set(links.flatMap(({ a, b }) => [a, b]));
+    const baseEndsBySecondEnd = new Map();
+    for (const clamp of this.clamps.values()) {
+      const second = this._clampSecondTube(clamp);
+      if (!second || ![second.a, second.b].some(id => linkedEnds.has(id))) continue;
+      const base = this._clampBaseTube(clamp);
+      if (!base || base.id === second.id) continue;
+      for (const id of [second.a, second.b]) {
+        if (!linkedEnds.has(id)) continue;
+        const ends = baseEndsBySecondEnd.get(id) || new Set();
+        ends.add(base.a);
+        ends.add(base.b);
+        baseEndsBySecondEnd.set(id, ends);
+      }
+    }
+    for (const link of links) {
+      // 旧版放置总是先写被选中的近邻，再写第二根管的端点。QDF 的 C45 也用 link。
+      const baseEnds = baseEndsBySecondEnd.get(link.b);
+      if (!baseEnds || baseEnds.has(link.a) || baseEndsBySecondEnd.get(link.a)?.has(link.b)
+        || this.nodes.get(link.a).c45file) continue;
+      const end = this.nodes.get(link.b);
+      const targets = [...baseEnds].filter(id => id !== link.b
+        && dist2(this.nodes.get(id), end) < CLAMP_LINK_DIST ** 2);
+      if (targets.length !== 1) continue;
+      const [target] = targets;
+      if (this.tubeBetween(target, link.b)) this.tubes.delete(link.id);
+      else link.a = target;
+    }
+  }
+
   // 一根管两端的节点在方向 u 上相对 origin 的位置。
   _tubeEndsAlong(tubeId, origin, u) {
     const t = this.tubes.get(tubeId);
@@ -7617,6 +7652,7 @@ export class BuildModel {
       this.groups.set(g.id, new Set(g.ids));
       maxSeq = Math.max(maxSeq, parseSeq(g.id));
     }
+    this._repairClampLinks();
     this._pruneGroups();
     // 兼容旧存档中已拆掉套筒连接、仍残留45°件标记的管端。
     for (const node of this.nodes.values()) if (node.c45body) this._syncC45Flag(node.id);

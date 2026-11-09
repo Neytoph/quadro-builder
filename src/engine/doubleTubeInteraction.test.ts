@@ -82,6 +82,63 @@ describe('双管空孔预览与实际落点', () => {
     model.extend(n.id, [0, 0, 1], 'T35', 'blue', 35, 40)
     expect(connectorsForNode(model, n)).toContain('elbow')
   })
+
+  it.each(['double_tube', 'tube_clamp'])('%s 只把第二根管桥接到实际承载管端点', connectorId => {
+    const { model, builder, clamp, base } = fixture()
+    clamp.connectorId = connectorId
+    const nearby = model.addNode(0, 45, 4.9)
+    const other = model.addNode(0, 45, 44.9)
+    model.addTube(nearby.id, other.id, 'T35', 'blue', 35)
+    builder._placeSecondTube([], clamp.dir, null, clamp.id)
+    const second = model._clampSecondTube(clamp)!
+    expect(model.tubeBetween(base.a, second.a)?.link).toBe(true)
+    expect(model.tubeBetween(base.b, second.b)?.link).toBe(true)
+    expect(model.tubeBetween(nearby.id, second.a)).toBeNull()
+  })
+})
+
+describe('旧存档的双管误连修复', () => {
+  it.each([false, true])('修复错接并保留正常桥接，目标桥接已存在=%s', duplicate => {
+    const { model, clamp, base } = fixture()
+    const a = model.addNode(0, 45, 0), b = model.addNode(40, 45, 0)
+    model.addTube(a.id, b.id, 'T35', 'yellow', 35)
+    const neighbor = model.addNode(0, 45, 4.9)
+    const wrong = model.addLink(neighbor.id, a.id)!
+    const correct = duplicate ? model.addLink(base.a, a.id)! : null
+    const reversed = model.addLink(b.id, base.b)!
+    const adapter = model.addNode(0, 47, 6)
+    adapter.c45file = true
+    const adapterLink = model.addLink(adapter.id, a.id)!
+
+    const raw = model.toJSON()
+    const reopened = new BuildModel()
+    expect(reopened.loadJSON(raw).ok).toBe(true)
+    expect(reopened.tubeBetween(neighbor.id, a.id)).toBeNull()
+    expect(reopened.tubeBetween(base.a, a.id)?.id).toBe(correct?.id || wrong.id)
+    expect(reopened.tubeBetween(base.b, b.id)?.id).toBe(reversed.id)
+    expect(reopened.tubeBetween(adapter.id, a.id)?.id).toBe(adapterLink.id)
+    expect(raw.tubes.find(t => t.id === wrong.id)?.a).toBe(neighbor.id)
+    const repaired = reopened.toJSON()
+    expect(reopened.loadJSON(repaired).ok).toBe(true)
+    expect(reopened.toJSON()).toEqual(repaired)
+    expect(reopened.clamps.get(clamp.id)?.off).toEqual(clamp.off)
+  })
+
+  it('第二根管有两个可能的承载端点时保留原桥接', () => {
+    const { model, clamp } = fixture()
+    const a = model.addNode(0, 45, 0), b = model.addNode(40, 45, 0)
+    model.addTube(a.id, b.id, 'T35', 'yellow', 35)
+    const c = model.addNode(0, 45, 5), d = model.addNode(40, 45, 5)
+    model.addTube(c.id, d.id, 'T35', 'blue', 35)
+    const other = model.addClamp(20, 45, 5)
+    other.dir = clamp.dir.slice()
+    other.off = [0, 0, -5]
+    const neighbor = model.addNode(0, 48, 4)
+    const link = model.addLink(neighbor.id, a.id)!
+    const reopened = new BuildModel()
+    expect(reopened.loadJSON(model.toJSON()).ok).toBe(true)
+    expect(reopened.tubeBetween(neighbor.id, a.id)?.id).toBe(link.id)
+  })
 })
 
 describe('自由管口的空心几何', () => {

@@ -3514,11 +3514,14 @@ export class Builder {
       const tb = this.model.addTube(n1.id, n2.id, tube.id, this.colorFor("tube"), tube.length_cm);
       // Rohr im Maul einer Lagerkupplung: Teil und Rohr gehoeren jetzt zusammen.
       if (bearingNode && tb) this.model.noteBearingTube(bearingNode, tb.id);
-      // Jedes Ende an seinen ausgerichteten Nachbar-Knoten (~Versatz) anbinden,
-      // damit die Klemme beide Rohre als Paar zusammenhaelt.
+      // 双管夹的虚拟桥只能连到实际夹住的第一根管。轴承沿用自己的端点查找。
+      const base = clamp && this.model._clampBaseTube(clamp);
+      const neighbors = clamp
+        ? [this.model.nodes.get(base?.a), this.model.nodes.get(base?.b)].filter(Boolean)
+        : [...this.model.nodes.values()];
       for (const nn of [n1, n2]) {
         let near = null, nd = Infinity;
-        for (const m of this.model.nodes.values()) {
+        for (const m of neighbors) {
           if (m.id === n1.id || m.id === n2.id) continue;
           const d = Math.hypot(m.x - nn.x, m.y - nn.y, m.z - nn.z);
           if (d < nd) { nd = d; near = m; }
