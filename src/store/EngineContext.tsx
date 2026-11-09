@@ -2957,7 +2957,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
           model: allowModel ? JSON.stringify(productOnly(data)) : undefined,
           version: new Date().toISOString(), sourceKey: preview.tabId,
         }
-        const modulePath = '/app/service-export.js?v=2'
+        const modulePath = '/app/service-export.js?v=3'
         void import(/* @vite-ignore */ modulePath).then(module => module.offerServiceExport(payload))
           .catch(error => console.error('[manual service entry]', error))
       }
