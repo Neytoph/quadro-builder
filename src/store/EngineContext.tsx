@@ -2891,7 +2891,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       : ''
     const fileBase = (preview.name || 'design').replace(/[\\/:*?"<>|]+/g, '_').trim() || 'design'
     const owner = String(storage.getAccountScope()).match(/^user:(\d+)$/)?.[1]
-    const nativeOffer = SINGLE_MODEL && !RESOURCE_MODE && !VIEW_ONLY && !!owner
+    const serviceExportModule = import.meta.env.VITE_SERVICE_EXPORT_MODULE
+    const nativeOffer = SINGLE_MODEL && !RESOURCE_MODE && !VIEW_ONLY && !!owner && !!serviceExportModule
     const allowModel = !e2.builder.readOnly
     const manualName = `${fileBase}-${t('manual.fileSuffix')}.pdf`
     let exported: {blob:Blob;cover:Blob|null} | undefined
@@ -2951,14 +2952,13 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       track('builder.export.manual.done', { object: manualObject })
       output('manual')
       notify(t('toast.manualSaved'))
-      if (exported && owner) {
+      if (exported && owner && serviceExportModule) {
         const payload = {
           ...exported, owner, lang, name: manualName, title: preview.name,
           model: allowModel ? JSON.stringify(productOnly(data)) : undefined,
           version: new Date().toISOString(), sourceKey: preview.tabId,
         }
-        const modulePath = '/app/service-export.js?v=3'
-        void import(/* @vite-ignore */ modulePath).then(module => module.offerServiceExport(payload))
+        void import(/* @vite-ignore */ serviceExportModule).then(module => module.offerServiceExport(payload))
           .catch(error => console.error('[manual service entry]', error))
       }
       return {status:'done' as const}
