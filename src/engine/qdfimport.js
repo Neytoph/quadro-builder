@@ -274,14 +274,6 @@ function unionDirs(a, b) {
   return out;
 }
 
-// Vektor auf die naechste Koordinatenachse (Einheits-Kardinalrichtung) runden.
-function nearestCardinal(v) {
-  const ax = Math.abs(v[0]), ay = Math.abs(v[1]), az = Math.abs(v[2]);
-  if (ax >= ay && ax >= az) return [Math.sign(v[0]) || 1, 0, 0];
-  if (ay >= az) return [0, Math.sign(v[1]) || 1, 0];
-  return [0, 0, Math.sign(v[2]) || 1];
-}
-
 // Nearest-Buildable-Tube nach Laenge (cm) bestimmen.
 function nearestTube(tubes, lengthCm) {
   let best = tubes[0], bestD = Infinity;
@@ -596,14 +588,10 @@ export function parseQDF(text, opts = {}) {
       if (istTot(p)) continue;
       const x = p.tuple[4] / 10, y = p.tuple[5] / 10, z = p.tuple[6] / 10;
       const q = decodeQuat([p.tuple[0], p.tuple[1], p.tuple[2], p.tuple[3]]);
-      const dir = nearestCardinal(rotateByQuat(q, [1, 0, 0]));
-      // Wohin das zweite Loch zeigt, steckt in der Drehung: bei der Rohrklammer
-      // auf der lokalen +Y-, beim Doppelrohrverbinder auf der lokalen -Z-Achse
-      // (an den abgegriffenen Modellen gemessen). Ohne diese Richtung stuende
-      // das Teil beliebig um sein Rohr gedreht.
-      const zweit = nearestCardinal(p.name === "clip2"
-        ? rotateByQuat(q, [0, 1, 0])
-        : rotateByQuat(q, [0, 0, -1]));
+      const dir = rotateByQuat(q, [1, 0, 0]);
+      // Auch ohne zweite Tube den freien Drehwinkel aus der Datei uebernehmen.
+      // Das zweite Loch liegt lokal auf +Y (clip2) bzw. -Z (clamp2).
+      const zweit = rotateByQuat(q, p.name === "clip2" ? [0, 1, 0] : [0, 0, -1]);
       clamps.push({
         id: "k" + seq++, x: round(x), y: round(y), z: round(z),
         connectorId: p.name === "clip2" ? "tube_clamp" : "double_tube",

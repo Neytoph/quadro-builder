@@ -271,20 +271,30 @@ function sceneParts(builder: Builder, model: BuildModel) {
 }
 
 describe('已选双管夹绕管旋转', () => {
-  it('拖动旋转保持第一根管、图关系，可逐步撤销重做', () => {
+  it.each(['tube_clamp', 'double_tube'])('%s 拖动到任意角度，保持第一根管和图关系，可撤销重做', connectorId => {
     const { model, builder, scene, clamp, base } = fixture()
+    clamp.connectorId = connectorId
     builder._placeSecondTube([30, 45, 0], clamp.dir, null, clamp.id)
     builder.mode = 'select'
     builder.selection = new Map([[clamp.id, 'clamp']])
     builder.setHistory(new ModelHistory(docFromJSON(model.toJSON())))
     const before = model.toJSON()
-    scene.pointOnPlane = (x: number) => x === 0 ? new THREE.Vector3(30, 45, 0) : new THREE.Vector3(30, 40, 5)
+    const angle = 0.37
+    scene.pointOnPlane = (x: number) => {
+      const a = x === 0 ? 0 : angle
+      return new THREE.Vector3(30, 40 + 5 * Math.cos(a), 5 * Math.sin(a))
+    }
     builder._down = { x: 0, y: 0 }
-    expect(builder._beginClampDrag(clamp.id)).toBe(true)
+    const driver = builder._rotationDriverForPick({ data: { id: clamp.id, kind: 'clamp' } })
+    expect(driver).toBe(clamp.id)
+    expect(builder._beginClampDrag(driver)).toBe(true)
     builder._updateClampDrag({ clientX: 30, clientY: 20 })
     builder._endClampDrag({ clientX: 30, clientY: 20 })
     const after = model.toJSON()
     expect(after).not.toEqual(before)
+    const turned = model.clamps.get(clamp.id)!
+    expect(Math.atan2(turned.off[2], turned.off[1])).toBeCloseTo(angle, 2)
+    expect(model._clampSecondTube(turned)).toBeTruthy()
     for (const id of [base.a, base.b]) expect(model.nodes.get(id)).toMatchObject(before.nodes.find((n: { id: string }) => n.id === id)!)
     expect(after.tubes).toEqual(before.tubes)
     expect(builder.history.canUndo()).toBe(true)
@@ -293,6 +303,23 @@ describe('已选双管夹绕管旋转', () => {
     expect(builder.history.canUndo()).toBe(false)
     builder.history.redo()
     expect(model.toJSON()).toEqual(after)
+  })
+
+  it.each(['tube_clamp', 'double_tube'])('%s 的空孔重新导入 QDF 后保留旋转角度', connectorId => {
+    const { model, clamp } = fixture()
+    clamp.connectorId = connectorId
+    expect(model.rotateClamp(clamp.id, 0.37)).toBe(true)
+    const data = parseQDF(buildQDF(model).text, {
+      tubes: buildableTubes(), connectorSize: geometry().connectorSize,
+    })
+    const reopened = new BuildModel()
+    expect(reopened.loadJSON(data).ok).toBe(true)
+    const imported = [...reopened.clamps.values()][0]
+    expect(imported.connectorId).toBe(connectorId)
+    expect(Math.atan2(imported.off[2], imported.off[1])).toBeCloseTo(0.37, 2)
+    expect(reopened._clampBaseTube(imported)).toBeTruthy()
+    expect(reopened._clampSecondTube(imported)).toBeNull()
+    expect(reopened.rotateClamp(imported.id, 0.2)).toBe(true)
   })
 
   it('按下后未移动走点击旋转入口；只读禁止开始拖动', () => {
