@@ -28,14 +28,26 @@ async function load(){
       })
     ]);
     viewer=await module.mountModelDisplay(document.getElementById('preview'),asset);
+    viewer.scene.controls.saveState();
     status.hidden=true;hint.textContent=words[3];hint.hidden=false;
     document.documentElement.dataset.ready='true';
+    window.frameElement?.dispatchEvent(new Event('xmf-model-view-ready'));
   }catch(error){
     console.error(error);status.textContent=words[1]+' ';status.setAttribute('role','alert');
     const detail=document.createElement('small');detail.textContent=error.message;status.append(detail);
     const retry=document.createElement('button');retry.textContent=words[2];retry.onclick=load;status.append(retry);
   }
 }
+document.addEventListener('xmf-model-view-reset',()=>{
+  if(!viewer)return;
+  const controls=viewer.scene.controls;
+  const damping=controls.enableDamping;
+  // 清掉拖动和旋转的惯性，再恢复预览加载完成时的取景。
+  controls.enableDamping=false;
+  controls.update();
+  controls.reset();
+  controls.enableDamping=damping;
+});
 window.addEventListener('pagehide',()=>viewer?.dispose());
 void load();
 </script>
