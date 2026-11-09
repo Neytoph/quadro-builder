@@ -2890,6 +2890,11 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       ? t('manual.size', { w: Math.round(b.size[0]), d: Math.round(b.size[2]), h: Math.round(b.size[1]) })
       : ''
     const fileBase = (preview.name || 'design').replace(/[\\/:*?"<>|]+/g, '_').trim() || 'design'
+    const owner = String(storage.getAccountScope()).match(/^user:(\d+)$/)?.[1]
+    const nativeOffer = SINGLE_MODEL && !RESOURCE_MODE && !VIEW_ONLY && !!owner
+    const allowModel = !e2.builder.readOnly
+    const manualName = `${fileBase}-${t('manual.fileSuffix')}.pdf`
+    let exported: {blob:Blob;cover:Blob|null} | undefined
     try {
       // 先绘制进度，再按高度冻结分层资料。
       await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
@@ -2904,9 +2909,17 @@ export function EngineProvider({ children }: { children: ReactNode }) {
         plan,
         name: preview.name,
         bom: bomNow,
-        filename: `${fileBase}-${t('manual.fileSuffix')}.pdf`,
+        filename: manualName,
         save: !RESOURCE_MODE,
-        onDocument: RESOURCE_MODE ? ({blob}:{blob:Blob})=>deliverResourceFile(blob,`${fileBase}-${t('manual.fileSuffix')}.pdf`) : undefined,
+        includeCover: RESOURCE_MODE || nativeOffer,
+        onDocument: RESOURCE_MODE || nativeOffer ? (result:{blob:Blob;cover:Blob|null})=>{
+          if (RESOURCE_MODE) deliverResourceFile(result.blob, manualName, {
+            cover: result.cover,
+            model: new URLSearchParams(location.search).get('serviceExportModel') === '1'
+              ? JSON.stringify(productOnly(data)) : undefined,
+          })
+          else exported = result
+        } : undefined,
         onProgress: (p: { page: number; total: number; phase?: string }) => setExportingManual(value => controller.signal.aborted ? value : p),
         copy: {
           ...assemblyPdfStrings[lang],
@@ -2938,6 +2951,16 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       track('builder.export.manual.done', { object: manualObject })
       output('manual')
       notify(t('toast.manualSaved'))
+      if (exported && owner) {
+        const payload = {
+          ...exported, owner, lang, name: manualName, title: preview.name,
+          model: allowModel ? JSON.stringify(productOnly(data)) : undefined,
+          version: new Date().toISOString(), sourceKey: preview.tabId,
+        }
+        const modulePath = '/app/service-export.js?v=1'
+        void import(/* @vite-ignore */ modulePath).then(module => module.offerServiceExport(payload))
+          .catch(error => console.error('[manual service entry]', error))
+      }
       return {status:'done' as const}
     } catch (err) {
       if (controller.signal.aborted && err === controller.signal.reason) { notify(t('manual.cancelled')); sendResourceMessage({type:'xmf-resource:result',status:'cancelled'}); return {status:'cancelled' as const} }

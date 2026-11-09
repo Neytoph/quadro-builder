@@ -1488,7 +1488,8 @@ function manualError(code, message, diagnostics = []) {
  *   copy: Record<string, string>,
  *   filename?: string,
  *   save?: boolean,
- *   onDocument?: (result: {doc: object, blob: Blob, pages: number, plan: object}) => void | Promise<void>,
+ *   includeCover?: boolean,
+ *   onDocument?: (result: {doc: object, blob: Blob, cover: Blob | null, pages: number, plan: object}) => void | Promise<void>,
  *   onProgress?: (p: { page: number, total: number, phase?: string }) => void,
  *   signal?: AbortSignal,
  *   stamp?: { url: string, host: string, hint: string } | null,
@@ -1497,7 +1498,7 @@ function manualError(code, message, diagnostics = []) {
  * stamp 是方案页的网址和二维码（src/sharePage.ts），给了就印在每一页右下角。
  */
 export async function exportAssemblyPdf(opts) {
-  const { name, filename, onProgress, stamp, save = true, onDocument, signal } = opts;
+  const { name, filename, onProgress, stamp, save = true, onDocument, signal, includeCover } = opts;
   const checkpoint = async () => { await yieldUi(); signal?.throwIfAborted(); };
   signal?.throwIfAborted();
   const manualLang = getLang();
@@ -1567,6 +1568,7 @@ export async function exportAssemblyPdf(opts) {
   host.setAttribute('aria-hidden', 'true');
   document.body.append(host);
   let scene;
+  let cover = null;
   const pageShots = [];
   let activeState = null;
   let currentPage = 0;
@@ -1651,6 +1653,7 @@ export async function exportAssemblyPdf(opts) {
         }
         else if (descriptor.type === 'cover') {
           const front = await shot(null, 0, [], fullBounds, null, pageBox), back = await shot(null, Math.PI, [], fullBounds, null, pageBox);
+          if (includeCover) cover = await new Promise(resolve => front.img.toBlob(resolve, 'image/jpeg', 0.85));
           const consumed = paintCover(ctx, { front: front.img, back: back.img, copy: coverCopy, items: descriptor.items, icons, fill: sceneFill(scene), stamp, partsH: descriptor.partsH });
           if (consumed !== descriptor.items.length) throw manualError('pagination', '总料表分页与实际绘制不一致');
         } else if (descriptor.type === 'reading' || descriptor.type === 'reading-local') {
@@ -1793,7 +1796,7 @@ export async function exportAssemblyPdf(opts) {
     onProgress?.({ page: total, total, phase: 'save' });
     await checkpoint();
     const blob = doc.output('blob');
-    await onDocument?.({ doc, blob, pages: total, plan });
+    await onDocument?.({ doc, blob, cover, pages: total, plan });
     if (save) doc.save(filename || `${name || 'design'}.pdf`);
     onProgress?.({ page: total, total, phase: 'complete' });
     return { pages: total, coverRows: itemsCover.length, steps: reading.steps.length, diagnostics: plan.diagnostics, readingPlan: reading, missingPictures: itemsCover.filter(item => !partImageSrc(item.id)).map(item => item.id), blob };

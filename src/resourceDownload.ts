@@ -5,10 +5,10 @@ export function resourceFileDelivered(){return delivered}
 export function sendResourceMessage(message:Record<string,unknown>){
   if(RESOURCE_MODE&&parent!==window)parent.postMessage(message,location.origin)
 }
-export function deliverResourceFile(blob:Blob,name:string){
+export function deliverResourceFile(blob:Blob,name:string,manual?:{cover:Blob|null;model?:string}){
   delivered=true
   if(RESOURCE_MODE&&parent!==window){
-    parent.postMessage({type:'xmf-resource:file',blob,name},location.origin)
+    parent.postMessage({type:'xmf-resource:file',blob,name,manual},location.origin)
     return
   }
   const url=URL.createObjectURL(blob),link=document.createElement('a')
