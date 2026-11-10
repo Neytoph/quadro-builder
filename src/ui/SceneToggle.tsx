@@ -18,7 +18,7 @@ const tileChrome = (_on: boolean, h: number): CSSProperties => ({
 const tileBtn = 'm-tile overflow-hidden rounded-lg p-0 border-0 cursor-pointer transition-[filter,opacity,box-shadow,transform] duration-200 hover:scale-[1.03] active:scale-95 flex items-center justify-center'
 
 /** 场景工具位于左侧属性栏旁，框架按钮跟在导出后面。 */
-export default function SceneToggle() {
+export default function SceneToggle({ showExploded = true }: { showExploded?: boolean }) {
   const api = useEngine()
   const { t, lang } = useI18n()
   const { left, vw, toolbarW } = usePanelLayout()
@@ -50,6 +50,28 @@ export default function SceneToggle() {
       style={{ width: clusterW, gap: SCENE_CLUSTER_GAP }}
     >
       <HomeRoomPanel tile={tile} />
+
+      {showExploded && <button
+        type="button"
+        data-ui="exploded-view-toggle"
+        data-panel-chrome
+        data-button-motion="off"
+        aria-label={t('account.what.exploded')}
+        aria-pressed={api.explodedOpen}
+        aria-busy={api.explodedLoading}
+        title={t('account.what.exploded')}
+        disabled={!api.ready || !api.entryReady || !!api.opening}
+        onClick={() => void api.toggleExplodedView()}
+        className={`pointer-events-auto ${tileBtn} focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600 disabled:opacity-45`}
+        style={tileChrome(api.explodedOpen, tile)}
+      >
+        <svg viewBox="0 0 48 48" width={tile} height={tile} aria-hidden="true">
+          <rect width="48" height="48" fill={api.explodedOpen ? '#FFF0DF' : '#EEF1F5'} />
+          <path transform="translate(9 9) scale(1.25)"
+            d="m12 8 4 2.3v4.6L12 17l-4-2.1v-4.6L12 8Zm-4 2.3 4 2.3 4-2.3m-4 2.3V17M12 2v3m0 15v2M3 7l2.5 1.5m13 7L21 17M3 17l2.5-1.5m13-7L21 7"
+            fill="none" stroke={api.explodedOpen ? '#EA580C' : '#3A8494'} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>}
 
       <button
         type="button"

@@ -277,6 +277,11 @@ interface EngineApi {
   grassOn: boolean
   frameOnly: boolean
   toggleFrameOnly: () => void
+  explodedView: boolean
+  explodedOpen: boolean
+  explodedLoading: boolean
+  toggleExplodedView: () => Promise<void>
+  closeExplodedView: (animate?: boolean) => void
   background: 'grass' | 'blank' | 'home'
   setBackground: (mode: 'grass' | 'blank' | 'home') => void
   homeZones: { obstacles: boolean; usable: boolean }
@@ -327,6 +332,7 @@ interface EngineApi {
   setViewCubePad: (right: number, bottom: number, size?: number) => void
   setViewCubeEnabled: (on: boolean) => void
   exportPng: () => Promise<void>
+  exportExplodedPng: (signal?: AbortSignal) => Promise<boolean>
   /** 料表存成表格文件 */
   exportBomCsv: () => Promise<void>
   /** 料表存成一张图，发群里直接能看 */
@@ -527,6 +533,12 @@ function outputCandidate(tab: Tab | undefined, data: ModelJSON) {
 }
 
 const EMPTY_MODEL: ModelJSON = { format: 2, nodes: [], tubes: [] }
+
+function explodedModelContent(model: InstanceType<typeof BuildModel>) {
+  const data = model.toJSON({ pruneGroups: false })
+  delete data.previewBackground
+  return JSON.stringify(data)
+}
 
 function reportStartup(step: string) {
   if (EDITOR_EMBED) parent.postMessage({ type: 'xmf-model-editor:progress', phase: 'prepare', step }, location.origin)
@@ -845,6 +857,29 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   })
 
   const bump = useCallback(() => setTick(n => n + 1), [])
+  const [explodedLoading, setExplodedLoading] = useState(false)
+  const explodedSource = useRef<{ json: string } | null>(null)
+  const closeExplodedView = useCallback((animate = false) => {
+    const current = eng.current
+    const view = current?.scene.explodedView
+    if (!explodedSource.current && !view) return
+    if (animate && current && view) {
+      current.scene.setExplodedTarget(0, () => {
+        explodedSource.current = null
+        current.builder.transformGizmo?.sync()
+        bump()
+      })
+      bump()
+      return
+    }
+    explodedSource.current = null
+    setExplodedLoading(false)
+    if (current && view) {
+      current.scene.setExplodedView(null)
+      current.builder.transformGizmo?.sync()
+      bump()
+    }
+  }, [bump])
   const notify = useCallback((message: string, kind: ToastKind = 'ok') => {
     setToast({ message, kind, id: ++toastSequence.current })
   }, [])
@@ -943,6 +978,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const applyTab = useCallback((tab: Tab) => {
     const e = eng.current
     if (!e) return
+    closeExplodedView()
     switching.current = true
     e.scene.clearDisplayObject()
     e.builder.modelReplaced()
@@ -971,7 +1007,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     if (home && !restoreCamera) e.scene.frameHomeProduct()
     switching.current = false
     bump()
-  }, [bump])
+  }, [bump, closeExplodedView])
 
   /** 标签页的造型，从它的 Yjs 文档导出。当前页先把模型里没交出去的改动写进文档。 */
   const exportTab = useCallback((tab: Tab): ModelJSON => {
@@ -1194,7 +1230,11 @@ export function EngineProvider({ children }: { children: ReactNode }) {
         const model = new BuildModel()
         const builder = new Builder(scene, model, { onChange: () => {} })
         builder.onChange = () => {
-          if (!switching.current) persistSessionRef.current()
+          if (!switching.current) {
+            const source = explodedSource.current
+            if (source && source.json !== explodedModelContent(model)) closeExplodedView()
+            persistSessionRef.current()
+          }
           bumpRef.current()
         }
         scene.onCameraChange = () => {
@@ -1310,6 +1350,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
 
     return () => {
       dead = true
+      explodedSource.current = null
+      currentScene?.setExplodedView(null)
       if (!EDITOR_EMBED) return
       if (sessionTimer.current) window.clearTimeout(sessionTimer.current)
       const current = eng.current
@@ -2718,6 +2760,73 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notify, t])
 
+  const exportExplodedPng = useCallback(async (signal?: AbortSignal) => {
+    const e2 = eng.current
+    if (!e2 || needAccount('exploded')) return false
+    const data = structuredClone(e2.model.toJSON({ pruneGroups: false }))
+    const name = activeName()
+    const title = t('account.what.exploded')
+    const owner = storage.getAccountScope()
+    const tabId = activeRef.current
+    const blob = await import('../engine/explodedView.js')
+      .then(({ renderExplodedView, EXPLODED_VIEWS }) => renderExplodedView(data, {
+        name, title, viewLabels: EXPLODED_VIEWS.map(view => t(`exploded.${view}`)),
+        labelOf: nameLabel, signal,
+      }))
+      .catch(error => {
+        signal?.throwIfAborted()
+        throw new Error(t('toast.explodedFailed'), { cause: error })
+      })
+    signal?.throwIfAborted()
+    if (owner !== storage.getAccountScope() || tabId !== activeRef.current || needAccount('exploded')) return false
+    if (!blob) throw new Error(t('toast.explodedEmpty'))
+    deliverResourceFile(blob, `${name} - ${title}.png`.replace(/[\\/:*?"<>|]/g, '_'))
+    track('builder.export.exploded')
+    return true
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [t])
+
+  const toggleExplodedView = useCallback(async () => {
+    const current = eng.current
+    if (!current) return
+    if (current.scene.explodedView) {
+      if (current.scene.explodedView.target === 1) closeExplodedView(true)
+      else { current.scene.setExplodedTarget(1); bump() }
+      return
+    }
+    if (explodedSource.current) { closeExplodedView(); return }
+    if (current.builder.busy() || current.builder._pointerId !== null || openingRef.current) return
+    current.builder._cancelSelectFlip()
+    const source = { json: explodedModelContent(current.model) }
+    explodedSource.current = source
+    setExplodedLoading(true)
+    try {
+      const { createExplodedView } = await import('../engine/explodedView.js')
+      if (explodedSource.current !== source) return
+      if (eng.current !== current || current.builder.busy() || current.builder._pointerId !== null ||
+          source.json !== explodedModelContent(current.model)) {
+        closeExplodedView()
+        return
+      }
+      const view = createExplodedView(current.scene, current.model, nameLabel)
+      if (!view) {
+        closeExplodedView()
+        notify(t('exploded.empty'), 'warn')
+        return
+      }
+      current.scene.setExplodedView(view)
+      current.builder.transformGizmo?.sync()
+      bump()
+    } catch (error) {
+      if (explodedSource.current !== source) return
+      closeExplodedView()
+      console.error('Exploded view:', error)
+      notify(t('toast.explodedFailed'), 'err')
+    } finally {
+      if (explodedSource.current === source) setExplodedLoading(false)
+    }
+  }, [bump, closeExplodedView, notify, t])
+
   /** 料表导出用到的几样东西，回调里取当下的值。 */
   const bomExportInput = () => ({
     bom: bomRef.current as BomView,
@@ -3205,6 +3314,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     bom: () => { void exportBomCsv() },
     bompng: () => { void exportBomPng() },
     shareimg: () => { void exportPng() },
+    exploded: () => { void exportExplodedPng().catch(error => notify(error.message, 'err')) },
     qdf: () => exportQdf(),
     json: () => exportJson(),
     link: () => { void shareCurrent() },
@@ -3410,7 +3520,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     toast,
     tabs, activeTabId, bom, inventory,
     invRows: cmp.rows, feasible: cmp.feasible, sizeCm, room, setRoom, roomOverflow,
-    loadPreset, placeModule, exportPng, exportBomCsv, exportBomPng, exportAssemblyPdf, confirmExportManual, cancelExportManual, exportManualConfirm, exportingManual, cancelManualExport, shareCurrent,
+    loadPreset, placeModule, exportPng, exportExplodedPng, exportBomCsv, exportBomPng, exportAssemblyPdf, confirmExportManual, cancelExportManual, exportManualConfirm, exportingManual, cancelManualExport, shareCurrent,
     manualPreview, updateManualConfig, saveManualConfig, reviewManualRepairs, applyManualRepairs, discardManualRepairs,
     accountAsk, answerAccount,
     assembly: {
@@ -3459,7 +3569,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     nudgePasteY: (steps) => { builder?.nudgePasteY?.(steps); bump() },
     setPasteHeightCm: (height) => { builder?.setPasteHeightCm(height); bump() },
     setViewCubePad, setViewCubeEnabled,
-    frame: () => { scene?.resetCamera?.(model, { animate: true }); bump() },
+    frame: () => { if (!scene?.frameExplodedView()) scene?.resetCamera?.(model, { animate: true }); bump() },
     toggleGrass: () => {
       const next = !scene?._sceneOn
       track('builder.scene.grass', { on: next })
@@ -3469,6 +3579,9 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     },
     grassOn: !!scene?._sceneOn,
     frameOnly: !!builder?.frameOnly,
+    explodedView: !!scene?.explodedView,
+    explodedOpen: scene?.explodedView?.target === 1,
+    explodedLoading, toggleExplodedView, closeExplodedView,
     toggleFrameOnly: () => {
       if (!builder || !scene || thumbBatch.current) return
       builder.frameOnly = !builder.frameOnly

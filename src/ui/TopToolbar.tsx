@@ -162,6 +162,6 @@ export default function TopToolbar() {
     {shown && <Pop anchor={barRef.current} leaving={leaving} onClose={close} align="center" width={472} className="ic-popover" belowOnly>
       <InstallationCatalogueMenu tool={shown} requestId={requestId} entries={entries} onBrowse={browse} onClose={close} />
     </Pop>}
-    <StatusTip menuOpen={open !== null || selectionOpen} />
+    {!api.explodedView && <StatusTip menuOpen={open !== null || selectionOpen} />}
   </>
 }

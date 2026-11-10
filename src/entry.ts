@@ -9,7 +9,7 @@
 //	&copy=1               打开之后存一份到自己的存档里（登录了就跟着同步进账号）
 //	?view=1               只看模式：嵌在方案页里，只有 3D 画面和分步手册，不改、不存
 //	?view=locked          锁定预览：禁止编辑，不提供打开编辑器的入口
-//	?export=manual|bom|bompng|shareimg|qdf|json|link   注册完回来，接着导出（link 是复制分享链接）
+//	?export=manual|bom|bompng|shareimg|exploded|qdf|json|link   注册完回来，接着导出（link 是复制分享链接）
 //	?lang=zh|en|de        界面语言，嵌在别的页面里时跟着那一页
 //	?background=grass|home 导入造型时使用来源页选择的背景，成功导入后应用
 //
@@ -32,9 +32,9 @@
 // 离线版处理完来源参数后移除，原有多标签会话保持。
 // 当前标签页是共享方案时，地址栏由 CollabProvider 写成这个方案的地址。
 
-export type ResumeExport = 'manual' | 'bom' | 'bompng' | 'shareimg' | 'qdf' | 'json' | 'link' | 'save'
+export type ResumeExport = 'manual' | 'bom' | 'bompng' | 'shareimg' | 'exploded' | 'qdf' | 'json' | 'link' | 'save'
 
-const RESUMES: ResumeExport[] = ['manual', 'bom', 'bompng', 'shareimg', 'qdf', 'json', 'link', 'save']
+const RESUMES: ResumeExport[] = ['manual', 'bom', 'bompng', 'shareimg', 'exploded', 'qdf', 'json', 'link', 'save']
 export const SINGLE_MODEL = Boolean(import.meta.env.VITE_SYNC_BASE)
 export const RECOVERY_ONLY = new URLSearchParams(location.search).get('recover') === '1'
 export const RESOURCE_MODE = new URLSearchParams(location.search).get('resources') === '1'

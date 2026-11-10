@@ -6,17 +6,18 @@ import {partImageSrc} from './partImages'
 import {RESOURCE_MODE,bootEntry} from '../entry'
 import {bomSections} from './bomExport'
 import {usePresence} from './motion'
+import {mountResources} from '../../public/model-resources.js'
 
 export const OPEN_DOWNLOADS='quadro:downloads'
 let inlineManualViews=0
 export function hasInlineManualProgress(){return inlineManualViews>0}
 const words={zh:['导出','正在读取造型资料…','关闭'],en:['Export','Loading model information…','Close'],de:['Exportieren','Modellinformationen werden geladen…','Schließen']}
 export function openDownloads(){window.dispatchEvent(new Event(OPEN_DOWNLOADS))}
-export async function exportResource(api:ReturnType<typeof useEngine>,action:string){
+export async function exportResource(api:ReturnType<typeof useEngine>,action:string,signal?:AbortSignal){
   if(api.readOnly)throw new Error('423')
   if(RESOURCE_MODE){
     const source=bootEntry().src,owner=new URLSearchParams(location.search).get('resourceOwner')
-    if(source){const response=await fetch(source,{credentials:'same-origin',cache:'no-store',headers:owner?{'X-Builder-User-ID':owner}:{}});if(!response.ok)throw new Error('Download HTTP '+response.status);await response.body?.cancel()}
+    if(source){const response=await fetch(source,{credentials:'same-origin',cache:'no-store',headers:owner?{'X-Builder-User-ID':owner}:{},signal});if(!response.ok)throw new Error('Download HTTP '+response.status);await response.body?.cancel()}
   }
   if(action==='manual'){
     const result=await api.exportAssemblyPdf()
@@ -24,6 +25,7 @@ export async function exportResource(api:ReturnType<typeof useEngine>,action:str
     return {cancelled:!result||result.status==='cancelled'}
   }
   else if(action==='picture')await api.exportPng()
+  else if(action==='exploded')return {cancelled:!await api.exportExplodedPng(signal)}
   else if(action==='json')api.exportJson()
   else if(action==='qdf')return {cancelled:!api.exportQdf()}
 }
@@ -58,15 +60,12 @@ export function DownloadContents(){
   const latestRows=useRef(rows);latestRows.current=rows
   useEffect(()=>{inlineManualViews++;return()=>{inlineManualViews--;live.current.cancelManualExport()}},[])
   useEffect(()=>{
-    let cancelled=false;const url=import.meta.env.BASE_URL+'model-resources.js?v=20261021';
-    void import(/* @vite-ignore */ url).then(module=>{
-      if(cancelled||!root.current)return
-      const current=live.current
-      widget.current=module.mountResources(root.current,{name:current.tabs.find(tab=>tab.tabId===current.activeTabId)?.name||'',lang,source:RESOURCE_MODE?'saved':'current',rows:latestRows.current,stockState:latestStock.current,canNative:!current.readOnly,
-        onCancel:()=>live.current.cancelManualExport(),onExport:(action:string)=>exportResource(live.current,action)}) as Widget
-    }).catch(error=>{if(!cancelled)setError(String(error))})
-    return()=>{cancelled=true;widget.current?.destroy();widget.current=null}
-  },[lang,api.activeTabId])
+    if(!root.current)return
+    const current=live.current
+    widget.current=mountResources(root.current,{name:current.tabs.find(tab=>tab.tabId===current.activeTabId)?.name||'',lang,source:RESOURCE_MODE?'saved':'current',rows:latestRows.current,stockState:latestStock.current,canNative:!current.readOnly,
+      onCancel:()=>live.current.cancelManualExport(),onExport:(action:string,signal?:AbortSignal)=>exportResource(live.current,action,signal)}) as Widget
+    return()=>{widget.current?.destroy();widget.current=null}
+  },[lang,api.activeTabId,api.readOnly])
   useEffect(()=>{widget.current?.update({rows,stockState})},[api.tick,api.feasible,api.inventory,api.invRows,remote,stockState])
   useEffect(()=>{widget.current?.update({manualProgress:api.exportingManual})},[api.exportingManual])
   return <>{error&&<p role="alert">{error}</p>}<div ref={root}/></>

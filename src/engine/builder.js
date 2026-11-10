@@ -3576,6 +3576,7 @@ export class Builder {
     // wie ueberall auf der Zeichenflaeche.
     listen("contextmenu", (e) => {
       e.preventDefault();
+      if (this.scene.explodedView) return;
       clearTimeout(this._panelFlipTimer);
       this._panelFlipTimer = null;
       if (this.mode !== "panel") return;
@@ -3589,6 +3590,7 @@ export class Builder {
     });
     // Doppelklick tut dasselbe -- auf dem Touchpad ist er der bequemere Weg.
     listen("dblclick", (e) => {
+      if (this.scene.explodedView) return;
       // Der erste Klick hat einen Seitenwechsel vorgemerkt; der gilt nicht mehr.
       clearTimeout(this._panelFlipTimer);
       this._panelFlipTimer = null;
@@ -3623,7 +3625,8 @@ export class Builder {
       if (this._pointerId !== null) { this._abortGesture({ keepPaste: true }); return; }
       // 还排着翻面：同一处又按下去是快点两下的第二下（选整块），翻面作废；
       // 按在别处就先把它翻完，免得在接下来的拖动中间才翻
-      if (this._selectFlip) {
+      const exploded = !!this.scene.explodedView;
+      if (this._selectFlip && !exploded) {
         const f = this._selectFlip;
         if (Math.hypot(e.clientX - f.x, e.clientY - f.y) < CLICK_TOLERANCE) this._cancelSelectFlip();
         else this._runSelectFlip();
@@ -3633,7 +3636,8 @@ export class Builder {
         x: e.clientX, y: e.clientY,
         button: e.button,
         add: e.ctrlKey || e.metaKey || e.shiftKey,
-        box: this.mode === "select" && !this._paste &&
+        exploded,
+        box: !exploded && this.mode === "select" && !this._paste &&
           (e.button === 1 || (e.button === 0 && !e.altKey && (this.boxSelect || e.ctrlKey || e.metaKey))),
       };
       this._boxing = false;
@@ -3649,6 +3653,13 @@ export class Builder {
       // Zeiger festhalten: sonst geht das pointerup verloren, wenn man beim
       // Aufziehen ueber den Rand des Canvas hinauszieht.
       if (el.setPointerCapture) { try { el.setPointerCapture(e.pointerId); } catch { /* egal */ } }
+      if (exploded) {
+        if (e.button === 0 && e.altKey) {
+          this._panning = true;
+          this.scene.beginPan();
+        } else if (e.button === 0) this.scene.beginOrbitAtTarget();
+        return;
+      }
       // 选择状态只影响点击；拖动零件所在位置仍然旋转视角。
       // Haengt eine Kopie am Zeiger, gehoert die linke Taste ihr: gezogen wird
       // gedreht, ein echter Klick setzt ab (siehe _onUp).
@@ -3711,7 +3722,7 @@ export class Builder {
     };
     // OrbitControls 先注册了中键缩放；在捕获阶段接管框选，避免相机同时移动。
     listen("pointerdown", (e) => {
-      if (e.button !== 1 || this.mode !== "select" || this._paste) return;
+      if (e.button !== 1 || this.scene.explodedView || this.mode !== "select" || this._paste) return;
       e.preventDefault();
       e.stopImmediatePropagation();
       onPointerDown(e);
@@ -3721,6 +3732,7 @@ export class Builder {
     const fremd = (e) => this._pointerId !== null && e.pointerId !== this._pointerId;
     listen("pointermove", (e) => { if (!multiTouch && !fremd(e)) this._onMove(e); });
     listen('pointerleave', (e) => {
+      if (this.scene.explodedView) return;
       this._tubeHoverPointer = null;
       this.scene.updateTubeCandidateHover?.(null);
       if (e.pointerType === 'touch') return;
@@ -3921,6 +3933,7 @@ export class Builder {
       if (dx || dy) this.scene.orbitBy(dx, dy);
       return;
     }
+    if (this.scene.explodedView || this._down?.exploded) return;
     if (this._down && this._down.box && (e.buttons & (this._down.button === 1 ? 4 : 1))) {
       if (this._boxing ||
           Math.hypot(e.clientX - this._down.x, e.clientY - this._down.y) > CLICK_TOLERANCE) {
@@ -4137,6 +4150,10 @@ export class Builder {
     this._clearLongPress();
     const gehalten = this._longDone;
     this._longDone = false;
+    if (this.scene.explodedView || d?.exploded) {
+      this.scene.endOrbit();
+      return;
+    }
     // 触屏点按只定位副本，面板确认后才写入模型历史。
     if (this._paste) {
       if (d && !d.pasteDragged && Math.hypot(e.clientX - d.x, e.clientY - d.y) <= CLICK_TOLERANCE && e.button === 0) {

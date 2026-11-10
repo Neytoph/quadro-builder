@@ -310,6 +310,7 @@ const MOTION = {
   batch: 600,
   cam: { dur: 900, ease: EASE.inOutQuint },
   cube: 620,
+  explode: { open: 860, close: 660 },
 };
 // Ortho-Ausschnitt. 45°-Orbit: Silhouette bis |ux|+|uy|+|uz| ≈ 1,63;
 // darunter schneidet der Scissor die untere Spitze ab.
@@ -448,7 +449,7 @@ export class SceneManager {
     if (!['grass', 'blank', 'home'].includes(mode)) throw new Error('Unknown background');
     if (mode === 'home' && !this._homeGroup) return false;
     if (mode !== 'home') this._homeFramePending = null;
-    this.setProjection('perspective');
+    if (!this.explodedView || mode === 'home') this.setProjection('perspective');
     this._homeHidden = mode === 'blank';
     this.setScene(mode === 'grass');
     this.requestRender();
@@ -463,6 +464,90 @@ export class SceneManager {
     this.renderer.toneMapping = indoor ? THREE.ACESFilmicToneMapping : THREE.NoToneMapping;
     this.renderer.toneMappingExposure = indoor ? HOME_STYLE.exposure : 1;
     this._applyBackground();
+  }
+
+  setExplodedView(view) {
+    this.explodedView?.drawing.dispose();
+    this.explodedView = view ? { drawing: view, progress: 0, target: 0 } : null;
+    this._explodedCamera = view ? this.camera.clone() : null;
+    this._explodedZoom = view ? this._explodedFitZoom(view.refresh().boxes) : 1;
+    if (view) this.setExplodedTarget(1);
+    this._shadowsDirty();
+  }
+
+  setExplodedTarget(target, finish) {
+    const view = this.explodedView;
+    if (!view || view.target === target) return;
+    const reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const duration = target ? MOTION.explode.open : MOTION.explode.close;
+    Object.assign(view, {
+      target, from: view.progress, start: null, finish,
+      duration: reduced || target === view.progress ? 0 : Math.max(160, duration * Math.abs(target - view.progress)),
+    });
+    this.requestRender();
+  }
+
+  _stepExplodedView(now) {
+    const view = this.explodedView;
+    if (!view || (view.target === 1 && view.progress === 1)) return;
+    view.start ??= now;
+    const time = view.duration ? Math.min(1, (now - view.start) / view.duration) : 1;
+    view.progress = THREE.MathUtils.lerp(view.from, view.target, THREE.MathUtils.smoothstep(time, 0, 1));
+    if (time === 1 && view.target === 0) {
+      this.setExplodedView(null);
+      view.finish?.();
+    }
+    this.requestRender();
+  }
+
+  _explodedFitZoom(boxes) {
+    const camera = this.camera;
+    camera.updateMatrixWorld();
+    const point = new THREE.Vector3();
+    let x = 0, y = 0;
+    for (const { min, max } of boxes) {
+      for (const px of [min.x, max.x]) for (const py of [min.y, max.y]) for (const pz of [min.z, max.z]) {
+        point.set(px, py, pz).applyMatrix4(camera.matrixWorldInverse);
+        if (camera.isPerspectiveCamera && point.z >= -camera.near) return 1;
+        point.applyMatrix4(camera.projectionMatrix);
+        x = Math.max(x, Math.abs(point.x));
+        y = Math.max(y, Math.abs(point.y));
+      }
+    }
+    // 当前镜头的位置和朝向保持原样。散开后超出可用画面时，只在查看层稍微拉远。
+    return Math.min(1, .93 / x, .86 / y);
+  }
+
+  frameExplodedView() {
+    const view = this.explodedView?.drawing.refresh();
+    if (!view) return false;
+    this._explodedZoom = 1;
+    const dir = this.camera.position.clone().sub(this.controls.target).normalize();
+    this._frameAlong(null, dir, { bounds: view.bounds, animate: true });
+    return true;
+  }
+
+  _renderExplodedScene() {
+    const { drawing, progress } = this.explodedView;
+    const view = progress && this.buildGroup.visible && drawing.refresh();
+    if (!view) { this._renderMainScene(); return; }
+    drawing.pose(view, progress, THREE.MathUtils.smoothstep(progress, .1, .86), this._sceneOn);
+    // 背景、光照与当前镜头继续使用 Builder 的场景，取景随展开进度连续变化。
+    if (this._explodedCamera.type !== this.camera.type) this._explodedCamera = this.camera.clone();
+    const camera = this._explodedCamera.copy(this.camera, false);
+    camera.zoom *= THREE.MathUtils.lerp(1, this._explodedZoom, progress);
+    camera.updateProjectionMatrix();
+    const hidden = [this.buildGroup, this.labelGroup, this.handleGroup, this._hoverPartGroup, this._panelPlacementGuides?.group]
+      .filter(obj => obj?.visible);
+    for (const obj of hidden) obj.visible = false;
+    this.buildGroup.parent.add(view.group);
+    try {
+      this.renderer.shadowMap.needsUpdate = true;
+      this.renderer.render(this.scene, camera);
+    } finally {
+      view.group.removeFromParent();
+      for (const obj of hidden) obj.visible = true;
+    }
   }
 
   _renderMainScene() {
@@ -593,6 +678,7 @@ export class SceneManager {
 
     // Gruppen
     this.buildGroup = new THREE.Group();
+    this._modelRenderRevision = 0;
     this.handleGroup = new THREE.Group();
     this.labelGroup = new THREE.Group();
     this._hoverPartGroup = new THREE.Group();
@@ -720,6 +806,7 @@ export class SceneManager {
   dispose() {
     this.clearDisplayObject();
     if (this._disposed) return;
+    this.setExplodedView(null);
     cancelAnimationFrame(this._animationFrame);
     this.selectionTransformGizmo?.dispose();
     this._clearHoverOverlay();
@@ -3578,7 +3665,7 @@ export class SceneManager {
       this._cachedGeo(`clampSleeve${seg}`, () => new THREE.CylinderGeometry(sleeveR, sleeveR, cs + 2, seg)), mat);
     sleeve.quaternion.setFromUnitVectors(UP, dir);
     sleeve.position.copy(axis);
-    sleeve.userData = { kind: "node", id: n.id };
+    sleeve.userData = { kind: "node", id: n.id, bomRole: "node-clamp" };
     this.buildGroup.add(sleeve);
     if (st !== "future") this.pickNodes.push(sleeve);
     // Der Hals ist bei beiden Klemm-Kupplungen gleich lang: eine Kupplungslaenge
@@ -3591,7 +3678,7 @@ export class SceneManager {
     const sv = new THREE.Vector3(stub[0], stub[1], stub[2]);
     socket.quaternion.setFromUnitVectors(UP, sv);
     socket.position.copy(axis).addScaledVector(sv, neck / 2);
-    socket.userData = { kind: "node", id: n.id };
+    socket.userData = { kind: "node", id: n.id, bomRole: "node-clamp" };
     this.buildGroup.add(socket);
     if (st !== "future") this.pickNodes.push(socket);
   }
@@ -4120,6 +4207,7 @@ export class SceneManager {
   // opts.slideNameFor(slide) -> string|null : Beschriftung an der Rutsche/Dach.
   // assembly.transforms 只移动场景碎片，保存的模型位置保持不变。
   renderModel(model, selectedNodeId, opts = {}) {
+    this._modelRenderRevision++;
     const frameOnly = !!opts.frameOnly;
     const viewChanged = !!this._frameOnly !== frameOnly;
     if (viewChanged) {
@@ -4530,7 +4618,7 @@ export class SceneManager {
         const c45lage = echtC45 ? this._c45Placement(model, n) : null;
         if (c45lage) {
           this._batchAdd(this._meshGeometry("fit:connector45_2", echtC45), c45mat,
-            c45lage, "node", n.id, this.pickNodes);
+            c45lage, "node", n.id, this.pickNodes, { bomRole: "diagonal" });
         } else if (fileC45) {
           const placement = this._c45Placement(model, n);
           if (placement) {
@@ -4544,7 +4632,7 @@ export class SceneManager {
               const piece = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, a.distanceTo(b), 14), c45mat);
               piece.position.copy(a).add(b).multiplyScalar(0.5);
               piece.quaternion.setFromUnitVectors(UP, b.sub(a).normalize());
-              piece.userData = { kind: 'node', id: n.id };
+              piece.userData = { kind: 'node', id: n.id, bomRole: 'diagonal' };
               this.buildGroup.add(piece); this.pickNodes.push(piece);
             }
           }
@@ -4560,7 +4648,7 @@ export class SceneManager {
                 c45mat);
               baseArm.position.copy(ad.baseArmMid);
               baseArm.quaternion.setFromUnitVectors(UP, ad.sleeveDir);
-              baseArm.userData = { kind: "node", id: n.id };
+              baseArm.userData = { kind: "node", id: n.id, bomRole: "diagonal" };
               this.buildGroup.add(baseArm);
             }
             // C45-Huelse: etwas breiter als das Rohr, der Basis-Arm steckt darin.
@@ -4570,13 +4658,13 @@ export class SceneManager {
               c45mat);
             sleeve.position.copy(ad.sleeveMid);
             sleeve.quaternion.setFromUnitVectors(UP, ad.sleeveDir);
-            sleeve.userData = { kind: "node", id: n.id };
+            sleeve.userData = { kind: "node", id: n.id, bomRole: "diagonal" };
             this.buildGroup.add(sleeve);
             if (st !== "future") this.pickNodes.push(sleeve);
 
             const body = new THREE.Mesh(this._c45Geometry(), c45mat);
             body.position.copy(ad.bodyPos);
-            body.userData = { kind: "node", id: n.id };
+            body.userData = { kind: "node", id: n.id, bomRole: "diagonal" };
             this.buildGroup.add(body);
 
             if (ad.armLen > 0.5) {
@@ -4591,7 +4679,7 @@ export class SceneManager {
                 c45mat);
               arm.position.copy(ad.bodyPos).addScaledVector(ad.armDir, armLen / 2);
               arm.quaternion.setFromUnitVectors(UP, ad.armDir);
-              arm.userData = { kind: "node", id: n.id };
+              arm.userData = { kind: "node", id: n.id, bomRole: "diagonal" };
               this.buildGroup.add(arm);
             }
           }
@@ -4610,17 +4698,17 @@ export class SceneManager {
               new THREE.CylinderGeometry(sockR, sockR, sleeveLen, 14), c45mat);
             sleeve.position.set(n.x + cv.x * cs * 0.75, n.y + cv.y * cs * 0.75, n.z + cv.z * cs * 0.75);
             sleeve.quaternion.setFromUnitVectors(UP, cv);
-            sleeve.userData = { kind: "node", id: n.id };
+            sleeve.userData = { kind: "node", id: n.id, bomRole: "diagonal" };
             this.buildGroup.add(sleeve);
             const body = new THREE.Mesh(this._c45Geometry(), c45mat);
             body.position.set(bx, by, bz);
-            body.userData = { kind: "node", id: n.id };
+            body.userData = { kind: "node", id: n.id, bomRole: "diagonal" };
             this.buildGroup.add(body);
             const stub = new THREE.Mesh(this._c45StubGeometry(), c45mat);
             const stubOff = cs * 0.75;
             stub.position.set(bx + dv.x * stubOff, by + dv.y * stubOff, bz + dv.z * stubOff);
             stub.quaternion.setFromUnitVectors(UP, dv);
-            stub.userData = { kind: "node", id: n.id };
+            stub.userData = { kind: "node", id: n.id, bomRole: "diagonal" };
             this.buildGroup.add(stub);
           }
         }
@@ -4801,7 +4889,7 @@ export class SceneManager {
         const rodGeo = this._tubeGeometry(rodRadius, len, 8);
         // Nicht anklickbar (kind null) -- das Profil steckt im Rohr.
         this._batchAdd(rodGeo, matFor(t.id, this._rodMaterial(), false, bomPartKey(t.id, "reinforcement")),
-          new THREE.Matrix4().compose(mid, quat, ONE), 'tube', t.id, null);
+          new THREE.Matrix4().compose(mid, quat, ONE), 'tube', t.id, null, { bomRole: "reinforcement" });
       }
 
       // Laengen-Beschriftung: gleiche Sichtbarkeitsregel wie die Kupplungs-Namen.
@@ -4921,7 +5009,8 @@ export class SceneManager {
         // Material des Rahmens, sonst Glas.
         const paneMat = (st === "future" || (asm && st === "done")) ? mat : this._glassMaterial();
         const pane = this._acrylicPaneGeometry(u.length(), w.length(), thickness);
-        this._batchAdd(pane, matFor(p.id, paneMat, false, bomHighlight?.has(paneId) ? paneId : p.id), basis, "panel", p.id, this.pickPanels);
+        this._batchAdd(pane, matFor(p.id, paneMat, false, bomHighlight?.has(paneId) ? paneId : p.id),
+          basis, "panel", p.id, this.pickPanels, { bomRole: "acrylic-glass" });
       }
 
       // Bällebad-Boden: Wasser-Volumen (75 % Füllhöhe) über dem Boden rendern.
@@ -4933,7 +5022,8 @@ export class SceneManager {
         // Mitte des Wassers: Boden-Deckfläche + waterH/2  (kein Z-Fighting mit Bodenplatte)
         wMesh.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis));
         wMesh.position.copy(center).addScaledVector(yAxis, thickness / 2 + waterH / 2);
-        this.buildGroup.add(wMesh);
+        wMesh.userData = { kind: "panel", id: p.id };
+        this.buildGroup.add(this._markPoolWater(wMesh));
       }
     }
 
@@ -5900,6 +5990,7 @@ export class SceneManager {
    * Weltpunkt unter dem Mauszeiger (Bauteil-Treffer, sonst Bodenebene).
    */
   _pointUnderCursor(clientX, clientY) {
+    if (this.explodedView) return this.controls.target.clone();
     this._setMouse(clientX, clientY);
     const objects = [...this.pickNodes, ...this.pickTubes, ...this.pickPanels,
                      ...this.pickClamps, ...this.pickTextiles, ...this.pickSlides];
@@ -7702,6 +7793,7 @@ export class SceneManager {
     for (const [o] of versteckt) o.visible = false;
     let url = null;
     try {
+      if (this.explodedView) this._shadowsDirty();
       this._renderMainScene();
       if (opts.canvas) {
         // 独立拷贝当前帧，供说明书直接合成，避免 PNG 编码后再解码。
@@ -7992,6 +8084,7 @@ export class SceneManager {
     if (this._stepCameraAnimation()) this._needsRender = true;
     if (this._stepCameraFly()) this._needsRender = true;
     if (this._stepMotion()) this._needsRender = true;
+    this._stepExplodedView(performance.now());
     if (this._panelPlacementFlash) {
       const progress = (performance.now() - this._panelPlacementFlash.start) / 650;
       if (progress >= 1) this._clearPanelPlacementFlash();
@@ -8004,7 +8097,8 @@ export class SceneManager {
     if (!this._needsRender) return;
     this._needsRender = false;
     this._homeGroup?.userData.updateWalls(this.camera);
-    this._renderMainScene();
+    if (this.explodedView) this._renderExplodedScene();
+    else this._renderMainScene();
     this._renderViewCube();
   }
 }

@@ -23,7 +23,7 @@ const RIGHT_MIN = 280
 const RIGHT_MAX = 448
 export const HEIGHT_MIN = 180
 
-/** 场景 / 框住 / 导出 / 框架：固定小方块，贴在左栏右侧画布角。 */
+/** 场景工具贴在左栏右侧画布角，窄屏每行最多四个。 */
 export const CORNER_TILE = 40
 export const VIEW_CUBE_PX = 80
 export const VIEW_CUBE_MARGIN = 22
@@ -179,7 +179,7 @@ export function toolbarTop(left: PanelBox, vw: number) {
 /** 居中工具条会碰到三个按钮或左栏时，按钮改到工具栏下面，工具条保持原宽。 */
 export function sceneButtonsDrop(left: PanelBox, vw: number, toolbarW: number) {
   if (leftStackDrop(left, vw, toolbarW)) return true
-  const tiles = SCENE_CLUSTER_TILES + (vw > NARROW_MAX ? 1 : 0)
+  const tiles = SCENE_CLUSTER_TILES + (vw > NARROW_MAX ? 2 : 0)
   const clusterW = SCENE_TOGGLE_PX * tiles + SCENE_CLUSTER_GAP * (tiles - 1)
   const sceneLeft = Math.min(
     canvasInset(left),
@@ -196,7 +196,7 @@ export function sceneButtonsDrop(left: PanelBox, vw: number, toolbarW: number) {
 export function canvasCorner(left: PanelBox, vw: number, extras: { right?: PanelBox; dockOpen?: boolean; toolbarW?: number } = {}) {
   const narrow = vw <= NARROW_MAX
   const tile = SCENE_TOGGLE_PX
-  const tiles = SCENE_CLUSTER_TILES + (narrow ? 0 : 1)
+  const tiles = SCENE_CLUSTER_TILES + (narrow ? 0 : 2)
   const clusterW = tile * tiles + SCENE_CLUSTER_GAP * (tiles - 1)
   const bottom = narrow ? CORNER_BOTTOM_NARROW : CORNER_BOTTOM
   const sceneLeft = Math.min(

@@ -21,9 +21,9 @@ import {openDownloads} from './Downloads'
 const btn = 'qb-file-action xmf-button xmf-button-secondary'
 const officialHexes = new Set([...Object.values(COLOR_HEX).map(hex => hex.toUpperCase()), '#2B2B2B'])
 const fileWords = {
-  zh: { actions: '文件操作', importHint: '导入官方 QDF', export: '导出', exportHint: '配件清单 · 分层说明书 · 官方 QDF' },
-  en: { actions: 'File actions', importHint: 'Import official QDF', export: 'Export', exportHint: 'Parts list · Layer-by-layer instructions · Official QDF' },
-  de: { actions: 'Dateiaktionen', importHint: 'Offizielle QDF importieren', export: 'Exportieren', exportHint: 'Teileliste · Schichtanleitung · Offizielle QDF' },
+  zh: { actions: '文件操作', importHint: '导入官方 QDF', export: '导出', exportHint: '配件清单 · 分层说明书 · 爆炸图 · 官方 QDF' },
+  en: { actions: 'File actions', importHint: 'Import official QDF', export: 'Export', exportHint: 'Parts list · Layer-by-layer instructions · Exploded view · Official QDF' },
+  de: { actions: 'Dateiaktionen', importHint: 'Offizielle QDF importieren', export: 'Exportieren', exportHint: 'Teileliste · Schichtanleitung · Explosionszeichnung · Offizielle QDF' },
 }
 
 export default function FilePanel() {

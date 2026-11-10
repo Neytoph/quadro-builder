@@ -338,13 +338,17 @@ function AppInner() {
   }, [api.ready, api.readOnly, api.nameAsk, api.exportManualConfirm, api.accountAsk])
 
   useEffect(() => { setComponentPosition(null) }, [api.readOnly, api.activeTabId])
+  useEffect(() => { if (collab.compare) api.closeExplodedView() }, [collab.compare, api.closeExplodedView])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.isComposing) return
       const el = e.target as HTMLElement | null
       if (el?.closest('[data-ui="editing-menu"]')) return
-      if (el?.closest('[data-ui="scene-menu"], [data-ui="scene-trigger"]')) return
+      const sceneTrigger = el?.closest('[data-ui="scene-trigger"]')
+      if (el?.closest('[data-ui="scene-menu"]')) return
+      if (sceneTrigger && (e.key !== 'Escape' || sceneTrigger.getAttribute('aria-expanded') === 'true' ||
+        !(api.explodedView || api.explodedLoading))) return
       const input = !!el?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')
       // 手机顶栏菜单自行处理键盘与焦点，避免菜单操作触发画布快捷键。
       if (el?.closest('[data-ui="mobile-topbar-dialog"]')) return
@@ -365,6 +369,10 @@ function AppInner() {
         }
         if (api.exportManualConfirm) {
           api.cancelExportManual()
+          return
+        }
+        if (api.explodedView || api.explodedLoading) {
+          api.closeExplodedView(true)
           return
         }
         // 内层菜单、工具和抽屉先退出；画布空闲时才请父页面检查保存并关闭。
@@ -399,6 +407,10 @@ function AppInner() {
       // 顶部菜单用左右方向键移动焦点，不执行画布接管或移动。
       if (el?.closest('[role="navigation"]') && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) return
       const meta = e.metaKey || e.ctrlKey
+      if (api.explodedView && !(meta && e.key.toLowerCase() === 's')) {
+        if (!meta && e.key.toLowerCase() === 'f') { e.preventDefault(); api.frame() }
+        return
+      }
       if (meta && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); e.shiftKey ? api.redo() : api.undo(); return }
       if (meta && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); api.redo(); return }
       if (meta && (e.key === 'c' || e.key === 'C')) { e.preventDefault(); api.copy(); return }
@@ -522,16 +534,20 @@ function AppInner() {
   const viewer = collab.mode === 'plan' && !collab.canEdit
   const visitor = viewer && collab.role === 'guest'
   return (
-    <div className="app-viewport w-screen flex bg-gray-950 overflow-hidden">
+    <div className="app-viewport w-screen flex bg-gray-950 overflow-hidden" onClickCapture={event => {
+      if (!api.explodedView && !api.explodedLoading) return
+      const target = event.target as Element
+      if (target.closest('[data-ui="toolbar-wrap"], [data-ui="selection-actions-dock"], [data-ui="left-stack"], [data-ui="right-dock"], [data-tour="assembly"], [data-ui="frame-only-toggle"], [data-ui="home-zone-toggle"]')) api.closeExplodedView()
+    }}>
       <CanvasHost />
-      <SceneToggle />
+      <SceneToggle showExploded={!collab.compare} />
       <ProjectTabs />
       {!visitor && !collab.compare && <TopToolbar />}
       {componentPosition && !api.readOnly && <CustomComponentsMenu position={componentPosition} onClose={closeComponents} />}
       {!viewer && !collab.compare && <LeftStack />}
       <RightDock />
-      {!collab.compare && <AssemblyBar />}
-      {collab.mode === 'plan' && !collab.compare && <PlanOverlays />}
+      {!collab.compare && !api.explodedView && <AssemblyBar />}
+      {collab.mode === 'plan' && !collab.compare && !api.explodedView && <PlanOverlays />}
       {collab.mode === 'plan' && collab.compare && <CompareView key={collab.session?.id} />}
       <JoinModal />
       <Toast />

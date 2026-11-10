@@ -12,6 +12,7 @@ const words = {
   summary:['共 {k} 种，{n} 件','{k} types, {n} parts','{k} Arten, {n} Bauteile'], shortage:['还缺 {k} 种，{n} 件','Missing {k} types, {n} parts','Es fehlen {k} Arten, {n} Bauteile'],
   manual:['分层说明书','Layer-by-layer instructions','Schichtweise Bauanleitung'], manualHint:['按高度分层，包含本层结构和零件用量','Layers by height, with structure views and parts quantities','Ebenen nach Höhe mit Strukturansichten und Teilemengen'],
   exportPdf:['导出 PDF','Export PDF','PDF exportieren'], exportList:['导出清单','Export list','Liste exportieren'],
+  exploded:['爆炸图','Exploded view','Explosionszeichnung'], exportPng:['导出 PNG','Export PNG','PNG exportieren'],
   qdf:['官方 QDF','Official QDF','Offizielles QDF'], qdfHint:['可在 QUADRO Designer 中打开与继续编辑','Open and continue editing in QUADRO Designer','In QUADRO Designer öffnen und weiterbearbeiten'], exportQdf:['导出 QDF','Export QDF','QDF exportieren'], qdfLogin:['登录后可导出官方 QDF。','Sign in to export official QDF.','Zum Export von offiziellem QDF anmelden.'], qdfUnavailable:['当前权限暂不可导出官方 QDF。','Your access does not allow QDF export.','Dein Zugriff erlaubt keinen QDF-Export.'],
   viewList:['查看清单','View list','Liste ansehen'], hideList:['收起清单','Hide list','Liste schließen'],
   resources:['正在准备资料…','Preparing resources…','Unterlagen werden vorbereitet…'], prepare:['正在准备页面…','Preparing pages…','Seiten werden vorbereitet…'],
@@ -105,6 +106,7 @@ export function mountResources(root,config){
   root.classList.add('mr');
   const listMenu='<details class="mr-menu mr-list-menu"><summary>'+esc(t('exportList'))+'</summary><div class="mr-menu-content"><p class="mr-caption" data-mr-list-label></p>'+button('csv','csv')+button('png','png')+button('copy','copy')+'</div></details>';
   const iconPaths={list:'<path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/>',file:'<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6M8 13h8M8 17h5"/>',manual:'<path d="m12 3 9 5-9 5-9-5 9-5Zm-9 9 9 5 9-5M3 16l9 5 9-5"/>'};
+  iconPaths.exploded='<path d="m12 8 4 2.3v4.6L12 17l-4-2.1v-4.6L12 8Zm-4 2.3 4 2.3 4-2.3m-4 2.3V17M12 2v3m0 15v2M3 7l2.5 1.5m13 7L21 17M3 17l2.5-1.5m13-7L21 7"/>';
   const icon=kind=>'<span class="mr-card-icon" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">'+iconPaths[kind]+'</svg></span>';
   root.innerHTML='<section class="mr-resource-card"><div class="mr-card-head">'+icon('list')+'<div class="mr-card-copy"><h2>'+esc(t('title'))+'</h2><div class="mr-card-summary"><p class="mr-caption" data-mr-summary></p><p class="mr-stock-count" data-mr-stock></p></div></div><button type="button" class="mr-expand" data-mr-expand aria-expanded="false">'+esc(t('viewList'))+'<span aria-hidden="true">⌄</span></button></div><div data-mr-list hidden><div class="mr-toolbar"><div class="mr-filters" role="group" aria-label="'+esc(t('list'))+'">'+['all','missing'].map(id=>'<button type="button" data-mr-filter="'+id+'" aria-pressed="'+(id==='all')+'">'+esc(t(id))+'</button>').join('')+'</div>'+listMenu+'</div><div class="mr-table" data-mr-table></div><p class="mr-note">'+esc(t('note'))+'</p></div></section>'+
     '<section class="mr-resource-card" data-mr-downloads tabindex="-1"><div class="mr-card-head">'+icon('manual')+'<div class="mr-card-copy"><h2>'+esc(t('manual'))+'</h2><p class="mr-caption">'+esc(t('manualHint'))+' · PDF</p></div>'+button('manual','exportPdf',!config.canNative)+'</div><div class="mr-inline-progress" data-mr-progress hidden><p role="status" aria-live="polite" data-mr-progress-label></p><progress aria-label="'+esc(t('manual'))+'"></progress><div class="mr-progress-footer"><p class="mr-caption">'+esc(t('downloadHint'))+'</p>'+button('cancel','cancel')+'</div></div><p class="mr-manual-status" role="status" hidden></p>'+(!config.canNative?'<p class="mr-note">'+esc(t(config.stockState==='anonymous'?'manualLogin':'unavailable'))+'</p>':'')+'</section><p class="mr-source mr-caption">'+esc(t(config.source||'saved'))+'</p><p class="mr-status" role="status" aria-live="polite" hidden></p>';
@@ -114,7 +116,11 @@ export function mountResources(root,config){
   const qdfCard=document.createElement('section');qdfCard.className='mr-resource-card';
   qdfCard.innerHTML='<div class="mr-card-head">'+icon('file')+'<div class="mr-card-copy"><h2>'+esc(t('qdf'))+'</h2><p class="mr-caption">'+esc(t('qdfHint'))+'</p></div>'+button('qdf','exportQdf',!config.canNative)+'</div>'+(!config.canNative?'<p class="mr-note">'+esc(t(config.stockState==='anonymous'?'qdfLogin':'qdfUnavailable'))+'</p>':'');
   root.querySelector('.mr-source').before(qdfCard);
-  const status=root.querySelector('.mr-status'),manualStatus=root.querySelector('.mr-manual-status');
+  const explodedCard=document.createElement('section');explodedCard.className='mr-resource-card';
+  explodedCard.innerHTML='<div class="mr-card-head">'+icon('exploded')+'<div class="mr-card-copy"><h2>'+esc(t('exploded'))+'</h2></div>'+button('exploded','exportPng',!config.canNative)+'</div><p class="mr-manual-status" role="status" hidden></p>';
+  qdfCard.before(explodedCard);
+  const explodedButton=explodedCard.querySelector('button'),explodedStatus=explodedCard.querySelector('[role=status]');
+  const status=root.querySelector('.mr-status'),manualStatus=root.querySelector('[data-mr-downloads] .mr-manual-status');
   function paint(){
     const rows=state.rows,missing=missingRows(rows),available=state.stockState==='ready';
     if(!available)filter='all';
@@ -131,6 +137,7 @@ export function mountResources(root,config){
     root.querySelector('[data-mr-action=copy]').disabled=busy||!available||!missing.length;
     for(const action of ['csv','png'])root.querySelector('[data-mr-action='+action+']').disabled=busy||!rows.length||(filter==='missing'&&!missing.length);
     manualButton.disabled=busy||!config.canNative;
+    explodedButton.disabled=busy||!config.canNative;
     root.querySelector('[data-mr-action=qdf]').disabled=busy||!config.canNative;
     manualButton.setAttribute('aria-busy',String(manualBusy));
     const progress=state.manualProgress,showProgress=manualBusy||!!progress,area=root.querySelector('[data-mr-progress]');area.hidden=!showProgress;
@@ -148,7 +155,11 @@ export function mountResources(root,config){
     const pick=event.target.closest('[data-mr-filter]');if(pick){if(busy||pick.disabled)return;filter=pick.dataset.mrFilter;paint();return}
     const target=event.target.closest('[data-mr-action]');if(!target||target.disabled||busy)return;
     const action=target.dataset.mrAction;
-    busy=true;cancelRequested=false;manualBusy=action==='manual';const feedback=manualBusy?manualStatus:status;feedback.dataset.error='false';feedback.textContent=manualBusy?'':t('working');feedback.hidden=manualBusy;paint();
+    busy=true;cancelRequested=false;manualBusy=action==='manual';
+    let feedback=status;
+    if(manualBusy)feedback=manualStatus;
+    else if(action==='exploded')feedback=explodedStatus;
+    feedback.dataset.error='false';feedback.textContent=manualBusy?'':t('working');feedback.hidden=manualBusy;paint();
     if(manualBusy)root.querySelector('[data-mr-downloads]').scrollIntoView({block:'nearest'});
     try{
       const missing=filter==='missing',rows=state.rows;
@@ -158,7 +169,7 @@ export function mountResources(root,config){
       if(action==='csv')downloadBlob(new Blob([resourceCsv(rows,config.name,config.lang,missing)],{type:'text/csv;charset=utf-8'}),config.name+' '+t(missing?'missing':'list')+'.csv');
       else if(action==='png'){const images=await listImage(rows,config.name,config.lang,missing);if(controller.signal.aborted)return;images.forEach((blob,index)=>downloadBlob(blob,config.name+' '+t(missing?'missing':'list')+(images.length>1?' '+(index+1):'')+'.png'))}
       else if(action==='copy'){await navigator.clipboard.writeText([config.name,...missingRows(rows).map(row=>row.label+' ('+row.id+') ×'+row.short+(row.soft?' · '+t('optional'):''))].join('\n'))}
-      else {const result=await config.onExport(action);if(result?.cancelled){feedback.textContent=t('cancelled');feedback.hidden=false;return}}
+      else {const result=await config.onExport(action,controller.signal);if(result?.cancelled){feedback.textContent=t('cancelled');feedback.hidden=false;return}}
       if(!controller.signal.aborted){if(!feedback.textContent||action!=='manual')feedback.textContent=action==='copy'?t('copied'):t('done');feedback.hidden=false;root.querySelectorAll('details.mr-menu[open]').forEach(menu=>disclosureMotion.set(menu,false))}
     }catch(error){if(!controller.signal.aborted){feedback.dataset.error=String(!cancelRequested);feedback.textContent=cancelRequested?t('cancelled'):error.message||t('failed');feedback.hidden=false}}
     finally{busy=false;manualBusy=false;state={...state,manualProgress:null};if(!controller.signal.aborted)paint()}
