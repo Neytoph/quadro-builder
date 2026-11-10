@@ -3,6 +3,9 @@ const sub=(a,b)=>a.map((v,i)=>v-b[i]);
 const norm=v=>{const l=Math.hypot(...v);return l>1e-8?v.map(x=>x/l):null;};
 const pos=n=>[n.x,n.y,n.z];
 
+// 从节点中心到完整轴承孔所需的管身余量，单位为厘米。
+export const BEARING_SHAFT_END_CLEARANCE = 7.5;
+
 function endpoint(model,node,tubes) {
   if(!node||node.part||node.bearingOn||node.clampOn||node.c45||node.c45body||node.c45file||node.unused||model.hasWheelCap(node)||model.hasEndPiece(node))return null;
   if(tubes.length!==1||tubes[0].bow||tubes[0].arm||tubes[0].link)return null;

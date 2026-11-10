@@ -8,6 +8,7 @@ import {ModelHistory} from '../collab/history'
 import {docFromJSON} from '../collab/ymodel'
 import {Builder} from './builder.js'
 import {BearingConnectionController} from './bearingConnectionController.js'
+import {structuralBearingSupport} from './assemblyStructuralBearings.js'
 import realDemo from './fixtures/userRainbowGate.json'
 
 beforeAll(async()=>{await loadCatalog()})
@@ -83,6 +84,61 @@ describe('现有管端补装轴承',()=>{
   const bolt=[...imported.nodes.values()].find(n=>n.hinges?.length)!,bearing=[...imported.nodes.values()].find(n=>n.bearingOn)!
   expect(bearing.clampOn).toBeTruthy();expect(imported.rotationJoint({kind:'hinge',nodeId:bolt.id,index:0}).blocked).toBe(false)
   expect(imported.rotateHingeBy(bolt.id,0,12)).toBe(true)
+ })
+})
+
+describe('轴承座的穿管调整', () => {
+ function axleFixture() {
+  const model = new BuildModel()
+  const left = model.addNode(0, 50, 0), right = model.addNode(40, 50, 0)
+  model.addTube(left.id, right.id, 'T35', 'blue', 35)
+  const bearings = [left, right].map(n => model.addBearingAtArm(n.id, [0, 1, 0])!)
+  const a = model.addNode(-20, 60, 0), b = model.addNode(60, 60, 0)
+  const shaft = model.addTube(a.id, b.id, 'T75', 'green', 75)!
+  const spoke = model.addNode(60, 60, 20)
+  model.addTube(b.id, spoke.id, 'T15', 'red', 15)
+  model.noteBearingTube(left.id, shaft.id)
+  return { model, left, right, bearings, a, b, shaft, spoke }
+ }
+
+ it('两座轴承共同限位，旧版近邻连线不带动支架，滑动后可正常导出并重开', () => {
+  const { model, left, right, bearings, a, b, shaft, spoke } = axleFixture()
+  model.addLink(left.id, a.id)
+  const fixed = [left, right].map(n => model.nodePos(n.id))
+  const fittingsBefore = model.toJSON().fittings
+  expect([left.clampOn, right.clampOn]).toEqual([{ tubeId: shaft.id, t: 20 }, { tubeId: shaft.id, t: 60 }])
+  expect(model.slideBearingShaft(left.id, 100)).toBe(true)
+  expect(model.nodePos(a.id)).toEqual([-7.5, 60, 0])
+  expect(model.slideBearingShaft(right.id, 5)).toBe(false)
+  expect(model.slideBearingShaft(left.id, -100)).toBe(true)
+  expect(model.nodePos(b.id)).toEqual([47.5, 60, 0])
+  expect(model.nodePos(spoke.id)).toEqual([47.5, 60, 20])
+  expect([left, right].map(n => model.nodePos(n.id))).toEqual(fixed)
+  expect(model.toJSON().fittings).toEqual(fittingsBefore)
+  expect(bearings.every(fitting => structuralBearingSupport(model, fitting).valid)).toBe(true)
+  const imported = new BuildModel()
+  expect(imported.loadJSON(parseQDF(buildQDF(model).text)).ok).toBe(true)
+  const mounted = [...imported.nodes.values()].filter(n => n.bearingOn)
+  expect(mounted).toHaveLength(2)
+  expect(new Set(mounted.map(n => n.clampOn?.tubeId)).size).toBe(1)
+  expect(imported.rotateJoint({ kind: 'bearingShaft', nodeId: mounted[0].id }, Math.PI / 3)).toBe(true)
+ })
+
+ it('绕管轴只转动活动侧，真实管件回接支架后拒绝调整', () => {
+  const { model, left, bearings, a, b, spoke } = axleFixture()
+  const ref = { kind: 'bearingShaft', nodeId: left.id }
+  const fittingsBefore = model.toJSON().fittings
+  expect(model.rotateJoint(ref, Math.PI / 2)).toBe(true)
+  expect(model.nodePos(a.id)).toEqual([-20, 60, 0])
+  expect(model.nodePos(b.id)).toEqual([60, 60, 0])
+  expect(model.nodePos(spoke.id)).toEqual([60, 40, 0])
+  expect(model.toJSON().fittings).toEqual(fittingsBefore)
+  expect(bearings.every(fitting => structuralBearingSupport(model, fitting).valid)).toBe(true)
+  model.addTube(left.id, spoke.id, 'T75', 'red', 75)
+  const before = model.toJSON()
+  expect(model.rotateJoint(ref, -Math.PI / 4)).toBe(false)
+  expect(model.slideBearingShaft(left.id, 5)).toBe(false)
+  expect(model.toJSON()).toEqual(before)
  })
 })
 

@@ -20,7 +20,7 @@ function fixture() {
   const bearings = supports.map(n => model.addBearingAtArm(n.id, [0, 1, 0])!);
   const a = model.addNode(0, 40, 0), b = model.addNode(80, 40, 0);
   const axle = model.addTube(a.id, b.id, 'T75', 'blue', 75)!;
-  supports.forEach((n, i) => model.noteBearingTube(n.id, axle.id, 20 + 40 * i));
+  model.noteBearingTube(supports[0].id, axle.id);
   return { model, supports, bearings, axle };
 }
 

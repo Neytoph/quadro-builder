@@ -20,7 +20,7 @@ import { nativePanelDiagnostics, nativePanelMounts, nativePanelGeometry } from '
 import { assemblyMeshes } from './assemblyNativeMesh.js';
 import { reinforcementPaths, aluminiumConnectorMounts, aluminiumConnectorSupport, isAluminiumConnector, validReinforcementRecords, explicitReinforcementGroups } from './reinforcement.js';
 import { c45PlacementBlocked } from './c45Placement.js';
-import { bearingEndpoints, bearingConnectionProbe, coaxial } from './bearingConnections.js';
+import { bearingEndpoints, bearingConnectionProbe, coaxial, BEARING_SHAFT_END_CLEARANCE } from './bearingConnections.js';
 
 // Zellweite des Rasters, mit dem die Kollisionspruefung Nachbarn sucht. Etwas
 // groesser als das laengste Rohr (75 cm + Kupplung): ein Rohr liegt damit in
@@ -1738,10 +1738,31 @@ export class BuildModel {
       j.origin = [n.x - n.stub[0] * off, n.y - n.stub[1] * off, n.z - n.stub[2] * off];
       j.axis = norm3([b.x - a.x, b.y - a.y, b.z - a.z]); j.dir = n.stub.slice();
       j.nodes.add(n.id); frozen.add(a.id); frozen.add(b.id); frozenTubes.add(t.id);
+    } else if (ref.kind === 'bearingShaft') {
+      const tubeId = n.clampOn?.tubeId;
+      const seat = this._bearingSeat(n, tubeId);
+      if (!seat) return null;
+      j.axis = seat.rail.dir;
+      j.origin = seat.rail.p0.map((v, i) => v + seat.along * j.axis[i]);
+      j.dir = norm3(cross3(j.axis, cross3(xAxisOf(seat.fitting.quat), j.axis)));
+      j.tubes.add(tubeId);
+      // 共轴的轴承座属于支架侧。活动管即使经过多个轴承，也不会把它们带走。
+      j.bearingSeats = new Map();
+      j.fixedFittings = new Set();
+      for (const node of this.nodes.values()) {
+        if (!node.bearingOn || !node.clampOn) continue;
+        const other = node.id === n.id ? seat : this._bearingSeat(node, node.clampOn.tubeId);
+        if (!other || !coaxial(j.origin, j.axis, other.rail.p0, other.rail.dir)) continue;
+        j.bearingSeats.set(node.id, other);
+        j.fixedFittings.add(other.fitting.id);
+        frozen.add(node.id);
+      }
     } else return null;
     for (const node of this.nodes.values()) if (isBoltPart(node.part) && coaxial(j.origin,j.axis,this.nodePos(node.id),boltAxis(node))) frozen.add(node.id);
     const addTube = id => {
-      if (!this.tubes.has(id)) return;
+      const tube = this.tubes.get(id);
+      // 保留 QDF 的斜角接头连接，跳过旧版为夹件生成的近邻虚拟桥。
+      if (!tube || (j.bearingSeats && tube.link && !this.nodes.get(tube.a)?.c45file)) return;
       if (frozenTubes.has(id)) { j.blocked = true; return; }
       j.tubes.add(id);
     };
@@ -1762,7 +1783,7 @@ export class BuildModel {
             else j.nodes.add(carrier.id);
           }
         }
-        if (!node.clampOn || node.id === n.id) continue;
+        if (!node.clampOn || node.id === n.id || j.bearingSeats?.has(node.id)) continue;
         if (j.tubes.has(node.clampOn.tubeId)) {
           if (frozen.has(node.id)) j.blocked = true;
           else j.nodes.add(node.id);
@@ -1826,6 +1847,7 @@ export class BuildModel {
     if (kind === 'clamp') return j.clamps.has(id);
     const part = ({ panel: this.panels, textile: this.textiles, fitting: this.fittings, slide: this.slides })[kind]?.get(id);
     if (!part) return false;
+    if (kind === 'fitting' && j.fixedFittings?.has(id)) return false;
     if (id === j.fittingId) return true;
     if ([...j.nodes].some(nid => this.nodes.get(nid)?.bearingOn === id)) return true;
     const supports = this._jointSupports(part);
@@ -1881,8 +1903,8 @@ export class BuildModel {
     }
     for (const id of j.clamps) {
       const c = this.clamps.get(id), p = turn([c.x, c.y, c.z]);
-      const off = rodriguesDir(c.off, ax.u, co, si);
-      if (this.isBelowGround(p[1]) || this.isBelowGround(p[1] + off[1])) return false;
+      const off = c.off && rodriguesDir(c.off, ax.u, co, si);
+      if (this.isBelowGround(p[1]) || (off && this.isBelowGround(p[1] + off[1]))) return false;
     }
     const extras = [];
     for (const [kind, map] of [['fitting', this.fittings], ['slide', this.slides]]) for (const part of map.values()) {
@@ -1901,16 +1923,36 @@ export class BuildModel {
       const c = this.clamps.get(id);
       [c.x, c.y, c.z] = turn([c.x, c.y, c.z]).map(round);
       c.dir = rodriguesDir(c.dir, ax.u, co, si).map(round4);
-      c.off = rodriguesDir(c.off, ax.u, co, si).map(round);
+      if (c.off) c.off = rodriguesDir(c.off, ax.u, co, si).map(round);
     }
     for (const { part, p } of extras) {
       [part.x, part.y, part.z] = p.map(round);
       part.quat = spinAroundAxis(part.quat || [0, 0, 0, 1], ax.u, radians);
       if (part.hook) part.hook = turn(part.hook).map(round);
+      if (j.kind === 'bearingShaft' && part.foot?.p0) part.foot = { ...part.foot,
+        p0: turn(part.foot.p0).map(cleanGeometryCoordinate),
+        dir: rodriguesDir(part.foot.dir, ax.u, co, si).map(round4) };
     }
     if (typeof hingeAngle === 'number') n.hinges[j.index] = hingeAngle;
     for(const shared of sharedAngles)shared.node.hinges[shared.index]=shared.angle;
-    this._moveTubeGeom(j.nodes); this._movePanelGeom(j.nodes);
+    if (j.kind === 'bearingShaft') {
+      const point = p => turn(p).map(cleanGeometryCoordinate);
+      const direction = v => rodriguesDir(v, ax.u, co, si).map(round4);
+      for (const id of j.tubes) {
+        const tube = this.tubes.get(id);
+        if (tube.geom) tube.geom = { ...tube.geom, p0: point(tube.geom.p0), dir: direction(tube.geom.dir),
+          ...(tube.geom.up ? { up: direction(tube.geom.up) } : {}) };
+      }
+      for (const part of [...this.panels.values(), ...this.textiles.values()]) {
+        const supports = this._jointSupports(part);
+        if (!supports.length || !supports.every(id => j.tubes.has(id))) continue;
+        if (part.geom?.p) part.geom = { ...part.geom, p: point(part.geom.p),
+          ...(part.geom.quat ? { quat: spinAroundAxis(part.geom.quat, ax.u, radians) } : {}) };
+        if (part.pool?.p) part.pool = { ...part.pool, p: point(part.pool.p), quat: spinAroundAxis(part.pool.quat, ax.u, radians) };
+      }
+    } else {
+      this._moveTubeGeom(j.nodes); this._movePanelGeom(j.nodes);
+    }
     return true;
   }
 
@@ -2390,11 +2432,82 @@ export class BuildModel {
     return this.rotateJoint({ kind: 'bearing', nodeId }, radians);
   }
 
-  /** Rohr im Maul einer Lagerkupplung vermerken. */
-  noteBearingTube(nodeId, tubeId, t = 0.5) {
+  _bearingSeat(node, tubeId) {
+    const fitting = this.fittings.get(node.bearingOn), rail = this._rail(tubeId);
+    if (fitting?.kind !== 'bearing-connector4' || !fitting.quat || !rail) return null;
+    const center = [fitting.x, fitting.y, fitting.z];
+    if (!coaxial(rail.p0, rail.dir, center, yAxisOf(fitting.quat))) return null;
+    const along = dot3(center.map((v, i) => v - rail.p0[i]), rail.dir);
+    if (along < -0.06 || along > rail.len + 0.06) return null;
+    return { fitting, tubeId, rail, along };
+  }
+
+  /** 记录同一根管实际穿过的空轴承座。 */
+  noteBearingTube(nodeId, tubeId) {
     const n = this.nodes.get(nodeId);
-    if (!n || !n.bearingOn) return;
-    n.clampOn = { tubeId, t: round(t) };
+    if (!n || !this._bearingSeat(n, tubeId)) return;
+    for (const node of this.nodes.values()) {
+      if (!node.bearingOn || node.clampOn) continue;
+      const seat = this._bearingSeat(node, tubeId);
+      if (!seat || (node.id !== nodeId &&
+          (seat.along < BEARING_SHAFT_END_CLEARANCE || seat.along > seat.rail.len - BEARING_SHAFT_END_CLEARANCE))) continue;
+      node.clampOn = { tubeId, t: round(seat.along) };
+    }
+  }
+
+  slideBearingShaft(nodeId, delta, cs = 5) {
+    if (!Number.isFinite(delta) || Math.abs(delta) < 1e-6) return false;
+    const joint = this.rotationJoint({ kind: 'bearingShaft', nodeId }, cs);
+    // 同轴铰链可以转动，但轴心不能沿管平移。
+    if (!joint || joint.blocked || joint.sharedHinges.length || this._incompleteComponentMove(joint)) return false;
+    let lo = -Infinity, hi = Infinity;
+    const seats = [...joint.bearingSeats].filter(([, seat]) => joint.tubes.has(seat.tubeId));
+    for (const [, { along, rail }] of seats) {
+      // 旧模型已装在管端时，只允许往管身内移动。
+      const from = Math.min(BEARING_SHAFT_END_CLEARANCE, along);
+      const to = Math.max(rail.len - BEARING_SHAFT_END_CLEARANCE, along);
+      const sign = dot3(joint.axis, rail.dir) >= 0 ? 1 : -1;
+      lo = Math.max(lo, sign > 0 ? along - to : from - along);
+      hi = Math.min(hi, sign > 0 ? along - from : to - along);
+    }
+    const distance = Math.max(lo, Math.min(hi, delta));
+    if (Math.abs(distance) < 1e-6) return false;
+    const offset = joint.axis.map(v => v * distance);
+    const [dx, dy, dz] = offset;
+    const { nodes, clamps, tubes } = joint;
+    const fittings = new Set(), slides = new Set();
+    for (const [kind, parts, ids] of [['fitting', this.fittings, fittings], ['slide', this.slides, slides]]) {
+      for (const part of parts.values()) if (this.jointMovesPart(joint, part.id, kind)) ids.add(part.id);
+    }
+    if ([...nodes].some(id => this.isBelowGround(this.nodes.get(id).y + dy))
+        || [...clamps].some(id => {
+          const c = this.clamps.get(id);
+          return this.isBelowGround(c.y + dy) || (c.off && this.isBelowGround(c.y + c.off[1] + dy));
+        })
+        || [...fittings].some(id => this.isBelowGround(this.fittings.get(id).y + dy))
+        || [...slides].some(id => this.isBelowGround(this.slides.get(id).y + dy))) return false;
+    for (const id of tubes) {
+      const tube = this.tubes.get(id);
+      if (tube.bow && tube.bowCenter &&
+          this.isBelowGround(this._bowLowestY(this.nodePos(tube.a), this.nodePos(tube.b), tube.bowCenter) + dy)) return false;
+    }
+    this._applyOffset({ nodes, clamps, fittings, slides }, dx, dy, dz);
+    const shiftPoint = p => p.map((v, i) => cleanGeometryCoordinate(v + offset[i]));
+    for (const id of fittings) {
+      const f = this.fittings.get(id);
+      if (f.hook) f.hook = shiftPoint(f.hook);
+    }
+    for (const id of slides) {
+      const s = this.slides.get(id);
+      if (s.foot?.p0) s.foot = { ...s.foot, p0: shiftPoint(s.foot.p0) };
+    }
+    for (const part of this.panels.values()) {
+      if (part.pool?.p && tubes.has(part.a) && tubes.has(part.b)) part.pool = { ...part.pool, p: shiftPoint(part.pool.p) };
+    }
+    for (const [id, { along, rail }] of seats) {
+      this.nodes.get(id).clampOn.t = round(along - dot3(offset, rail.dir));
+    }
+    return true;
   }
 
   /**

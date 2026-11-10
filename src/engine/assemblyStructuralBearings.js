@@ -1,4 +1,5 @@
 import { xAxisOf, yAxisOf } from './util.js';
+import { BEARING_SHAFT_END_CLEARANCE } from './bearingConnections.js';
 
 const xyz = n => [n.x, n.y, n.z];
 const sub = (a, b) => a.map((v, i) => v - b[i]);
@@ -26,7 +27,9 @@ export function structuralBearingSupport(model, fitting) {
     const end = p0.map((v, i) => v + dir[i] * (len + pad + 5));
     if (!(near(p0, xyz(a)) && near(end, xyz(b))) && !(near(p0, xyz(b)) && near(end, xyz(a)))) return invalid;
   }
-  if (Math.abs(dot(shaftAxis, axis)) < .999999 || !near(xyz(fitting), xyz(a).map((v, i) => v + along * axis[i])) || along < 7.5 || along > length - 7.5 || !Number.isFinite(node.clampOn.t) || Math.abs(node.clampOn.t - along) > .05) return invalid;
+  if (Math.abs(dot(shaftAxis, axis)) < .999999 || !near(xyz(fitting), xyz(a).map((v, i) => v + along * axis[i]))
+      || along < BEARING_SHAFT_END_CLEARANCE - 1e-6 || along > length - BEARING_SHAFT_END_CLEARANCE + 1e-6
+      || !Number.isFinite(node.clampOn.t) || Math.abs(node.clampOn.t - along) > .05) return invalid;
   const nodes = new Map(model.nodes), fittings = new Map(model.fittings);
   nodes.set(node.id, { ...node, bearingOn: null, clampOn: null }); fittings.delete(fitting.id);
   const virtual = Object.assign(Object.create(Object.getPrototypeOf(model)), model, { nodes, fittings });

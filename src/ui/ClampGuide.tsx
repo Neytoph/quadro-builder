@@ -9,20 +9,28 @@ export default function ClampGuide() {
   const target = builder?.clampAdjustment()
   if (!target) return null
   const slide = target.mode === 'slide'
-  return <section className="qb-card qb-flexi-guide" aria-label={t('clamp.adjustTitle')}>
+  const bearing = target.kind === 'bearing'
+  const title = t(bearing ? 'bearing.adjustTitle' : 'clamp.adjustTitle')
+  const message = api.toast?.message || (!bearing && t(slide ? 'clamp.slideHint' : 'clamp.rotateHint'))
+  const setMode = (mode: 'rotate' | 'slide') => {
+    if (target.mode === mode || !builder.setClampAdjustmentMode(mode)) return
+    api.dismissToast()
+    api.bump()
+  }
+  return <section className="qb-card qb-flexi-guide" aria-label={title}>
     <div className="qb-flexi-heading">
-      <strong>{t('clamp.adjustTitle')}</strong>
+      <strong>{title}</strong>
       <div className="qb-flexi-options" role="group" aria-label={t('clamp.adjustMode')}>
-        <button type="button" aria-pressed={!slide} onClick={() => { builder.setClampAdjustmentMode('rotate'); api.bump() }}>{t('clamp.rotate')}</button>
-        <button type="button" aria-pressed={slide} onClick={() => { builder.setClampAdjustmentMode('slide'); api.bump() }}>{t('clamp.slide')}</button>
+        <button type="button" aria-pressed={!slide} onClick={() => setMode('rotate')}>{t('clamp.rotate')}</button>
+        <button type="button" aria-pressed={slide} onClick={() => setMode('slide')}>{t('clamp.slide')}</button>
         {slide && <>
           <button type="button" aria-label={t('clamp.backward')} onClick={() => { builder.slideSelectedClampBy(-5); api.bump() }}>−5 cm</button>
           <button type="button" aria-label={t('clamp.forward')} onClick={() => { builder.slideSelectedClampBy(5); api.bump() }}>+5 cm</button>
         </>}
       </div>
     </div>
-    <p className="qb-flexi-message" data-kind={api.toast?.kind} role={api.toast?.kind === 'warn' ? 'alert' : 'status'}>
-      {api.toast?.message || t(slide ? 'clamp.slideHint' : 'clamp.rotateHint')}
-    </p>
+    {message && <p className="qb-flexi-message" data-kind={api.toast?.kind} role={api.toast?.kind === 'warn' ? 'alert' : 'status'}>
+      {message}
+    </p>}
   </section>
 }

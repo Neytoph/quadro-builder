@@ -1011,6 +1011,11 @@ export class Builder {
    */
   moveSelectionBy(dir, step = this.moveStep) {
     if (this.readOnly || this.mode !== "select" || !this.selection.size) return false;
+    const bearing = this._selectedBearingShaft();
+    if (bearing) {
+      const along = bearing.axis.reduce((sum, v, i) => sum + dir[i] * v, 0) * step;
+      return Math.abs(along) >= 0.01 && this.slideSelectedClampBy(along);
+    }
     const driver = this._selectedClampDriver();
     if (driver) {
       const c = this.model.clamps.get(driver);
@@ -1041,7 +1046,17 @@ export class Builder {
    */
   rotateSelectionBy(steps = 1) {
     if (this._paste) return this._rotatePaste(steps);
-    if (this.mode !== "select" || !this.selection.size) return false;
+    if (this.readOnly || this.mode !== "select" || !this.selection.size) return false;
+    const bearing = this._selectedBearingShaft();
+    if (bearing) {
+      if (this.busy()) return false;
+      const ref = { kind: bearing.kind, nodeId: bearing.nodeId };
+      const ok = this.recordHistory(() => this._rotateWithDirection(`bearingShaft:${ref.nodeId}`, steps * Math.PI / 2,
+        angle => this.model.rotateJoint(ref, angle, geometry().connectorSize)));
+      if (!ok) this.onNotice(t("notice_fitting_fixed"), "warn");
+      this.refresh();
+      return !!ok;
+    }
     if (this.selection.size === 1) {
       const [id, kind] = [...this.selection][0];
       const node = kind === "node" ? this.model.nodes.get(id) : null;
@@ -3512,9 +3527,9 @@ export class Builder {
         for (const node of [n1, n2]) if (!node.quat && this.model.degree(node.id) === 0) node.quat = quat.slice();
       }
       const tb = this.model.addTube(n1.id, n2.id, tube.id, this.colorFor("tube"), tube.length_cm);
-      // Rohr im Maul einer Lagerkupplung: Teil und Rohr gehoeren jetzt zusammen.
-      if (bearingNode && tb) this.model.noteBearingTube(bearingNode, tb.id);
-      // 双管夹的虚拟桥只能连到实际夹住的第一根管。轴承沿用自己的端点查找。
+      // 轴承的实际安装关系已记录，不再按端点距离补虚拟连接。
+      if (bearingNode && tb) { this.model.noteBearingTube(bearingNode, tb.id); return; }
+      // 双管夹的虚拟桥只能连到实际夹住的第一根管。
       const base = clamp && this.model._clampBaseTube(clamp);
       const neighbors = clamp
         ? [this.model.nodes.get(base?.a), this.model.nodes.get(base?.b)].filter(Boolean)
@@ -3672,9 +3687,10 @@ export class Builder {
       if (e.button === 0 && !this._down.box && this.mode === "select" && !this._down.add && !e.altKey) {
         const pick = this._pickSelect(e.clientX, e.clientY, false);
         const adjustment = this.clampAdjustment();
-        const driver = adjustment?.mode === 'slide' ? this._flapDriverForPick(pick) : this._rotationDriverForPick(pick);
+        const driver = adjustment?.mode === 'slide' && adjustment.kind !== 'bearing'
+          ? this._flapDriverForPick(pick) : this._rotationDriverForPick(pick);
         const key = this._rotationPickKey(pick);
-        if (driver && this.selection.has(key) && this._beginClampDrag(driver)) return;
+        if (driver && this.selection.has(key) && this._beginClampDrag(driver, pick.point)) return;
       }
       // ⌥ + Ziehen: quer verschieben -- am Mac-Trackpad die Alternative zur
       // mittleren / rechten Taste.
@@ -4406,8 +4422,30 @@ export class Builder {
     return c && this._clampMovesPart(c, this.model._clampFlap(c), pick.data.id, pick.data.kind) ? driver : null;
   }
 
+  _selectedBearingShaft() {
+    const selection = this.selection;
+    if (!selection.size) return null;
+    const candidates = [...this.model.nodes.values()].filter(n => n.bearingOn && n.clampOn);
+    candidates.sort((a, b) => Number(selection.has(b.clampOn.tubeId)) - Number(selection.has(a.clampOn.tubeId)));
+    const checked = new Set();
+    for (const n of candidates) {
+      const tubeId = n.clampOn.tubeId;
+      if (checked.has(tubeId)) continue;
+      const joint = this.model.rotationJoint({ kind: 'bearingShaft', nodeId: n.id }, geometry().connectorSize);
+      if (!joint) continue;
+      checked.add(tubeId);
+      if ([...selection].every(([id, kind]) => this.model.jointMovesPart(joint, id, kind))) return joint;
+    }
+    return null;
+  }
+
   clampAdjustment() {
     if (this.readOnly || this.mode !== 'select' || this.boxSelect || this._paste) return null;
+    const bearing = this._selectedBearingShaft();
+    if (bearing) {
+      const id = bearing.nodeId;
+      return { id, kind: 'bearing', mode: this._clampAdjustment?.id === id ? this._clampAdjustment.mode : 'rotate' };
+    }
     const id = this._selectedClampDriver();
     const c = id && this.model.clamps.get(id);
     if (!c || !this.model._clampSecondTube(c)) return null;
@@ -4427,7 +4465,8 @@ export class Builder {
     const target = this.clampAdjustment();
     if (!target || this.busy() || !Number.isFinite(cm)) return false;
     const before = JSON.stringify(this.model.toJSON());
-    const ok = this.model.slideClampFlap(target.id, cm);
+    const ok = target.kind === 'bearing' ? this.model.slideBearingShaft(target.id, cm, geometry().connectorSize)
+      : this.model.slideClampFlap(target.id, cm);
     if (ok) this._afterMove(before, { merged: 0, detached: 0 });
     if (!ok) this.onNotice(t('notice_clamp_slide_limit'), 'warn');
     return ok;
@@ -4447,6 +4486,11 @@ export class Builder {
 
   _rotationDriverForPick(pick) {
     if (!pick || !this.selection.size) return null;
+    const bearing = this._selectedBearingShaft();
+    const kind = Number.isInteger(pick.data.hinge) ? 'hinge' : pick.data.kind;
+    if (bearing && this.model.jointMovesPart(bearing, this._rotationPickKey(pick), kind)) {
+      return { kind: bearing.kind, nodeId: bearing.nodeId };
+    }
     const refs = [];
     for (const n of this.model.nodes.values()) {
       const ref = this._nodeJointRef(n.id);
@@ -4457,7 +4501,6 @@ export class Builder {
     const candidates = [];
     for (const ref of refs) {
       const j = this.model.rotationJoint(ref, geometry().connectorSize);
-      const kind = Number.isInteger(pick.data.hinge) ? 'hinge' : pick.data.kind;
       if (j && [...this.selection].every(([id, kind]) => this.model.jointMovesPart(j, id, kind))
           && this.model.jointMovesPart(j, this._rotationPickKey(pick), kind)) {
         const selectedJoint = this.selection.has(keyOf(ref)) || this.selection.has(this.model.nodes.get(ref.nodeId)?.bearingOn);
@@ -4612,11 +4655,12 @@ export class Builder {
     return true;
   }
 
-  _beginClampDrag(id) {
+  _beginClampDrag(id, point = null) {
     if (this.readOnly) return false;
     const adjustment = this.clampAdjustment();
-    if (adjustment?.id === id && adjustment.mode === 'slide') return this._beginClampSlide(id);
     const joint = typeof id === 'object' ? this.model.rotationJoint(id, geometry().connectorSize) : null;
+    if (adjustment?.mode === 'slide' && (adjustment.id === id
+        || (joint?.kind === 'bearingShaft' && adjustment.id === joint.nodeId))) return this._beginClampSlide(id, joint, point);
     const c = joint || this.model.clamps.get(id);
     if (!c || !(joint || c.dir && c.off)) return false;
     this._clampDrag = {
@@ -4631,6 +4675,15 @@ export class Builder {
       moved: false,
     };
     const d = this._clampDrag;
+    if (joint?.kind === 'bearingShaft' && point) {
+      // 以抓取点所在的轴截面计算角度，拖管端时不会因离轴承远而跳动。
+      const origin = new Vector3(...d.origin), axis = new Vector3(...d.axis);
+      const radial = new Vector3(point.x, point.y, point.z).sub(origin);
+      const along = radial.dot(axis);
+      d.origin = origin.addScaledVector(axis, along).toArray();
+      radial.addScaledVector(axis, -along);
+      if (radial.length() > 0.4) d.startOff = radial.normalize().toArray();
+    }
     if (this._down) {
       d.pointer = { ...this._down };
       d.pointerDir = this._clampPointerDir(this._down.x, this._down.y, d);
@@ -4772,12 +4825,14 @@ export class Builder {
     this.refresh();
   }
 
-  _beginClampSlide(id) {
-    const c = this.model.clamps.get(id);
+  _beginClampSlide(id, joint = null, point = null) {
+    const c = joint || this.model.clamps.get(id);
     if (this.readOnly || !c?.dir || !this._down) return false;
-    const tube = this.model._clampSecondTube(c);
+    const tube = joint ? this.model.tubes.get(this.model.nodes.get(joint.nodeId)?.clampOn?.tubeId)
+      : this.model._clampSecondTube(c);
     if (!tube) return false;
-    const origin = [c.x, c.y, c.z], axis = new Vector3(...c.dir).normalize().toArray();
+    const origin = joint ? (point ? [point.x, point.y, point.z] : joint.origin) : [c.x, c.y, c.z];
+    const axis = joint ? joint.axis : new Vector3(...c.dir).normalize().toArray();
     const points = this.scene.projectWorld([origin, origin.map((v, i) => v + axis[i] * 10)]);
     if (!points[0] || !points[1]) {
       this.onNotice(t('notice_clamp_slide_view'), 'info');
@@ -4806,9 +4861,12 @@ export class Builder {
     const [sx, sy] = d.screenAxis;
     const delta = (dx * sx + dy * sy) / (sx * sx + sy * sy) * 10;
     this.model.loadJSON(JSON.parse(d.before));
-    const ok = delta === 0 || this.model.slideClampFlap(d.id, delta);
+    const slide = distance => d.id?.kind === 'bearingShaft'
+      ? this.model.slideBearingShaft(d.id.nodeId, distance, geometry().connectorSize)
+      : this.model.slideClampFlap(d.id, distance);
+    const ok = delta === 0 || slide(delta);
     if (ok) d.lastDelta = delta;
-    else if (d.lastDelta) this.model.slideClampFlap(d.id, d.lastDelta);
+    else if (d.lastDelta) slide(d.lastDelta);
     this.refresh();
     if (!ok) { this.onNotice(t('notice_clamp_slide_limit'), 'warn'); return; }
     const n = this.model.nodes.get(d.mark[0]);
@@ -6050,7 +6108,8 @@ export class Builder {
       this._selectClampCohort(id, add);
       return;
     }
-    const slideOwner = this._slideDriverForPick(pick);
+    const slideOwner = this._slideDriverForPick(pick) || (!pick.data.tubes && kind === "tube"
+      && [...this.model.nodes.values()].some(n => n.bearingOn && n.clampOn?.tubeId === id));
     if (slideOwner && (kind === "tube" || kind === "panel" || kind === "textile")) {
       if (this._isBlockClick(e, id)) {
         this._selectConnectedFromPick(pick, add);
