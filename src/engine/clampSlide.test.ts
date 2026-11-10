@@ -270,6 +270,27 @@ describe('双管连接旋转与沿轴平移', () => {
     expect(model.toJSON()).toEqual(before)
   })
 
+  it('斜坡转到固定接头附近后仍能沿轴双向平移', () => {
+    const { model, clamp, n0 } = fixture()
+    const tail = model.addNode(0, 80, 45)
+    model.addTube(n0.id, tail.id, 'T35', 'blue', 35)
+    const fixedTop = model.addNode(0, 65, 25.98)
+    const fixedBottom = model.addNode(0, 25, 25.98)
+    model.addTube(fixedTop.id, fixedBottom.id, 'T35', 'red', 35)
+    const fixedNodes = () => model.toJSON().nodes.filter(node => node.id === fixedTop.id || node.id === fixedBottom.id)
+    const before = fixedNodes()
+
+    expect(model.rotateClamp(clamp.id, Math.PI / 6)).toBe(true)
+    expect(tail.y).toBe(57.5)
+    expect(model.slideClampFlap(clamp.id, -5)).toBe(true)
+    expect(tail.x).toBe(-5)
+    expect(fixedNodes()).toEqual(before)
+    expect(model.slideClampFlap(clamp.id, 10)).toBe(true)
+    expect(tail.x).toBe(5)
+    expect(tail.y).toBe(57.5)
+    expect(fixedNodes()).toEqual(before)
+  })
+
   it('滑动范围限制在夹子仍夹住第二根管的位置', () => {
     const { model, clamp, tube } = fixture()
     expect(model.slideClampFlap(clamp.id, 100)).toBe(true)

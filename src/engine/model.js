@@ -4670,14 +4670,8 @@ export class BuildModel {
       const ax = hingeOf.get(tid) || hingeAx;
       seed(t.a, ax);
       seed(t.b, ax);
-      const a = this.nodes.get(t.a), b = this.nodes.get(t.b);
-      if (a && b) {
-        for (const n of this.nodes.values()) {
-          if (fence.has(n.id) || tagged.has(n.id)) continue;
-          if (distPointToSeg(n.x, n.y, n.z, a, b) <= 1.2) seed(n.id, ax);
-        }
-      }
     }
+    // 管中接头按实际夹持关系跟随，附近的固定接头不属于活动侧。
     for (const n of this.nodes.values()) {
       if (n.clampOn && flap.second.has(n.clampOn.tubeId)) {
         seed(n.id, hingeOf.get(n.clampOn.tubeId) || hingeAx);
