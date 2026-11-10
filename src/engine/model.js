@@ -1080,7 +1080,7 @@ export class BuildModel {
     let weg = 0;
     for (const id of ids) {
       const n = this.nodes.get(id);
-      if (!n || n.part || n.preferType) continue;
+      if (!n || n.part || n.preferType || this.fittings.has(n.bearingOn)) continue;
       let belegt = false;
       for (const t of this.tubes.values()) if (t.a === id || t.b === id) { belegt = true; break; }
       if (belegt) continue;
@@ -1424,10 +1424,16 @@ export class BuildModel {
   }
 
   removeFitting(id) {
-    // Die Kupplung, die eine Lagerkupplung trug, steht danach frei -- ihr
-    // Verweis muss weg, sonst zeichnet die Szene weiter einen Stutzen ins Leere.
-    for (const n of this.nodes.values()) if (n.bearingOn === id) { n.bearingOn = null; n.stub = null; }
+    const anchors = [];
+    for (const n of this.nodes.values()) {
+      if (n.bearingOn !== id) continue;
+      n.bearingOn = null;
+      n.clampOn = null;
+      n.stub = null;
+      anchors.push(n.id);
+    }
     this.fittings.delete(id);
+    this.removeEmptyNodes(anchors);
   }
 
   accessoryMounts(kind) {
@@ -4822,11 +4828,12 @@ export class BuildModel {
     return adj;
   }
 
-  // Klemm-Kupplungen haengen an ihrem umschlossenen Rohr: faellt es weg,
-  // faellt die Kupplung mit (und mit ihr, was an ihr steckt).
+  // 穿轴可以从轴承座抽出，轴承座及其支架仍保留。其他夹具仍按承载关系清理。
   _pruneClamps() {
     for (const n of [...this.nodes.values()]) {
-      if (n.clampOn && !this.tubes.has(n.clampOn.tubeId)) this.removeNode(n.id);
+      if (!n.clampOn || this.tubes.has(n.clampOn.tubeId)) continue;
+      if (this.fittings.has(n.bearingOn)) n.clampOn = null;
+      else this.removeNode(n.id);
     }
   }
 

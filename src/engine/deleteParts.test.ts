@@ -53,6 +53,64 @@ function expectHistory(builder: Builder, before: object) {
   expect(builder.model.toJSON()).toEqual(after)
 }
 
+function bearingFrame() {
+  const model = new BuildModel()
+  const [a, b, c, d, e, f] = [[0, 0], [40, 0], [0, -40], [40, -40], [0, 40], [40, 40]]
+    .map(([x, z]) => model.addNode(x, 2.5, z))
+  const frame = [[a, b], [a, c], [c, d], [d, b], [a, e], [e, f], [f, b]]
+    .map(([from, to]) => model.addTube(from.id, to.id, 'T35', 'blue', 35)!)
+  const bearings = [a, b].map(node => model.addBearingAtArm(node.id, [0, 1, 0])!)
+  const start = model.addNode(-10, 12.5, 0), end = model.addNode(30, 12.5, 0)
+  const shaft = model.addTube(start.id, end.id, 'T35', 'green', 35)!
+  model.noteBearingTube(a.id, shaft.id)
+  return { model, frame, bearings, shaft, a, b }
+}
+
+describe('删除预览与实际删除范围', () => {
+  it('删除穿过轴承座的管子只移除管子，保留支架和可重新穿管的空孔', () => {
+    const { model, frame, bearings, shaft, a, b } = bearingFrame()
+    const builder = editor(model), before = model.toJSON()
+    expect(builder._deleteHoverExtras({ data: { kind: 'tube', id: shaft.id } })).toBeNull()
+    expect(model.toJSON()).toEqual(before)
+    expect(builder.history.canUndo()).toBe(false)
+
+    clickDelete(builder, shaft.id, 'tube')
+    expect([...model.tubes.values()]).toEqual(frame)
+    expect([...model.fittings.values()]).toEqual(bearings)
+    expect(model.bearingOpenings().map(opening => opening.nodeId)).toEqual([a.id, b.id])
+    expectHistory(builder, before)
+  })
+
+  it('单独删除轴承座会解除穿管关系，再删原来的穿轴也不影响支架', () => {
+    const { model, frame, bearings, shaft, a } = bearingFrame()
+    const builder = editor(model)
+    clickDelete(builder, bearings[0].id, 'fitting')
+    expect(model.nodes.get(a.id)?.clampOn).toBeNull()
+    expect(model.tubes.has(shaft.id)).toBe(true)
+    clickDelete(builder, shaft.id, 'tube')
+    expect([...model.tubes.values()]).toEqual(frame)
+    expect([...model.fittings.keys()]).toEqual([bearings[1].id])
+  })
+
+  it('删除承载管时预览确实会消失的面板和接头，另一根管保持原位', () => {
+    const { model, center, tubes } = junction()
+    const a = model.addNode(0, 40, 40), b = model.addNode(40, 40, 40)
+    const rail = model.addTube(a.id, b.id, 'T35', 'blue', 35)!
+    const panel = model.addPanel(tubes[0].id, rail.id, 0, 40, 'panel_40x40', 'yellow')!
+    const builder = editor(model)
+    expect(builder._deleteHoverExtras({ data: { kind: 'tube', id: tubes[0].id } })).toEqual([panel.id])
+    clickDelete(builder, tubes[0].id, 'tube')
+    expect(model.panels.has(panel.id)).toBe(false)
+    expect(model.tubes.has(rail.id)).toBe(true)
+    expect(connectorsForNode(model, center)).toEqual(['elbow'])
+    expect(builder._deleteHoverExtras({ data: { kind: 'tube', id: tubes[2].id } })).toEqual([center.id, a.id])
+    clickDelete(builder, tubes[2].id, 'tube')
+    expect(connectorsForNode(model, center)).toEqual([])
+    expect(connectorsForNode(model, a)).toEqual([])
+    expect(model.tubes.has(rail.id)).toBe(true)
+  })
+})
+
 describe('删除后连接件自动适配', () => {
   for (const imported of [false, true]) {
     for (const batch of [false, true]) {

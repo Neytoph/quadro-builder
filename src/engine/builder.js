@@ -11,10 +11,10 @@ import { CLASSIC_COLOR_IDS, officialColorId } from "./colors.js";
 import { colorPreviewModel, normalizeColor } from './customColors.js';
 import { connectorLabelInfo } from "./buildplan.js";
 import { computeAssemblyPlan, assemblyState } from "./assemblyPlan.js";
-import { infeasibleConnectors, inferConnectorType, resolveNodeConnection } from "./bom.js";
+import { bomPartKey, infeasibleConnectors, inferConnectorType, resolveNodeConnection } from "./bom.js";
 import { getLang, t } from "./i18n.js";
 import { round2, panelNormal, modelMiddle, xAxisOf, yAxisOf, zAxisOf, quatFromBasis } from "./util.js";
-import { TUBE_FITTINGS, POOL_KINDS, isHolePart, holeArmDirs, holeClampDirsAt, HOLE_MASKS,
+import { BuildModel, TUBE_FITTINGS, POOL_KINDS, isHolePart, holeArmDirs, holeClampDirsAt, HOLE_MASKS,
   BOLT_PART, HINGE_PART, isBoltPart, boltArmDirs, boltAxis, boltDepth, hingeDir, hingeKey, splitHingeKey,
   POOL_SETS, ARM_FITTINGS, armFittingDirsAt, fixedFittingColor, fixedTubeColor, slopeArmDirsAt, SLIDE_PARTS, SLIDE_SPECS, ROTATABLE_FITTINGS } from "./model.js";
 import { CONNECTOR_ARM_BITS } from "./qdfimport.js";
@@ -72,6 +72,7 @@ const CLICK_TOLERANCE = 9; // px: groessere Bewegung = Kamera drehen, kein Klick
 const LONG_PRESS_MS = 450;
 // Zweiter Klick auf dasselbe Teil innerhalb dieser Zeit waehlt den Verbund.
 const SELECT_BLOCK_MS = 500;
+const DELETE_PART_MAPS = ["nodes", "tubes", "panels", "textiles", "slides", "clamps", "fittings"];
 
 // C45_SLEEVE_LEN / C45_ARM_LEN stehen in config.js. Ausgemessen an den Dateien
 // der Herstellersoftware (alle sechs Adapter identisch): dazwischen liegt ein
@@ -1801,18 +1802,43 @@ export class Builder {
 
   // Anbauteil loeschen -- Laufrolle und ihr Adapter gehoeren zusammen und gehen
   // gemeinsam, egal welches der beiden ausgewaehlt war.
-  _removeFittingWithRider(id) {
-    const f = this.model.fittings.get(id);
+  _removeFittingWithRider(model, id) {
+    const f = model.fittings.get(id);
     if (!f) return;
     const partner = f.kind === "casters2" ? "adapter2" : f.kind === "adapter2" ? "casters2" : null;
     if (partner) {
-      for (const o of [...this.model.fittings.values()]) {
+      for (const o of [...model.fittings.values()]) {
         if (o.kind === partner && Math.hypot(o.x - f.x, o.y - f.y, o.z - f.z) < 2) {
-          this.model.removeFitting(o.id);
+          model.removeFitting(o.id);
         }
       }
     }
-    this.model.removeFitting(id);
+    model.removeFitting(id);
+  }
+
+  _removeParts(model, entries, profile) {
+    if (profile) {
+      model.removeReinforcement(entries[0][0]);
+      return;
+    }
+    const neighbors = model.neighborNodeIds(entries.map(([id]) => id));
+    for (const [id, kind] of entries) {
+      if (kind === "tube") model.removeTube(id);
+      else if (kind === "panel") model.removePanel(id);
+      else if (kind === "textile") model.removeTextile(id);
+      else if (kind === "slide") model.removeSlide(id);
+      else if (kind === "clamp") model.removeClamp(id);
+      else if (kind === "fitting") this._removeFittingWithRider(model, id);
+      else if (kind === "hinge") {
+        const hinge = splitHingeKey(id);
+        if (hinge) model.removeHinge(hinge.nodeId, hinge.index);
+      }
+    }
+    for (const [id, kind] of entries) {
+      if (kind === "node") model.removeConnector(id);
+      neighbors.delete(id);
+    }
+    model.removeEmptyNodes(neighbors);
   }
 
   /**
@@ -1828,46 +1854,14 @@ export class Builder {
   /** Loescht alle ausgewaehlten Teile. Kupplungen zuletzt (nehmen Rohre mit). */
   deleteSelection() {
     if (!this.selection.size) return 0;
-    // Ein gewaehltes Verstaerkungsprofil: nur das Profil kommt heraus, die
-    // Rohre bleiben stehen. Sie sind ja nicht angeklickt worden -- sie tragen
-    // es nur.
-    if (this._profilGewaehlt()) {
-      const rohre = [...this.selection.keys()];
-      this.recordHistory(() => { this.model.removeReinforcement(rohre[0]); });
-      this.selection.clear();
-      this._profilAuswahl = null;
-      this.refresh();
-      return rohre.length;
-    }
     const entries = [...this.selection];
-    // Kupplungen, an denen das Geloeschte haengt: sie koennten danach ohne
-    // jeden Anschluss dastehen und werden dann mit weggeraeumt.
-    const nachbarn = this.model.neighborNodeIds(entries.map(([id]) => id));
-    this.recordHistory(() => {
-      for (const [id, kind] of entries) {
-        if (kind === "tube") this.model.removeTube(id);
-        else if (kind === "panel") this.model.removePanel(id);
-        else if (kind === "textile") this.model.removeTextile(id);
-        else if (kind === "slide") this.model.removeSlide(id);
-        else if (kind === "clamp") this.model.removeClamp(id);
-        else if (kind === "fitting") this._removeFittingWithRider(id);
-        else if (kind === "hinge") {
-          const teil = splitHingeKey(id);
-          if (teil) this.model.removeHinge(teil.nodeId, teil.index);
-        }
-      }
-      for (const [id, kind] of entries) {
-        if (kind !== "node") continue;
-        this.model.removeConnector(id);
-      }
-      for (const [id] of entries) nachbarn.delete(id);
-      this.model.removeEmptyNodes(nachbarn);
-    });
+    const profile = this._profilGewaehlt();
+    this.recordHistory(() => this._removeParts(this.model, entries, profile));
     if (this.selectedNodeId && !this.model.nodes.has(this.selectedNodeId)) this.selectedNodeId = null;
-    const n = entries.length;
     this.selection.clear();
+    this._profilAuswahl = null;
     this.refresh();
-    return n;
+    return entries.length;
   }
 
   /**
@@ -2283,6 +2277,8 @@ export class Builder {
   }
 
   _refreshPlacementPass() {
+    this._deletePreview = null;
+    if (this.mode === "delete") this.scene.setHoverPart(null);
     this.bearingConnection?.validate();
     if(this._selectionTransform?.visualPreview){this.scene.requestRender();this.onPreview();return;}
     const transformKey=[...this.selection.keys()].sort().join(',');
@@ -3735,6 +3731,7 @@ export class Builder {
       if (this.scene.explodedView) return;
       this._tubeHoverPointer = null;
       this.scene.updateTubeCandidateHover?.(null);
+      if (this.mode === 'delete') this.scene.setHoverPart(null);
       if (e.pointerType === 'touch') return;
       this._panelHoverKey = null;
       this.scene.clearPanelPlacementPreview?.();
@@ -6057,28 +6054,59 @@ export class Builder {
     this.deleteSelection();
   }
 
-  /** 删除模式下：指到接头时，把会一起删掉的管子也标出来。 */
+  /** 在副本上执行同一套删除规则，只高亮点击后会消失的配件。 */
   _deleteHoverExtras(pick) {
-    if (this.mode !== "delete" || !pick || pick.data.kind !== "node") return null;
-    if (pick.data.hinge != null) return null;
-    if (!this.model.isAutomaticConnector(pick.data.id)) return null;
-    const ids = this.model.incidentTubeIds(pick.data.id);
-    return ids.length ? ids : null;
+    if (this.mode !== "delete" || !pick) return null;
+    const { id, kind, hinge, tubes } = pick.data;
+    const key = JSON.stringify([kind, id, hinge, tubes]);
+    if (this._deletePreview?.key === key) return this._deletePreview.extra;
+
+    const model = this.model;
+    const maps = Object.fromEntries(DELETE_PART_MAPS.map(name => [name, model[name]]));
+    const after = Object.assign(new BuildModel(), structuredClone(maps));
+    this._removeParts(after, this._deletePickEntries(pick.data), !!tubes?.length);
+    const removed = new Set(), changedNodes = new Set();
+    for (const name of DELETE_PART_MAPS.filter(name => name !== "nodes" && name !== "tubes")) {
+      for (const partId of model[name].keys()) if (!after[name].has(partId)) removed.add(partId);
+    }
+    for (const tube of model.tubes.values()) {
+      const next = after.tubes.get(tube.id);
+      if (tube.reinforced && !next?.reinforced) removed.add(bomPartKey(tube.id, "reinforcement"));
+      if (!next) {
+        if (!tube.arm && !tube.link) removed.add(tube.id);
+        changedNodes.add(tube.a);
+        changedNodes.add(tube.b);
+      }
+    }
+    for (const node of model.nodes.values()) {
+      const next = after.nodes.get(node.id);
+      if (!next || node.bearingOn && !next.bearingOn) changedNodes.add(node.id);
+      if (node.hinges?.length && !isBoltPart(next?.part)) {
+        node.hinges.forEach((_, index) => removed.add(hingeKey(node.id, index)));
+      }
+    }
+    // 接头退成裸管端时，逻辑节点仍在，场景中的接头会消失。
+    const hasPart = (state, node) => node && !node.unused &&
+      (node.bearingOn || node.c45file || resolveNodeConnection(state, node).types.some(Boolean));
+    for (const nodeId of changedNodes) {
+      const before = model.nodes.get(nodeId), next = after.nodes.get(nodeId);
+      if (!hasPart(after, next) && hasPart(model, before)) removed.add(nodeId);
+    }
+    removed.delete(id);
+    const extra = removed.size ? [...removed] : null;
+    this._deletePreview = { key, extra };
+    return extra;
   }
 
-  /** Setzt die Auswahl auf genau das getroffene Teil (ohne refresh). */
+  _deletePickEntries({ id, kind, hinge, tubes }) {
+    if (kind === "node" && Number.isInteger(hinge)) return [[hingeKey(id, hinge), "hinge"]];
+    return (tubes?.length ? tubes : [id]).map(partId => [partId, kind]);
+  }
+
   _fillSelectionFromPick(pick) {
     this.selection.clear();
-    const { kind, id } = pick.data;
-    if (kind === "node" && pick.data.hinge != null) {
-      this.selection.set(hingeKey(id, pick.data.hinge), "hinge");
-      this._profilAuswahl = null;
-      return;
-    }
-    const ids = Array.isArray(pick.data.tubes) && pick.data.tubes.length
-      ? pick.data.tubes : [id];
-    this._profilAuswahl = Array.isArray(pick.data.tubes) ? new Set(ids) : null;
-    for (const x of ids) this.selection.set(x, kind);
+    this._profilAuswahl = pick.data.tubes?.length ? new Set(pick.data.tubes) : null;
+    for (const [id, kind] of this._deletePickEntries(pick.data)) this.selection.set(id, kind);
   }
 
   // Cursor-Modus: bereits platzierte Teile auswaehlen. Einfacher Klick waehlt

@@ -6635,7 +6635,12 @@ export class SceneManager {
     if (id == null) return;
     const ids = new Set([id, ...(extraIds || [])]);
     const matches = data => {
-      if (!data || !ids.has(data.id)) return false;
+      if (!data) return false;
+      if (this._hoverPartMode === 'delete') {
+        if (Number.isInteger(data.hinge) && ids.has(hingeKey(data.id, data.hinge))) return true;
+        if (data.tubes?.some(tubeId => ids.has(bomPartKey(tubeId, "reinforcement")))) return true;
+      }
+      if (!ids.has(data.id)) return false;
       if (this._hoverPartMode === 'select' && this._isSolidSelectedPart(data)) return false;
       if (data.id !== id) return true;
       if (this._hoverPartKind && data.kind !== this._hoverPartKind) return false;
