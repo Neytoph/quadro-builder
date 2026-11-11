@@ -34,6 +34,14 @@ export default function SafetyPane() {
 
   const ref = (f: SafetyFinding) => (f.ref === 'builder' ? t('safety.ref.builder') : t('safety.ref', { ref: f.ref }))
 
+  if (api.safetyError) return (
+    <div className="p-3 text-xs text-gray-400" role="alert">
+      <span>{t('safety.failed')}</span>
+      <button type="button" className="ml-2 underline" onClick={api.retrySafety}>{t('safety.retry')}</button>
+    </div>
+  )
+  if (api.safetyPending) return <div className="p-3 text-xs text-gray-400" role="status" aria-live="polite">{t('safety.pending')}</div>
+
   if (!res || !res.findings.length) {
     return (
       <div className="p-3 text-xs text-gray-400">

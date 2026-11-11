@@ -273,12 +273,17 @@ export function strapShape(model,part) {
   }):[];
   return {points,axes,normal,bands,radius,width,depth};
 }
-function railCandidates(model,spec,{legacyInset=false,deduplicate=true,screwAxis='vertical',oppositeRetainers=false}={}) {
+function railCandidates(model,spec,{legacyInset=false,deduplicate=true,screwAxis='vertical',oppositeRetainers=false,near=null}={}) {
   const out=[],seen=new Set();
   for(const tube of model.tubes.values()){
-    const candidates=placementMemo(model,'rail-candidates:'+JSON.stringify([tube.id,spec,legacyInset,screwAxis,oppositeRetainers]),
+    if(near){
+      const rail=model._rail(tube.id);if(!rail)continue;
+      const delta=cSub(near,rail.p0),along=cDot(delta,rail.dir);
+      if(Math.hypot(...delta.map((v,i)=>v-along*rail.dir[i]))>Math.max(spec.width,spec.height)/2+1)continue;
+    }
+    const candidates=placementMemo(model,'rail-candidates:'+JSON.stringify([tube.id,spec,legacyInset,screwAxis,oppositeRetainers,near]),
       {groups:['nodes','tubes'],bounds:railBounds(model,tube.id,Math.max(spec.width,spec.height)+8),ids:new Set([tube.id])},
-      ()=>computeRailCandidates(model,spec,{legacyInset,deduplicate:false,screwAxis,oppositeRetainers,tube}));
+      ()=>computeRailCandidates(model,spec,{legacyInset,deduplicate:false,screwAxis,oppositeRetainers,tube,near}));
     for(const candidate of candidates){
       const key=model.panelCorners(candidate)?.map(p=>p.map(v=>v.toFixed(2)).join(',')).sort().join('|');
       if(deduplicate&&seen.has(key))continue;seen.add(key);out.push(candidate);
@@ -286,7 +291,7 @@ function railCandidates(model,spec,{legacyInset=false,deduplicate=true,screwAxis
   }
   return out;
 }
-function computeRailCandidates(model,spec,{legacyInset,deduplicate,screwAxis,oppositeRetainers,tube}) {
+function computeRailCandidates(model,spec,{legacyInset,deduplicate,screwAxis,oppositeRetainers,tube,near}) {
   const out=[],seen=new Set();
   for(const partner of model.panelPartners(tube.id,[spec.width,spec.height])) {
     const count=Math.max(1,Math.floor((partner.hi-partner.lo+0.5)/partner.len));
@@ -302,6 +307,7 @@ function computeRailCandidates(model,spec,{legacyInset,deduplicate,screwAxis,opp
       const cor=model.panelCorners(probe);if(!cor)continue;
       const key=cor.map(p=>p.map(v=>v.toFixed(2)).join(',')).sort().join('|');if(deduplicate && seen.has(key))continue;seen.add(key);
       const frame=confirmedFrame(model,{...probe,panelId:spec.id,side:1});if(!frame)continue;
+      if(near && Math.hypot(...cSub(frame.pos,near))>1)continue;
       const normal=frame.axes[2];if(spec.mountType==='horizontal-frame' && Math.abs(normal[1])<0.999)continue;
       const density=spec.feature==='trampoline'?4:spec.feature==='net'?10:0;
       let supports;
@@ -392,8 +398,8 @@ function computeConfirmedCandidates(model,id,options) {
   }
   if(isOuterScrewPanel(id))options={...options,oppositeRetainers:true};
   if(spec.mountType==='net-frame'){
-    const candidates=railCandidates(model,spec),seen=new Set(candidates.map(p=>model.panelCorners(p)?.map(c=>c.map(v=>v.toFixed(2)).join(',')).sort().join('|')));
-    for(const probe of insetPanelProbes(model,spec.width,spec.height,{deduplicate:false})){
+    const candidates=railCandidates(model,spec,{near:options.near}),seen=new Set(candidates.map(p=>model.panelCorners(p)?.map(c=>c.map(v=>v.toFixed(2)).join(',')).sort().join('|')));
+    for(const probe of insetPanelProbes(model,spec.width,spec.height,{deduplicate:false,near:options.near})){
       const corners=model.panelCorners(probe),key=corners?.map(c=>c.map(v=>v.toFixed(2)).join(',')).sort().join('|');
       if(!corners||seen.has(key))continue;
       const supports=edgeSupports(model,corners,10),frame=confirmedFrame(model,{...probe,panelId:spec.id,side:1});
@@ -500,8 +506,17 @@ export function confirmedStructuralValid(model,part) {
     const candidate=trampolineCandidate(model,part);
     return candidate.valid && candidate.supportTubes.length===part.supportTubes.length && candidate.supportTubes.every(id=>part.supportTubes.includes(id)) && sameMounts(part.mounts,candidate.mounts);
   }
+  // 已安装的网只核对原位置附近的框架，保留原候选顺序、固定点和姿态比较。
+  // 1cm筛选范围大于最终0.1cm判定及候选去重舍入误差，不放宽安装规则。
+  if(spec.mountType==='net-frame' && part.kind && !part.panelId)return placementMemo(model,'installed-net:'+JSON.stringify(part),
+    {groups:['nodes','tubes'],ids:new Set(part.supportTubes),bounds:pointsBounds([[part.x,part.y,part.z]],Math.hypot(spec.width,spec.height)/2+2)},
+    ()=>confirmedCandidates(model,spec.id,{near:[part.x,part.y,part.z],sectorFacing:part.facing}).some(p=>matchesInstalled(p,part)));
   const candidates=part.panelId ? [confirmedPanelDiagnostics(model,part)] : confirmedCandidates(model,spec.id,{legacySector:spec.feature==='sector' && part.mounts.some(m=>m.role==='arc-retainer'),sectorFacing:part.facing});
-  return candidates.some(p=>p.valid && p.supportTubes.length===part.supportTubes.length && p.supportTubes.every(id=>part.supportTubes.includes(id)) && sameMounts(part.mounts,p.mounts) && (!part.kind || Math.hypot(...cSub(p.pos,[part.x,part.y,part.z]))<0.1 && sameRotation(p.quat,part.quat)));
+  return candidates.some(p=>matchesInstalled(p,part));
+}
+
+function matchesInstalled(p,part) {
+  return p.valid && p.supportTubes.length===part.supportTubes.length && p.supportTubes.every(id=>part.supportTubes.includes(id)) && sameMounts(part.mounts,p.mounts) && (!part.kind || Math.hypot(...cSub(p.pos,[part.x,part.y,part.z]))<0.1 && sameRotation(p.quat,part.quat));
 }
 
 export function confirmedVolumes(model,part) {

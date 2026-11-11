@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { bumpCount, track, entryAnalyticsObject, setAnalyticsObject } from '../analytics/track'
 import {
-  BuildModel, Builder, SceneManager, loadCatalog, computeBOM, compareInventory, computeSafety,
+  BuildModel, Builder, SceneManager, loadCatalog, computeBOM, compareInventory,
   parseQDF, parseDesign, designEntry, buildQDF, buildableTubes, buildableCurvedTubes, buildablePanels, tubeColors, allConnectors, accessories,
   panels, geometry, RANDOM_COLOR, docs, storage, setLang as setEngineLang, t as engineT,
   computeBuildPlan, partsOfModel, partsOfData,
@@ -19,6 +19,9 @@ import { chooseSharing, SharingCancelled } from '../shareOptions'
 import { publishSharePage, sharePagesEnabled, stampFor, type ExportKind, type Stamp } from '../sharePage'
 import { statsOfModel } from '../designStats'
 import { createStatsQueue } from '../sync/statsQueue'
+import { useSafetyAnalysis } from './useSafetyAnalysis'
+import type { SafetyResult } from '../engine/safetyTypes'
+export type { SafetyLevel, SafetyFinding, SafetyResult } from '../engine/safetyTypes'
 import { geometricPreset, jsonToFragment } from '../data/presets'
 import pyramidQdf from '../data/A0128.qdf?raw'
 import { clearSharePayload, decodeShare, peekSharePayload, shareUrl, productOnly } from '../share'
@@ -73,20 +76,6 @@ export interface RoomSettings {
   h: number
   visible: boolean
   showExtents: boolean
-}
-
-export type SafetyLevel = 'error' | 'warn' | 'info'
-export interface SafetyFinding {
-  rule: string
-  level: SafetyLevel
-  /** 官方安全须知的章节号，引擎自己的规则是 builder */
-  ref: string
-  params: Record<string, unknown>
-  ids: { nodes?: string[]; tubes?: string[]; panels?: string[] }
-}
-export interface SafetyResult {
-  findings: SafetyFinding[]
-  height: number
 }
 
 export type ThumbJob = { kind: 'official' | 'preset'; id: string } | { kind: 'model'; data: unknown }
@@ -293,6 +282,9 @@ interface EngineApi {
   /** 按零件 id 高亮一批（安全审查点行用），再点同一批取消 */
   highlightIds: (key: string, ids: string[]) => void
   safety: SafetyResult | null
+  safetyPending: boolean
+  safetyError: Error | null
+  retrySafety: () => void
   setInv: (group: keyof Inventory, key: string, value: number) => void
   newTab: () => void
   closeTab: (tabId: string) => void
@@ -1460,13 +1452,15 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   }, [model, ready, modelSnapshot, lang])
   const bom = useMemo(() => rawBom ? asBom(rawBom) : null, [rawBom])
 
-  const safety = useMemo<SafetyResult | null>(() => {
-    if (!model || !ready) return null
-    return computeSafety(model, {
-      room: room.visible ? { w: room.w, d: room.d } : null,
-      indoor: room.visible,
-    }) as SafetyResult
-  }, [model, ready, modelSnapshot, room])
+  const { safety, safetyPending, safetyError, retrySafety } = useSafetyAnalysis(modelSnapshot, {
+    room: room.visible ? { w: room.w, d: room.d } : null,
+    indoor: room.visible,
+  }, JSON.stringify([storage.getAccountScope(), activeTabId]))
+  useEffect(() => {
+    if (import.meta.env.DEV && eng.current) Object.assign(eng.current, {
+      safetyAnalysis: { snapshot: modelSnapshot, result: safety, pending: safetyPending, error: safetyError?.message || null },
+    })
+  }, [modelSnapshot, safety, safetyPending, safetyError])
 
   const cmp = useMemo(() => {
     if (!rawBom) return { rows: [] as InvRow[], feasible: null as boolean | null }
@@ -3601,7 +3595,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     homeContext,
     bindHome,
     frameHome: () => { changeBackground('home'); scene?.frameHome(); bump() },
-    highlight, highlightIds, safety, setInv, newTab, closeTab, activateTab, renameTab, setTabName, saveCurrent, saveCurrentAs, askName, answerName, nameAsk, saveConflict, answerSaveConflict, saveWasCancelled: () => saveCancelled.current, openDoc, retrySave,
+    highlight, highlightIds, safety, safetyPending, safetyError, retrySafety, setInv, newTab, closeTab, activateTab, renameTab, setTabName, saveCurrent, saveCurrentAs, askName, answerName, nameAsk, saveConflict, answerSaveConflict, saveWasCancelled: () => saveCancelled.current, openDoc, retrySave,
     listDocs: async () => (await docs.listDocs()).map((d: AnyRec) => ({ id: String(d.id), name: String(d.name), updatedAt: Number(d.updatedAt || 0), local: !Number(d.rev) || !!d.dirty || (!!d.saveId && d.syncedSaveId !== d.saveId) })),
     removeDoc: async (id) => { await docs.removeDoc(id); bump() },
     renameDoc: async (id, name) => { await docs.renameDoc(id, name); bump() },

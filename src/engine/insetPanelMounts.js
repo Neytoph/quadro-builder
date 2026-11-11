@@ -20,11 +20,16 @@ const local=(frame,p)=>frame.axes.map(a=>dot(sub(p,frame.pos),a));
 export function hasInsetScrews(part) {return INSET_PANEL_IDS.has(part.panelId) && part.params?.mountLayout===INSET_MOUNT_LAYOUT;}
 
 // 连续边管用于查找矩形候选，固定边可由一根或多根相接的直管组成。
-export function insetPanelProbes(model,width,height,{deduplicate=true,segmentedOnly=false,onlyRailId=null}={}) {
+export function insetPanelProbes(model,width,height,{deduplicate=true,segmentedOnly=false,onlyRailId=null,near=null}={}) {
   const ids=onlyRailId?[onlyRailId]:[...model.tubes.keys()],seen=new Set(),out=[];
   for(const id of ids){
-    const probes=placementMemo(model,'inset-rail:'+JSON.stringify([width,height,segmentedOnly,id]),railLineScope(model,id,width+2),
-      ()=>computeInsetPanelProbes(model,width,height,{deduplicate:false,segmentedOnly,onlyRailId:id}));
+    if(near){
+      const rail=model._rail(id);if(!rail)continue;
+      const delta=sub(near,rail.p0),along=dot(delta,rail.dir);
+      if(Math.hypot(...sub(delta,rail.dir.map(v=>v*along)))>width/2+1)continue;
+    }
+    const probes=placementMemo(model,'inset-rail:'+JSON.stringify([width,height,segmentedOnly,id,near]),railLineScope(model,id,width+2),
+      ()=>computeInsetPanelProbes(model,width,height,{deduplicate:false,segmentedOnly,onlyRailId:id,near}));
     for(const probe of probes){
       if(deduplicate){
         const rail=model._rail(probe.a),partner=model._rail(probe.b),delta=sub(partner.p0,rail.p0),along=dot(delta,rail.dir),across=delta.map((v,i)=>v-along*rail.dir[i]);
@@ -37,7 +42,7 @@ export function insetPanelProbes(model,width,height,{deduplicate=true,segmentedO
   }
   return out;
 }
-function computeInsetPanelProbes(model,width,height,{deduplicate,segmentedOnly,onlyRailId}) {
+function computeInsetPanelProbes(model,width,height,{deduplicate,segmentedOnly,onlyRailId,near}) {
   const rails=[...model.tubes.values()].flatMap(t=>{const rail=model._rail(t.id);return rail?[{...rail,id:t.id}]:[];}),out=[],seen=new Set();
   for(const rail of rails){
     if(onlyRailId && rail.id!==onlyRailId)continue;
@@ -53,6 +58,7 @@ function computeInsetPanelProbes(model,width,height,{deduplicate,segmentedOnly,o
     }
     intervals.sort((a,b)=>a.lo-b.lo);
     const complete=[...starts].filter(start=>{
+      if(near && Math.abs(start-(dot(sub(near,rail.p0),rail.dir)-height/2))>1) return false;
       let reach=start;for(const span of intervals){if(span.lo>reach+.35)break;if(span.hi>reach)reach=span.hi;}
       return reach>=start+height-.35;
     });
@@ -62,6 +68,7 @@ function computeInsetPanelProbes(model,width,height,{deduplicate,segmentedOnly,o
       if(Math.abs(Math.hypot(...across)-width)>.35)continue;
       for(const t0 of complete){
         const start=rail.p0.map((v,i)=>v+rail.dir[i]*t0),end=start.map((v,i)=>v+rail.dir[i]*height);
+        if(near && Math.hypot(...sub(start.map((v,i)=>v+(rail.dir[i]*height+across[i])/2),near))>1)continue;
         const key=[start,end,start.map((v,i)=>v+across[i]),end.map((v,i)=>v+across[i])].map(p=>p.map(v=>v.toFixed(2)).join(',')).sort().join('|');
         if(deduplicate&&seen.has(key))continue;seen.add(key);out.push({a:rail.id,b:partner.id,t0,len:height});
       }

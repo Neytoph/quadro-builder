@@ -22,6 +22,7 @@ import { ACCESSORY_IDS, PANEL_ACCESSORY_IDS, componentMountsValid, componentObst
 import { confirmedSpec } from './componentPack.js';
 import { panelEdgeCoverage } from './confirmedComponentModel.js';
 import { computeSupportGraph } from './supportGraph.js';
+import { withPlacementSnapshot } from './incrementalPlacement.js';
 
 const EPS = 2;              // cm：网格点重合判定
 const CORNER_EPS = 6;       // cm：板角落到接头的距离（半个接头加余量）
@@ -374,6 +375,12 @@ function ruleAccessories(model, support, out) {
 }
 
 export function computeSafety(model, opts = {}) {
+  if (!model || !model.nodes.size) return { findings: [], height: 0 };
+  // 一次检查内共享几何结果；新模型重新核对，避免继承其他编辑状态的结论。
+  return withPlacementSnapshot(model, () => computeSafetyPass(model, opts));
+}
+
+function computeSafetyPass(model, opts) {
   const out = [];
   if (!model || !model.nodes.size) return { findings: out, height: 0 };
   const ground = groundOf(model);
