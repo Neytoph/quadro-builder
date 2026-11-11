@@ -2435,7 +2435,9 @@ export class BuildModel {
    * eines darin, gilt `rotateTubeClamp`.
    */
   turnBearingMouth(nodeId, radians = Math.PI / 2) {
-    return this.rotateJoint({ kind: 'bearing', nodeId }, radians);
+    const turned = this.rotateJoint({ kind: 'bearing', nodeId }, radians);
+    if (turned) this._bindBearingTubes([this.nodes.get(nodeId)]);
+    return turned;
   }
 
   _bearingSeat(node, tubeId) {
@@ -2446,6 +2448,21 @@ export class BuildModel {
     const along = dot3(center.map((v, i) => v - rail.p0[i]), rail.dir);
     if (along < -0.06 || along > rail.len + 0.06) return null;
     return { fitting, tubeId, rail, along };
+  }
+
+  /** 把已装在管身上的空轴承纳入连接图；多根重叠管时不猜测归属。 */
+  _bindBearingTubes(nodes = this.nodes.values()) {
+    for (const node of nodes) {
+      if (!node.bearingOn || !node.stub || node.clampOn) continue;
+      let match = null, ambiguous = false;
+      for (const tube of this.tubes.values()) {
+        const seat = this._bearingSeat(node, tube.id);
+        if (!seat) continue;
+        if (match) { ambiguous = true; break; }
+        match = seat;
+      }
+      if (match && !ambiguous) node.clampOn = { tubeId: match.tubeId, t: round(match.along) };
+    }
   }
 
   /** 记录同一根管实际穿过的空轴承座。 */
@@ -2535,6 +2552,7 @@ export class BuildModel {
     node.bearingOn = f.id;
     node.quat = f.quat.slice();   // die Kupplung steht wie die Klemme
     node.stub = [round(-u[0]), round(-u[1]), round(-u[2])];
+    this._bindBearingTubes([node]);
     return f;
   }
 
@@ -6732,6 +6750,8 @@ export class BuildModel {
     } else if (from.quat && !to.quat) to.quat = from.quat.slice();
     const tube = this.addTube(from.id, to.id, tubeId, color, length);
     this._extendConnectorArms(tube);
+    // 直管从普通接头搭入已装好的轴承，也属于这一次搭建操作。
+    if (tube) this._bindBearingTubes();
     return { node: to, tube };
   }
 
@@ -7766,6 +7786,8 @@ export class BuildModel {
       this.groups.set(g.id, new Set(g.ids));
       maxSeq = Math.max(maxSeq, parseSeq(g.id));
     }
+    // 兼容旧存档中位置和朝向已吻合、尚未记录穿管关系的轴承。
+    this._bindBearingTubes();
     this._repairClampLinks();
     this._pruneGroups();
     // 兼容旧存档中已拆掉套筒连接、仍残留45°件标记的管端。
