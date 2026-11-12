@@ -4,18 +4,29 @@ import { useEngine } from '../store/EngineContext'
 import { useI18n } from '../i18n'
 import { canvasCorner, SCENE_CLUSTER_GAP, usePanelLayout } from './panelLayout'
 import HomeRoomPanel from './HomeRoomPanel'
+import explodedViewIcon from '../assets/icons/exploded-view.png?inline'
+import frameOnlyIcon from '../assets/icons/frame-only.png?inline'
+import frameCompleteIcon from '../assets/icons/frame-complete.png?inline'
+
+const FRAME_FULL_TITLE = {
+  zh: '恢复完整显示',
+  en: 'Show complete model',
+  de: 'Vollständiges Modell anzeigen',
+}
 
 const TILE_EDGE = '2px solid rgba(255,255,255,0.88)'
 
-const tileChrome = (_on: boolean, h: number): CSSProperties => ({
+const tileChrome = (on: boolean, h: number): CSSProperties => ({
   height: h,
   width: h,
   boxSizing: 'border-box',
   boxShadow: '0 2px 8px rgba(0,0,0,0.28)',
-  border: TILE_EDGE,
+  border: on ? '2px solid #EB923E' : TILE_EDGE,
+  background: '#EEF1F5',
 })
 
-const tileBtn = 'm-tile overflow-hidden rounded-lg p-0 border-0 cursor-pointer transition-[filter,opacity,box-shadow,transform] duration-200 hover:scale-[1.03] active:scale-95 flex items-center justify-center'
+const tileBase = 'overflow-hidden rounded-lg p-0 border-0 cursor-pointer flex items-center justify-center'
+const tileBtn = `m-tile ${tileBase} transition-[filter,opacity,box-shadow,transform] duration-200 hover:scale-[1.03] active:scale-95`
 
 /** 场景工具位于左侧属性栏旁，框架按钮跟在导出后面。 */
 export default function SceneToggle({ showExploded = true }: { showExploded?: boolean }) {
@@ -24,6 +35,7 @@ export default function SceneToggle({ showExploded = true }: { showExploded?: bo
   const { left, vw, toolbarW } = usePanelLayout()
   const pos = canvasCorner(left, vw, { toolbarW })
   const { tile, clusterW } = pos
+  const frameTitle = api.frameOnly ? FRAME_FULL_TITLE[lang] : t('btn.frameOnly')
   const exporting = !!api.exportingManual
   const indoor = api.background === 'home' && !!api.homeContext
   const { obstacles, usable } = api.homeZones
@@ -65,12 +77,9 @@ export default function SceneToggle({ showExploded = true }: { showExploded?: bo
         className={`pointer-events-auto ${tileBtn} focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600 disabled:opacity-45`}
         style={tileChrome(api.explodedOpen, tile)}
       >
-        <svg viewBox="0 0 48 48" width={tile} height={tile} aria-hidden="true">
-          <rect width="48" height="48" fill={api.explodedOpen ? '#FFF0DF' : '#EEF1F5'} />
-          <path transform="translate(9 9) scale(1.25)"
-            d="m12 8 4 2.3v4.6L12 17l-4-2.1v-4.6L12 8Zm-4 2.3 4 2.3 4-2.3m-4 2.3V17M12 2v3m0 15v2M3 7l2.5 1.5m13 7L21 17M3 17l2.5-1.5m13-7L21 7"
-            fill="none" stroke={api.explodedOpen ? '#EA580C' : '#3A8494'} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+        <span aria-hidden="true" className="flex h-full w-full items-center justify-center bg-[#EEF1F5]">
+          <img src={explodedViewIcon} alt="" draggable={false} className="h-[84%] w-[84%] object-contain" />
+        </span>
       </button>}
 
       <button
@@ -101,7 +110,7 @@ export default function SceneToggle({ showExploded = true }: { showExploded?: bo
         style={tileChrome(false, tile)}
       >
         <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" width={tile} height={tile} aria-hidden="true">
-          <rect x="0" y="0" width="48" height="48" fill="#F3EADC" />
+          <rect x="0" y="0" width="48" height="48" fill="#EEF1F5" />
           <rect x="11" y="8" width="26" height="32" rx="3.2" fill="#fff" />
           <path d="M14.2 8 H33.8 A3.2 3.2 0 0 1 37 11.2 V16 H11 V11.2 A3.2 3.2 0 0 1 14.2 8 Z" fill="#EA580C" />
           <rect x="11" y="8" width="26" height="32" rx="3.2" fill="none" stroke="#3A8494" strokeWidth="1.7" />
@@ -116,23 +125,16 @@ export default function SceneToggle({ showExploded = true }: { showExploded?: bo
         data-ui="frame-only-toggle"
         data-panel-chrome
         data-button-motion="off"
-        aria-label={t('btn.frameOnly')}
+        aria-label={frameTitle}
         aria-pressed={api.frameOnly}
-        title={t('btn.frameOnly')}
+        title={frameTitle}
         onClick={api.toggleFrameOnly}
-        className={`pointer-events-auto ${tileBtn} focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600`}
+        className={`pointer-events-auto ${tileBase} focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600`}
         style={tileChrome(api.frameOnly, tile)}
       >
-        <svg viewBox="0 0 48 48" width={tile} height={tile} aria-hidden="true">
-          <rect width="48" height="48" fill={api.frameOnly ? '#FFF0DF' : '#EEF1F5'} />
-          <g fill="none" stroke={api.frameOnly ? '#EA580C' : '#3A8494'} strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round">
-            <path d="M13 17 25 10 37 17 25 24Z M13 17V32L25 39 37 32V17 M25 24V39" />
-            <path d="M25 10V25 M13 32 25 25 37 32" strokeDasharray="2 3" opacity=".5" />
-          </g>
-          <g fill={api.frameOnly ? '#EA580C' : '#3A8494'}>
-            {[[13,17],[25,10],[37,17],[25,24],[13,32],[25,39],[37,32]].map(([cx,cy]) => <rect key={`${cx}-${cy}`} x={cx-1.8} y={cy-1.8} width="3.6" height="3.6" rx=".7" />)}
-          </g>
-        </svg>
+        <span aria-hidden="true" className="flex h-full w-full items-center justify-center bg-[#EEF1F5]">
+          <img src={api.frameOnly ? frameCompleteIcon : frameOnlyIcon} alt="" draggable={false} className="h-[84%] w-[84%] object-contain" />
+        </span>
       </button>
       {indoor && <button
         type="button"
@@ -142,13 +144,13 @@ export default function SceneToggle({ showExploded = true }: { showExploded?: bo
         aria-label={zoneTitle}
         title={zoneTitle}
         onClick={() => { api.setHomeZones('obstacles', next.obstacles); api.setHomeZones('usable', next.usable) }}
-        className={`pointer-events-auto ${tileBtn} bg-[#FFFDF9] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600`}
+        className={`pointer-events-auto ${tileBtn} bg-[#EEF1F5] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600`}
         style={tileChrome(false, tile)}
       >
         <span className="relative block h-[26px] w-[26px]" aria-hidden="true">
           <EyeIcon size={26} weight="regular" className="absolute inset-0" style={{ color: obstacles ? '#EB923E' : '#E7D5C2', clipPath: 'polygon(0 0,100% 0,0 100%)' }} />
           <EyeIcon size={26} weight="regular" className="absolute inset-0" style={{ color: usable ? '#68A179' : '#D1DFD3', clipPath: 'polygon(100% 0,100% 100%,0 100%)' }} />
-          {!(obstacles && usable) && <span data-ui="home-zone-slash" className="absolute left-[12px] top-[-2px] h-[30px] w-[1.6px] rotate-45 rounded bg-[#A0A39B] shadow-[0_0_0_1.4px_#FFFDF9]" />}
+          {!(obstacles && usable) && <span data-ui="home-zone-slash" className="absolute left-[12px] top-[-2px] h-[30px] w-[1.6px] rotate-45 rounded bg-[#A0A39B] shadow-[0_0_0_1.4px_#EEF1F5]" />}
         </span>
       </button>}
     </div></div>

@@ -9,8 +9,11 @@ test('框架切换隐藏面板与配件，保留结构及模型数据', async ({
   })
   await page.goto('/')
   await expect(page.locator('#canvas-host')).toHaveAttribute('data-ready', 'true', { timeout: 30_000 })
-  const button = page.getByRole('button', { name: '仅显示框架', exact: true })
+  const button = page.locator('[data-ui="frame-only-toggle"]')
   await expect(button).toHaveAttribute('aria-pressed', 'false')
+  await expect(button).toHaveText('')
+  const frameIcon = await button.locator('img').getAttribute('src')
+  if (!frameIcon) throw new Error('框架图示缺失')
   for (const partId of ['panel_40x40', 'textile', 'lattice_curved', 'sleeve']) {
     const before = await page.evaluate(async id => {
       const { createConfirmedComponentFixture } = await import('/src/engine/confirmedComponentExample.js')
@@ -31,6 +34,9 @@ test('框架切换隐藏面板与配件，保留结构及模型数据', async ({
     }, before.hiddenId)
     await button.click()
     await expect(button).toHaveAttribute('aria-pressed', 'true')
+    await expect(button).toHaveText('')
+    expect(await button.locator('img').getAttribute('src')).not.toBe(frameIcon)
+    await expect(button).toHaveAttribute('aria-label', '恢复完整显示')
     expect(await page.evaluate(id => {
       const { model, scene, builder } = window.__quadroDev
       return {
@@ -46,11 +52,15 @@ test('框架切换隐藏面板与配件，保留结构及模型数据', async ({
     expect(await page.evaluate(id => window.__quadroDev.scene.selectableParts().has(id), before.hiddenId)).toBe(false)
     await button.click()
     await expect(button).toHaveAttribute('aria-pressed', 'false')
+    await expect(button).toHaveText('')
+    await expect(button.locator('img')).toHaveAttribute('src', frameIcon)
     await expect.poll(() => page.evaluate(id => window.__quadroDev.scene.selectableParts().has(id), before.hiddenId)).toBe(true)
   }
   const order = await page.locator('[data-ui="scene-buttons"] button').evaluateAll(buttons => buttons.map(button => button.getAttribute('title')))
-  expect(order[2]).toContain('说明书')
-  expect(order[3]).toBe('仅显示框架')
+  expect(order[3]).toContain('说明书')
+  expect(order[4]).toBe('仅显示框架')
+  const backgrounds = await page.locator('[data-ui="scene-buttons"] button').evaluateAll(buttons => buttons.map(button => getComputedStyle(button).backgroundColor))
+  expect(backgrounds).toEqual(Array(5).fill('rgb(238, 241, 245)'))
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(page.locator('[data-ui="scene-buttons"]')).toHaveCSS('width', '184px')
   const boxes = await page.locator('[data-ui="scene-buttons"] button').evaluateAll(buttons => buttons.map(button => {
@@ -60,8 +70,10 @@ test('框架切换隐藏面板与配件，保留结构及模型数据', async ({
   for (let i = 0; i < boxes.length; i++) {
     expect(boxes[i].x).toBeGreaterThanOrEqual(0)
     expect(boxes[i].x + boxes[i].width).toBeLessThanOrEqual(390)
-    if (i) expect(boxes[i].x).toBeGreaterThanOrEqual(boxes[i - 1].x + boxes[i - 1].width)
+    if (i && Math.abs(boxes[i].y - boxes[i - 1].y) < 1) expect(boxes[i].x).toBeGreaterThanOrEqual(boxes[i - 1].x + boxes[i - 1].width)
   }
+  expect(boxes).toHaveLength(5)
+  expect(boxes[4].y).toBeGreaterThanOrEqual(boxes[0].y + boxes[0].height)
   await button.click()
   await expect(button).toHaveAttribute('aria-pressed', 'true')
   expect(errors).toEqual([])
@@ -100,20 +112,27 @@ test('框架视图保留轴承，隐藏滑梯；室内开关在窄屏换行', as
   })
   const zone = page.locator('[data-ui="home-zone-toggle"]')
   await expect(zone).toBeVisible()
+  const backgrounds = await page.locator('[data-ui="scene-buttons"] button').evaluateAll(buttons => buttons.map(button => getComputedStyle(button).backgroundColor))
+  expect(backgrounds).toEqual(Array(6).fill('rgb(238, 241, 245)'))
   for (const width of [1440, 390, 320]) {
     await page.setViewportSize({ width, height: 844 })
-    await expect(page.locator('[data-ui="scene-buttons"]')).toHaveCSS('width', width < 768 ? '184px' : '232px')
+    await expect(page.locator('[data-ui="scene-buttons"]')).toHaveCSS('width', width < 768 ? '184px' : '280px')
+    await expect.poll(() => page.locator('[data-ui="scene-buttons"] button').evaluateAll((buttons, viewport) => buttons.every(button => {
+      const box = button.getBoundingClientRect()
+      return box.left >= 0 && box.right <= viewport
+    }), width)).toBe(true)
     const boxes = await page.locator('[data-ui="scene-buttons"] button').evaluateAll(buttons => buttons.map(button => {
       const { x, y, width, height } = button.getBoundingClientRect()
       return { x, y, width, height }
     }))
-    expect(boxes).toHaveLength(5)
+    expect(boxes).toHaveLength(6)
     for (const box of boxes) {
       expect(box.x).toBeGreaterThanOrEqual(0)
       expect(box.x + box.width).toBeLessThanOrEqual(width)
     }
     if (width < 768) expect(boxes[4].y).toBeGreaterThanOrEqual(boxes[0].y + boxes[0].height)
     else expect(boxes[4].x).toBeGreaterThanOrEqual(boxes[3].x + boxes[3].width)
+    expect(boxes[5].x).toBeGreaterThanOrEqual(boxes[4].x + boxes[4].width)
   }
   await zone.click()
   await expect(zone).toHaveAttribute('data-zone-state', 'orange')

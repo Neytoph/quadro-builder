@@ -7,9 +7,9 @@ import { readRooms, readRoom, onRoomAccountInvalidated, type RoomData, type Room
 import { registerRoomThumbnails } from '../home/thumbnail.js'
 import {usePresence} from './motion'
 
-function GrassThumb({ blank = false }: { blank?: boolean }) {
+function GrassThumb({ blank = false, grayBackground = false }: { blank?: boolean; grayBackground?: boolean }) {
   return <svg viewBox="0 0 48 48" className={'h-full w-full ' + (blank ? 'opacity-45 grayscale' : '')} aria-hidden="true">
-    <rect width="48" height="48" fill="#B8D6E0" /><circle cx="38" cy="12" r="6" fill="#FFD942" />
+    <rect width="48" height="48" fill={grayBackground ? '#EEF1F5' : '#B8D6E0'} /><circle cx="38" cy="12" r="6" fill="#FFD942" />
     <ellipse cx="14" cy="13" rx="8" ry="5" fill="rgba(255,248,240,0.7)" />
     <path d="M0,32 Q12,27 24,32 Q36,36 48,31 L48,48 L0,48 Z" fill="#7BC86A" />
     <rect x="21.5" y="31" width="5" height="9" rx="2" fill="#B08968" />
@@ -96,18 +96,20 @@ export default function HomeRoomPanel({ tile = 40 }: { tile?: number }) {
     finally { if (version === request.current) setChoosing(false) }
   }
   const switchTo = (mode: 'grass' | 'blank' | 'home') => { api.setBackground(mode); close(true) }
-  const iconButton = 'relative shrink-0 overflow-hidden rounded-lg p-0 cursor-pointer flex items-center justify-center bg-[#FFFDF9] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600 disabled:opacity-50 disabled:cursor-wait'
-  const option = (active: boolean) => iconButton + ' h-[var(--scene-tile)] w-[var(--scene-tile)] border-2 ' + (active ? 'border-orange-600' : 'border-white hover:border-orange-200')
+  const iconButton = 'relative shrink-0 overflow-hidden rounded-lg p-0 cursor-pointer flex items-center justify-center focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600 disabled:opacity-50 disabled:cursor-wait'
+  const option = (active: boolean) => iconButton + ' bg-[#FFFDF9] h-[var(--scene-tile)] w-[var(--scene-tile)] border-2 ' + (active ? 'border-orange-600' : 'border-white hover:border-orange-200')
   return <div ref={root} className="relative pointer-events-auto" onKeyDown={event => {
     event.stopPropagation()
     if (event.key === 'Escape' && open) { event.preventDefault(); close(true) }
     if (event.key === 'Tab' && open) close()
   }} onKeyUp={event => event.stopPropagation()}>
     <button ref={trigger} type="button" data-ui="scene-trigger" aria-label={text('场景', 'Scene', 'Szene')} aria-haspopup="menu" aria-expanded={open} aria-controls={panelID}
-      title={text('切换场景', 'Change scene', 'Szene wechseln')} className={iconButton + ' shadow-[0_2px_8px_rgba(0,0,0,0.28)]'}
+      title={text('切换场景', 'Change scene', 'Szene wechseln')} className={iconButton + ' bg-[#EEF1F5] shadow-[0_2px_8px_rgba(0,0,0,0.28)]'}
       style={{ width: tile, height: tile, border: '2px solid rgba(255,255,255,0.88)' }}
       onClick={() => { if (open) close(); else setOpen(true) }}>
-      {api.background === 'home' && context ? <RoomThumb data={context.snapshot} /> : <GrassThumb blank={api.background === 'blank'} />}
+      <span className="flex h-[84%] w-[84%] items-center justify-center">
+        {api.background === 'home' && context ? <RoomThumb data={context.snapshot} /> : <GrassThumb blank={api.background === 'blank'} grayBackground />}
+      </span>
     </button>
     {shown && createPortal(<div ref={panel} id={panelID} data-ui="scene-menu" role="menu" aria-label={text('场景', 'Scene', 'Szene')} aria-orientation="vertical" inert={leaving}
       className={`m-pop ${leaving?'m-leave pointer-events-none':'pointer-events-auto'} fixed z-[60] flex flex-col items-center gap-2 overflow-y-auto overscroll-contain rounded-[14px] border border-[#ECD6C2] bg-[#FFFDF9] p-[5px] shadow-lg`}
