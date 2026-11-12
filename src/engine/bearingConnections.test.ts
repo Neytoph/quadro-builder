@@ -22,6 +22,12 @@ function gate(){
  const bottom=model.extend(right.node!.id,[-1,0,0],'T15','yellow',15,20)!
  return {model,fixed,pivot,end:bottom.node!,top:top.node!,right:right.node!}
 }
+function rigidFrame(){
+ const model=new BuildModel(),points=[[10,20,0],[30,20,0],[30,0,0],[0,0,0],[0,40,0]],nodes=points.map(p=>model.addNode(...p))
+ const parts=[['T15',15],['T15',15],['T25',25],['T35',35]] as const
+ const tubes=parts.map(([part,length],i)=>model.addTube(nodes[i].id,nodes[i+1].id,part,'red',length)!)
+ return {model,end:nodes[0],fixed:tubes[3],returnTube:tubes[2]}
+}
 describe('现有管端补装轴承',()=>{
  it('复用既有端头，补齐轴承和直通；管长、节点位置与原管数量不改变',()=>{
   const {model,fixed,end}=gate(),before=model.toJSON(),probe=model.bearingConnectionProbe(end.id,fixed.id,[0,21,2.45])
@@ -44,20 +50,70 @@ describe('现有管端补装轴承',()=>{
   expect(probe.valid).toBe(false);expect(probe.reason).toBe('distance');expect(probe.gapCm).toBeGreaterThan(9)
   expect(model.connectExistingBearing('n21','t12',[0,20,0]).valid).toBe(false);expect(model.toJSON()).toEqual(before)
  })
- it('阻止自连接、不同轴支撑及靠近接头的安装',()=>{
+ it('管端距离不符及靠近接头时仍拒绝安装',()=>{
   const {model,end,right,fixed}=gate(),before=model.toJSON()
   const self=[...model.tubes.values()].find(t=>t.a===right.id&&t.tubeId==='T15')!
   expect(model.bearingConnectionProbe(end.id,self.id,[10,20,0]).valid).toBe(false)
   const a=model.addNode(0,0,5),b=model.addNode(0,40,5),wrong=model.addTube(a.id,b.id,'T35','red',35)!
-  expect(model.bearingConnectionProbe(end.id,wrong.id,[0,20,5]).reason).toBe('axis')
+  expect(model.bearingConnectionProbe(end.id,wrong.id,[0,20,5]).reason).toBe('distance')
   expect(model.bearingConnectionProbe(end.id,fixed.id,[0,0,0]).reason).toBe('tube_end')
   expect(model.toJSON().nodes.slice(0,before.nodes.length)).toEqual(before.nodes)
  })
- it('没有活动关节的刚体不能回接到自身承载管',()=>{
-  const model=new BuildModel(),points=[[10,20,0],[30,20,0],[30,0,0],[0,0,0],[0,40,0]],nodes=points.map(p=>model.addNode(...p))
-  for(let i=1;i<nodes.length;i++)model.addTube(nodes[i-1].id,nodes[i].id,'T35','yellow',35)
-  const support=[...model.tubes.values()].at(-1)!
-  expect(model.bearingConnectionProbe(nodes[0].id,support.id,[0,20,0]).reason).toBe('fixed')
+ it('同一刚体仍检查端口方向、端部余量和重复占位',()=>{
+  const {model,end,fixed}=rigidFrame(),tube=model.tubes.get(model.bearingEndpoints().find(e=>e?.nodeId===end.id)!.tubeId)!
+  expect(model.bearingConnectionProbe(end.id,tube.id,[20,20,0]).reason).toBe('support')
+  expect(model.bearingConnectionProbe(end.id,fixed.id,[0,0,0]).reason).toBe('tube_end')
+  const a=model.addNode(0,50,0),b=model.addNode(40,50,0),parallel=model.addTube(a.id,b.id,'T35','blue',35)!
+  expect(model.bearingConnectionProbe(end.id,parallel.id,[20,50,0]).reason).toBe('perpendicular')
+  const duplicate=model.addNode(-10,20,0),other=model.addNode(-30,20,0)
+  model.addTube(duplicate.id,other.id,'T15','yellow',15)
+  expect(model.connectExistingBearing(duplicate.id,fixed.id,[0,20,0]).valid).toBe(true)
+  const before=model.toJSON()
+  expect(model.connectExistingBearing(end.id,fixed.id,[0,20,0]).reason).toBe('occupied')
+  expect(model.toJSON()).toEqual(before)
+ })
+ it('同一刚体允许安装，回接约束只在旋转时阻止移动；解除回接后可转动',()=>{
+  const {model,end,fixed,returnTube}=rigidFrame(),before=model.toJSON()
+  expect(model.bearingConnectionProbe(end.id,fixed.id,[0,20,0]).valid).toBe(true)
+  expect(model.toJSON()).toEqual(before)
+  expect(model.connectExistingBearing(end.id,fixed.id,[0,20,0]).valid).toBe(true)
+  expect(model.toJSON().tubes).toEqual(before.tubes)
+  for(const node of before.nodes)expect(model.nodePos(node.id)).toEqual([node.x,node.y,node.z])
+  expect(end.clampOn).toEqual({tubeId:fixed.id,t:20})
+  const installed=model.toJSON()
+  for(const kind of ['tubeClamp','bearingShaft']){
+   const ref={kind,nodeId:end.id}
+   expect(model.rotationJoint(ref).blocked).toBe(true)
+   expect(model.rotateJoint(ref,Math.PI/9)).toBe(false)
+   expect(model.toJSON()).toEqual(installed)
+  }
+  model.removeTube(returnTube.id)
+  expect(model.rotationJoint({kind:'tubeClamp',nodeId:end.id}).blocked).toBe(false)
+  expect(model.rotateJoint({kind:'tubeClamp',nodeId:end.id},Math.PI/9)).toBe(true)
+ })
+ it('已有铰链与新轴承不同轴也允许安装，转动时检查固定侧约束',()=>{
+  const {model,end,pivot}=gate(),a=model.addNode(0,20,-20),b=model.addNode(0,20,20),c=model.addNode(0,60,-20)
+  const support=model.addTube(a.id,b.id,'T35','red',35)!
+  model.addTube(a.id,c.id,'T35','red',35);model.addTube(c.id,pivot.id,'T15','red',15)
+  expect(model.connectExistingBearing(end.id,support.id,[0,20,0]).valid).toBe(true)
+  const installed=model.toJSON()
+  for(const ref of [{kind:'hinge',nodeId:pivot.id,index:0},{kind:'tubeClamp',nodeId:end.id}]){
+   expect(model.rotationJoint(ref).blocked).toBe(true)
+   expect(model.rotateJoint(ref,Math.PI/9)).toBe(false)
+   expect(model.toJSON()).toEqual(installed)
+  }
+ })
+ it('同一刚体的轴承连接经 JSON 和 QDF 重开后保留，仍受回接约束',()=>{
+  const {model,end,fixed}=rigidFrame()
+  expect(model.connectExistingBearing(end.id,fixed.id,[0,20,0]).valid).toBe(true)
+  for(const saved of [model.toJSON(),parseQDF(buildQDF(model).text)]){
+   const reopened=new BuildModel();expect(reopened.loadJSON(saved).ok).toBe(true)
+   const bearing=[...reopened.nodes.values()].find(n=>n.bearingOn)!
+   expect(bearing.clampOn).toBeTruthy()
+   const before=reopened.toJSON()
+   expect(reopened.rotateJoint({kind:'tubeClamp',nodeId:bearing.id},Math.PI/9)).toBe(false)
+   expect(reopened.toJSON()).toEqual(before)
+  }
  })
  it('上铰链和下轴承共轴，拖动任一活动端都只转动门扇',()=>{
   const {model,end,pivot,fixed}=gate();model.connectExistingBearing(end.id,fixed.id,[0,20,0])
@@ -152,6 +208,23 @@ function editor(touch=false){
  return {...state,builder,frames,controller:new BearingConnectionController(builder),target:(value:string)=>{target=value}}
 }
 describe('轴承两步连接控制',()=>{
+ it.each([false,true])('刚体回接可预览确认并撤销重做，触屏=%s',touch=>{
+  const {controller,builder,target,model,fixed,right,end}=editor(touch),event={clientX:0,clientY:0}
+  const lower=model.addNode(30,0,0)
+  model.addTube(right.id,lower.id,'T15','red',15);model.addTube(lower.id,fixed.a,'T25','red',25)
+  builder.setHistory(new ModelHistory(docFromJSON(model.toJSON())))
+  const before=model.toJSON()
+  controller.click(event);target('support');controller.hover(event)
+  expect(controller.preview.valid).toBe(true);expect(model.toJSON()).toEqual(before)
+  controller.click(event)
+  if(touch){expect(model.fittings.size).toBe(0);controller.click(event)}
+  const installed=model.toJSON()
+  expect(end.clampOn).toEqual({tubeId:fixed.id,t:20})
+  expect(model.rotateJoint({kind:'tubeClamp',nodeId:end.id},Math.PI/9)).toBe(false)
+  builder.history.undo();expect(model.toJSON()).toEqual(before);expect(builder.history.canUndo()).toBe(false)
+  builder.history.redo();expect(model.toJSON()).toEqual(installed)
+  expect(model.rotateJoint({kind:'tubeClamp',nodeId:end.id},Math.PI/9)).toBe(false)
+ })
  it('选择和悬停没有历史写入，确认只产生一条撤销',()=>{
   const {controller,builder,target,frames,model}=editor(),event={clientX:0,clientY:0},before=model.toJSON()
   expect(controller.click(event)).toBe(true);target('support');controller.hover(event)

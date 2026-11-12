@@ -39,24 +39,11 @@ export function bearingConnectionProbe(model,nodeId,tubeId,point,cs=5) {
   const position=center.map((v,i)=>v+stub[i]*cs*2),gapCm=Math.hypot(...sub(position,end.pos));
   const probe={nodeId,tubeId,center,pos:position,stub,axis,t,gapCm,valid:false,reason:'distance'};
   if(t<cs||t>length-cs)return {...probe,reason:'tube_end'};
-  // 仅通过普通接头连在一起的管件属于同一刚体，不能回接为自己的轴承支撑。
-  const connected=new Set([nodeId]),queue=[nodeId],adj=new Map();
-  for(const candidate of model.tubes.values())for(const [from,to] of [[candidate.a,candidate.b],[candidate.b,candidate.a]]){if(!adj.has(from))adj.set(from,[]);adj.get(from).push(to);}
-  for(let i=0;i<queue.length;i++){
-    if(model.nodes.get(queue[i])?.hinges?.length)continue;
-    for(const other of adj.get(queue[i])||[])if(!connected.has(other)){connected.add(other);queue.push(other);}
-  }
-  if(connected.has(tube.a)&&connected.has(tube.b))return {...probe,reason:'fixed'};
   for(const node of model.nodes.values())if(node.bearingOn) {
     const fitting=model.fittings.get(node.bearingOn);
     if(fitting&&Math.hypot(...sub(pos(fitting),center))<cs)return {...probe,reason:'occupied'};
   }
-  for(const node of model.nodes.values())for(let index=0;index<(node.hinges||[]).length;index++) {
-    const joint=model.rotationJoint({kind:'hinge',nodeId:node.id,index},cs);
-    if(!joint?.nodes.has(nodeId))continue;
-    if(joint.blocked||joint.tubes.has(tubeId))return {...probe,reason:'fixed'};
-    if(!coaxial(joint.origin,joint.axis,center,axis))return {...probe,reason:'axis'};
-  }
+  // 安装只检查局部几何；刚体回接及不同轴关节的运动约束由 rotationJoint 检查。
   if(gapCm>.12)return probe;
   return {...probe,valid:true,reason:null};
 }
