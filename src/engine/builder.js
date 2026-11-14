@@ -1053,7 +1053,7 @@ export class Builder {
       if (this.busy()) return false;
       const ref = { kind: bearing.kind, nodeId: bearing.nodeId };
       const ok = this.recordHistory(() => this._rotateWithDirection(`bearingShaft:${ref.nodeId}`, steps * Math.PI / 2,
-        angle => this.model.rotateJoint(ref, angle, geometry().connectorSize)));
+        angle => this.model._rotateJointPastGround(ref, angle, geometry().connectorSize)));
       if (!ok) this.onNotice(t("notice_fitting_fixed"), "warn");
       this.refresh();
       return !!ok;
@@ -1108,7 +1108,7 @@ export class Builder {
   // 点击和快捷键共用夹子的方向；拖动仍跟随指针。
   _rotateClampWithFallback(id, radians = Math.PI / 4) {
     return this._rotateWithDirection(`clamp:${id}`, radians,
-      (direction) => this.model.rotateClamp(id, direction));
+      (direction) => this.model.rotateClamp(id, direction, { pastGround: true }));
   }
 
   _clickRotationKind(id, kind) {
@@ -2755,6 +2755,20 @@ export class Builder {
     }
   }
 
+  /** 45° 接头本体（套筒加斜臂）会不会落到地面以下。 */
+  _c45BodyBelowGround(node, axis, dir) {
+    const y = node.y + axis[1] * C45_SLEEVE_LEN + dir[1] * C45_ARM_LEN;
+    return this.model.isBelowGround(y);
+  }
+
+  /** 直接插进管口时，套筒那一头的新接头会不会落到地面以下。 */
+  _c45SleeveBelowGround(node, axis) {
+    const dir = this.model.c45TubeDir(node);
+    if (!dir) return false;
+    const y = node.y - axis[1] * C45_SLEEVE_LEN - dir[1] * C45_ARM_LEN;
+    return this.model.isBelowGround(y);
+  }
+
   _targetBelowGround(node, vec) {
     if (isCurvedTube(this.tubeId))
       return this.model.bowBelowGround(node, vec, this._bowNormal(vec, node), getTube(this.tubeId)?.radius_cm || gridSpacing());
@@ -2913,7 +2927,8 @@ export class Builder {
       // Dummy-Kupplung (ein Rohr, sonst nichts) sitzt der Punkt deshalb MITTIG
       // auf ihr. Gesetzt tritt die Winkelkupplung an ihre Stelle, und am
       // anderen Ende der Huelse entsteht eine neue Dummy-Kupplung.
-      const achsen = this.model.c45SleeveAxes(tubeDir);
+      const achsen = this.model.c45SleeveAxes(tubeDir)
+        .filter(axis => !this._c45SleeveBelowGround(node, axis));
       const sleeveAxis = achsen.find(axis => !this.model.c45OnTubeCollision(node.id, axis, C45_SLEEVE_LEN, C45_ARM_LEN));
       if (sleeveAxis) {
         // Er sitzt MITTEN auf der Dummy-Kupplung und ist etwas groesser: die
@@ -3004,7 +3019,8 @@ export class Builder {
         const punkt = d.vec[0] * a.vec[0] + d.vec[1] * a.vec[1] + d.vec[2] * a.vec[2];
         if (Math.abs(punkt + Math.SQRT1_2) > 0.05) continue;
         const dir = nachWelt(d.vec);
-        if (this._targetBelowGround(node, dir)) continue;
+        // 看接头本体落点，不看整根管子的跨度。管子仍不能搭到地面以下。
+        if (this._c45BodyBelowGround(node, axis, dir)) continue;
         // Schraege schon belegt? Geometrisch pruefen -- Namen aus
         // `_occupiedDirs` gelten nur fuer die ungedrehte Kupplung.
         if (this._armOccupied(node, dir)) continue;

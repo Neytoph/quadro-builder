@@ -92,7 +92,8 @@ describe('受阻后反向旋转', () => {
     expect(builder._turnC45(body!.id)).toBe(true)
     const expected = new BuildModel()
     expect(expected.loadJSON(model.toJSON()).ok).toBe(true)
-    expect(expected.rotateC45Sleeve(body!.id, -1)).toBe(true)
+    // 贴地那一档被跳过，下一次同方向是再跳一档，不是退回相反方向。
+    expect(expected.rotateC45Sleeve(body!.id, 1)).toBe(true)
     expect(expected.rotateC45(other.id, 1)).toBe(true)
     expect(builder._turnC45(body!.id)).toBe(true)
     expect(builder._turnC45(other.id)).toBe(true)
@@ -137,8 +138,25 @@ describe('受阻后反向旋转', () => {
     expect(model.nodes.get(foot.a)!.y).toBeGreaterThan(0)
   })
 
-  it('夹子两边都被地面阻挡时完整保持原位，没有撤销记录', () => {
-    const { model, clamp } = flap(true)
+  it('双向坡板的两个90度档位进入地下时，一次跳到合法的180度档位并可撤销', () => {
+    const { model, clamp, foot } = flap(true)
+    const before = model.toJSON()
+    const builder = editor(model, new Map([[clamp.id, 'clamp']]))
+    expect(model.rotateClamp(clamp.id, Math.PI / 2)).toBe(false)
+    expect(model.toJSON()).toEqual(before)
+    expect(builder.rotateSelectionBy(1)).toBe(true)
+    expect(model.nodes.get(foot.a)!.z).toBe(-45)
+    expect(model.nodes.get(foot.a)!.y).toBe(40)
+    expect([...model.nodes.values()].every(n => !model.isBelowGround(n.y))).toBe(true)
+    builder.history.undo()
+    expect(model.toJSON()).toEqual(before)
+    expect(builder.history.canUndo()).toBe(false)
+  })
+
+  it('其余档位均进入地下时保持原位，没有撤销记录', () => {
+    const { model, clamp, moving } = flap(true)
+    const high = model.addNode(0, 100, 5)
+    model.addTube(moving.a, high.id, 'T55', 'blue', 55)
     const before = model.toJSON()
     const builder = editor(model, new Map([[clamp.id, 'clamp']]))
     expect(builder.rotateSelectionBy(1)).toBe(false)
@@ -390,18 +408,69 @@ describe('选择模式下再次点击弯管和斜角接头', () => {
     expect(model.toJSON().tubes).toEqual(before.tubes)
   })
 
-  it('插在水平管中的 45° 斜角接头碰到地面后反向，管子保持原位', () => {
+  it('插在水平管中的 45° 斜角接头跳过地面以下的那一档，落到地面上，管子保持原位', () => {
     const model = new BuildModel()
     const a = model.addNode(0, 0, 0), b = model.addNode(40, 0, 0)
     model.addTube(a.id, b.id, 'T35', 'blue', 35)
     const result = model.addC45OnTube(a.id, [-Math.SQRT1_2, 0, -Math.SQRT1_2], C45_SLEEVE_LEN, C45_ARM_LEN)!
     const body = result.body!, base = result.base!
     const builder = editor(model, new Map([[body.id, 'node']]))
-    expect(model.rotateC45Sleeve(body.id)).toBe(false)
+    const start = [base.x, base.z]
+    expect(model.rotateC45Sleeve(body.id)).toBe(true)
+    const turned = model.nodes.get(base.id)!
+    expect(turned.y).toBe(0)
+    expect([turned.x, turned.z]).not.toEqual(start)
     expect(builder._turnC45(body.id)).toBe(true)
-    expect(model.nodes.get(base.id)!.y).toBeGreaterThan(0)
+    expect(model.nodes.get(base.id)!.y).toBeGreaterThanOrEqual(0)
     expect([model.nodes.get(a.id)!.x, model.nodes.get(a.id)!.y, model.nodes.get(a.id)!.z]).toEqual([0, 0, 0])
     expect([model.nodes.get(b.id)!.x, model.nodes.get(b.id)!.y, model.nodes.get(b.id)!.z]).toEqual([40, 0, 0])
+  })
+
+  it('贴地接头的斜臂朝下时放不出来，朝上的那一档旋转时跳过地面以下', () => {
+    const model = new BuildModel()
+    const foot = model.addNode(0, 0, 0)
+    expect(model.addC45Adapter(foot.id, [Math.SQRT1_2, -Math.SQRT1_2, 0], [-1, 0, 0], C45_SLEEVE_LEN, C45_ARM_LEN)).toEqual({ ground: true })
+    const body = model.addC45Adapter(foot.id, [Math.SQRT1_2, Math.SQRT1_2, 0], [-1, 0, 0], C45_SLEEVE_LEN, C45_ARM_LEN)!.body!
+    const before = [body.x, body.y, body.z]
+    expect(before[1]).toBeGreaterThan(0)
+    expect(model.rotateC45(body.id)).toBe(true)
+    const turned = model.nodes.get(body.id)!
+    expect(turned.y).toBeGreaterThan(0)
+    expect([turned.x, turned.y, turned.z]).not.toEqual(before)
+    expect([model.nodes.get(foot.id)!.x, model.nodes.get(foot.id)!.y, model.nodes.get(foot.id)!.z]).toEqual([0, 0, 0])
+  })
+
+  it('贴地孔接头带动管子跳过地下90度档位，连续拖动仍被地面挡住', () => {
+    const model = new BuildModel()
+    const carrier = model.addNode(0, 0, 0), other = model.addNode(0, 0, -40)
+    model.addTube(carrier.id, other.id, 'T35', 'blue', 35)
+    const hole = model.addHoleClamp(carrier.id, [1, 0, 0], 'hole_1', 5)!
+    const end = model.addNode(5, 0, 20)
+    model.addTube(hole.id, end.id, 'T15', 'blue', 15)
+    const before = model.toJSON()
+    expect(model.rotateJoint({ kind: 'hole', nodeId: hole.id }, Math.PI / 2)).toBe(false)
+    expect(model.toJSON()).toEqual(before)
+    expect(model.turnHoleClamp(hole.id)).toBe(true)
+    expect([end.x, end.z]).toEqual([5, -20])
+    expect(end.y).toBeCloseTo(0, 8)
+    expect([carrier.x, carrier.y, carrier.z]).toEqual([0, 0, 0])
+    expect([other.x, other.y, other.z]).toEqual([0, 0, -40])
+  })
+
+  it('贴地管口的安装入口选择地面以上的45度套筒', () => {
+    const model = new BuildModel()
+    const a = model.addNode(0, 0, 0), b = model.addNode(40, 0, 0)
+    model.addTube(a.id, b.id, 'T35', 'blue', 35)
+    const builder = editor(model, new Map())
+    const handles: any[] = []
+    // 隔离记录真实入口选择出的安装参数，不参与模型几何判断。
+    builder.scene = { addHandle: (_position: number[], data: any) => handles.push(data) }
+    builder.selectedNodeId = a.id
+    builder._buildC45Handles()
+    const handle = handles.find(h => h.inTube)
+    expect(handle).toBeTruthy()
+    expect(builder._c45SleeveBelowGround(a, handle.axis)).toBe(false)
+    expect(model.addC45OnTube(a.id, handle.axis, C45_SLEEVE_LEN, C45_ARM_LEN)?.base?.y).toBeGreaterThanOrEqual(0)
   })
 
   it('斜角接头两侧都安装管子时不拆开结构；取消待执行点击也不改模型', () => {

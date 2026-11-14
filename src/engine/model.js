@@ -1701,7 +1701,7 @@ export class BuildModel {
    * umschlossene Rohr weiter, alles daran Steckende dreht mit.
    */
   rotateTubeClamp(nodeId, cs = 5, radians = Math.PI / 4) {
-    return this.rotateJoint({ kind: 'tubeClamp', nodeId }, radians, cs);
+    return this._rotateJointPastGround({ kind: 'tubeClamp', nodeId }, radians, cs);
   }
 
   /** 可活动关节的轴与活动组；共享铰链节点始终留在固定侧。 */
@@ -2435,7 +2435,7 @@ export class BuildModel {
    * eines darin, gilt `rotateTubeClamp`.
    */
   turnBearingMouth(nodeId, radians = Math.PI / 2) {
-    const turned = this.rotateJoint({ kind: 'bearing', nodeId }, radians);
+    const turned = this._rotateJointPastGround({ kind: 'bearing', nodeId }, radians);
     if (turned) this._bindBearingTubes([this.nodes.get(nodeId)]);
     return turned;
   }
@@ -2636,7 +2636,57 @@ export class BuildModel {
    * Arme und alle daran angeschlossenen Komponenten drehen gemeinsam.
    */
   turnHoleClamp(nodeId, radians = Math.PI / 2) {
-    return this.rotateJoint({ kind: 'hole', nodeId }, radians);
+    return this._rotateJointPastGround({ kind: 'hole', nodeId }, radians);
+  }
+
+  /**
+   * 点击的固定档位：下一档进入地面以下就沿同一方向再跳，一次转到第一个仍在地面以上的姿态。
+   * 中间那档不写进模型。碰撞、铰链间隙和不完整组件仍是真失败，不跳过。连续拖动不走这里。
+   */
+  _rotateJointPastGround(ref, radians, cs = 5) {
+    if (!Number.isFinite(radians) || Math.abs(radians) < 1e-9) return false;
+    const sign = Math.sign(radians), step = Math.abs(radians);
+    if (![Math.PI / 4, Math.PI / 2].some(angle => Math.abs(step - angle) < 1e-9))
+      return this.rotateJoint(ref, radians, cs);
+    const slots = Math.round((Math.PI * 2) / step);
+    for (let i = 1; i < slots; i++) {
+      const angle = sign * step * i;
+      if (this._jointStepBelowGround(ref, angle, cs)) continue;
+      return this.rotateJoint(ref, angle, cs);
+    }
+    return false;
+  }
+
+  /** 从当前姿态转过这个角度后，活动组会不会进地面。只读，不改模型。 */
+  _jointStepBelowGround(ref, radians, cs = 5) {
+    const j = this.rotationJoint(ref, cs);
+    if (!j || !Number.isFinite(radians)) return false;
+    const co = Math.cos(radians), si = Math.sin(radians);
+    const turn = p => rodriguesAt(p, j.origin, j.axis, co, si);
+    if ([...j.nodes].some(id => this.isBelowGround(turn(this.nodePos(id))[1]))) return true;
+    for (const id of j.tubes) {
+      const t = this.tubes.get(id);
+      if (!t?.bow || !t.bowCenter) continue;
+      const p = turn(t.bowCenter), a = turn(this.nodePos(t.a)), b = turn(this.nodePos(t.b));
+      if (this.isBelowGround(this._bowLowestY(a, b, p))) return true;
+    }
+    for (const id of j.clamps) {
+      const c = this.clamps.get(id);
+      if (!c) continue;
+      const p = turn([c.x, c.y, c.z]);
+      const off = c.off && rodriguesDir(c.off, j.axis, co, si);
+      if (this.isBelowGround(p[1]) || (off && this.isBelowGround(p[1] + off[1]))) return true;
+    }
+    for (const id of j.nodes) {
+      const bearing = this.nodes.get(id)?.bearingOn && this.fittings.get(this.nodes.get(id).bearingOn);
+      if (bearing && this.isBelowGround(turn([bearing.x, bearing.y, bearing.z])[1])) return true;
+    }
+    for (const [kind, map] of [['fitting', this.fittings], ['slide', this.slides]]) {
+      for (const part of map.values()) {
+        if (this.jointMovesPart(j, part.id, kind) && this.isBelowGround(turn([part.x, part.y, part.z])[1])) return true;
+      }
+    }
+    return false;
   }
 
   /**
@@ -4117,14 +4167,17 @@ export class BuildModel {
    * mit -- eine Klappe um die Achse, oder zwei parallele Klemmen zusammen als
    * Tablett. Das gehaltene Rohr selbst bleibt.
    */
-  rotateClamp(id, radians = Math.PI / 4) {
+  rotateClamp(id, radians = Math.PI / 4, { pastGround = false, onGround } = {}) {
     const c = this.clamps.get(id);
     if (!c || !c.dir || !c.off) return false;
     if (!Number.isFinite(radians) || Math.abs(radians) < 1e-9) return false;
+    // 点击的固定档位：下一档进地面就沿同一方向再跳，停在地面以上。拖动仍是单步。
+    if (pastGround) return this._rotateClampPastGround(id, radians);
     const u = norm3(c.dir);
     const co = Math.cos(radians), si = Math.sin(radians);
     const no = rodriguesDir(c.off, u, co, si);
-    if (this.isBelowGround(c.y + no[1])) return false;
+    const groundBlocked = () => { onGround?.(); return false; };
+    if (this.isBelowGround(c.y + no[1])) return groundBlocked();
 
     const flap = this._clampFlap(c);
     const tagged = this._flapNodeAxes(c, flap);
@@ -4152,7 +4205,7 @@ export class BuildModel {
       const n = this.nodes.get(nid);
       if (!n) continue;
       const p = rodriguesAt([n.x, n.y, n.z], ax.o, ax.u, co, si);
-      if (this.isBelowGround(p[1])) return false;
+      if (this.isBelowGround(p[1])) return groundBlocked();
       neu.push({ n, p, ax });
     }
     const nodeMoves = new Map(neu.map((e) => [e.n.id, e.p]));
@@ -4171,7 +4224,7 @@ export class BuildModel {
       }
       const pa = nodeMoves.get(a.id) || [a.x, a.y, a.z];
       const pb = nodeMoves.get(b.id) || [b.x, b.y, b.z];
-      if (this.isBelowGround(this._bowLowestY(pa, pb, p))) return false;
+      if (this.isBelowGround(this._bowLowestY(pa, pb, p))) return groundBlocked();
       bowMoves.push({ t, p });
     }
     const clampMove = [];
@@ -4185,7 +4238,7 @@ export class BuildModel {
       const pos = frozen ? [k.x, k.y, k.z] : rodriguesAt([k.x, k.y, k.z], ax.o, ax.u, co, si);
       const ko = rodriguesDir(k.off, ax.u, co, si);
       const kd = frozen ? k.dir : rodriguesDir(k.dir, ax.u, co, si);
-      if (this.isBelowGround(pos[1] + ko[1]) || this.isBelowGround(pos[1])) return false;
+      if (this.isBelowGround(pos[1] + ko[1]) || this.isBelowGround(pos[1])) return groundBlocked();
       clampMove.push({ k, pos, off: ko, dir: kd });
     }
     const bearingDone = new Set();
@@ -4196,14 +4249,14 @@ export class BuildModel {
       const ax = this.clampPartAxis(flap, tagged, f);
       if (!ax) continue;
       const p = rodriguesAt([f.x, f.y, f.z], ax.o, ax.u, co, si);
-      if (this.isBelowGround(p[1])) return false;
+      if (this.isBelowGround(p[1])) return groundBlocked();
       extraMove.push({ o: f, p, ax, hook: null });
     }
     for (const s of this.slides.values()) {
       const ax = this.clampPartAxis(flap, tagged, s);
       if (!ax) continue;
       const p = rodriguesAt([s.x, s.y, s.z], ax.o, ax.u, co, si);
-      if (this.isBelowGround(p[1])) return false;
+      if (this.isBelowGround(p[1])) return groundBlocked();
       const hook = s.hook ? rodriguesAt(s.hook, ax.o, ax.u, co, si) : null;
       extraMove.push({ o: s, p, ax, hook });
     }
@@ -4229,6 +4282,20 @@ export class BuildModel {
     this._moveTubeGeom(moved);
     this._movePanelGeom(moved);
     return true;
+  }
+
+  /** 点击按原方向跳过地下档位，复用整组预检；连续拖动仍在地面停止。 */
+  _rotateClampPastGround(id, radians) {
+    const step = Math.abs(radians);
+    if (![Math.PI / 4, Math.PI / 2].some(angle => Math.abs(step - angle) < 1e-9))
+      return this.rotateClamp(id, radians);
+    const slots = Math.round(Math.PI * 2 / step);
+    for (let i = 1; i < slots; i++) {
+      let ground = false;
+      if (this.rotateClamp(id, radians * i, { onGround: () => { ground = true; } })) return true;
+      if (!ground) return false;
+    }
+    return false;
   }
 
   /** 弯管圆弧的最低轴心位置，包括两端之间可能低于端点的部分。 */
@@ -6921,23 +6988,32 @@ export class BuildModel {
       if (t.arm) continue;
       if (t.a === base.id || t.b === base.id) return false;
     }
+    const sign = steps < 0 ? -1 : 1;
     const dreh = (v) => {
       // 90 Grad um `dir`: v' = (dir x v) + dir (dir . v)
-      const c = cross3(dir, v).map(value => value * (steps < 0 ? -1 : 1));
+      const c = cross3(dir, v).map(value => value * sign);
       const d = dot3(dir, v);
       return [c[0] + dir[0] * d, c[1] + dir[1] * d, c[2] + dir[2] * d];
     };
-    const achse = dreh(body.c45axis);
-    const r = dreh([base.x - body.x, base.y - body.y, base.z - body.z]);
-    const p = { x: body.x + r[0], y: body.y + r[1], z: body.z + r[2] };
-    if (this.isBelowGround(p.y)) return false;
-    const candidateBase = { ...base, x: round(p.x), y: round(p.y), z: round(p.z) };
-    const candidateBody = { ...body, c45axis: achse };
-    if (c45PlacementBlocked(this, candidateBase, candidateBody)) return false;
-    base.x = round(p.x); base.y = round(p.y); base.z = round(p.z);
-    const L = Math.hypot(achse[0], achse[1], achse[2]) || 1;
+    // 按原方向跳过地下档位，选定姿态前不改模型。转回原位不算成功。
+    const poses = [];
+    let achse = body.c45axis.slice();
+    let off = [base.x - body.x, base.y - body.y, base.z - body.z];
+    for (let step = 0; step < 3; step++) {
+      achse = dreh(achse);
+      off = dreh(off);
+      poses.push({
+        achse,
+        y: body.y + off[1],
+        base: { ...base, x: round(body.x + off[0]), y: round(body.y + off[1]), z: round(body.z + off[2]) },
+      });
+    }
+    const pick = poses.find((pose) => !this.isBelowGround(pose.y));
+    if (!pick || c45PlacementBlocked(this, pick.base, { ...body, c45axis: pick.achse })) return false;
+    base.x = pick.base.x; base.y = pick.base.y; base.z = pick.base.z;
+    const L = Math.hypot(pick.achse[0], pick.achse[1], pick.achse[2]) || 1;
     const r4 = (v) => Math.round((v / L) * 1e4) / 1e4;
-    body.c45axis = [r4(achse[0]), r4(achse[1]), r4(achse[2])];
+    body.c45axis = [r4(pick.achse[0]), r4(pick.achse[1]), r4(pick.achse[2])];
     base.quat = quatFromXAxis(body.c45axis);
     this._updateC45Quat(body, base);
     this._moveTubeGeom(new Set([base.id]));
@@ -7050,13 +7126,18 @@ export class BuildModel {
     const base = baseId && this.nodes.get(baseId);
     if (!base) return false;
     const u = body.c45axis;
+    const sign = steps < 0 ? -1 : 1;
     // Drehpunkt: die Kupplung selbst; gedreht wird um ihre Huelsenachse.
-    const dreh = (p) => {
-      const r = [p.x - base.x, p.y - base.y, p.z - base.z];
-      const c = cross3(u, r).map(value => value * (steps < 0 ? -1 : 1));
-      const d = dot3(u, r);
-      // 90 Grad: cos = 0, sin = 1 -> p' = (u x r) + u (u . r)
-      return { x: base.x + c[0] + u[0] * d, y: base.y + c[1] + u[1] * d, z: base.z + c[2] + u[2] * d };
+    // 四档都从原始坐标算，不把中间那档写回节点。
+    const turn = (p, times) => {
+      let cur = { x: p.x, y: p.y, z: p.z };
+      for (let i = 0; i < times; i++) {
+        const r = [cur.x - base.x, cur.y - base.y, cur.z - base.z];
+        const c = cross3(u, r).map(value => value * sign);
+        const d = dot3(u, r);
+        cur = { x: base.x + c[0] + u[0] * d, y: base.y + c[1] + u[1] * d, z: base.z + c[2] + u[2] * d };
+      }
+      return cur;
     };
     // Alles, was an der Winkelkupplung haengt -- aber nicht ueber die Huelse
     // zurueck in die tragende Kupplung.
@@ -7070,19 +7151,27 @@ export class BuildModel {
       }
     }
     seen.delete(baseId);
-    const zweig = [...seen].map((id) => this.nodes.get(id)).filter(Boolean).map((n) => ({ n, p: dreh(n) }));
-    if (zweig.some((e) => this.isBelowGround(e.p.y))) return false;
-    const preview = { nodes: new Map(this.nodes), tubes: this.tubes };
-    for (const { n, p } of zweig) preview.nodes.set(n.id, { ...n, x: round(p.x), y: round(p.y), z: round(p.z) });
-    for (const { n } of zweig) {
-      if (!n.c45body) continue;
-      const arm = [...this.tubes.values()].find(t => t.arm && (t.a === n.id || t.b === n.id));
-      const carrier = arm && preview.nodes.get(arm.a === n.id ? arm.b : arm.a);
-      if (carrier && c45PlacementBlocked(preview, carrier, preview.nodes.get(n.id))) return false;
+    const nodes = [...seen].map((id) => this.nodes.get(id)).filter(Boolean);
+    let chosen = null;
+    let blocked = false;
+    for (let times = 1; times < 4 && !chosen && !blocked; times++) {
+      const zweig = nodes.map((n) => ({ n, p: turn(n, times) }));
+      if (zweig.some((e) => this.isBelowGround(e.p.y))) continue;
+      const preview = { nodes: new Map(this.nodes), tubes: this.tubes };
+      for (const { n, p } of zweig) preview.nodes.set(n.id, { ...n, x: round(p.x), y: round(p.y), z: round(p.z) });
+      for (const { n } of zweig) {
+        if (!n.c45body) continue;
+        const arm = [...this.tubes.values()].find(t => t.arm && (t.a === n.id || t.b === n.id));
+        const carrier = arm && preview.nodes.get(arm.a === n.id ? arm.b : arm.a);
+        if (carrier && c45PlacementBlocked(preview, carrier, preview.nodes.get(n.id))) { blocked = true; break; }
+      }
+      // 相撞是真挡住，不跳到再下一档。只有地面以下才继续找。
+      if (!blocked) chosen = zweig;
     }
-    for (const e of zweig) { e.n.x = round(e.p.x); e.n.y = round(e.p.y); e.n.z = round(e.p.z); }
+    if (!chosen) return false;
+    for (const e of chosen) { e.n.x = round(e.p.x); e.n.y = round(e.p.y); e.n.z = round(e.p.z); }
     this._updateC45Quat(body, base);
-    const bewegt = new Set(zweig.map((e) => e.n.id));
+    const bewegt = new Set(chosen.map((e) => e.n.id));
     this._moveTubeGeom(bewegt);
     this._movePanelGeom(bewegt);
     return true;
