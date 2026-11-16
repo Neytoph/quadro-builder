@@ -5,6 +5,7 @@ import {useCollab} from '../collab/CollabContext'
 import {useI18n} from '../i18n'
 import {useDock} from './dock'
 import {photoWords,photoStyles,photoCall,presetFrame,resizePhotoFrame,openPhotoHistory} from '../../public/photo-render.js'
+import {photoReplacements} from '../../public/photo-retention.js'
 
 export const OPEN_PHOTO='quadro:photo-render'
 export function openPhotoRender(){window.dispatchEvent(new Event(OPEN_PHOTO))}
@@ -32,9 +33,9 @@ export default function PhotoRender(){
  const api=useEngine(),collab=useCollab(),{lang}=useI18n(),t=photoWords(lang)
  const {setPane}=useDock()
  const [open,setOpen]=useState(false),[rect,setRect]=useState<Rect|null>(null),[viewport,setViewport]=useState({left:0,top:0,width:1,height:1}),[preset,setPreset]=useState('4:3'),[busy,setBusy]=useState(false),[error,setError]=useState(''),[description,setDescription]=useState(''),[capture,setCapture]=useState<{id:string;source:string;url:string}|null>(null),[owner,setOwner]=useState('')
- const preview=useRef<HTMLDialogElement>(null),live=useRef({api,collab}),drag=useRef<{rect:Rect;handle:string;x:number;y:number}|null>(null),generation=useRef(0),activeTab=useRef(api.activeTabId)
+ const preview=useRef<HTMLDialogElement>(null),live=useRef({api,collab}),drag=useRef<{rect:Rect;handle:string;x:number;y:number}|null>(null),generation=useRef(0),activeTab=useRef(api.activeTabId),selection=useRef<AbortController|null>(null)
  live.current={api,collab}
- useEffect(()=>()=>{generation.current++},[])
+ useEffect(()=>()=>{generation.current++;selection.current?.abort()},[])
  useEffect(()=>{
   if(!open)return
   const engine=api.engine();if(!engine)return
@@ -50,17 +51,17 @@ export default function PhotoRender(){
     const pending=localStorage.getItem('xmf-photo-submit:'+account)
     if(pending){const saved=JSON.parse(pending);setDescription(saved.prompt||'')
      try{await photoCall('/attempts',account,'POST',{quoteId:saved.quote.id,requestId:saved.requestId});localStorage.removeItem('xmf-photo-submit:'+account);if(!disposed){setOpen(false);await openPhotoHistory({source:saved.quote.source,owner:account,lang})}}
-     catch(cause){if((cause as {code?:string}).code==='render_conflict')localStorage.removeItem('xmf-photo-submit:'+account);throw cause}
+     catch(cause){if(['render_conflict','render_storage_changed','render_capture_expired','render_replacement_busy'].includes((cause as {code?:string}).code||''))localStorage.removeItem('xmf-photo-submit:'+account);throw cause}
     }
    }catch(cause){if(!disposed)fail(cause)}finally{if(!disposed)setBusy(false)}
   })()
   return()=>{disposed=true}
  },[open])
  useEffect(()=>{photoStyles();const show=()=>{live.current.api.closeExplodedView();setPane(null);setOpen(true);setCapture(null);setPreset('4:3');setError('')};window.addEventListener(OPEN_PHOTO,show);return()=>window.removeEventListener(OPEN_PHOTO,show)},[])
- useEffect(()=>{if(activeTab.current!==api.activeTabId){activeTab.current=api.activeTabId;generation.current++;setOpen(false);setCapture(null);setDescription('')}},[api.activeTabId])
+ useEffect(()=>{if(activeTab.current!==api.activeTabId){activeTab.current=api.activeTabId;generation.current++;selection.current?.abort();setOpen(false);setCapture(null);setDescription('')}},[api.activeTabId])
  useEffect(()=>{
   if(!open)return
-  const invalid=()=>{generation.current++;setOpen(false);setCapture(null);setDescription('');setOwner('')};window.addEventListener('quadro-account-invalidated',invalid)
+  const invalid=()=>{generation.current++;selection.current?.abort();setOpen(false);setCapture(null);setDescription('');setOwner('')};window.addEventListener('quadro-account-invalidated',invalid)
   const canvas=api.engine()?.scene.renderer.domElement as HTMLCanvasElement|undefined;if(!canvas)return
   const resize=()=>{const bounds=canvas.getBoundingClientRect();setViewport({left:bounds.left,top:bounds.top,width:bounds.width,height:bounds.height});setRect(presetFrame(bounds));setPreset('4:3')}
   resize();const observer=new ResizeObserver(resize);observer.observe(canvas);window.addEventListener('resize',resize)
@@ -91,12 +92,14 @@ export default function PhotoRender(){
     await photoCall('/attempts',owner,'POST',{quoteId:saved.quote.id,requestId:saved.requestId});localStorage.removeItem(key)
     if(token===generation.current){preview.current?.close();setCapture(null);setOpen(false);await openPhotoHistory({source:saved.quote.source,owner,lang})}return
    }
-   const quote=saved?.capture===capture.id&&saved?.prompt===description?saved.quote:await photoCall('/quotes',owner,'POST',{capture:capture.id,prompt:description,language:lang})
+   let quote=saved?.capture===capture.id&&saved?.prompt===description?saved.quote:null
+   if(!quote){selection.current?.abort();const controller=new AbortController();selection.current=controller;const replace=await photoReplacements({source:capture.source,owner,lang,signal:controller.signal});if(replace===null||token!==generation.current)return;quote=await photoCall('/quotes',owner,'POST',{capture:capture.id,prompt:description,language:lang,replace},controller.signal)}
+   if(token!==generation.current)return
    const requestId=saved?.quote?.id===quote.id?saved.requestId:crypto.randomUUID().replaceAll('-','')
    localStorage.setItem(key,JSON.stringify({quote,requestId,capture:capture.id,prompt:description}))
    await photoCall('/attempts',owner,'POST',{quoteId:quote.id,requestId});localStorage.removeItem(key)
    if(token===generation.current){preview.current?.close();setCapture(null);setOpen(false);await openPhotoHistory({source:capture.source,owner,lang})}
-  }catch(cause){if(token===generation.current)fail(cause)}finally{if(token===generation.current)setBusy(false)}
+  }catch(cause){if(token===generation.current){if(['render_storage_changed','render_capture_expired','render_replacement_busy'].includes((cause as {code?:string}).code||''))localStorage.removeItem(key);fail(cause)}}finally{if(token===generation.current)setBusy(false)}
  }
  if(!open)return null
  return <>
