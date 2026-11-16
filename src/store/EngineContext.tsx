@@ -1392,8 +1392,21 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const homeContext = tabHomeContext(tabsRef.current.find(tab => tab.tabId === activeRef.current), model?.homeContext || (scene?._displayObject ? scene.homeContext : null) || null)
 
   useEffect(() => {
-    if (ready && scene && model) scene.setHomeContext(homeContext)
-  }, [ready, scene, model, homeContext, tick])
+    if (!ready || !scene || !model) return
+    scene.setHomeContext(homeContext)
+    const tab = tabsRef.current.find(item => item.tabId === activeRef.current)
+    if (tab?.planId && !tab.readOnly) {
+      const background = model.previewBackground || (homeContext ? 'home' : 'grass')
+      const next = background === 'home' && !homeContext ? 'grass' : background
+      let current = 'blank'
+      if (scene._sceneOn) current = 'grass'
+      else if (scene._homeGroup && !scene._homeHidden) current = 'home'
+      if (current !== next) {
+        scene.setBackground(next)
+        if (next === 'home') scene.frameHomeProduct()
+      }
+    }
+  }, [ready, scene, model, homeContext, model?.previewBackground, tick])
 
   const bindHome = useCallback((record: AnyRec | null, expectedTabId?: string | null) => {
     const current = eng.current
