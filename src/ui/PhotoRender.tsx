@@ -1,5 +1,5 @@
 import {useEffect,useRef,useState,type CSSProperties} from 'react'
-import {Camera} from 'lucide-react'
+import {Camera,Sparkles} from 'lucide-react'
 import {useEngine} from '../store/EngineContext'
 import {useCollab} from '../collab/CollabContext'
 import {useI18n} from '../i18n'
@@ -25,7 +25,7 @@ export function PhotoRenderButton({className,style}:{className:string;style:CSSP
  },[api.ready,api.activeTabId])
  if(!available)return null
  const locked=api.tabs.find(tab=>tab.tabId===api.activeTabId)?.slotLocked
- return <button type="button" data-ui="photo-render-entry" data-panel-chrome data-button-motion="off" title={photoWords(lang).take} aria-label={photoWords(lang).take} disabled={!api.entryReady||api.readOnly||locked||!!api.opening||!!collab.compare||collab.mode==='plan'&&!collab.canEdit} onClick={openPhotoRender} className={className} style={style}><Camera size={24} strokeWidth={1.8} aria-hidden="true"/></button>
+ return <button type="button" data-ui="photo-render-entry" data-panel-chrome data-button-motion="off" title={photoWords(lang).take} aria-label={photoWords(lang).take} disabled={!api.entryReady||api.readOnly||locked||!!api.opening||!!collab.compare||collab.mode==='plan'&&!collab.canEdit} onClick={openPhotoRender} className={className} style={style}><span className="relative flex h-6 w-6 items-center justify-center" aria-hidden="true"><Camera size={24} strokeWidth={1.8}/><Sparkles size={14} strokeWidth={1.8} className="absolute -right-[5px] -top-[5px] rounded-sm bg-[#EEF1F5] p-px text-[#EA580C]"/></span></button>
 }
 type Rect={x:number;y:number;width:number;height:number;outputWidth:number;outputHeight:number}
 export default function PhotoRender(){
