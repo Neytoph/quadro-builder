@@ -10,6 +10,7 @@ import { mediaUrl, type Anchor, type Thread } from '../api'
 import type { Peer } from '../planSession'
 import { Face, partLabel, when } from './bits'
 import { Compose } from './Compose'
+import { anchorPoint, attachAnchor } from '../anchors'
 import { ForkModal } from './Modals'
 import { NARROW_MAX, PANEL_GAP, projectBarHeight, TOOLBAR_CHROME_H, usePanelLayout } from '../../ui/panelLayout'
 
@@ -103,7 +104,7 @@ export default function PlanOverlays() {
     const hit = e.scene.pickPoint(ev.clientX, ev.clientY) as Anchor | null
     if (!hit) return
     collab.setActiveThread(null)
-    collab.setPinDraft({ partId: hit.partId, point: hit.point.map(v => Math.round(v * 10) / 10) as P3,...(collab.plan?.viewOnly?{sceneRevision:collab.plan.sceneRevision}:{}) })
+    collab.setPinDraft(attachAnchor(e.model, { partId: hit.partId, point: hit.point.map(v => Math.round(v * 10) / 10) as P3,...(collab.plan?.viewOnly?{sceneRevision:collab.plan.sceneRevision}:{}) }))
     collab.setPlacingPin(false)
   }
 
@@ -145,21 +146,21 @@ export default function PlanOverlays() {
         const gone = collab.partGone(th)
         const unread = th.posts.some(collab.isUnread)
         return (
-          <Fragment key={`pin-${th.id}`}><div className="cb-at" ref={track(`pin-${th.id}`, () => [th.anchor!.point as P3])} style={active ? { zIndex: 37 } : undefined}>
+          <Fragment key={`pin-${th.id}`}><div className="cb-at" ref={track(`pin-${th.id}`, () => [anchorPoint(api.engine()?.model, th.anchor!)])} style={active ? { zIndex: 37 } : undefined}>
             {gone && <span className="cb-ghost-part" />}
             <button type="button" data-ui="pin" data-thread={th.id}
               className={`cb-pin ${active ? 'on' : ''} ${th.resolved ? 'done' : ''} ${gone ? 'gone' : ''} ${unread && !active ? 'unread' : ''}`}
               onClick={() => (active ? collab.setActiveThread(null) : collab.focusThread(th))}>
               <b>{collab.pinNumber(th)}</b>
             </button>
-          </div>{active && <Discussion point={th.anchor!.point}><Bubble th={th} gone={gone} /></Discussion>}</Fragment>
+          </div>{active && <Discussion anchor={th.anchor!}><Bubble th={th} gone={gone} /></Discussion>}</Fragment>
         )
       })}
 
       {draft && (
-        <><div className="cb-at" ref={track('draft', () => [draft.point])} style={{ zIndex: 37 }}>
+        <><div className="cb-at" ref={track('draft', () => [anchorPoint(api.engine()?.model, draft)])} style={{ zIndex: 37 }}>
           <span className="cb-pin draft"><b>{pins.length + 1}</b></span>
-        </div><Discussion point={draft.point}><DraftBubble draft={draft} /></Discussion></>
+        </div><Discussion anchor={draft}><DraftBubble draft={draft} /></Discussion></>
       )}
 
       <span className={`cb-sync qb-card ${s.conn === 'connected' ? '' : 'off'}`} data-ui="sync-state" data-conn={s.conn} title={t(syncing ? 'collab.connecting' : `collab.conn.${s.conn}`)}>
@@ -191,7 +192,7 @@ export default function PlanOverlays() {
 }
 
 /** 手机输入框独立挂在页面上，避开图钉投影的 transform，并跟随软键盘可视区域。 */
-function Discussion({ point, children }: { point: P3; children: ReactNode }) {
+function Discussion({ anchor, children }: { anchor: Anchor; children: ReactNode }) {
   const { vw } = usePanelLayout()
   const narrow = vw <= NARROW_MAX
   const { engine } = useEngine()
@@ -209,7 +210,8 @@ function Discussion({ point, children }: { point: P3; children: ReactNode }) {
     const tick = () => {
       frame = requestAnimationFrame(tick)
       const el = ref.current, host = document.getElementById('canvas-host')
-      const projected = engine()?.scene.projectWorld([point])?.[0]
+      const e = engine()
+      const projected = e?.scene.projectWorld([anchorPoint(e.model, anchor)])?.[0]
       if (!el || !host) return
       el.style.display = projected ? '' : 'none'
       if (projected) {
@@ -219,7 +221,7 @@ function Discussion({ point, children }: { point: P3; children: ReactNode }) {
     }
     tick()
     return () => cancelAnimationFrame(frame)
-  }, [narrow, engine, point])
+  }, [narrow, engine, anchor])
   useEffect(() => {
     const update = () => setViewport(measure())
     const view = window.visualViewport

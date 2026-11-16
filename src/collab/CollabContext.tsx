@@ -19,6 +19,7 @@ import { diffBom, diffModels, type BomDiffRow, type ModelDiff } from './compare'
 import { ScopedRequests } from './scopedRequests'
 import { slotLocked } from '../sync/slotAccess'
 import { attachModelDisplay } from '../store/modelCover'
+import { anchorPoint } from './anchors'
 
 export type CollabMode = 'off' | 'plan' | 'delivery' | 'room' | 'snapshot'
 
@@ -632,7 +633,8 @@ export function CollabProvider({ children }: { children: ReactNode }) {
   const focusThread = useCallback((th: Thread) => {
     if (planGeneration.current.id !== activePlanId || !threads.some(thread => thread.id === th.id)) return
     setActiveThread(th.id)
-    if (th.anchor) engine()?.scene.flyToPoint(th.anchor.point)
+    const e = engine()
+    if (th.anchor && e) e.scene.flyToPoint(anchorPoint(e.model, th.anchor))
   }, [activePlanId, threads, engine])
 
   // —— 版本、成员、复制、交付 ——
@@ -738,7 +740,8 @@ export function CollabProvider({ children }: { children: ReactNode }) {
     if (!trimmed || Array.from(trimmed).length > 40) throw new Error(t('collab.create.nameLimit'))
     // 任何 await 之前锁定实际引擎画面，包含未保存的编辑。
     const data = structuredClone((blank ? new BuildModel() : current.model).toJSON()) as ModelJSON
-    if(!attachRoom)delete data.homeContext
+    if (attachRoom && !blank && api.homeContext) data.homeContext = structuredClone(api.homeContext)
+    else delete data.homeContext
     const body = exportOf(data, trimmed)
     creating.current = true
     try {
@@ -752,7 +755,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
       setMyPlans(list => [...list, { ...created, role: 'owner' }])
       recoverCreatedPlan()
     } finally { creating.current = false }
-  }, [activeTab, engine, api.entryReady, recoverCreatedPlan, notify, t])
+  }, [activeTab, engine, api.entryReady, api.homeContext, recoverCreatedPlan, notify, t])
 
   const loginUrl = useCallback(() => {
     const base = import.meta.env.VITE_LOGIN_URL

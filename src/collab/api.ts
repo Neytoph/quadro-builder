@@ -82,6 +82,7 @@ export interface Anchor {
   sceneRevision?: string
   partId: string | null
   point: [number, number, number]
+  partPoint?: [number, number, number]
 }
 
 export interface Ref {

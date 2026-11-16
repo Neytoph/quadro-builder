@@ -52,6 +52,7 @@ import { UI_ESCAPE_EVENT } from '../ui/events'
 import { validHomeContext, placeInRoom } from '../home/context.js'
 import { readRoom } from '../home/rooms'
 import { refreshedRoomBackground, roomBackgroundWarnings } from '../home/refresh'
+import { homeForTab, localRoomOnly, sharedRoomSnapshot } from '../home/collaboration'
 import { installationChoices, selectInstallation, type CatalogueChoice } from './installationCatalogue'
 import { captureTool, ToolMemory, type BuilderTool, type ToolState } from './toolMemory'
 import { editorScenes } from './scenePool'
@@ -503,9 +504,8 @@ type Tab = TabInfo & {
 // 只在内存中核对修改与成功快照；模型、名称和文档ID均不发送给统计服务。
 type TabAnalytics = { baseline: string; edited: boolean; lastOutput: string; object: string }
 
-// 共享方案的私人房间只保存在本机视图中，不写入协作文档。
 function tabHomeContext(tab: Tab | undefined, modelHome: AnyRec | null): AnyRec | null {
-  return tab?.planId && tab.view && Object.hasOwn(tab.view, 'homeContext') ? tab.view.homeContext : modelHome
+  return homeForTab(tab, modelHome)
 }
 const tabAnalytics = new WeakMap<Tab, TabAnalytics>()
 function resetTabAnalytics(tab: Tab, data: ModelJSON, object = '') {
@@ -1005,8 +1005,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const exportTab = useCallback((tab: Tab): ModelJSON => {
     if (tab.tabId === activeRef.current) flushModel()
     const data = tab.local.history.toJSON()
-    return tab.planId && tab.view && Object.hasOwn(tab.view, 'homeContext')
-      ? { ...data, homeContext: structuredClone(tab.view.homeContext) } : data
+    const home = tabHomeContext(tab, data.homeContext as AnyRec | null ?? null)
+    return home ? { ...data, homeContext: structuredClone(home) } : data
   }, [flushModel])
 
   const snapshotActive = useCallback(() => {
@@ -1389,7 +1389,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   }, [builder, mobile])
   const model = e?.model
   const scene = e?.scene
-  const homeContext = tabHomeContext(tabsRef.current.find(tab => tab.tabId === activeRef.current), model?.homeContext || null)
+  const homeContext = tabHomeContext(tabsRef.current.find(tab => tab.tabId === activeRef.current), model?.homeContext || (scene?._displayObject ? scene.homeContext : null) || null)
 
   useEffect(() => {
     if (ready && scene && model) scene.setHomeContext(homeContext)
@@ -1405,10 +1405,13 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const context = record ? placeInRoom(record, bounds) : null
     if (context && record?.placement) context.placement = structuredClone(record.placement)
     if (context && !validHomeContext(context)) return false
-    if (tab.planId) {
+    if (localRoomOnly(tab.planId, tab.readOnly)) {
       tab.view = { ...tab.view, homeContext: context }
       persistSession()
-    } else current.builder.recordHistory(() => { current.model.homeContext = context; current.model.previewBackground = context ? 'home' : 'blank' })
+    } else {
+      delete tab.view.homeContext
+      current.builder.recordHistory(() => { current.model.homeContext = tab.planId ? sharedRoomSnapshot(context) : context; current.model.previewBackground = context ? 'home' : 'blank' })
+    }
     current.scene.setHomeContext(context)
     current.scene.setBackground(context ? 'home' : 'blank')
     if (context) current.scene.frameHomeProduct()

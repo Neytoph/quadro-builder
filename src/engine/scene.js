@@ -416,6 +416,7 @@ const LABEL_BG = {
 
 export class SceneManager {
   setHomeContext(context) {
+    this.homeContext = context;
     const key = JSON.stringify(context);
     if (key !== this._homeKey) {
       this._homeFramePending = null;

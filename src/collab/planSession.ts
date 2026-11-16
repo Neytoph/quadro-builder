@@ -61,7 +61,9 @@ export function sameModel(raw: ModelJSON | null, b: ModelJSON): boolean {
   if (!raw) return false
   const m = new BuildModel()
   if (!m.loadJSON(raw).ok) return false
-  const fa = flatten(m.toJSON() as ModelJSON)
+  const normalized = m.toJSON() as ModelJSON
+  if (!sameJson(normalized.homeContext, b.homeContext) || normalized.previewBackground !== b.previewBackground) return false
+  const fa = flatten(normalized)
   const fb = flatten(b)
   if (fa.size !== fb.size) return false
   for (const [id, rec] of fa) {
