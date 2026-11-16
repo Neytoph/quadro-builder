@@ -1,6 +1,16 @@
 import {describe,it,expect} from 'vitest'
 import {presetFrame,resizePhotoFrame,photoSize} from '../../public/photo-render.js'
 describe('拍照取景',()=>{
+ it('整框移动保持尺寸、输出和比例，并限制在画布内',()=>{
+  const viewport={width:1213,height:767},start=presetFrame(viewport)
+  for(const dx of [-5000,-130,95,5000])for(const dy of [-5000,-83,201,5000]){
+   const frame=resizePhotoFrame(start,'move',dx,dy,viewport)
+   expect(frame.width).toBe(start.width);expect(frame.height).toBe(start.height)
+   expect(frame.outputWidth).toBe(start.outputWidth);expect(frame.outputHeight).toBe(start.outputHeight)
+   expect(frame.x).toBeGreaterThanOrEqual(0);expect(frame.y).toBeGreaterThanOrEqual(0)
+   expect(frame.x+frame.width).toBeLessThanOrEqual(viewport.width);expect(frame.y+frame.height).toBeLessThanOrEqual(viewport.height)
+  }
+ })
  it.each([3/4,4/3,16/9,9/16])('预设比例和输出尺寸一致 %s',ratio=>{
   const viewport={width:390,height:720},frame=presetFrame(viewport,ratio)
   expect(frame.width/frame.height).toBeCloseTo(ratio,8)
