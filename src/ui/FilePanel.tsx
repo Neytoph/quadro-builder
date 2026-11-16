@@ -17,6 +17,8 @@ import { DeviceDraftsLink } from './SingleModelBar'
 import { COLOR_HEX } from '../engine/colors.js'
 import { ChevronDown, Download, FileJson, FolderInput, Link, Plus, Save, Sparkles, Upload } from 'lucide-react'
 import {openDownloads} from './Downloads'
+import {openPhotoRender} from './PhotoRender'
+import {photoCall} from '../../public/photo-render.js'
 
 const btn = 'qb-file-action xmf-button xmf-button-secondary'
 const officialHexes = new Set([...Object.values(COLOR_HEX).map(hex => hex.toUpperCase()), '#2B2B2B'])
@@ -33,6 +35,8 @@ export default function FilePanel() {
   const words = fileWords[lang]
   const fileRef = useRef<HTMLInputElement>(null)
   const [batch, setBatch] = useState(false)
+  const [photoAvailable,setPhotoAvailable]=useState(false)
+  useEffect(()=>{let active=true;if(!api.ready)return;void fetch('/quadro/identity',{credentials:'same-origin',cache:'no-store'}).then(async response=>{if(!response.ok)return;const user=await response.json();const capability=await photoCall('/capabilities',user.userId);if(active)setPhotoAvailable(capability.enabled===true)}).catch(()=>{if(active)setPhotoAvailable(false)});return()=>{active=false}},[api.ready,api.activeTabId])
   const [backingUp, setBackingUp] = useState(false)
   const [legacy, setLegacy] = useState<Awaited<ReturnType<typeof legacyBackupWithTabs>> | null>(null)
   const legacyModels = legacy ? [
@@ -49,6 +53,7 @@ export default function FilePanel() {
   return (
     <div className="qb-file-panel">
       <section aria-label={words.actions} className="qb-file-actions" data-button-motion="off">
+        {photoAvailable&&<button type="button" disabled={contentReadOnly||!api.entryReady} onClick={openPhotoRender} className={btn}><Sparkles aria-hidden="true"/><span>{lang==='zh'?'生成效果图':lang==='en'?'Generate render':'Effektbild erstellen'}</span></button>}
         <MyModelsLink />
         {SINGLE_MODEL && !EDITOR_EMBED && <DeviceDraftsLink/>}
         {saveCapacityFull()&&<p className="text-xs px-2 pb-2 leading-relaxed" role="status" data-ui="capacity-guidance">{t('capacity.cloudFull')}</p>}

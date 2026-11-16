@@ -35,6 +35,7 @@ import RoomEditor from './collab/ui/RoomEditor'
 import CustomComponentsMenu, { CUSTOM_COMPONENTS_EVENT, type ComponentMenuPosition } from './ui/CustomComponentsMenu'
 import { NUMBER_TUBES } from './store/toolMemory'
 import Downloads, {DownloadContents,exportResource,hasInlineManualProgress} from './ui/Downloads'
+import PhotoRender from './ui/PhotoRender'
 import {resourceFileDelivered,sendResourceMessage} from './resourceDownload'
 import {installResourceStyle} from '../public/model-resources.js'
 import {RESOURCE_MODE} from './entry'
@@ -552,6 +553,7 @@ function AppInner() {
       <JoinModal />
       <Toast />
       <Downloads />
+      <PhotoRender />
       <DeferredAssemblyPreview />
       <AccountDialog />
       <NameDialog />

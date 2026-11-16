@@ -7763,6 +7763,36 @@ export class SceneManager {
    * Gerendert wird eigens fuer diesen Aufruf und der Puffer SOFORT ausgelesen:
    * `preserveDrawingBuffer` ist aus, nach dem naechsten Bild waere er leer.
    */
+  snapshotCrop({ width, height, viewport, frame }) {
+    this._finishMotion();
+    this.selectionTransformGizmo?.flushPreview();
+    const preview = this.selectionTransformPreview;
+    preview?.apply(true);
+    const camera = this.camera, cropped = camera.clone();
+    const size = this.renderer.getSize(new THREE.Vector2()), ratio = this.renderer.getPixelRatio();
+    const objects = [this._grid, this.handleGroup, this.labelGroup, this._hoverPartGroup, this.selectionTransformGizmo?.helper, this._panelPlacementGuides?.group].filter(Boolean);
+    const visibility = objects.map(object => [object, object.visible]);
+    try {
+      cropped.setViewOffset(viewport.width, viewport.height, frame.x * viewport.width, frame.y * viewport.height, frame.width * viewport.width, frame.height * viewport.height);
+      cropped.updateProjectionMatrix();
+      this.camera = cropped;
+      this.renderer.setPixelRatio(1);
+      this.renderer.setSize(width, height, false);
+      for (const object of objects) object.visible = false;
+      this._homeGroup?.userData.updateWalls(cropped);
+      this.renderer.render(this.scene, cropped);
+      return this.renderer.domElement.toDataURL('image/png');
+    } finally {
+      this.camera = camera;
+      for (const [object, visible] of visibility) object.visible = visible;
+      this.renderer.setPixelRatio(ratio);
+      this.renderer.setSize(size.x, size.y, false);
+      this._homeGroup?.userData.updateWalls(camera);
+      preview?.apply();
+      this.requestRender();
+    }
+  }
+
   snapshot(opts = {}) {
     this._finishMotion();
     this.selectionTransformGizmo?.flushPreview();
