@@ -1,4 +1,5 @@
-import {useEffect,useRef,useState} from 'react'
+import {useEffect,useRef,useState,type CSSProperties} from 'react'
+import {Camera} from 'lucide-react'
 import {useEngine} from '../store/EngineContext'
 import {useCollab} from '../collab/CollabContext'
 import {useI18n} from '../i18n'
@@ -7,6 +8,25 @@ import {photoWords,photoStyles,photoCall,presetFrame,resizePhotoFrame,openPhotoH
 
 export const OPEN_PHOTO='quadro:photo-render'
 export function openPhotoRender(){window.dispatchEvent(new Event(OPEN_PHOTO))}
+export function PhotoRenderButton({className,style}:{className:string;style:CSSProperties}){
+ const api=useEngine(),collab=useCollab(),{lang}=useI18n(),[available,setAvailable]=useState(false)
+ useEffect(()=>{
+  const controller=new AbortController();setAvailable(false)
+  if(!api.ready)return()=>controller.abort()
+  const invalid=()=>{setAvailable(false);controller.abort()}
+  window.addEventListener('quadro-account-invalidated',invalid,{signal:controller.signal})
+  void(async()=>{try{
+   const response=await fetch('/quadro/identity',{credentials:'same-origin',cache:'no-store',signal:controller.signal})
+   if(!response.ok)return
+   const account=await response.json(),capability=await photoCall('/capabilities',account.userId,'GET',undefined,controller.signal)
+   if(!controller.signal.aborted)setAvailable(capability.enabled===true)
+  }catch{if(!controller.signal.aborted)setAvailable(false)}})()
+  return()=>controller.abort()
+ },[api.ready,api.activeTabId])
+ if(!available)return null
+ const locked=api.tabs.find(tab=>tab.tabId===api.activeTabId)?.slotLocked
+ return <button type="button" data-ui="photo-render-entry" data-panel-chrome data-button-motion="off" title={photoWords(lang).take} aria-label={photoWords(lang).take} disabled={!api.entryReady||api.readOnly||locked||!!api.opening||!!collab.compare||collab.mode==='plan'&&!collab.canEdit} onClick={openPhotoRender} className={className} style={style}><Camera size={24} strokeWidth={1.8} aria-hidden="true"/></button>
+}
 type Rect={x:number;y:number;width:number;height:number;outputWidth:number;outputHeight:number}
 export default function PhotoRender(){
  const api=useEngine(),collab=useCollab(),{lang}=useI18n(),t=photoWords(lang)
@@ -36,7 +56,7 @@ export default function PhotoRender(){
   })()
   return()=>{disposed=true}
  },[open])
- useEffect(()=>{photoStyles();const show=()=>{setPane(null);setOpen(true);setCapture(null);setPreset('4:3');setError('')};window.addEventListener(OPEN_PHOTO,show);return()=>window.removeEventListener(OPEN_PHOTO,show)},[])
+ useEffect(()=>{photoStyles();const show=()=>{live.current.api.closeExplodedView();setPane(null);setOpen(true);setCapture(null);setPreset('4:3');setError('')};window.addEventListener(OPEN_PHOTO,show);return()=>window.removeEventListener(OPEN_PHOTO,show)},[])
  useEffect(()=>{if(activeTab.current!==api.activeTabId){activeTab.current=api.activeTabId;generation.current++;setOpen(false);setCapture(null);setDescription('')}},[api.activeTabId])
  useEffect(()=>{
   if(!open)return

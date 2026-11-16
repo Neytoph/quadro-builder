@@ -4,6 +4,7 @@ import { useEngine } from '../store/EngineContext'
 import { useI18n } from '../i18n'
 import { canvasCorner, SCENE_CLUSTER_GAP, usePanelLayout } from './panelLayout'
 import HomeRoomPanel from './HomeRoomPanel'
+import {PhotoRenderButton} from './PhotoRender'
 import explodedViewIcon from '../assets/icons/exploded-view.png?inline'
 import frameOnlyIcon from '../assets/icons/frame-only.png?inline'
 import frameCompleteIcon from '../assets/icons/frame-complete.png?inline'
@@ -36,7 +37,6 @@ export default function SceneToggle({ showExploded = true }: { showExploded?: bo
   const pos = canvasCorner(left, vw, { toolbarW })
   const { tile, clusterW } = pos
   const frameTitle = api.frameOnly ? FRAME_FULL_TITLE[lang] : t('btn.frameOnly')
-  const exporting = !!api.exportingManual
   const indoor = api.background === 'home' && !!api.homeContext
   const { obstacles, usable } = api.homeZones
   const states = [
@@ -99,27 +99,11 @@ export default function SceneToggle({ showExploded = true }: { showExploded?: bo
         </svg>
       </button>
 
-      <button
-        type="button"
-        onClick={() => void api.exportAssemblyPdf()}
-        disabled={exporting}
-        aria-busy={exporting}
-        aria-label={t('btn.exportManual')}
-        title={t('btn.exportManual')}
-        className={`pointer-events-auto ${tileBtn} disabled:opacity-45 disabled:cursor-not-allowed disabled:hover:scale-100`}
+      <PhotoRenderButton
+        className={`pointer-events-auto ${tileBtn} text-[#3A8494] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600 disabled:opacity-45 disabled:cursor-not-allowed disabled:hover:scale-100`}
         style={tileChrome(false, tile)}
-      >
-        <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" width={tile} height={tile} aria-hidden="true">
-          <rect x="0" y="0" width="48" height="48" fill="#EEF1F5" />
-          <rect x="11" y="8" width="26" height="32" rx="3.2" fill="#fff" />
-          <path d="M14.2 8 H33.8 A3.2 3.2 0 0 1 37 11.2 V16 H11 V11.2 A3.2 3.2 0 0 1 14.2 8 Z" fill="#EA580C" />
-          <rect x="11" y="8" width="26" height="32" rx="3.2" fill="none" stroke="#3A8494" strokeWidth="1.7" />
-          <rect x="15" y="19" width="8.2" height="7.2" rx="1.2" fill="#D7E8EE" />
-          <rect x="24.8" y="19" width="8.2" height="7.2" rx="1.2" fill="#D7E8EE" />
-          <circle cx="17.2" cy="33.2" r="3.1" fill="#fff" stroke="#5C6570" strokeWidth="1.05" />
-          <path d="M22.4 31.7 h10.4 M22.4 35.3 h7.4" stroke="#C4B8A8" strokeWidth="1.5" strokeLinecap="round" />
-        </svg>
-      </button>
+      />
+
       <button
         type="button"
         data-ui="frame-only-toggle"
