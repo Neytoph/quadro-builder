@@ -24,10 +24,10 @@ async function configure(page: Page) {
 
 async function extendTo(page: Page, slot: number) {
   const center = await page.locator('[data-configure]').boundingBox()
-  const target = await page.locator(`[data-slot="${slot}"]`).boundingBox()
+  const target = await page.locator(`.qb-components-wheel [data-slot="${slot}"]`).boundingBox()
   const cx = center!.x + center!.width / 2, cy = center!.y + center!.height / 2
   await page.mouse.move(cx + (target!.x + target!.width / 2 - cx) * 1.45, cy + (target!.y + target!.height / 2 - cy) * 1.45)
-  await expect(page.locator(`[data-slot="${slot}"]`)).toHaveAttribute('data-active', 'true')
+  await expect(page.locator(`.qb-components-wheel [data-slot="${slot}"]`)).toHaveAttribute('data-active', 'true')
 }
 
 async function buildAndSelect(page: Page) {
