@@ -10,7 +10,7 @@ const retention={
  de:{delete:'Löschen',deleteConfirm:'Dieses Effektbild unwiderruflich löschen?',render_storage_changed:'Bilder geändert. Bitte erneut zum Ersetzen wählen.',render_cover_protected:'Ein aktuelles Titelbild kann nicht gelöscht oder ersetzt werden.',render_replacement_busy:'Dieses Bild ist zum Ersetzen vorgemerkt.',render_capture_expired:'Das Ausgangsbild ist abgelaufen. Bitte neu aufnehmen.',protected:'Aktuelles Titelbild'}
 };
 const savedCover={zh:'保留的封面',en:'Saved cover',de:'Gespeichertes Titelbild'};
-export const photoWords=lang=>({...translations[lang]||translations.zh,...framing[lang]||framing.zh,...retention[lang]||retention.zh});
+export const photoWords=lang=>({...translations[lang]||translations.zh,...framing[lang]||framing.zh,...retention[lang]||retention.zh,promptLabel:(translations[lang]||translations.zh).prompt});
 export function photoStyles(){if(document.querySelector('[data-photo-styles]'))return;const link=document.createElement('link');link.rel='stylesheet';link.href='/builder/photo-render.css?v=20261116.3';link.dataset.photoStyles='';document.head.append(link)}
 export async function photoCall(path,owner,method='GET',body,signal){
  const response=await fetch('/quadro/rendering'+path,{method,credentials:'same-origin',cache:'no-store',signal,headers:{'Content-Type':'application/json','X-Builder-User-ID':String(owner)},body:body===undefined?undefined:JSON.stringify(body)});
@@ -56,7 +56,7 @@ export async function openPhotoHistory({source,owner,lang='zh'}){
      if(item.protected)card.append(element('p','photo-state',item.currentCover?t.protected:savedCover[lang]||savedCover.zh));
      if(!item.currentCover){const remove=element('button','photo-delete',t.delete);remove.type='button';remove.disabled=!!item.reserved;remove.onclick=async()=>{if(!window.confirm(t.deleteConfirm))return;remove.disabled=true;try{await photoCall('/attempts/'+item.id,owner,'DELETE',undefined,controller.signal);void load()}catch(error){if(!controller.signal.aborted)notice.textContent=errorText(error)}finally{remove.disabled=!!item.reserved}};actions.append(remove)}
     }else if(item.refundStatus)card.append(element('p','photo-state',item.refundStatus==='refunded'?t.refund:t.pending));
-    if(item.summary?.prompt)card.append(element('p','photo-state',item.summary.prompt));body.append(card);
+    if(item.summary?.prompt){const details=element('details','photo-description'),label=element('summary','',t.promptLabel);details.append(label,element('p','photo-state',item.summary.prompt));card.append(details)}body.append(card);
    }
    if(items.some(item=>['queued','running','checking'].includes(item.state)))timer=setTimeout(load,3000);
   }catch(error){if(!controller.signal.aborted){notice.textContent=errorText(error);const retry=element('button','qb-btn',t.retry);retry.onclick=()=>void load();body.replaceChildren(retry)}}finally{loading=false}
