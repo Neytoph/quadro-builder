@@ -533,9 +533,10 @@
     }
   ],
   "panels": [
+    { "id": "panel_40x30", "name": "中板", "name_en": "Medium panel", "name_de": "Mittlere Platte", "w": 40, "h": 30, "feature": "plain", "buildable": true, "compat": true, "colored": true, "price": 0 },
     { "id": "acrylic_panel_40x20", "name": "透明小板", "w": 40, "h": 20, "feature": "acrylic", "buildable": true, "compat": true, "price": 0 },
     { "id": "acrylic_panel_40x60", "name": "亚克力长板", "w": 40, "h": 60, "feature": "acrylic", "buildable": true, "compat": true, "price": 0 },
-    { "id": "acrylic_hole_panel_40x40", "name": "亚克力九洞板", "w": 40, "h": 40, "feature": "acrylic_holes", "buildable": true, "compat": true, "price": 0 },
+    { "id": "acrylic_hole_panel_40x40", "name": "透明洞洞板", "w": 40, "h": 40, "feature": "acrylic_holes", "buildable": true, "compat": true, "price": 0 },
     { "id": "panel_40x40_clock", "name": "时钟板", "w": 40, "h": 40, "feature": "clock", "buildable": true, "compat": true, "price": 0 },
     { "id": "panel_40x40_maze", "name": "数字迷宫板", "w": 40, "h": 40, "feature": "maze", "buildable": true, "compat": true, "price": 0 },
     { "id": "panel_40x30_climbing", "name": "中板攀岩板", "w": 40, "h": 30, "feature": "climbing", "buildable": true, "compat": true, "price": 0 },
@@ -821,7 +822,7 @@
   ],
   "accessories": [
     { "id": "panel_sector_20", "name": "小扇形板", "qdf": "panel_sector_20", "compat": true, "price": 0 },
-    { "id": "panel_sector_40", "name": "扇形小板", "qdf": "panel_sector_40", "compat": true, "price": 0 },
+    { "id": "panel_sector_40", "name": "扇形板", "qdf": "panel_sector_40", "compat": true, "price": 0 },
     { "id": "lattice_curved", "name": "曲面攀爬网", "qdf": "lattice_curved", "compat": true, "price": 0 },
     { "id": "trampoline", "name": "蹦床", "qdf": "trampoline", "compat": true, "price": 0 },
     { "id": "textile_long", "name": "长布片", "qdf": "textile_long", "compat": true, "price": 0 },

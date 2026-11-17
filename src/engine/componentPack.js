@@ -5,12 +5,12 @@ const fitting = (id, name, mountType, feature, width = 40, height = 40) => ({ id
 const EN=['Square panel','Small panel','30 cm square panel','Quarter-circle panel','Clear panel','Small clear panel','Long acrylic panel','Perforated acrylic panel','Clock panel','Number maze panel','Green brick baseplate','Nine-hole panel','Magnetic panel','Honeycomb panel','Large climbing panel','Medium climbing panel','Small climbing panel','Flat climbing net','Curved climbing net','Basketball hoop','Rainbow bridge','Trampoline','Soft roller','Fabric panel','Long fabric panel','Curved climbing fabric','Curved fabric with joint clearance','Sensory basin','Gel sensory mat','Clear hemisphere','Clear platform','Felt activity panel','Castle panel','Rope','Grid panel'];
 const DE=['Quadratische Platte','Kleine Platte','Quadratische 30-cm-Platte','Viertelkreisplatte','Transparente Platte','Kleine transparente Platte','Lange Acrylplatte','Acryl-Lochplatte','Uhrentafel','Zahlenlabyrinth','Grüne Bausteinplatte','Neunlochplatte','Magnettafel','Wabenplatte','Große Kletterplatte','Mittlere Kletterplatte','Kleine Kletterplatte','Flaches Kletternetz','Gebogenes Kletternetz','Basketballkorb','Regenbogenbrücke','Trampolin','Weiche Rolle','Stofffläche','Lange Stofffläche','Gebogener Kletterstoff','Gebogener Stoff mit Anschlussfreiheit','Sensorikwanne','Gel-Sensorikmatte','Transparente Halbkugel','Transparente Plattform','Filztafel','Burgplatte','Seil','Gitterplatte'];
 export const CONFIRMED_COMPONENTS = [
-  panel('panel_40x40', '普通方板', 'plain'), panel('panel_40x20', '小板', 'plain', 40, 20), panel('panel_30x30', '30厘米方板', 'plain', 30, 30),
-  fitting('panel_sector_40', '扇形小板', 'corner', 'sector'),
+  panel('panel_40x40', '大板', 'plain'), panel('panel_40x20', '小板', 'plain', 40, 20), panel('panel_30x30', '30厘米方板', 'plain', 30, 30),
+  fitting('panel_sector_40', '扇形板', 'corner', 'sector'),
   panel('acrylic_panel_40x40', '透明大板', 'acrylic'), panel('acrylic_panel_40x20', '透明小板', 'acrylic', 40, 20),
-  panel('acrylic_panel_40x60', '亚克力长板', 'acrylic', 40, 60), panel('acrylic_hole_panel_40x40', '亚克力九洞板', 'acrylic_holes'),
+  panel('acrylic_panel_40x60', '亚克力长板', 'acrylic', 40, 60), panel('acrylic_hole_panel_40x40', '透明洞洞板', 'acrylic_holes'),
   panel('panel_40x40_clock', '时钟板', 'clock'), panel('panel_40x40_maze', '数字迷宫板', 'maze'),
-  { ...panel('panel_40x40_lego', '积木板', 'lego'), studHeight: 1.25 }, panel('hole_panel_40x40', '九洞板', 'holes'),
+  { ...panel('panel_40x40_lego', '积木板', 'lego'), studHeight: 1.25 }, panel('hole_panel_40x40', '洞洞板', 'holes'),
   panel('panel_40x40_magnet', '磁吸板', 'magnet'), { ...panel('panel_40x40_honeycomb', '蜂窝板', 'honeycomb'), defaultColor:'blue', paletteVersion:2 },
   panel('panel_40x40_climbing', '大板攀岩板', 'climbing'),
   panel('panel_40x30_climbing', '中板攀岩板', 'climbing', 40, 30), panel('panel_40x20_climbing', '小板攀岩板', 'climbing', 40, 20),
@@ -32,6 +32,9 @@ export const CONFIRMED_COMPONENTS = [
 CONFIRMED_COMPONENTS.push({ ...fitting('strap', '绑带', 'rope', 'rope'), bandWidth: 5, depth: 0.2,
   name_en: 'Tie strap', name_de: 'Bindegurt', fixedColor: '#363a3f', mount: 'rope',
   designAssumption: true, assumption: 'frame-grid-unmeasured', qdfSupported: false, qdfSimplified: false });
+CONFIRMED_COMPONENTS.push({ ...panel('panel_40x30', '中板', 'plain', 40, 30),
+  name_en: 'Medium panel', name_de: 'Mittlere Platte', fixedColor: null, mount: 'frame',
+  designAssumption: true, assumption: 'frame-grid-unmeasured', qdfSupported: true, qdfSimplified: true });
 export const CONFIRMED_PANEL_IDS = new Set(CONFIRMED_COMPONENTS.filter(p => p.placement === 'panel').map(p => p.id));
 export const CONFIRMED_FITTING_IDS = new Set(CONFIRMED_COMPONENTS.filter(p => p.placement === 'fitting').flatMap(p => [p.id, p.kind || p.id]));
 export function confirmedSpec(id) { return CONFIRMED_COMPONENTS.find(p => p.id === id || p.kind === id) || null; }

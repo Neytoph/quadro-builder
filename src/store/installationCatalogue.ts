@@ -24,6 +24,14 @@ export const INSTALLATION_CATALOGUE: readonly CatalogueEntry[] = [
     "aliases": ""
   },
   {
+    "id": "panel_40x30",
+    "origin": "extended",
+    "group": "outside",
+    "tool": "panels",
+    "method": "外侧固定",
+    "aliases": "普通板 中板 30×40 40×30 30x40 40x30 30*40 40*30 medium panel"
+  },
+  {
     "id": "panel_40x20",
     "origin": "official",
     "group": "outside",

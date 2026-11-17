@@ -15,7 +15,7 @@
 
 .ic-popover { height:min(540px, calc(100dvh - 160px)); overflow:hidden; }
 .ic-continuous { display:flex; flex-direction:column; height:100%; min-height:0; }
-.ic-catalogue-scroll { overflow-y:auto; overscroll-behavior:contain; min-height:0; flex:1; padding:0 3px 6px; scroll-padding-top:0; touch-action:pan-y; }
+.ic-catalogue-scroll { position:relative; overflow-y:auto; overscroll-behavior:contain; min-height:0; flex:1; padding:0 3px 6px; scroll-padding-top:0; touch-action:pan-y; }
 .ic-catalogue-scroll section { margin-bottom:14px; }
 .ic-catalogue-scroll section:last-child { margin-bottom:0; }
 .ic-section-title { display:flex; align-items:center; justify-content:space-between; margin:0; padding:10px 3px 8px; font-size:13px; font-weight:600; color:#293c3e; }

@@ -134,7 +134,7 @@ describe('确认配件的真实清单、手册和格式转换', () => {
     })
   }
 
-  for (const [id, height] of [['panel_40x30_climbing', 30], ['panel_40x20_climbing', 20]] as const) {
+  for (const [id, height] of [['panel_40x30', 30], ['panel_40x30_climbing', 30], ['panel_40x20_climbing', 20]] as const) {
     it(`${id}导出再读取保持真实尺寸变体`, () => {
       const model = frame(height)
       const mount = model.confirmedMounts(id).find((p: any) => p.valid)

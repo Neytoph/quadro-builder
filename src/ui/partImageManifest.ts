@@ -218,6 +218,10 @@ export const PART_IMAGE_MANIFEST = {
       "src": "parts/panel_40x20_climbing.png",
       "srcLarge": "parts/large/panel_40x20_climbing.png"
     },
+    "panel_40x30": {
+      "src": "parts/panel_40x30.png",
+      "srcLarge": "parts/large/panel_40x30.png"
+    },
     "panel_40x30_climbing": {
       "src": "parts/panel_40x30_climbing.png",
       "srcLarge": "parts/large/panel_40x30_climbing.png"

@@ -36,11 +36,11 @@ function routingApi() {
 
 it('目录组件各归属一次，包含旋转轴承和任意两管绑带', () => {
   const entries = installationChoices(routingApi(), key => key)
-  expect(entries).toHaveLength(100)
-  expect(new Set(entries.map(entry => entry.id)).size).toBe(100)
+  expect(entries).toHaveLength(101)
+  expect(new Set(entries.map(entry => entry.id)).size).toBe(101)
   expect(entries.find(entry => entry.id === 'strap')).toMatchObject({tool:'accessories',method:'扎带固定'})
-  expect(Object.fromEntries([...new Set(entries.map(entry => entry.tool))].map(tool => [tool, entries.filter(entry => entry.tool === tool).length]))).toEqual({ panels:25, accessories:12, textiles:13, wheels:7, slides:4, pools:5, tubes:11, connectors:19, reinforce:4 })
-  expect(entries.filter(entry => entry.group === 'outside')).toHaveLength(17)
+  expect(Object.fromEntries([...new Set(entries.map(entry => entry.tool))].map(tool => [tool, entries.filter(entry => entry.tool === tool).length]))).toEqual({ panels:26, accessories:12, textiles:13, wheels:7, slides:4, pools:5, tubes:11, connectors:19, reinforce:4 })
+  expect(entries.filter(entry => entry.group === 'outside')).toHaveLength(18)
   expect(entries.filter(entry => entry.group === 'inset')).toHaveLength(8)
   expect(entries.filter(entry => entry.group === 'on-tube')).toHaveLength(4)
   expect(entries.filter(entry => entry.group === 'on-frame')).toHaveLength(3)

@@ -3,9 +3,9 @@ import { useI18n } from '../i18n'
 import { useEngine } from '../store/EngineContext'
 import { installationActive, selectInstallation, type CatalogueChoice, type CatalogueTool } from '../store/installationCatalogue'
 import { CATALOGUE_TOOLS, TOOL_LABELS } from '../store/toolMemory'
-import { PartImg, TOOL_ICON } from './icons'
+import { PartImg } from './icons'
 import { installationCatalogueStrings } from './installationCatalogueStrings'
-import { SLIDE_CARDS } from './SlideMenu'
+import { SLIDE_CARDS, SlideCatalogue } from './SlideMenu'
 import { NARROW_MAX, usePanelLayout } from './panelLayout'
 import './installationCatalogue.css'
 
@@ -31,8 +31,7 @@ export default function InstallationCatalogueMenu({ tool, requestId, entries, on
     const root = scroller.current
     const section = root?.querySelector<HTMLElement>(`[data-catalogue-section="${target}"]`)
     if (!root || !section) return false
-    if (section === root.firstElementChild) root.scrollTop = 0
-    else root.scrollTop += section.getBoundingClientRect().top - root.getBoundingClientRect().top
+    root.scrollTop = section.offsetTop
     browsing.current = target
     onBrowse(target)
     return true
@@ -60,20 +59,13 @@ export default function InstallationCatalogueMenu({ tool, requestId, entries, on
     <div ref={scroller} className="ic-catalogue-scroll scrollbar-thin" data-ui="catalogue-scroll" onScroll={scroll}>
       {sections.map(id => <section key={id} data-catalogue-section={id} aria-label={t(TOOL_LABELS[id])}>
         <h2 className="ic-section-title"><span>{t(TOOL_LABELS[id])}</span></h2>
-        <div className="ic-grid">
-          {id === 'slides' ? SLIDE_CARDS.map(card => <button key={card.id} type="button" className="ic-part" data-ui="catalogue-item" data-part-id={card.id} data-category="slides"
-            aria-pressed={api.mode === 'slide' && api.slideKind === card.id} disabled={api.readOnly}
-            title={`${t(card.family)}${card.size ? ` ${card.size} cm` : ''}`}
-            onClick={() => { api.setSlide(card.id); onClose() }}>
-            <PartImg id={card.image} svg={TOOL_ICON.slide} size={imageSize} />
-            <span className="ic-name">{t(card.family)}{card.size && <><br />{card.size} cm</>}</span>
-          </button>) : entries.filter(entry => entry.tool === id).map(entry => <button type="button" className="ic-part" key={entry.id} data-ui="catalogue-item" data-part-id={entry.id} data-category={entry.group} data-method={entry.method}
+        {id === 'slides' ? <SlideCatalogue imageSize={imageSize} onClose={onClose} /> : <div className="ic-grid">
+          {entries.filter(entry => entry.tool === id).map(entry => <button type="button" className="ic-part" key={entry.id} data-ui="catalogue-item" data-part-id={entry.id} data-category={entry.group} data-method={entry.method}
             aria-pressed={installationActive(entry, api)} aria-label={entry.choice.label} title={`${entry.choice.label} · ${methodName(entry.method)}`} disabled={api.readOnly}
             onClick={() => { if (selectInstallation(entry, api)) onClose() }}>
             <PartImg id={entry.id} svg={entry.choice.icon} size={imageSize} /><span className="ic-name">{shortName(entry.choice.label)}</span>
           </button>)}
-        </div>
-        {id === 'slides' && <p className="ic-section-note">{t('slide_separate_end_hint')}</p>}
+        </div>}
       </section>)}
       {!sections.length && <p className="ic-empty" role="status">{copy.empty}</p>}
     </div>
