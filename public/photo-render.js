@@ -11,7 +11,7 @@ const retention={
 };
 const savedCover={zh:'保留的封面',en:'Saved cover',de:'Gespeichertes Titelbild'};
 export const photoWords=lang=>({...translations[lang]||translations.zh,...framing[lang]||framing.zh,...retention[lang]||retention.zh,promptLabel:(translations[lang]||translations.zh).prompt});
-export function photoStyles(){if(document.querySelector('[data-photo-styles]'))return;const link=document.createElement('link');link.rel='stylesheet';link.href='/builder/photo-render.css?v=20261116.3';link.dataset.photoStyles='';document.head.append(link)}
+export function photoStyles(){if(document.querySelector('[data-photo-styles]'))return;const link=document.createElement('link');link.rel='stylesheet';link.href='/builder/photo-render.css?v=20261117.1';link.dataset.photoStyles='';document.head.append(link)}
 export async function photoCall(path,owner,method='GET',body,signal){
  const response=await fetch('/quadro/rendering'+path,{method,credentials:'same-origin',cache:'no-store',signal,headers:{'Content-Type':'application/json','X-Builder-User-ID':String(owner)},body:body===undefined?undefined:JSON.stringify(body)});
  const value=await response.json();if(!response.ok){const error=new Error(value.code||'error');error.code=value.code;throw error}return value;
