@@ -1,4 +1,4 @@
-import { Save, FileArchive, Menu } from 'lucide-react'
+import { Save, FileArchive, GitFork, Menu } from 'lucide-react'
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useEngine } from '../store/EngineContext'
 import { useCollab } from '../collab/CollabContext'
@@ -13,6 +13,7 @@ import MyModelsLink from './MyModelsLink'
 import { Pop } from './Pop'
 import { usePresence } from './motion'
 import './singleModel.css'
+import { ForkModal } from '../collab/ui/Modals'
 
 export function DeviceDraftsLink() {
   const { t, lang } = useI18n()
@@ -26,6 +27,14 @@ export default function SingleModelBar() {
   useEffect(()=>{if(menu)content.current?.querySelector<HTMLButtonElement>('button')?.focus()},[menu])
   const active = api.tabs.find(tab => tab.tabId === api.activeTabId)
   const plan = collab.mode === 'plan', bound = !!(active?.docId || active?.libraryId || active?.planId)
+  const readOnly = plan && !collab.canEdit
+  const canFork = readOnly && !!collab.plan?.me && !collab.plan.viewOnly && collab.role !== 'guest'
+  const [fork, setFork] = useState(false)
+  const roleTitle = t(collab.role === 'commenter' ? 'collab.readOnly.commenterTitle' : 'collab.readOnly.visitorTitle')
+  const roleHint = t(collab.role === 'commenter' ? 'collab.readOnly.commenter' : 'collab.readOnly.visitor')
+  let status = t(String(storage.getAccountScope()) === 'anonymous' ? 'single.guest' : `sync.${displaySaveState(active || {}, active?.dirty || false)}`)
+  if (plan) status = t('single.collab')
+  if (readOnly) status = roleTitle
   const items = DOCK_PILLS.filter(item => !collab.plan?.viewOnly&&(['file','bom','inventory','safety'].includes(item.id) || item.id === 'library' && !bound && !EDITOR_EMBED))
   const navigation=[...items,...(plan?PLAN_PILLS.filter(item=>!collab.plan?.viewOnly||item.id==='comments'):[])]
   const rename = async () => {
@@ -37,15 +46,16 @@ export default function SingleModelBar() {
   }
   return <div className={`qb-project-bar qb-single-bar fixed top-0 left-0 right-0 z-40 ${EDITOR_EMBED ? 'qb-embedded-bar' : ''}`} data-mobile={vw < 768} style={{height:projectBarHeight(vw)}}>
     {!EDITOR_EMBED && <><a href="/" className="qb-project-home shrink-0" aria-label={t('nav.home')}><img src={`${import.meta.env.BASE_URL}favicon.svg`} width={32} height={32} alt=""/></a><MyModelsLink toolbar/></>}
-    <div className="qb-single-title" data-tour="current-design"><button type="button" title={t('single.name')} disabled={!api.entryReady || api.readOnly} onClick={() => void rename()}>{active?.name || t('tab.untitled')}</button><small role="status" data-ui="single-save-state">{plan ? t('single.collab') : t(String(storage.getAccountScope()) === 'anonymous' ? 'single.guest' : `sync.${displaySaveState(active || {}, active?.dirty || false)}`)}</small></div>
+    <div className="qb-single-title" data-tour="current-design"><button type="button" title={t('single.name')} disabled={!api.entryReady || api.readOnly} onClick={() => void rename()}>{active?.name || t('tab.untitled')}</button><small role="status" data-ui={readOnly && collab.plan?.me ? 'read-only-banner' : 'single-save-state'} data-tour={readOnly ? 'read-only-banner' : undefined} title={readOnly ? roleHint : undefined}>{status}</small></div>
     {!plan && <button type="button" className="qb-single-save xmf-button" data-button-motion="off" disabled={!api.ready || !api.entryReady || api.readOnly || api.saving || saving} aria-busy={api.saving || saving} onClick={() => {setSaving(true);void api.saveCurrent().finally(()=>setSaving(false))}} aria-label={t('chrome.save')}><Save size={18} aria-hidden="true"/><span>{t('chrome.save')}</span></button>}
-    <nav className="qb-single-nav" aria-label={t('chrome.navigation')}>{navigation.map(item => <button key={item.id} type="button" data-pane={item.id} aria-expanded={pane === item.id} aria-label={t(item.labelKey)} title={t(item.labelKey)} className="qb-nav-button" onClick={() => toggle(item.id)}><DockIcon pane={item.id}/><span>{t(item.labelKey)}</span></button>)}</nav>
+    <nav className="qb-single-nav" aria-label={t('chrome.navigation')}>{navigation.map(item => <button key={item.id} type="button" data-pane={item.id} aria-expanded={pane === item.id} aria-label={t(item.labelKey)} title={t(item.labelKey)} className="qb-nav-button" onClick={() => toggle(item.id)}><DockIcon pane={item.id}/><span>{t(item.labelKey)}</span></button>)}{canFork && <button type="button" className="qb-nav-button" data-ui="plan-fork" onClick={() => setFork(true)} aria-label={t('collab.forkOwn')} title={t('collab.forkOwn')}><GitFork size={18}/><span>{t('collab.forkOwn')}</span></button>}</nav>
     <button ref={anchor} className="qb-single-menu-trigger qb-nav-button" type="button" aria-label={t('chrome.resources')} aria-expanded={menu} onClick={()=>setMenu(!menu)}><Menu size={20}/></button>
     {shown && <Pop anchor={anchor.current} leaving={leaving} onClose={closeMenu} width={280} align="right"><div ref={content} role="menu" data-ui="mobile-topbar-dialog" className="qb-single-menu" onKeyDown={event=>{
       const controls=Array.from(content.current!.querySelectorAll<HTMLButtonElement>('button')),index=controls.indexOf(event.target as HTMLButtonElement)
       if(['ArrowDown','ArrowUp','Home','End'].includes(event.key)){event.preventDefault();let target=0;if(event.key==='End')target=controls.length-1;else if(event.key!=='Home')target=(index+(event.key==='ArrowUp'?-1:1)+controls.length)%controls.length;controls[target].focus()}
       if(event.key==='Escape'){event.stopPropagation();closeMenu();anchor.current?.focus()}
-    }}>{navigation.map(item=><button type="button" key={item.id} role="menuitem" onClick={()=>{closeMenu();toggle(item.id)}}><DockIcon pane={item.id}/><span>{t(item.labelKey)}</span></button>)}</div></Pop>}
+    }}>{navigation.map(item=><button type="button" key={item.id} role="menuitem" onClick={()=>{closeMenu();toggle(item.id)}}><DockIcon pane={item.id}/><span>{t(item.labelKey)}</span></button>)}{canFork && <button type="button" role="menuitem" data-ui="plan-fork" onClick={() => { closeMenu(); setFork(true) }}><GitFork size={18}/><span>{t('collab.forkOwn')}</span></button>}</div></Pop>}
+    {fork && <ForkModal onClose={() => setFork(false)} />}
     {!EDITOR_EMBED && <div data-site-slot="help" hidden className="qb-host-help"/>}
   </div>
 }

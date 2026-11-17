@@ -15,6 +15,9 @@ import {CommentActions} from './CommentActions'
 import {useCommentText} from '../commentStrings'
 import { ForkModal } from './Modals'
 import { NARROW_MAX, PANEL_GAP, projectBarHeight, TOOLBAR_CHROME_H, usePanelLayout } from '../../ui/panelLayout'
+import { SINGLE_MODEL } from '../../entry'
+import { Pop } from '../../ui/Pop'
+import { layoutPinGroups, type PinPosition } from '../pinGroups'
 
 type P3 = [number, number, number]
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -49,10 +52,23 @@ export default function PlanOverlays() {
   const narrow = vw <= NARROW_MAX
   const items = useRef(new Map<string, { el: HTMLElement; pts: () => P3[]; box: boolean }>())
   const [fork, setFork] = useState(false)
+  const [bannerTop, setBannerTop] = useState(projectBarHeight(vw) + PANEL_GAP)
+  const [pinChoices, setPinChoices] = useState<{ anchor: HTMLElement; ids: number[] } | null>(null)
   const placement=useRef<{x:number;y:number;cancelled:boolean}|null>(null)
   const pointers=useRef(new Set<number>())
   const s = collab.session
   const { engine } = api
+
+  useEffect(() => setPinChoices(null), [s?.id])
+
+  useLayoutEffect(() => {
+    const elements = ['[data-ui=toolbar-wrap]', '[data-ui=scene-buttons]'].map(selector => document.querySelector(selector)).filter((el): el is Element => !!el)
+    const update = () => setBannerTop(Math.max(projectBarHeight(vw), ...elements.map(el => el.getBoundingClientRect().bottom)) + PANEL_GAP)
+    update()
+    const observer = new ResizeObserver(update)
+    elements.forEach(el => observer.observe(el))
+    return () => observer.disconnect()
+  }, [vw, collab.canEdit, collab.role])
 
   // 每一帧：图钉摆到那一点，选中框框住那几件零件；转到背后、出了画面的藏起来
   useEffect(() => {
@@ -63,13 +79,16 @@ export default function PlanOverlays() {
       const host = document.getElementById('canvas-host')
       if (!e || !host) return
       const r = host.getBoundingClientRect()
+      const pinPositions: PinPosition[] = []
       for (const it of items.current.values()) {
         const pts = it.pts()
         const proj = pts.length ? (e.scene.projectWorld(pts) as Array<{ u: number; v: number } | null>).filter(Boolean) as Array<{ u: number; v: number }> : []
         if (!proj.length) { it.el.style.display = 'none'; continue }
         it.el.style.display = ''
         if (!it.box) {
-          it.el.style.transform = `translate(${r.left + proj[0].u * r.width}px, ${r.top + proj[0].v * r.height}px)`
+          const x = r.left + proj[0].u * r.width, y = r.top + proj[0].v * r.height
+          it.el.style.transform = `translate(${x}px, ${y}px)`
+          if (it.el.dataset.pinId) pinPositions.push({ id: it.el.dataset.pinId, x, y })
           continue
         }
         const xs = proj.map(q => r.left + q.u * r.width), ys = proj.map(q => r.top + q.v * r.height)
@@ -79,10 +98,42 @@ export default function PlanOverlays() {
         it.el.style.width = `${Math.max(...xs) + pad - x0}px`
         it.el.style.height = `${Math.max(...ys) + pad - y0}px`
       }
+      const obstacles = Array.from(document.querySelectorAll<HTMLElement>('[data-ui=toolbar-wrap], [data-ui=scene-buttons], .cb-ro, #qhChatFab, #qhChatNoticeHint, #qhChatPeek')).filter(el => {
+        const style = getComputedStyle(el)
+        return style.visibility !== 'hidden' && Number(style.opacity) > 0
+      }).map(el => el.getBoundingClientRect()).filter(rect => rect.width > 0 && rect.height > 0)
+      const positions = new Map(pinPositions.map(point => [point.id, point]))
+      for (const group of layoutPinGroups(pinPositions, obstacles, { width: window.innerWidth, height: window.innerHeight, top: projectBarHeight(window.innerWidth) })) {
+        const primary = group.ids.find(id => items.current.get(`pin-${id}`)?.el.querySelector('.cb-pin.on')) || group.ids[0]
+        const ids = [primary, ...group.ids.filter(id => id !== primary)]
+        const el = items.current.get(`pin-${primary}`)?.el
+        const button = el?.querySelector<HTMLButtonElement>('[data-ui=pin]')
+        if (!el || !button) continue
+        el.style.transform = `translate(${group.x}px, ${group.y}px)`
+        const line = el.querySelector<SVGLineElement>('.cb-pin-connector line')
+        if (line) {
+          const original = group.ids.map(id => positions.get(id)!)
+          const x = original.reduce((sum, point) => sum + point.x, 0) / original.length - group.x
+          const y = original.reduce((sum, point) => sum + point.y, 0) / original.length - group.y
+          line.style.display = Math.hypot(x, y) > 4 ? '' : 'none'
+          line.setAttribute('x2', String(x))
+          line.setAttribute('y2', String(y))
+        }
+        button.dataset.pinIds = ids.join(',')
+        button.dataset.clusterUnread = String(ids.some(id => items.current.get(`pin-${id}`)?.el.querySelector('.cb-pin.unread')))
+        const numbers = ids.map(id => items.current.get(`pin-${id}`)?.el.dataset.pinNumber || '')
+        button.setAttribute('aria-label', `${t('collab.tab.pins')} ${numbers.join(', ')}`)
+        if (group.ids.length > 1) button.dataset.clusterCount = `+${group.ids.length - 1}`
+        else delete button.dataset.clusterCount
+        for (const id of ids.slice(1)) {
+          const member = items.current.get(`pin-${id}`)?.el
+          if (member) member.style.display = 'none'
+        }
+      }
     }
     tick()
     return () => cancelAnimationFrame(raf)
-  }, [engine])
+  }, [engine, t])
 
   const track = (key: string, pts: () => P3[], box = false) => (el: HTMLElement | null) => {
     if (el) items.current.set(key, { el, pts, box })
@@ -91,6 +142,10 @@ export default function PlanOverlays() {
 
   // 放图钉：Esc 退出
   const { placingPin, pinDraft, setPlacingPin, setPinDraft } = collab
+  useEffect(() => {
+    if (!pinChoices) return
+    document.querySelector<HTMLButtonElement>('[data-ui=pin-choices] button')?.focus()
+  }, [pinChoices])
   useEffect(() => {
     if (!placingPin && !pinDraft) return
     const off = () => { if(collab.savingPin)return;collab.cancelMovePin();setPlacingPin(false); setPinDraft(null) }
@@ -113,8 +168,8 @@ export default function PlanOverlays() {
 
   if (!s) {
     return collab.error
-      ? <div className="cb-ro qb-card" data-ui="collab-error"><TriangleAlert /><span><b>{t('collab.error.title')}</b> · {collab.error}</span></div>
-      : <div className="cb-ro qb-card" data-ui="collab-loading"><span>{t('collab.loading')}</span></div>
+      ? <div className="cb-ro qb-card" style={{ top: bannerTop }} data-ui="collab-error"><TriangleAlert /><span><b>{t('collab.error.title')}</b> · {collab.error}</span></div>
+      : <div className="cb-ro qb-card" style={{ top: bannerTop }} data-ui="collab-loading"><span>{t('collab.loading')}</span></div>
   }
 
   const pins = collab.threads.filter(th => th.kind === 'pin' && th.anchor && !(collab.movingPin?.id===th.id&&pinDraft))
@@ -149,16 +204,36 @@ export default function PlanOverlays() {
         const gone = collab.partGone(th)
         const unread = th.posts.some(collab.isUnread)
         return (
-          <Fragment key={`pin-${th.id}`}><div className="cb-at" ref={track(`pin-${th.id}`, () => [anchorPoint(api.engine()?.model, th.anchor!)])} style={active ? { zIndex: 37 } : undefined}>
+          <Fragment key={`pin-${th.id}`}><div className="cb-at" data-pin-id={th.id} data-pin-number={collab.pinNumber(th)} ref={track(`pin-${th.id}`, () => [anchorPoint(api.engine()?.model, th.anchor!)])} style={active ? { zIndex: 37 } : undefined}>
+            <svg className="cb-pin-connector" aria-hidden="true"><line x1="0" y1="-22" x2="0" y2="0" /></svg>
             {gone && <span className="cb-ghost-part" />}
             <button type="button" data-ui="pin" data-thread={th.id}
               className={`cb-pin ${active ? 'on' : ''} ${th.resolved ? 'done' : ''} ${gone ? 'gone' : ''} ${unread && !active ? 'unread' : ''}`}
-              onClick={() => (active ? collab.setActiveThread(null) : collab.focusThread(th))}>
+              onClick={event => {
+                const ids = (event.currentTarget.dataset.pinIds || String(th.id)).split(',').map(Number)
+                if (ids.length > 1) setPinChoices({ anchor: event.currentTarget, ids })
+                else { setPinChoices(null); if (active) collab.setActiveThread(null); else collab.focusThread(th) }
+              }}>
               <b>{collab.pinNumber(th)}</b>
             </button>
           </div>{active && <Discussion anchor={th.anchor!}><Bubble th={th} gone={gone} /></Discussion>}</Fragment>
         )
       })}
+      {pinChoices && <Pop anchor={pinChoices.anchor} leaving={false} onClose={() => setPinChoices(null)} width={320} align="center" className="cb-pin-choice-pop">
+        <div className="cb-pin-choices" role="group" aria-label={t('collab.tab.pins')} data-panel-chrome="" data-ui="pin-choices" onKeyDown={event => {
+          const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button'))
+          const index = buttons.indexOf(document.activeElement as HTMLButtonElement)
+          if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            event.preventDefault()
+            buttons[(index + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length]?.focus()
+          }
+          if (event.key === 'Escape') pinChoices.anchor.focus()
+        }}>
+          {pinChoices.ids.map(id => collab.threads.find(th => th.id === id)).filter((th): th is Thread => !!th).map(th => <button key={th.id} type="button" data-thread={th.id} onClick={() => { setPinChoices(null); collab.focusThread(th) }}>
+            <b>{collab.pinNumber(th)}</b><span>{th.posts[0]?.body || t('collab.pin.photoOnly')}</span>
+          </button>)}
+        </div>
+      </Pop>}
 
       {draft && (
         <><div className="cb-at" ref={track('draft', () => [anchorPoint(api.engine()?.model, draft)])} style={{ zIndex: 37 }}>
@@ -178,14 +253,14 @@ export default function PlanOverlays() {
       ))}
 
       {viewer && !me && (
-        <div className="cb-ro qb-card" data-ui="read-only-banner" data-tour="read-only-banner"><Eye />
-          <span><b>{t('collab.readOnly.guestTitle')}</b> · {t('collab.readOnly.guest', { owner: collab.plan?.members.find(m => m.role === 'owner')?.name || '' })}</span>
+        <div className="cb-ro qb-card" style={{ top: bannerTop }} data-ui="read-only-banner" data-tour="read-only-banner"><Eye />
+          <span><b>{t('collab.readOnly.guestTitle')}</b>{!narrow && <> · {t('collab.readOnly.guest', { owner: collab.plan?.members.find(m => m.role === 'owner')?.name || '' })}</>}</span>
           <a href={collab.loginUrl()} className="qb-btn qb-btn-sm no-underline">{t('collab.readOnly.login')}</a>
         </div>
       )}
-      {viewer && me && (
-        <div className="cb-ro low qb-card" data-ui="read-only-banner" data-tour="read-only-banner"><MessageSquare />
-          <span><b>{t(collab.role === 'guest' ? 'collab.readOnly.visitorTitle' : 'collab.readOnly.commenterTitle')}</b> · {t(collab.role === 'guest' ? 'collab.readOnly.visitor' : 'collab.readOnly.commenter')}</span>
+      {viewer && me && !SINGLE_MODEL && (
+        <div className="cb-ro qb-card" style={{ top: bannerTop }} data-ui="read-only-banner" data-tour="read-only-banner"><MessageSquare />
+          <span><b>{t(collab.role === 'guest' ? 'collab.readOnly.visitorTitle' : 'collab.readOnly.commenterTitle')}</b>{!narrow && <> · {t(collab.role === 'guest' ? 'collab.readOnly.visitor' : 'collab.readOnly.commenter')}</>}</span>
           {collab.role !== 'guest'&&!collab.plan?.viewOnly && <button type="button" className="qb-btn qb-btn-ghost qb-btn-sm" onClick={() => setFork(true)} data-ui="plan-fork"><GitFork />{t('collab.forkOwn')}</button>}
         </div>
       )}

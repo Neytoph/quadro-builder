@@ -59,7 +59,7 @@ export default function TopToolbar() {
     const observer = new ResizeObserver(update)
     observer.observe(el)
     return () => observer.disconnect()
-  }, [setToolbarW])
+  }, [setToolbarW, locked, commenting, lang])
   useEffect(() => {
     window.addEventListener(UI_ESCAPE_EVENT, close)
     return () => window.removeEventListener(UI_ESCAPE_EVENT, close)
@@ -93,11 +93,11 @@ export default function TopToolbar() {
   return <>
     <div data-ui="toolbar-wrap" className={`fixed z-50 flex flex-col items-stretch gap-1.5 pointer-events-none ${narrow ? 'left-2 right-2' : 'left-1/2 -translate-x-1/2 items-center'}`} style={{ top: toolbarTop(left, vw) }}>
       <div ref={barRef} data-compact={compact} data-tour="toolbar" role="toolbar" aria-label={t('chrome.tools')} className="qb-card qb-top-toolbar relative flex items-stretch gap-0.5 p-1 pointer-events-auto max-w-[calc(100vw-1rem)] overflow-x-auto scrollbar-none">
-        <div className={`contents ${locked ? 'qb-locked' : ''}`}>
+        {!locked && <div className="contents">
           <button disabled={!api.canUndo} onClick={api.undo} title={t('hint.undo')} aria-label={t('hint.undo')} className="qb-tool qb-history-tool"><Svg16 inner={TOOL_ICON.undo} /><span>{t('tool.undo')}</span></button>
           <button disabled={!api.canRedo} onClick={api.redo} title={t('hint.redo')} aria-label={t('hint.redo')} className="qb-tool qb-history-tool"><Svg16 inner={TOOL_ICON.redo} /><span>{t('tool.redo')}</span></button>
-        </div>
-        {sep}
+        </div>}
+        {!locked && sep}
         <div className="qb-mode-group" role="group" aria-label={t('tool.select')}>
           <button ref={selectRef} className="m-tool qb-tool qb-text-tool" data-ui="tool-select"
             title={mobile ? t('tool.select') : `${t('tool.select')} · Esc · ${t('keys.toggleTool')} (Space)`}
@@ -128,7 +128,7 @@ export default function TopToolbar() {
             </kbd>}
           </button>
         </div>
-        <div className={`contents ${locked ? 'qb-locked' : ''}`}>
+        {!locked && <div className="contents">
           <button className="m-tool qb-tool qb-text-tool qb-delete-tool" data-mode-on={api.mode === 'delete'} aria-pressed={api.mode === 'delete'} data-tone="red" title={t(mobile ? 'tool.delete' : 'tool.deleteHint')} aria-label={t(mobile ? 'tool.delete' : 'tool.deleteHint')} onClick={() => { api.setMode(api.mode === 'delete' ? 'select' : 'delete'); close() }}>
             <span>{t('tool.delete')}</span>{!mobile && <kbd className="qb-tool-key" aria-hidden="true">D</kbd>}
           </button>
@@ -147,7 +147,7 @@ export default function TopToolbar() {
             close()
             window.dispatchEvent(new CustomEvent(CUSTOM_COMPONENTS_EVENT, { detail: { x: rect.left + rect.width / 2, y: rect.bottom + 8 } }))
           }}><LayoutGrid size={16} strokeWidth={2} /><span>{customComponentStrings[lang].title}</span>{!mobile && <kbd className="qb-tool-key" aria-hidden="true">4</kbd>}</button>
-        </div>
+        </div>}
         {commenting && <>{sep}<button className="m-tool qb-tool" data-mode-on={collab.placingPin} aria-pressed={collab.placingPin} title={t('collab.pin.toolHint')} aria-label={t('collab.pin.toolHint')} data-ui="tool-comment" data-tour="tool-comment" onClick={() => {
           api.setMode('select'); collab.setPinDraft(null)
           if (!collab.placingPin) { setPane(null); collab.setActiveThread(null) }

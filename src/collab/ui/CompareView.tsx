@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { useI18n } from '../../i18n'
 import { BuildModel, SceneManager } from '../../engine-api'
@@ -6,6 +6,7 @@ import { MOTION } from '../../ui/motion'
 import { DIFF_COLORS, useCollab } from '../CollabContext'
 import type { ModelJSON } from '../ymodel'
 import { day } from './bits'
+import { usePanelLayout } from '../../ui/panelLayout'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type E = any
@@ -42,6 +43,10 @@ function useSide(host: React.RefObject<HTMLDivElement | null>, json: ModelJSON, 
 export default function CompareView() {
   const collab = useCollab()
   const { t, lang } = useI18n()
+  const { vh } = usePanelLayout()
+  const short = vh < 650
+  const [bomOpen, setBomOpen] = useState(!short)
+  useEffect(() => setBomOpen(!short), [short])
   const cmp = collab.compare!
   const leftHost = useRef<HTMLDivElement>(null)
   const rightHost = useRef<HTMLDivElement>(null)
@@ -96,12 +101,12 @@ export default function CompareView() {
   for (const id of cmp.ids) if (!options.some(o => o.id === id)) options.push({ id, name: cmp.names[cmp.ids.indexOf(id)], at: null })
   const count = (json: ModelJSON) => ['tubes', 'panels', 'slides', 'fittings'].reduce((s, k) => s + ((json[k] as unknown[] | undefined)?.length || 0), 0)
 
-  const Select = ({ side }: { side: 0 | 1 }) => {
+  const renderSelect = (side: 0 | 1) => {
     const id = cmp.ids[side]
     const o = options.find(x => x.id === id)
     return (
       <span className="cb-vsel" data-ui={`compare-pick-${side}`}>
-        {cmp.names[side]}{o?.at ? <small>{day(o.at, lang)}</small> : null}<ChevronDown />
+        <span className="cb-version-name" title={cmp.names[side]}>{cmp.names[side]}</span>{o?.at ? <small>{day(o.at, lang)}</small> : null}<ChevronDown />
         <select value={id} aria-label={cmp.names[side]} onChange={e => {
           const ids: [string, string] = side === 0 ? [e.target.value, cmp.ids[1]] : [cmp.ids[0], e.target.value]
           collab.openCompare(ids[0], ids[1])
@@ -116,11 +121,9 @@ export default function CompareView() {
     <div className="cb-compare" data-ui="compare-view">
       {/* data-tour=toolbar：站点装进来的小麦头像会让开工具条，对照时这一条就是工具条 */}
       <div className="cb-cmpbar qb-card" data-tour="toolbar">
-        <Select side={0} />
-        <span className="cb-legend">→</span>
-        <Select side={1} />
-        <span className="cb-legend"><i className="r" />{t('collab.compare.removed', { n: removed })}</span>
-        <span className="cb-legend"><i className="a" />{t('collab.compare.added', { n: added })}</span>
+        <div className="cb-compare-selectors">{renderSelect(0)}<span aria-hidden="true">→</span>{renderSelect(1)}</div>
+        <div className="cb-compare-legend"><span className="cb-legend"><i className="r" />{t('collab.compare.removed', { n: removed })}</span>
+        <span className="cb-legend"><i className="a" />{t('collab.compare.added', { n: added })}</span></div>
         <button type="button" className="qb-btn qb-btn-ghost qb-btn-sm sp" onClick={collab.closeCompare} data-ui="compare-close">{t('collab.compare.close')}</button>
       </div>
       <div className="cb-panes">
@@ -132,9 +135,9 @@ export default function CompareView() {
           </div>
         ))}
       </div>
-      <div className="cb-diff qb-card" data-ui="compare-bom">
-        <div className="dh"><b>{t('collab.compare.bom')}</b>
-          <span>{t('collab.compare.totals', { a: cmp.names[0], n: count(cmp.left), b: cmp.names[1], m: count(cmp.right) })}</span></div>
+      <details className="cb-diff qb-card" data-ui="compare-bom" open={bomOpen} onToggle={event => setBomOpen(event.currentTarget.open)}>
+        <summary className="dh" data-button-motion="off"><b>{t('collab.compare.bom')}</b>
+          <span>{t('collab.compare.totals', { a: cmp.names[0], n: count(cmp.left), b: cmp.names[1], m: count(cmp.right) })}</span><ChevronDown size={16} aria-hidden="true" /></summary>
         <div className="tb">
           {!cmp.bom.length && <div className="cb-hint" style={{ padding: 0 }}>{t('collab.compare.bomSame')}</div>}
           {cmp.bom.length > 0 && (
@@ -156,7 +159,7 @@ export default function CompareView() {
             </table>
           )}
         </div>
-      </div>
+      </details>
     </div>
   )
 }
