@@ -28,6 +28,7 @@ import { CollabProvider, useCollab } from './collab/CollabContext'
 import './collab/collab.css'
 import { JoinModal } from './collab/ui/Modals'
 import PlanOverlays from './collab/ui/PlanOverlays'
+import CommentMessageLink from './collab/ui/CommentMessageLink'
 import CollabCoach from './collab/ui/CollabCoach'
 import CompareView from './collab/ui/CompareView'
 import BatchImport from './collab/ui/BatchImport'
@@ -548,6 +549,7 @@ function AppInner() {
       {!viewer && !collab.compare && <LeftStack />}
       <RightDock />
       {!collab.compare && !api.explodedView && <AssemblyBar />}
+      <CommentMessageLink />
       {collab.mode === 'plan' && !collab.compare && !api.explodedView && <PlanOverlays />}
       {collab.mode === 'plan' && collab.compare && <CompareView key={collab.session?.id} />}
       <JoinModal />

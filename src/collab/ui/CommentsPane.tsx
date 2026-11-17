@@ -22,24 +22,32 @@ export default function CommentsPane() {
   const collab = useCollab()
   const api = useEngine()
   const { t } = useI18n()
-  const { commentsTab, setPane } = useDock()
+  const { pane, commentsTab, setPane } = useDock()
   const [tab, setTab] = useState<CommentsTab>(commentsTab || (collab.unread.chat && !collab.unread.pins ? 'chat' : 'pins'))
   useEffect(() => { if (commentsTab) setTab(commentsTab) }, [commentsTab])
   const [filter, setFilter] = useState<Filter>('open')
   const seen = useRef<(p: Post) => boolean>(collab.isUnread)
 
   useEffect(() => {
-    collab.refreshThreads().catch(collab.report)
-    collab.markRead().catch(collab.report)
+    if (pane !== 'comments') return
+    let open = true
+    let snapshot: typeof collab.threads | undefined
+    const read = () => { if (open && !document.hidden && snapshot) { const items = snapshot; snapshot = undefined; void collab.markRead(items).catch(collab.report) } }
+    collab.refreshThreads().then(items => { snapshot = items; read() }).catch(collab.report)
+    document.addEventListener('visibilitychange',read)
+    return () => { open = false; document.removeEventListener('visibilitychange',read) }
     // 只在打开时做一次
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [pane, collab.plan?.id])
+
+  const activeResolved = collab.threads.some(th => th.id === collab.activeThread && th.resolved)
+  useEffect(() => { if (activeResolved) setFilter('all') }, [collab.activeThread, activeResolved])
 
   const allPins = collab.threads.filter(th => th.kind === 'pin').sort((a, b) => collab.pinNumber(a) - collab.pinNumber(b))
   const open = allPins.filter(th => !th.resolved)
   const done = allPins.filter(th => th.resolved)
   const chat = collab.threads.find(th => th.kind === 'chat') || null
-  const unreadIn = (th: Thread) => th.posts.filter(p => seen.current(p)).length
+  const unreadIn = (th: Thread) => th.posts.filter(collab.isUnread).length
   const pinUnread = allPins.reduce((s, th) => s + unreadIn(th), 0)
   const chatUnread = chat ? unreadIn(chat) : 0
 
@@ -135,7 +143,7 @@ function Chat({ chat, seen }: { chat: Thread | null; seen: (p: Post) => boolean 
           return (
             <div key={p.id} style={{ display: 'contents' }}>
               {i === firstNew && <div className="cb-unread-line">{t('collab.chat.newLine', { n: newCount })}</div>}
-              <div className={`cb-msg ${mine ? 'me' : ''}`} data-ui="post">
+              <div className={`cb-msg ${mine ? 'me' : ''}`} data-ui="post" data-message-post={p.id}>
                 <Face name={p.name} avatar={p.avatar} color={collab.colorOf(p.userId)} />
                 <div>
                   <div className="who">

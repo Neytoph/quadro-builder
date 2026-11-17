@@ -520,3 +520,4 @@
   .cb-shared-dialog .cb-mem .t b { overflow-wrap: anywhere; }
   .cb-shared-dialog .cb-member-actions { grid-column: 2 / -1; justify-self: end; }
 }
+.cb-message-target{outline:2px solid #ed8e4f;outline-offset:3px;border-radius:8px;background:#fff4e8!important}

@@ -22,8 +22,8 @@ export interface Me {
   userId: number
   name: string
   avatar: string
-  /** 上次看过评论和留言的时间（毫秒），没看过是 0 */
-  lastReadAt: number
+  /** 服务端已读留言编号。 */
+  lastReadId: number
 }
 
 export interface Plan {
@@ -233,7 +233,7 @@ export const collabApi = {
     form.append('photo', file)
     return call<{ path: string }>('POST', `/collab/plans/${enc(id)}/photos`, form)
   },
-  read: (id: string) => call<unknown>('POST', `/collab/plans/${enc(id)}/read`),
+  read: (id: string, through: number, user: number) => call<unknown>('POST', `/collab/plans/${enc(id)}/read`, {through_id:through,expected_user_id:user}),
   fork: (id: string, versionId: number | null) => call<{ planId: string }>('POST', `/collab/plans/${enc(id)}/fork`, { versionId }),
   deliver: (id: string, body: { versionId: number; ageNote: string; loadNote: string; metrics: Metrics; renders: string[] }) =>
     call<{ token: string }>('POST', `/collab/plans/${enc(id)}/deliver`, body),

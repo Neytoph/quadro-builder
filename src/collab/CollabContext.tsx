@@ -72,8 +72,8 @@ interface CollabApi {
   versions: VersionInfo[]
   isUnread: (p: Post) => boolean
   unread: { pins: number; chat: number }
-  markRead: () => Promise<void>
-  refreshThreads: () => Promise<void>
+  markRead: (items?: Thread[]) => Promise<void>
+  refreshThreads: () => Promise<Thread[] | undefined>
   refreshVersions: () => Promise<void>
   /** 放图钉的工具开着 */
   placingPin: boolean
@@ -144,6 +144,13 @@ function planUrl(id: string, extra: Record<string, string> = {}) {
   return `${location.pathname}?${q.toString()}`
 }
 
+function previewUrl(id: string) {
+  const query = new URLSearchParams({plan:id})
+  const source = new URLSearchParams(location.search)
+  for (const key of ['comments','thread','post','lang']) if (source.has(key)) query.set(key,source.get(key)!)
+  return '/model-preview.html?'+query
+}
+
 function errText(err: unknown) {
   return err instanceof Error ? err.message : String(err)
 }
@@ -154,6 +161,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
   const api = useEngine()
   const { t } = useI18n()
   const entry = useMemo(() => bootEntry(), [])
+  const messageEntry = useRef(new URLSearchParams(location.search).get('comments') === '1')
   const enabled = collabEnabled() && !entry.lockedView
   const [rev, setRev] = useState(0)
   const bump = useCallback(() => setRev(n => n + 1), [])
@@ -169,7 +177,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
   const [compare, setCompare] = useState<CompareState | null>(null)
   const [delivery, setDelivery] = useState<DeliveryState | null>(null)
   const [room, setRoom] = useState<RoomState | null>(null)
-  const [readAt, setReadAt] = useState<Record<string, number>>({})
+  const [readPosition, setReadPosition] = useState<Record<string, number>>({})
   const [myPlans, setMyPlans] = useState<Array<{ id: string; name: string; role: Role }>>([])
   const [joinAsk, setJoinAsk] = useState<JoinAsk | null>(null)
   const [inviteError, setInviteError] = useState<string | null>(null)
@@ -239,7 +247,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
       loading.current.add(planId)
       collabApi.plan(planId).then((plan) => {
         if (!alive.current) return
-        if(plan.viewOnly&&!(plan.canView3D&&plan.canComment)){setTabAccess(tabId,{readOnly:true,idTag:''});if(EDITOR_EMBED)parent.postMessage({type:'xmf-model-editor:readonly',plan:planId,name:plan.name,coverUrl:plan.coverUrl},location.origin);else if(activePlanId===planId)location.replace('/model-preview.html?plan='+encodeURIComponent(planId));return}
+        if(plan.viewOnly&&!(plan.canView3D&&plan.canComment)){setTabAccess(tabId,{readOnly:true,idTag:''});if(EDITOR_EMBED)parent.postMessage({type:'xmf-model-editor:readonly',plan:planId,name:plan.name,coverUrl:plan.coverUrl},location.origin);else if(activePlanId===planId)location.replace(previewUrl(planId));return}
         const local = tabLocal(tabId)
         if (!local) return
         const s = new PlanSession(plan, local)
@@ -248,7 +256,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
           ? shotRef.current.coverShot() : null)
         sessions.current.set(planId, s)
         setErrors(e => { const next = { ...e }; delete next[planId]; return next })
-        setReadAt(r => ({ ...r, [planId]: plan.me?.lastReadAt || 0 }))
+        setReadPosition(r => ({ ...r, [planId]: plan.me?.lastReadId || 0 }))
         s.subscribe(bump)
         setTabAccess(tabId, { readOnly: !s.canEdit, idTag: s.idTag })
         if(plan.viewOnly)void s.refresh().catch(report)
@@ -385,7 +393,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
         }
         if (!entry.plan) return
         const plan = await collabApi.plan(entry.plan)
-        if(plan.viewOnly&&!(plan.canView3D&&plan.canComment)){if(EDITOR_EMBED)parent.postMessage({type:'xmf-model-editor:readonly',plan:plan.id,name:plan.name,coverUrl:plan.coverUrl},location.origin);else location.replace('/model-preview.html?plan='+encodeURIComponent(plan.id));return}
+        if(plan.viewOnly&&!(plan.canView3D&&plan.canComment)){if(EDITOR_EMBED)parent.postMessage({type:'xmf-model-editor:readonly',plan:plan.id,name:plan.name,coverUrl:plan.coverUrl},location.origin);else location.replace(previewUrl(plan.id));return}
         api.openPlanTab(plan.id, plan.name)
       } catch (err) {
         setJoining(false)
@@ -417,8 +425,10 @@ export function CollabProvider({ children }: { children: ReactNode }) {
   // —— 当前方案的评论和版本 ——
   const refreshThreads = useCallback(async () => {
     if (!activePlanId) return
+    let loaded: Thread[] | undefined
     await planGeneration.run(activePlanId, 'threads', signal => collabApi.threads(activePlanId, signal),
-      (items, epoch) => setThreadResult({ plan: activePlanId, epoch, items }))
+      (items, epoch) => { loaded = items; setThreadResult({ plan: activePlanId, epoch, items }) })
+    return loaded
   }, [activePlanId, planGeneration])
 
   const refreshVersions = useCallback(async () => {
@@ -558,8 +568,8 @@ export function CollabProvider({ children }: { children: ReactNode }) {
 
   // —— 评论 ——
   const me = session?.plan.me || null
-  const seenAt = activePlanId ? readAt[activePlanId] || 0 : 0
-  const isUnread = useCallback((p: Post) => !p.deleted && !!me && p.userId !== me.userId && p.createdAt > seenAt, [me, seenAt])
+  const seenThrough = activePlanId ? readPosition[activePlanId] || 0 : 0
+  const isUnread = useCallback((p: Post) => !p.deleted && !!me && p.userId !== me.userId && p.id > seenThrough, [me, seenThrough])
   const unread = useMemo(() => {
     let pins = 0, chat = 0
     for (const th of threads) {
@@ -570,11 +580,20 @@ export function CollabProvider({ children }: { children: ReactNode }) {
     return { pins, chat }
   }, [threads, isUnread])
 
-  const markRead = useCallback(async () => {
-    if (!session || !me) return
-    await collabApi.read(session.id)
-    setReadAt(r => ({ ...r, [session.id]: Date.now() }))
-  }, [session, me])
+  const markRead = useCallback(async (items = threads) => {
+    if (!session || !me || planGeneration.current.id !== session.id) return
+    const generation = planGeneration.current
+    const through = Math.max(0, ...items.flatMap(th => th.posts.map(post => post.id)))
+    if (!through) return
+    await collabApi.read(session.id, through, me.userId)
+    if (generation !== planGeneration.current) return
+    setReadPosition(r => ({ ...r, [session.id]: Math.max(r[session.id] || 0, through) }))
+    document.dispatchEvent(new CustomEvent('qh-messages-changed'))
+    if (window.BroadcastChannel) {
+      const channel = new BroadcastChannel('xmf-messages')
+      channel.postMessage({type:'read',user:me.userId}); channel.close()
+    }
+  }, [session, me, threads, planGeneration])
 
   const upload = useCallback(async (files: File[]) => {
     if (!session) throw new Error('no plan')
@@ -844,7 +863,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
     saveVersion, inviteUrl, viewUrl, setRole, removeMember, fork, metricsOf, deliver,
     compare, openCompare, closeCompare, versionModel,
     delivery, room, saveRoom, enableSharing, createdPlan, recoverCreatedPlan, retryCover, inviteOpenId, closeInvite, openPlan,
-    coachBlocked: sharingDialogOpen || modalCount > 0, setSharingDialogOpen, holdModal,
+    coachBlocked: sharingDialogOpen || modalCount > 0 || (messageEntry.current && activePlanId === entry.plan), setSharingDialogOpen, holdModal,
     joinAsk, inviteError, dismissInviteError, joinAsGuest, loginUrl, report,
   }
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>

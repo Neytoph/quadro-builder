@@ -412,7 +412,8 @@ function Bubble({ th, gone }: { th: Thread; gone: boolean }) {
   // 气泡里的新回复标「新」，看过就不标：打开就记已读
   const [seen] = useState(() => collab.isUnread)
   const { isUnread, markRead, report } = collab
-  useEffect(() => { if (th.posts.some(isUnread)) markRead().catch(report) }, [th.posts, isUnread, markRead, report])
+  // 每次打开只标记这一刻的快照，之后到达的回复继续显示未读。
+  useEffect(() => { if (th.posts.some(isUnread)) markRead().catch(report) }, [th.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div ref={ref} className={`cb-bubble ${left ? 'left' : ''}`} data-ui="pin-bubble" onPointerDown={ev => ev.stopPropagation()}>
@@ -431,7 +432,7 @@ function Bubble({ th, gone }: { th: Thread; gone: boolean }) {
         {gone && <div className="cb-gone-note"><TriangleAlert />{note?.text || t('collab.pin.partGone')}</div>}
         <div className="cb-posts">
           {th.posts.map((p,i) => (
-            <div key={p.id} className={`cb-post ${seen(p) ? 'new' : ''}`} data-new={t('collab.new')} data-ui="post">
+            <div key={p.id} className={`cb-post ${seen(p) ? 'new' : ''}`} data-new={t('collab.new')} data-ui="post" data-message-post={p.id}>
               <Face name={p.name} avatar={p.avatar} color={collab.colorOf(p.userId)} />
               <div>
                 <div className="who">{p.name}{isDesigner(collab.plan, p.userId) && <span className="role">{t('collab.designer')}</span>}<small>{when(p.createdAt, lang)}{p.editedAt?` · ${commentText('edited')}`:''}</small><CommentActions thread={th} post={p} first={i===0}/></div>

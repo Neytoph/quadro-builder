@@ -6,7 +6,7 @@ import { COACH_GUEST_KEY, COACH_KEY, coachKind, coachSeen, coachSteps, markCoach
 function plan(myRole: Plan['myRole'], me: boolean): Plan {
   return {
     id: 'p1', name: '次卧滑梯屋', data: null, qdf: '', members: [], myRole, briefId: null,
-    me: me ? { userId: 7, name: '林晓', avatar: '', lastReadAt: 0 } : null,
+    me: me ? { userId: 7, name: '林晓', avatar: '', lastReadId: 0 } : null,
   }
 }
 
