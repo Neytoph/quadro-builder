@@ -166,7 +166,7 @@ export default function ComponentConfiguration({ choices, selectedKeys, busy, lo
       </section>
       </>}
     </div>
-    <footer className="cc-footer"><div className="cc-footer-meta"><button type="button" className="cc-library-button" aria-label={s.advanced} aria-expanded={expanded} onClick={() => { setEditing(null); setExpanded(!expanded) }}>{s.library} ↗</button><span className="cc-save-state" role="status"><i />{busy || pending ? s.saving : s.saved}</span></div><button type="button" className="qb-btn primary cc-back" disabled={locked} onClick={onBack}>{s.back}</button></footer>
+    <footer className="cc-footer"><div className="cc-footer-meta"><button type="button" className="cc-library-button" aria-label={s.advanced} aria-expanded={expanded} onClick={() => { setEditing(null); setExpanded(!expanded) }}>{s.library} ↗</button>{!error && !loadFailed && !loading && <span className="cc-save-state" role="status"><i />{busy || pending ? s.saving : s.saved}</span>}</div><button type="button" className="qb-btn primary cc-back" disabled={locked} onClick={onBack}>{s.back}</button></footer>
     {drag?.active && choiceMap.has(drag.key) && createPortal(<div className="cc-drag-ghost" style={{ left: drag.x + 12, top: drag.y - 24 }} aria-hidden="true"><ComponentChoicePreview choice={choiceMap.get(drag.key)!} /></div>, document.body)}
   </div>
 }

@@ -11,7 +11,8 @@ export function componentMenuLabel(choice: ComponentChoice, lang: 'zh' | 'en' | 
 export const customComponentStrings = {
   zh: {
     title: '自定义组件', configure: '配置组件', saveSelection: '保存选中零件', cancel: '取消', cancelOnRelease: '松开 4 取消', holdHint: '松开 4 选择 · 滚轮换组', releaseHint: '松开 4 选择',
-    empty: '点击中心配置，将已有组件加入快捷菜单', local: '配置保存在此浏览器，可在不同造型中使用。',
+    empty: '点击中心配置，将已有组件加入快捷菜单',
+    importLocal: '导入本机旧组件', imported: '已保存到当前账号', changed: '组件已在其他页面或设备更新，请重新读取后再试。', accountChanged: '登录账号已变化，请重新读取组件。',
     name: '组件名称', placeholder: '例如：窗框、楼梯单元', save: '保存组件',
     selected: '将当前选中的零件保存为一个组件，保留颜色和组合。',
     selectFirst: '请先选中要保存的零件。', saved: '组件已保存', renamed: '组件已重命名',
@@ -22,10 +23,12 @@ export const customComponentStrings = {
     placing: '组件跟随指针。↑↓ 升降，Q/E 旋转，点击放下，Esc 取消。',
     centreClick: '中心配置 · 右下取消', centreRelease: '松开 4，打开组件配置', cancelClick: '点击取消，收起菜单', cancelRelease: '松开 4，取消本次选择', useRelease: '松开 4，使用', unconfigured: '此位置还没有组件', outside: '移到圆环外，方向选择仍然有效', clickHint: '按住 4 选择，或直接点击组件', scrollHint: '滚轮换组',
     noSelection: '当前没有选中零件', count: '个组件', loading: '正在读取组件…', savedList: '已保存组件', noneSaved: '还没有自定义组件', incomplete: '请一并选择配件所连接的管子或接头，再保存组件。', retry: '重新读取',
+    full: '已有 10 个组件。删除一个后再保存。',
   },
   en: {
     title: 'Custom components', configure: 'Configure', saveSelection: 'Save selected parts', cancel: 'Cancel', cancelOnRelease: 'Release 4 to cancel', holdHint: 'Release 4 to select · Scroll for groups', releaseHint: 'Release 4 to select',
-    empty: 'Configure in the centre to add existing components', local: 'Menu settings are saved in this browser, across designs.',
+    empty: 'Configure in the centre to add existing components',
+    importLocal: 'Import previous local components', imported: 'Saved to this account', changed: 'Components changed on another page or device. Reload before editing.', accountChanged: 'The signed-in account changed. Reload components.',
     name: 'Component name', placeholder: 'e.g. Window frame, stair unit', save: 'Save component',
     selected: 'Save the selected parts together, including their colours and groups.',
     selectFirst: 'Select the parts to save first.', saved: 'Component saved', renamed: 'Component renamed',
@@ -36,10 +39,12 @@ export const customComponentStrings = {
     placing: 'Component follows the pointer. ↑↓ to lift, Q/E to rotate, click to place, Esc to cancel.',
     centreClick: 'Configure in the centre · Cancel lower right', centreRelease: 'Release 4 to configure', cancelClick: 'Click to close the menu', cancelRelease: 'Release 4 to cancel', useRelease: 'Release 4 to use', unconfigured: 'No component in this position', outside: 'Directions also work outside the ring', clickHint: 'Hold 4 to select, or click a component', scrollHint: 'Scroll for groups',
     noSelection: 'No parts selected', count: 'components', loading: 'Loading components…', savedList: 'Saved components', noneSaved: 'No custom components yet', incomplete: 'Also select the tubes or joints supporting these accessories before saving.', retry: 'Reload',
+    full: '10 components saved. Delete one before saving another.',
   },
   de: {
     title: 'Eigene Komponenten', configure: 'Verwalten', saveSelection: 'Auswahl speichern', cancel: 'Abbrechen', cancelOnRelease: '4 loslassen zum Abbrechen', holdHint: '4 loslassen · Scrollen für Gruppen', releaseHint: '4 loslassen zum Auswählen',
-    empty: 'In der Mitte vorhandene Komponenten zum Menü hinzufügen', local: 'Menüeinstellungen in diesem Browser, für alle Entwürfe gespeichert.',
+    empty: 'In der Mitte vorhandene Komponenten zum Menü hinzufügen',
+    importLocal: 'Bisherige lokale Komponenten importieren', imported: 'Im aktuellen Konto gespeichert', changed: 'Komponenten wurden auf einer anderen Seite oder einem anderen Gerät geändert. Bitte neu laden.', accountChanged: 'Das angemeldete Konto hat sich geändert. Komponenten bitte neu laden.',
     name: 'Name der Komponente', placeholder: 'z. B. Fensterrahmen, Treppenelement', save: 'Komponente speichern',
     selected: 'Ausgewählte Teile mit ihren Farben und Gruppen zusammen speichern.',
     selectFirst: 'Zuerst die zu speichernden Teile auswählen.', saved: 'Komponente gespeichert', renamed: 'Komponente umbenannt',
@@ -50,5 +55,6 @@ export const customComponentStrings = {
     placing: 'Komponente folgt dem Zeiger. ↑↓ heben, Q/E drehen, klicken zum Platzieren, Esc bricht ab.',
     centreClick: 'Mitte konfigurieren · Rechts unten abbrechen', centreRelease: '4 loslassen zum Konfigurieren', cancelClick: 'Klicken zum Schließen', cancelRelease: '4 loslassen zum Abbrechen', useRelease: '4 loslassen für', unconfigured: 'Hier ist keine Komponente', outside: 'Richtungsauswahl auch außerhalb des Rings', clickHint: '4 halten oder Komponente anklicken', scrollHint: 'Scrollen für Gruppen',
     noSelection: 'Keine Teile ausgewählt', count: 'Komponenten', loading: 'Komponenten werden geladen…', savedList: 'Gespeicherte Komponenten', noneSaved: 'Noch keine eigenen Komponenten', incomplete: 'Auch die tragenden Rohre oder Kupplungen auswählen, dann speichern.', retry: 'Neu laden',
+    full: '10 Komponenten gespeichert. Eine löschen, bevor eine weitere gespeichert wird.',
   },
 }

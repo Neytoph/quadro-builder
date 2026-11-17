@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { ChevronLeft, ChevronRight, LayoutGrid, Plus, X } from 'lucide-react'
 import { useEngine } from '../store/EngineContext'
 import { useI18n } from '../i18n'
-import { listComponents, readComponentConfiguration, removeComponent, saveComponent, saveComponentConfiguration, type ComponentFragment, type CustomComponent } from '../store/customComponents'
+import { canImportLegacyComponents, fragmentIsComplete, importLegacyComponents, readComponentLibrary, removeComponent, saveComponent, saveComponentConfiguration, type ComponentFragment, type CustomComponent } from '../store/customComponents'
 import { activateComponent, componentChoices, DEFAULT_COMPONENT_KEYS, type ComponentChoice } from '../store/componentChoices'
 import { componentMenuLabel, customComponentStrings } from './customComponentStrings'
 import CustomComponentPreview from './CustomComponentPreview'
@@ -31,25 +31,32 @@ export default function CustomComponentsMenu({ position, onClose }: { position: 
   const [editing, setEditing] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [legacyAvailable, setLegacyAvailable] = useState(false)
   const [page, setPage] = useState(0)
   const [viewport, setViewport] = useState({ w: window.innerWidth, h: window.innerHeight })
   const rootRef = useRef<HTMLDivElement>(null)
   const originFocus = useRef(document.activeElement as HTMLElement | null)
-  const report = (err: unknown) => setError(`${s.error}: ${err instanceof Error ? err.message : String(err)}`)
+  const report = (err: unknown) => {
+    const message = err instanceof Error ? err.message : String(err)
+    const messages: Record<string, string> = { components_changed: s.changed, component_account_changed: s.accountChanged }
+    if (messages[message]) setLoadFailed(true)
+    setError(messages[message] ?? `${s.error}: ${message}`)
+  }
 
   useEffect(() => {
     let active = true
     setLoading(true)
     setLoadFailed(false)
     setError('')
-    Promise.all([listComponents(), readComponentConfiguration()]).then(async ([list, configuration]) => {
+    readComponentLibrary().then(({ components: list, keys: configuration }) => {
       const available = new Set(componentChoices(api, list, t).map(choice => choice.key))
       const wanted = configuration ?? [...DEFAULT_COMPONENT_KEYS, ...list.map(row => `saved:${row.id}`)]
       const keys = wanted.filter(key => available.has(key))
-      if (!configuration || keys.length !== wanted.length) await saveComponentConfiguration(keys)
       if (active) { setRows(list); setSelectedKeys(keys) }
     })
       .catch(err => { if (active) { setLoadFailed(true); report(err) } }).finally(() => { if (active) setLoading(false) })
+    canImportLegacyComponents().then(available => { if (active) setLegacyAvailable(available) })
+      .catch(err => console.warn('[components] legacy import unavailable', err))
     return () => { active = false }
   }, [reload])
 
@@ -157,16 +164,7 @@ export default function CustomComponentsMenu({ position, onClose }: { position: 
     const old = editing ? rows.find(row => row.id === editing) : null
     const fragment = old?.fragment || (!api.pasting && api.engine()?.builder.copySelection()) as ComponentFragment | null
     if (!fragment) { setError(s.selectFirst); return }
-    const tubes = new Set(fragment.tubes.map(tube => tube.id))
-    const nodes = new Set(fragment.nodes.map(node => node.id))
-    const fittings = new Set(fragment.fittings.map(fitting => fitting.id))
-    if (fragment.fittings.some(part => typeof part.tube === 'string' && !tubes.has(part.tube)) ||
-      fragment.nodes.some(node => (typeof node.bearingOn === 'string' && !fittings.has(node.bearingOn)) ||
-        (node.clampOn && !tubes.has(String((node.clampOn as { tubeId: string }).tubeId)))) ||
-      fragment.fittings.some(part => typeof part.node === 'string' && !nodes.has(part.node))) {
-      setError(s.incomplete)
-      return
-    }
+    if (!fragmentIsComplete(fragment)) { setError(s.incomplete); return }
     setError('')
     setBusy(true)
     try {
@@ -176,7 +174,10 @@ export default function CustomComponentsMenu({ position, onClose }: { position: 
       setName('')
       setEditing(null)
       api.notify(old ? s.renamed : s.saved)
-    } catch (err) { report(err) } finally { setBusy(false) }
+    } catch (err) {
+      if (err instanceof Error && err.message === 'component_limit') setError(s.full)
+      else report(err)
+    } finally { setBusy(false) }
   }
 
   const remove = async (id: string) => {
@@ -192,7 +193,23 @@ export default function CustomComponentsMenu({ position, onClose }: { position: 
     } catch (err) { report(err) } finally { setBusy(false) }
   }
 
+  const importLegacy = async () => {
+    if (busy || loading || loadFailed || api.readOnly) return
+    setBusy(true)
+    setError('')
+    try {
+      await importLegacyComponents()
+      setLegacyAvailable(false)
+      setReload(n => n + 1)
+      api.notify(s.imported)
+    } catch (err) {
+      if (err instanceof Error && err.message === 'component_limit') setError(s.full)
+      else report(err)
+    } finally { setBusy(false) }
+  }
+
   const selectionEditor = <>
+    {legacyAvailable && <button type="button" className="qb-btn qb-btn-ghost qb-btn-sm" disabled={busy || loading || loadFailed || api.readOnly} onClick={() => void importLegacy()}>{s.importLocal}</button>}
     <form onSubmit={e => { e.preventDefault(); void submit() }}>
       <h3>{editing ? s.rename : s.saveSelection}</h3>
       <p>{editing ? rows.find(row => row.id === editing)?.name : api.selectionCount && !api.pasting ? s.selected : s.noSelection}</p>
