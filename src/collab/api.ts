@@ -91,6 +91,9 @@ export interface Ref {
 }
 
 export interface Post {
+  revision?: number
+  deleted?: boolean
+  editedAt?: number
   id: number
   userId: number
   name: string
@@ -102,6 +105,8 @@ export interface Post {
 }
 
 export interface Thread {
+  revision?: number
+  number?: number
   partGone?: boolean
   id: number
   kind: 'pin' | 'chat'
@@ -217,6 +222,10 @@ export const collabApi = {
     call<{ id: number }>('POST', `/collab/plans/${enc(id)}/threads`, body),
   reply: (tid: number, body: { body: string; photos: string[]; refs: Ref[] }) =>
     call<{ id: number }>('POST', `/collab/threads/${tid}/posts`, body),
+  movePin: (tid: number, revision: number, anchor: Anchor) => call<unknown>('PUT', `/collab/threads/${tid}/anchor`, { revision, anchor }),
+  deletePin: (tid: number, revision: number) => call<unknown>('DELETE', `/collab/threads/${tid}`, { revision }),
+  editPost: (pid: number, revision: number, body: string) => call<unknown>('PATCH', `/collab/posts/${pid}`, { revision, body }),
+  deletePost: (pid: number, revision: number) => call<unknown>('DELETE', `/collab/posts/${pid}`, { revision }),
   resolve: (tid: number) => call<unknown>('POST', `/collab/threads/${tid}/resolve`),
   reopen: (tid: number) => call<unknown>('POST', `/collab/threads/${tid}/reopen`),
   photo: (id: string, file: File) => {

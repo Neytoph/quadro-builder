@@ -11,6 +11,8 @@ import type { Peer } from '../planSession'
 import { Face, partLabel, when } from './bits'
 import { Compose } from './Compose'
 import { anchorPoint, attachAnchor } from '../anchors'
+import {CommentActions} from './CommentActions'
+import {useCommentText} from '../commentStrings'
 import { ForkModal } from './Modals'
 import { NARROW_MAX, PANEL_GAP, projectBarHeight, TOOLBAR_CHROME_H, usePanelLayout } from '../../ui/panelLayout'
 
@@ -42,6 +44,7 @@ export default function PlanOverlays() {
   const collab = useCollab()
   const api = useEngine()
   const { t } = useI18n()
+  const commentText=useCommentText()
   const { vw } = usePanelLayout()
   const narrow = vw <= NARROW_MAX
   const items = useRef(new Map<string, { el: HTMLElement; pts: () => P3[]; box: boolean }>())
@@ -90,10 +93,10 @@ export default function PlanOverlays() {
   const { placingPin, pinDraft, setPlacingPin, setPinDraft } = collab
   useEffect(() => {
     if (!placingPin && !pinDraft) return
-    const off = () => { setPlacingPin(false); setPinDraft(null) }
+    const off = () => { if(collab.savingPin)return;collab.cancelMovePin();setPlacingPin(false); setPinDraft(null) }
     window.addEventListener(UI_ESCAPE_EVENT, off)
     return () => window.removeEventListener(UI_ESCAPE_EVENT, off)
-  }, [placingPin, pinDraft, setPlacingPin, setPinDraft])
+  }, [placingPin, pinDraft, setPlacingPin, setPinDraft,collab.cancelMovePin,collab.savingPin])
 
   const place = (ev: React.MouseEvent) => {
     ev.preventDefault()
@@ -114,7 +117,7 @@ export default function PlanOverlays() {
       : <div className="cb-ro qb-card" data-ui="collab-loading"><span>{t('collab.loading')}</span></div>
   }
 
-  const pins = collab.threads.filter(th => th.kind === 'pin' && th.anchor)
+  const pins = collab.threads.filter(th => th.kind === 'pin' && th.anchor && !(collab.movingPin?.id===th.id&&pinDraft))
   const peers = collab.peers.filter(p => p.user && p.selection.length)
   const draft = collab.pinDraft
   const syncing = s.empty && !s.synced
@@ -130,8 +133,8 @@ export default function PlanOverlays() {
             onPointerMove={event=>{if(placement.current&&Math.hypot(event.clientX-placement.current.x,event.clientY-placement.current.y)>7)placement.current.cancelled=true}}
             onPointerUp={event=>pointers.current.delete(event.pointerId)} onPointerCancel={event=>{pointers.current.delete(event.pointerId);if(placement.current)placement.current.cancelled=true}} />
           <div className="qb-card cb-pin-placement" style={{ top: projectBarHeight(vw) + PANEL_GAP + TOOLBAR_CHROME_H + 8 }} data-ui="pin-placement-hint">
-            <span>{t(narrow ? 'collab.pin.placeTouchHint' : 'collab.pin.placeHint')}</span>
-            <button type="button" className="qb-btn qb-btn-ghost qb-btn-sm" data-ui="cancel-pin-placement" onClick={() => collab.setPlacingPin(false)}>{t('confirm.cancel')}</button>
+            <span>{collab.movingPin?commentText('place'):t(narrow ? 'collab.pin.placeTouchHint' : 'collab.pin.placeHint')}</span>
+            <button type="button" className="qb-btn qb-btn-ghost qb-btn-sm" data-ui="cancel-pin-placement" onClick={() => collab.cancelMovePin()}>{t('confirm.cancel')}</button>
           </div>
         </>
       )}
@@ -159,7 +162,7 @@ export default function PlanOverlays() {
 
       {draft && (
         <><div className="cb-at" ref={track('draft', () => [anchorPoint(api.engine()?.model, draft)])} style={{ zIndex: 37 }}>
-          <span className="cb-pin draft"><b>{pins.length + 1}</b></span>
+          <span className="cb-pin draft"><b>{collab.movingPin?collab.pinNumber(collab.movingPin):'+'}</b></span>
         </div><Discussion anchor={draft}><DraftBubble draft={draft} /></Discussion></>
       )}
 
@@ -216,7 +219,17 @@ function Discussion({ anchor, children }: { anchor: Anchor; children: ReactNode 
       el.style.display = projected ? '' : 'none'
       if (projected) {
         const r = host.getBoundingClientRect()
-        el.style.transform = `translate(${r.left + projected.u * r.width}px, ${r.top + projected.v * r.height}px)`
+        const x=r.left+projected.u*r.width,y=r.top+projected.v*r.height
+        el.dataset.pinX=String(x)
+        const bubble=el.querySelector<HTMLElement>('.cb-bubble')
+        if(bubble){
+          const style=getComputedStyle(bubble),dx=parseFloat(style.marginLeft),dy=parseFloat(style.marginTop)
+          const safeTop=projectBarHeight(vw)+PANEL_GAP+TOOLBAR_CHROME_H+8
+          const left=Math.max(8,Math.min(window.innerWidth-bubble.offsetWidth-8,x+dx))
+          const top=Math.max(safeTop,Math.min(window.innerHeight-bubble.offsetHeight-12,y+dy))
+          el.style.transform=`translate(${left-dx}px,${top-dy}px)`
+          bubble.style.setProperty('--cb-arrow-top',`${Math.max(16,Math.min(bubble.offsetHeight-24,y-top-6))}px`)
+        }else el.style.transform=`translate(${x}px,${y}px)`
       }
     }
     tick()
@@ -264,7 +277,7 @@ function useBubbleSide(ref: React.RefObject<HTMLDivElement | null>) {
     const el = ref.current?.parentElement
     if (!el) return
     const check = () => {
-      const x = el.getBoundingClientRect().left
+      const x = el.dataset.pinX===undefined?el.getBoundingClientRect().left:Number(el.dataset.pinX)
       setLeft(x + 380 > window.innerWidth)
     }
     check()
@@ -312,6 +325,7 @@ function Bubble({ th, gone }: { th: Thread; gone: boolean }) {
   const collab = useCollab()
   const api = useEngine()
   const { t, lang } = useI18n()
+  const commentText=useCommentText()
   const ref = useRef<HTMLDivElement>(null)
   const left = useBubbleSide(ref)
   const note = useGoneNote(th, gone)
@@ -341,12 +355,12 @@ function Bubble({ th, gone }: { th: Thread; gone: boolean }) {
         </div>
         {gone && <div className="cb-gone-note"><TriangleAlert />{note?.text || t('collab.pin.partGone')}</div>}
         <div className="cb-posts">
-          {th.posts.map(p => (
+          {th.posts.map((p,i) => (
             <div key={p.id} className={`cb-post ${seen(p) ? 'new' : ''}`} data-new={t('collab.new')} data-ui="post">
               <Face name={p.name} avatar={p.avatar} color={collab.colorOf(p.userId)} />
               <div>
-                <div className="who">{p.name}{isDesigner(collab.plan, p.userId) && <span className="role">{t('collab.designer')}</span>}<small>{when(p.createdAt, lang)}</small></div>
-                {p.body && <p>{p.body}</p>}
+                <div className="who">{p.name}{isDesigner(collab.plan, p.userId) && <span className="role">{t('collab.designer')}</span>}<small>{when(p.createdAt, lang)}{p.editedAt?` · ${commentText('edited')}`:''}</small><CommentActions thread={th} post={p} first={i===0}/></div>
+                {p.deleted?<p className="cb-deleted-post">{commentText('deleted')}</p>:p.body && <p>{p.body}</p>}
                 {p.photos.length > 0 && <div className="pics">{p.photos.map(src => <a key={src} href={mediaUrl(src)} target="_blank" rel="noreferrer"><img src={mediaUrl(src)} alt="" /></a>)}</div>}
               </div>
             </div>
@@ -364,20 +378,27 @@ function DraftBubble({ draft }: { draft: Anchor }) {
   const collab = useCollab()
   const api = useEngine()
   const { t } = useI18n()
+  const commentText=useCommentText()
+  const [busy,setBusy]=useState(false),[error,setError]=useState('')
   const ref = useRef<HTMLDivElement>(null)
   const left = useBubbleSide(ref)
   const e = api.engine()
   const label = draft.partId && e ? partLabel(e.builder, e.model, draft.partId) : null
+  let where=draft.partId?(label||t('collab.pin.part')):t('collab.pin.space')
+  if(collab.movingPin)where=commentText('moveTitle')
   return (
     <div ref={ref} className={`cb-bubble ${left ? 'left' : ''}`} data-ui="pin-draft" onPointerDown={ev => ev.stopPropagation()}>
       <div className="inner qb-card">
         <div className="cb-bh">
-          <span className="no">{collab.threads.filter(th => th.kind === 'pin').length + 1}</span>
-          <span className="where">{draft.partId ? (label || t('collab.pin.part')) : t('collab.pin.space')}</span>
-          <button type="button" className="x" aria-label="×" onClick={() => collab.setPinDraft(null)}>×</button>
+          <span className="no">{collab.movingPin?collab.pinNumber(collab.movingPin):'+'}</span>
+          <span className="where">{where}</span>
+          <button type="button" className="x" aria-label="×" disabled={busy} onClick={() => collab.cancelMovePin()}>×</button>
         </div>
-        <Compose autoFocus placeholder={t('collab.pin.placeholder')} sendLabel={t('collab.pin.post')}
-          send={(body, files) => collab.addPin(draft, body, files)} />
+        {collab.movingPin?<div className="cb-move-confirm" data-ui="move-pin-confirm">
+          <p>{collab.movingPin.posts[0]?.body}</p>{error&&<p role="alert" className="cb-comment-error">{error}</p>}
+          <div className="foot"><button type="button" className="qb-btn qb-btn-ghost qb-btn-sm" disabled={busy} onClick={collab.cancelMovePin}>{commentText('cancel')}</button><button type="button" className="qb-btn qb-btn-sm" disabled={busy} aria-busy={busy} onClick={()=>{const thread=collab.movingPin;if(!thread||busy)return;setBusy(true);setError('');collab.movePin(thread,draft).catch(e=>setError(e instanceof Error?e.message:String(e))).finally(()=>setBusy(false))}}>{commentText('save')}</button></div>
+        </div>:<Compose autoFocus placeholder={t('collab.pin.placeholder')} sendLabel={t('collab.pin.post')}
+          send={(body, files) => collab.addPin(draft, body, files)} />}
       </div>
     </div>
   )

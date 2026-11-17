@@ -79,6 +79,14 @@ interface CollabApi {
   placingPin: boolean
   setPlacingPin: (on: boolean) => void
   pinDraft: Anchor | null
+  movingPin: Thread | null
+  savingPin: boolean
+  startMovePin: (thread: Thread) => void
+  cancelMovePin: () => void
+  movePin: (thread: Thread, anchor: Anchor) => Promise<void>
+  deletePin: (thread: Thread) => Promise<void>
+  editPost: (thread: Thread, post: Post, body: string) => Promise<void>
+  deletePost: (thread: Thread, post: Post) => Promise<void>
   setPinDraft: (a: Anchor | null) => void
   addPin: (anchor: Anchor, body: string, files: File[]) => Promise<void>
   reply: (tid: number, body: string, files: File[], refs: Ref[]) => Promise<void>
@@ -155,6 +163,8 @@ export function CollabProvider({ children }: { children: ReactNode }) {
   const [versionResult, setVersionResult] = useState<{ plan: string | null; epoch: number; items: VersionInfo[] }>({ plan: null, epoch: 0, items: [] })
   const [placingPin, setPlacingPin] = useState(false)
   const [pinDraft, setPinDraft] = useState<Anchor | null>(null)
+  const [movingPin, setMovingPin] = useState<Thread | null>(null)
+  const [savingPin, setSavingPin] = useState(false)
   const [activeThread, setActiveThread] = useState<number | null>(null)
   const [compare, setCompare] = useState<CompareState | null>(null)
   const [delivery, setDelivery] = useState<DeliveryState | null>(null)
@@ -279,7 +289,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
   },[session?.displayAsset,activeTab?.tabId,engine,t])
 
   useEffect(()=>{
-    if(session&&!canComment){setPlacingPin(false);setPinDraft(null);setActiveThread(null)}
+    if(session&&!canComment){setPlacingPin(false);setPinDraft(null);setMovingPin(null);setActiveThread(null)}
   },[session,canComment])
 
   useEffect(()=>{
@@ -422,6 +432,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
     setVersionResult({ plan: activePlanId, epoch: planGeneration.current.epoch, items: [] })
     setActiveThread(null)
     setPinDraft(null)
+    setMovingPin(null)
     setPlacingPin(false)
     setCompare(null)
     if (!activePlanId) return
@@ -548,7 +559,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
   // —— 评论 ——
   const me = session?.plan.me || null
   const seenAt = activePlanId ? readAt[activePlanId] || 0 : 0
-  const isUnread = useCallback((p: Post) => !!me && p.userId !== me.userId && p.createdAt > seenAt, [me, seenAt])
+  const isUnread = useCallback((p: Post) => !p.deleted && !!me && p.userId !== me.userId && p.createdAt > seenAt, [me, seenAt])
   const unread = useMemo(() => {
     let pins = 0, chat = 0
     for (const th of threads) {
@@ -612,6 +623,47 @@ export function CollabProvider({ children }: { children: ReactNode }) {
     nudge()
   }, [activePlanId, threads, refreshThreads, nudge])
 
+  const changeComment = useCallback(async (thread: Thread, action: () => Promise<unknown>) => {
+    const generation = planGeneration.current
+    if (!canComment || generation.id !== activePlanId || !threads.some(item => item.id === thread.id)) throw new Error('thread is not in the active plan')
+    try { await action() }
+    catch (error) {
+      if (generation === planGeneration.current && error instanceof ApiError && (error.code === 'comment_conflict' || error.code === 'slot_conflict')) await refreshThreads()
+      throw error
+    }
+    if (generation !== planGeneration.current) return false
+    await refreshThreads()
+    if (generation !== planGeneration.current) return false
+    nudge()
+    return true
+  }, [activePlanId, canComment, threads, planGeneration, refreshThreads, nudge])
+  const startMovePin = useCallback((thread: Thread) => {
+    if (!canComment || !thread.revision || !threads.some(item => item.id === thread.id)) return
+    api.setMode('select');setMovingPin(thread);setActiveThread(null);setPinDraft(null);setPlacingPin(true)
+  }, [api, canComment, threads])
+  const cancelMovePin = useCallback(() => {
+    if (savingPin) return
+    if (movingPin) setActiveThread(movingPin.id)
+    setMovingPin(null);setPinDraft(null);setPlacingPin(false)
+  }, [movingPin,savingPin])
+  const movePin = useCallback(async (thread: Thread, anchor: Anchor) => {
+    if (savingPin) return
+    setSavingPin(true)
+    try { if (await changeComment(thread, () => collabApi.movePin(thread.id, thread.revision!, anchor))) {
+      setMovingPin(null);setPinDraft(null);setPlacingPin(false);setActiveThread(thread.id)
+    }} catch (error) {
+      if (error instanceof ApiError && error.code==='slot_conflict' && session?.id===planGeneration.current.id && session.plan.viewOnly) {
+        await session.refresh();setPinDraft(null);setPlacingPin(true);report(error)
+      }
+      throw error
+    } finally { setSavingPin(false) }
+  }, [changeComment,savingPin,session,planGeneration,report])
+  const deletePin = useCallback(async (thread: Thread) => {
+    if (await changeComment(thread, () => collabApi.deletePin(thread.id, thread.revision!))) setActiveThread(null)
+  }, [changeComment])
+  const editPost = useCallback(async (thread: Thread, post: Post, body: string) => { await changeComment(thread, () => collabApi.editPost(post.id, post.revision!, body)) }, [changeComment])
+  const deletePost = useCallback(async (thread: Thread, post: Post) => { await changeComment(thread, () => collabApi.deletePost(post.id, post.revision!)) }, [changeComment])
+
   const partGone = useCallback((th: Thread) => {
     if(session?.plan.viewOnly)return !!th.partGone
     const pid = th.anchor?.partId
@@ -628,7 +680,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
     const ids = threads.filter(th => th.kind === 'pin').map(th => th.id).sort((a, b) => a - b)
     return new Map(ids.map((id, i) => [id, i + 1]))
   }, [threads])
-  const pinNumber = useCallback((th: Thread) => pinOrder.get(th.id) || 0, [pinOrder])
+  const pinNumber = useCallback((th: Thread) => th.number || pinOrder.get(th.id) || 0, [pinOrder])
 
   const focusThread = useCallback((th: Thread) => {
     if (planGeneration.current.id !== activePlanId || !threads.some(thread => thread.id === th.id)) return
@@ -786,7 +838,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
     canDeliver: !!session?.canDeliver,
     peers, colorOf,
     threads, versions, isUnread, unread, markRead, refreshThreads, refreshVersions,
-    placingPin, setPlacingPin, pinDraft, setPinDraft, addPin, reply, resolve, partGone, pinNumber, myPlans, focusThread,
+    placingPin, setPlacingPin, pinDraft, setPinDraft, movingPin, savingPin, startMovePin, cancelMovePin, movePin, deletePin, editPost, deletePost, addPin, reply, resolve, partGone, pinNumber, myPlans, focusThread,
     activeThread, setActiveThread,
     renamable, renamePlan,
     saveVersion, inviteUrl, viewUrl, setRole, removeMember, fork, metricsOf, deliver,

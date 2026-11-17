@@ -9,6 +9,20 @@
   --cb-num: "Space Grotesk", "Noto Sans SC", ui-sans-serif, system-ui, sans-serif;
 }
 
+.cb-comment-more { display:inline-flex; align-items:center; justify-content:center; flex:none; margin-left:auto; width:32px; height:32px; border:0; border-radius:8px; background:transparent; color:var(--cb-ink2); cursor:pointer; }
+.cb-comment-more:hover,.cb-comment-more[aria-expanded="true"] { background:var(--cb-tint); color:var(--cb-o); }
+.cb-comment-menu { position:fixed; z-index:1000; width:208px; padding:6px; border:1px solid var(--cb-line); border-radius:12px; box-shadow:0 12px 32px #492a101c; }
+.cb-comment-menu button { display:flex; align-items:center; gap:9px; width:100%; min-height:38px; padding:8px 10px; text-align:left; background:transparent; border:0; border-radius:8px; color:var(--cb-ink); cursor:pointer; }
+.cb-comment-menu button:hover,.cb-comment-menu button:focus-visible { background:var(--cb-tint); }
+.cb-comment-menu .danger { color:var(--cb-red); }
+.cb-comment-dialog textarea { width:100%; min-height:140px; padding:12px; resize:vertical; border:1px solid var(--cb-edge); border-radius:10px; background:#fffdf9; }
+.cb-comment-dialog .foot,.cb-move-confirm .foot { display:flex; justify-content:flex-end; gap:8px; margin-top:14px; }
+.cb-comment-error { color:var(--cb-red); font-size:12px; }
+.cb-deleted-post { color:var(--cb-ink3); }
+.cb-move-confirm { padding:12px; }
+.cb-move-confirm p { font-size:13px; white-space:pre-wrap; }
+@media(pointer:coarse) { .cb-comment-more { width:44px; height:44px; } .cb-comment-menu button { min-height:44px; } }
+
 /* ── 顶栏右端：在线成员和「共享」按钮 ── */
 .cb-cluster { display: flex; align-items: center; gap: 8px; flex: none; margin-left: 6px; }
 .cb-people { display: flex; align-items: center; }
@@ -59,7 +73,7 @@
 /* 评论气泡：挂在图钉右边，带一个小尖 */
 .cb-bubble { position: absolute; left: 0; top: 0; width: 340px; margin: -44px 0 0 26px; padding: 0; overflow: visible; z-index: 5; text-align: left; }
 .cb-bubble.left { margin-left: -366px; }
-.cb-bubble::before { content: ""; position: absolute; left: -7px; top: 20px; width: 12px; height: 12px; background: rgba(255, 248, 242, .96); border-left: 1.5px solid #E0B892; border-bottom: 1.5px solid #E0B892; transform: rotate(45deg); }
+.cb-bubble::before { content: ""; position: absolute; left: -7px; top: var(--cb-arrow-top,20px); width: 12px; height: 12px; background: rgba(255, 248, 242, .96); border-left: 1.5px solid #E0B892; border-bottom: 1.5px solid #E0B892; transform: rotate(45deg); }
 .cb-bubble.left::before { left: auto; right: -7px; transform: rotate(-135deg); }
 .cb-bubble > .inner { border-radius: 18px; overflow: hidden; }
 .cb-bh { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--cb-line); }
@@ -105,6 +119,7 @@
 .cb-pin-placement > button { flex-shrink: 0; min-height: 44px; }
 .cb-mobile-discussion { position: fixed; left: 8px; right: 8px; z-index: 70; overflow-y: auto; overscroll-behavior: contain; border-radius: 18px; box-shadow: 0 8px 30px #38271a26; }
 .cb-anchored-discussion { position: fixed; left: 0; top: 0; width: 0; height: 0; z-index: 37; }
+.cb-anchored-discussion .cb-bubble > .inner { max-height:calc(100dvh - 180px); overflow-y:auto; }
 .cb-mobile-discussion .cb-bubble, .cb-mobile-discussion .cb-bubble.left { position: static; width: 100%; margin: 0; }
 .cb-mobile-discussion .cb-bubble::before { display: none; }
 .cb-mobile-discussion .cb-bubble > .inner { border-radius: 18px; }

@@ -8,6 +8,8 @@ import { Compose, RefCard } from './Compose'
 import { MessageSquarePlus } from 'lucide-react'
 import { useEngine } from '../../store/EngineContext'
 import { NARROW_MAX, usePanelLayout } from '../../ui/panelLayout'
+import {CommentActions} from './CommentActions'
+import {useCommentText} from '../commentStrings'
 
 type Filter = 'open' | 'done' | 'all'
 
@@ -114,6 +116,7 @@ function PinItem({ th, unread }: { th: Thread; unread: number }) {
 function Chat({ chat, seen }: { chat: Thread | null; seen: (p: Post) => boolean }) {
   const collab = useCollab()
   const { t, lang } = useI18n()
+  const commentText=useCommentText()
   const me = collab.plan?.me
   const posts = chat?.posts || []
   const firstNew = posts.findIndex(seen)
@@ -138,11 +141,11 @@ function Chat({ chat, seen }: { chat: Thread | null; seen: (p: Post) => boolean 
                   <div className="who">
                     {mine ? <><small>{when(p.createdAt, lang)}</small> {p.name}</> : <>{p.name}
                       {isDesigner(collab.plan, p.userId) && <span className="role">{t('collab.designer')}</span>}
-                      <small>{when(p.createdAt, lang)}{brief ? ` · ${t('collab.chat.brief')}` : ''}</small></>}
+                      <small>{when(p.createdAt, lang)}{brief ? ` · ${t('collab.chat.brief')}` : ''}</small></>}{chat&&!brief&&<CommentActions thread={chat} post={p}/>}
                   </div>
                   {brief ? <div className="cb-briefmsg">{p.body}</div> : (
                     <div className="txt">
-                      {p.body}
+                      {p.deleted?commentText('deleted'):p.body}
                       {p.photos.length > 0 && <div className="pics">{p.photos.map(src => <a key={src} href={mediaUrl(src)} target="_blank" rel="noreferrer"><img src={mediaUrl(src)} alt="" /></a>)}</div>}
                       {p.refs.map((r, j) => <RefCard key={j} r={r} />)}
                     </div>
