@@ -60,8 +60,22 @@ export function Compose({ placeholder, send, sendLabel, withRefs, autoFocus }: {
   const [refs, setRefs] = useState<Ref[]>([])
   const [picking, setPicking] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [dragging, setDragging] = useState(false)
+  const [fileError, setFileError] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
+  const dragDepth = useRef(0)
   const empty = !body.trim() && !files.length
+
+  const addFiles = (incoming: File[]) => {
+    if (busy || !incoming.length) return
+    const error = files.length + incoming.length > 9 ? 'collab.photoCount'
+      : incoming.some(file => file.size > 3 * 1024 * 1024) ? 'collab.photoSize'
+      : incoming.some(file => !file.size || !(/^image\/(jpeg|png|gif|webp)$/.test(file.type)
+        || (!file.type && /\.(jpe?g|png|gif|webp)$/i.test(file.name)))) ? 'collab.photoFormat'
+      : ''
+    setFileError(error)
+    if (!error) setFiles([...files, ...incoming])
+  }
 
   const go = async () => {
     if (busy || empty) return
@@ -71,6 +85,7 @@ export function Compose({ placeholder, send, sendLabel, withRefs, autoFocus }: {
       setBody('')
       setFiles([])
       setRefs([])
+      setFileError('')
     } catch (err) {
       collab.report(errText(err))
     } finally {
@@ -87,15 +102,39 @@ export function Compose({ placeholder, send, sendLabel, withRefs, autoFocus }: {
   const forks = collab.myPlans.filter(p => p.role === 'owner' && p.id !== collab.session?.id)
 
   return (
-    <div className="cb-compose" data-ui="composer">
+    <div className={`cb-compose${dragging ? ' is-image-drop' : ''}`} data-ui="composer"
+      onDragEnter={event => {
+        if (!event.dataTransfer.types.includes('Files')) return
+        event.preventDefault()
+        if (!busy && ++dragDepth.current === 1) setDragging(true)
+      }}
+      onDragOver={event => {
+        if (!event.dataTransfer.types.includes('Files')) return
+        event.preventDefault()
+        event.dataTransfer.dropEffect = busy ? 'none' : 'copy'
+      }}
+      onDragLeave={() => {
+        if (dragDepth.current > 0 && --dragDepth.current === 0) setDragging(false)
+      }}
+      onDrop={event => {
+        if (!event.dataTransfer.types.includes('Files')) return
+        event.preventDefault()
+        event.stopPropagation()
+        dragDepth.current = 0
+        setDragging(false)
+        addFiles(Array.from(event.dataTransfer.files))
+      }}>
       {refs.map((r, i) => <RefCard key={i} r={r} onRemove={() => setRefs(l => l.filter((_, j) => j !== i))} />)}
-      <textarea value={body} onChange={e => setBody(e.target.value)} placeholder={placeholder} autoFocus={autoFocus}
+      <textarea value={body} onChange={e => setBody(e.target.value)} placeholder={placeholder} autoFocus={autoFocus} disabled={busy}
         onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void go() } }} />
       {files.length > 0 && (
         <div className="files">
-          {files.map((f, i) => <span key={i}>{f.name}<button type="button" onClick={() => setFiles(l => l.filter((_, j) => j !== i))}>×</button></span>)}
+          {files.map((f, i) => <span key={i}>{f.name}<button type="button" disabled={busy}
+            aria-label={`${t('collab.removePhoto')} ${f.name}`}
+            onClick={() => { setFiles(l => l.filter((_, j) => j !== i)); setFileError('') }}>×</button></span>)}
         </div>
       )}
+      {fileError && <div className="cb-photo-error" role="status">{t(fileError)}</div>}
       {picking && (
         <div className="cb-picker" data-ui="ref-picker">
           {pins.length > 0 && <div className="h">{t('collab.ref.pickThread')}</div>}
@@ -110,14 +149,14 @@ export function Compose({ placeholder, send, sendLabel, withRefs, autoFocus }: {
         </div>
       )}
       <div className="row">
-        <button type="button" className="cb-ib" onClick={() => fileRef.current?.click()}><Image />{t(withRefs ? 'collab.photo' : 'collab.attachPhoto')}</button>
+        <button type="button" className="cb-ib" disabled={busy} onClick={() => fileRef.current?.click()}><Image />{t(withRefs ? 'collab.photo' : 'collab.attachPhoto')}</button>
         {withRefs && <button type="button" className="cb-ib" onClick={() => setPicking(p => !p)}><Quote />{t('collab.addRef')}</button>}
         <button type="button" className="qb-btn qb-btn-sm sp" disabled={busy || empty} onClick={() => void go()}>
           {withRefs && <Send />}{sendLabel}
         </button>
       </div>
-      <input ref={fileRef} type="file" accept="image/*" multiple hidden
-        onChange={e => { const list = [...(e.target.files || [])]; setFiles(f => [...f, ...list].slice(0, 9)); e.target.value = '' }} />
+      <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/gif,image/webp" multiple hidden
+        onChange={e => { addFiles(Array.from(e.target.files || [])); e.target.value = '' }} />
     </div>
   )
 }

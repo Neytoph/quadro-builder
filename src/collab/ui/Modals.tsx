@@ -317,6 +317,7 @@ export function DeliverModal({ onClose }: { onClose: () => void }) {
   const upload = async (files: FileList | null) => {
     if (!files?.length || !collab.plan || running.current) return
     if (renders.length + files.length > 6) { setFailure(f('limit')); return }
+    if (Array.from(files).some(file => file.size > 3 * 1024 * 1024)) { setFailure(t('collab.photoSize')); return }
     running.current = true; setBusy(true); setBusyLabel(f('loading')); setFailure('')
     try {
       for (const file of Array.from(files)) {
